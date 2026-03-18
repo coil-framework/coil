@@ -1,0 +1,15 @@
+# Logging, Metrics, Tracing, and Error Handling
+
+Observability is part of the platform contract. The system is expected to run multiple customer apps, handle significant domain workflows, and own infrastructure-facing behavior such as TLS, storage policy, and background execution. Without strong diagnostics, the platform would quickly become another opaque application stack that operators learn only through incident pain.
+
+Logging should be structured and contextual by default. Every request, job, and important domain event needs identifiers that make it possible to reconstruct what happened across HTTP handling, database access, authorization checks, storage operations, queue execution, and extension boundaries. Logs should also carry customer-app and site context where appropriate, because "which customer app was affected" is a first-order operational question in this architecture.
+
+Metrics should describe the health of the platform at its real bottlenecks. That includes HTTP latency and saturation, database timings, cache hit and miss behavior, auth engine timings, template render cost, storage latency, queue depth, job retry rates, and extension-host execution. Metrics naming and cardinality rules belong in core so that official modules add useful signal without creating unbounded metric sprawl.
+
+Tracing ties those signals together. A request trace should be able to show route resolution, handler execution, auth checks, cache calls, storage decisions, rendering phases, and downstream integration calls. A job trace should show its triggering event or parent request where that relationship exists. This matters especially for diagnosing slow permission checks, fragment rendering costs, cache invalidation fan-out, and object-store operations.
+
+Error handling must distinguish between categories instead of flattening everything into generic failure. User-facing domain errors include validation failures, capability denials, and state conflicts such as attempting to book an unavailable slot. Operational failures include cache outages, queue transport errors, certificate renewal failures, or object-store timeouts. Programming errors and invariant violations are a third category and should be treated differently again. These categories should drive log severity, metrics, trace annotations, and the shape of the user-facing response.
+
+The platform also needs explainability, especially around authorization and extension boundaries. When an auth check fails, operators and developers need a path to understand which capability was requested and why it did not resolve. When a WASM extension misbehaves, resource limits and host-call traces need to make that visible. "There was an error" is not an acceptable steady-state operational story for a framework of this scope.
+
+The practical rule is simple: diagnostics are available by default, and modules or customer apps add domain signal on top. They should not invent private logging models or ad hoc error taxonomies that force operators to learn the platform one subsystem at a time.

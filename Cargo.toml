@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/davenda-a11y",
+    "crates/davenda-admin",
+    "crates/davenda-assets",
+    "crates/davenda-auth",
+    "crates/davenda-cache",
+    "crates/davenda-cms",
+    "crates/davenda-commerce",
+    "crates/davenda-config",
+    "crates/davenda-core",
+    "crates/davenda-events",
+    "crates/davenda-i18n",
+    "crates/davenda-media",
+    "crates/davenda-memberships",
+    "crates/davenda-runtime",
+    "crates/davenda-seo",
+    "crates/davenda-storage",
+    "crates/davenda-template",
+    "crates/davenda-wasm",
+    "crates/zanzibar",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+zanzibar = { path = "crates/zanzibar" }

@@ -462,6 +462,7 @@ version = "0.1.0"
 name = "davenda-media"
 version = "0.1.0"
 dependencies = [
+ "davenda-assets",
  "davenda-auth",
  "davenda-core",
  "davenda-storage",

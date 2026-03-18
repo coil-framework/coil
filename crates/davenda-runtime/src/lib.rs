@@ -869,7 +869,7 @@ cdn_base_url = "https://cdn.example.com"
         assert!(
             plan.services
                 .iter()
-                .any(|service| service.id == "module.media.library")
+                .any(|service| service.id == "module.media.assets")
         );
         assert_eq!(plan.modules.len(), 6);
         assert_eq!(plan.modules[0].name, "admin");

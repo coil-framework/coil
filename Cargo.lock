@@ -461,6 +461,11 @@ version = "0.1.0"
 [[package]]
 name = "davenda-media"
 version = "0.1.0"
+dependencies = [
+ "davenda-auth",
+ "davenda-core",
+ "davenda-storage",
+]
 
 [[package]]
 name = "davenda-memberships"
@@ -483,6 +488,7 @@ dependencies = [
  "davenda-config",
  "davenda-core",
  "davenda-events",
+ "davenda-media",
  "davenda-memberships",
  "davenda-template",
  "davenda-wasm",

@@ -234,6 +234,7 @@ pub struct LocalizedUrls {
     pub alternate_hreflang: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocaleRouter {
     config: LocaleUrlConfig,
 }

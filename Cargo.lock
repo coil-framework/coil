@@ -429,6 +429,8 @@ dependencies = [
  "davenda-auth",
  "davenda-cache",
  "davenda-config",
+ "davenda-i18n",
+ "davenda-seo",
  "davenda-template",
  "davenda-wasm",
  "hmac",
@@ -486,6 +488,9 @@ dependencies = [
 [[package]]
 name = "davenda-seo"
 version = "0.1.0"
+dependencies = [
+ "davenda-i18n",
+]
 
 [[package]]
 name = "davenda-storage"

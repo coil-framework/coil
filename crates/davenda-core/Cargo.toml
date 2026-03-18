@@ -8,6 +8,8 @@ base64 = "0.22"
 davenda-auth = { path = "../davenda-auth" }
 davenda-cache = { path = "../davenda-cache" }
 davenda-config = { path = "../davenda-config" }
+davenda-i18n = { path = "../davenda-i18n" }
+davenda-seo = { path = "../davenda-seo" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }
 hmac = "0.12"

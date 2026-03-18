@@ -9,6 +9,11 @@ use davenda_config::{
     CookieConfig as HttpCookieConfig, CsrfConfig as HttpCsrfConfig, DistributedCache,
     PlatformConfig, SameSitePolicy, SessionStore as ConfigSessionStore, TlsMode,
 };
+use davenda_i18n::{
+    CurrencyCode, LocaleContext, LocaleRouter, LocaleTag, LocaleUrlConfig, TimeZoneId,
+    TranslationCatalog, TranslationRuntime,
+};
+use davenda_seo::HeadMetadata;
 use davenda_template::{TemplateNamespace, TemplateRegistry, TemplateRuntime};
 use davenda_wasm::{ExtensionPointKind, ResourceLimits};
 use hmac::{Hmac, Mac};
@@ -306,11 +311,59 @@ impl TemplateRuntimeServices {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct I18nRuntimeServices {
+    pub default_locale: LocaleTag,
+    pub supported_locales: Vec<LocaleTag>,
+    pub fallback_locale: LocaleTag,
+    pub router: LocaleRouter,
+    pub translations: TranslationRuntime,
+}
+
+impl I18nRuntimeServices {
+    pub fn request_context(&self, requested_locale: Option<&str>) -> LocaleContext {
+        let resolved = requested_locale
+            .and_then(|locale| {
+                self.supported_locales
+                    .iter()
+                    .find(|candidate| candidate.as_str() == locale)
+            })
+            .cloned()
+            .unwrap_or_else(|| self.default_locale.clone());
+
+        LocaleContext::new(
+            resolved.clone(),
+            vec![self.fallback_locale.clone()],
+            currency_for_locale(&resolved),
+            timezone_for_locale(&resolved),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeoRuntimeServices {
+    pub canonical_host: String,
+    pub emit_json_ld: bool,
+    pub sitemap_enabled: bool,
+}
+
+impl SeoRuntimeServices {
+    pub fn allows_json_ld(&self) -> bool {
+        self.emit_json_ld
+    }
+
+    pub fn can_emit_metadata(&self, metadata: &HeadMetadata) -> bool {
+        !metadata.canonical_url.is_empty()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CoreBootstrap {
     pub registry: ServiceRegistry,
     pub cache: CacheRuntimeServices,
     pub browser: BrowserSecurityServices,
+    pub i18n: I18nRuntimeServices,
+    pub seo: SeoRuntimeServices,
     pub template: TemplateRuntimeServices,
     pub wasm: WasmRuntimeServices,
 }
@@ -465,6 +518,8 @@ pub fn bootstrap_core_services(
         planner: CachePlanner::new(cache_topology),
     };
     let browser = browser_security_from_config(config);
+    let i18n = i18n_runtime_from_config(config);
+    let seo = seo_runtime_from_config(config);
     let template = template_runtime_services();
     let wasm = wasm_runtime_from_config(config);
 
@@ -517,6 +572,24 @@ pub fn bootstrap_core_services(
 
     registry.register_core_service("core.storage", "Storage policy and object access layer")?;
     registry.register_core_service("core.assets", "Asset manifest and CDN publication layer")?;
+    registry.register_core_service(
+        "core.i18n",
+        format!(
+            "Locale resolution, fallback translation runtime, and URL generation rooted at `{}`",
+            seo.canonical_host
+        ),
+    )?;
+    registry.register_core_service(
+        "core.seo",
+        format!(
+            "Typed metadata, sitemap, canonical URL, and JSON-LD services with sitemap {}",
+            if seo.sitemap_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        ),
+    )?;
     registry.register_core_service("core.template", "HTML-first template runtime")?;
     registry.register_core_service(
         "core.template.fragments",
@@ -559,6 +632,8 @@ pub fn bootstrap_core_services(
         registry,
         cache,
         browser,
+        i18n,
+        seo,
         template,
         wasm,
     })
@@ -694,6 +769,8 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.http.sessions"));
         assert!(ids.contains(&"core.http.cookies"));
         assert!(ids.contains(&"core.http.csrf"));
+        assert!(ids.contains(&"core.i18n"));
+        assert!(ids.contains(&"core.seo"));
         assert!(ids.contains(&"core.template.fragments"));
         assert!(ids.contains(&"core.wasm"));
         assert!(ids.contains(&"core.wasm.limits"));
@@ -715,6 +792,20 @@ cdn_base_url = "https://cdn.example.com"
             "davenda_session"
         );
         assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
+        let locale_context = bootstrap.i18n.request_context(Some("fr-FR"));
+        assert_eq!(locale_context.locale.as_str(), "fr-FR");
+        assert_eq!(locale_context.currency.as_str(), "EUR");
+        assert_eq!(locale_context.timezone.as_str(), "Europe/Paris");
+        assert_eq!(
+            bootstrap
+                .i18n
+                .router
+                .absolute_url(&bootstrap.i18n.default_locale, "/events")
+                .unwrap(),
+            "https://www.example.com/en-GB/events"
+        );
+        assert!(bootstrap.seo.emit_json_ld);
+        assert!(bootstrap.seo.sitemap_enabled);
         assert_eq!(
             bootstrap
                 .template
@@ -844,6 +935,59 @@ fn template_runtime_services() -> TemplateRuntimeServices {
     }
 }
 
+fn i18n_runtime_from_config(config: &PlatformConfig) -> I18nRuntimeServices {
+    let default_locale =
+        LocaleTag::new(config.i18n.default_locale.clone()).expect("validated locale");
+    let supported_locales = config
+        .i18n
+        .supported_locales
+        .iter()
+        .cloned()
+        .map(LocaleTag::new)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("validated locales");
+    let fallback_locale =
+        LocaleTag::new(config.i18n.fallback_locale.clone()).expect("validated locale");
+    let router = LocaleRouter::new(
+        LocaleUrlConfig::path_prefix(config.seo.canonical_host.clone())
+            .expect("validated canonical host"),
+    );
+    let translations = TranslationRuntime::new(
+        default_locale.clone(),
+        supported_locales
+            .iter()
+            .cloned()
+            .map(|locale| {
+                TranslationCatalog::new(
+                    locale.clone(),
+                    vec![(
+                        davenda_i18n::MessageKey::new("core.locale").expect("static key"),
+                        locale.to_string(),
+                    )],
+                )
+                .expect("static catalog")
+            })
+            .collect::<Vec<_>>(),
+    )
+    .expect("default translation runtime");
+
+    I18nRuntimeServices {
+        default_locale,
+        supported_locales,
+        fallback_locale,
+        router,
+        translations,
+    }
+}
+
+fn seo_runtime_from_config(config: &PlatformConfig) -> SeoRuntimeServices {
+    SeoRuntimeServices {
+        canonical_host: config.seo.canonical_host.clone(),
+        emit_json_ld: config.seo.emit_json_ld,
+        sitemap_enabled: config.seo.sitemap_enabled,
+    }
+}
+
 fn wasm_runtime_from_config(config: &PlatformConfig) -> WasmRuntimeServices {
     let request_limit = Duration::from_millis(config.wasm.default_time_limit_ms);
     let tighten = |point| tighten_runtime_limit(ResourceLimits::baseline_for(point), request_limit);
@@ -869,6 +1013,22 @@ fn tighten_runtime_limit(mut limits: ResourceLimits, max_runtime: Duration) -> R
     }
 
     limits
+}
+
+fn currency_for_locale(locale: &LocaleTag) -> CurrencyCode {
+    let currency = match locale.as_str() {
+        "fr-FR" => "EUR",
+        _ => "GBP",
+    };
+    CurrencyCode::new(currency).expect("static currency")
+}
+
+fn timezone_for_locale(locale: &LocaleTag) -> TimeZoneId {
+    let timezone = match locale.as_str() {
+        "fr-FR" => "Europe/Paris",
+        _ => "Europe/London",
+    };
+    TimeZoneId::new(timezone).expect("static timezone")
 }
 
 fn sign_payload(secret: &[u8], payload: &[u8]) -> Result<String, BrowserSecurityError> {

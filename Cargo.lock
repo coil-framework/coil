@@ -369,6 +369,11 @@ version = "0.1.0"
 [[package]]
 name = "davenda-assets"
 version = "0.1.0"
+dependencies = [
+ "davenda-config",
+ "davenda-storage",
+ "thiserror",
+]
 
 [[package]]
 name = "davenda-auth"
@@ -441,6 +446,10 @@ version = "0.1.0"
 [[package]]
 name = "davenda-storage"
 version = "0.1.0"
+dependencies = [
+ "davenda-config",
+ "thiserror",
+]
 
 [[package]]
 name = "davenda-template"

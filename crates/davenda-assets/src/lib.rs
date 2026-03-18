@@ -1039,7 +1039,7 @@ mod tests {
         assert_eq!(
             plan.target(),
             &AssetDeliveryTarget::LocalPath {
-                path: "srv/davenda/staff/exports/orders.csv".to_string(),
+                path: "/srv/davenda/staff/exports/orders.csv".to_string(),
             }
         );
     }

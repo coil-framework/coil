@@ -9,6 +9,7 @@ use thiserror::Error;
 pub struct PlatformConfig {
     pub app: AppConfig,
     pub server: ServerConfig,
+    pub http: HttpConfig,
     pub tls: TlsConfig,
     pub storage: StorageConfig,
     pub cache: CacheConfig,
@@ -75,6 +76,59 @@ impl PlatformConfig {
             errors.push(ConfigValidationError::EmptyServerBind);
         }
 
+        if self.http.session.idle_timeout_secs == 0 {
+            errors.push(ConfigValidationError::InvalidSessionTimeout {
+                field: "http.session.idle_timeout_secs",
+            });
+        }
+
+        if self.http.session.absolute_timeout_secs == 0 {
+            errors.push(ConfigValidationError::InvalidSessionTimeout {
+                field: "http.session.absolute_timeout_secs",
+            });
+        }
+
+        if self.http.session.absolute_timeout_secs < self.http.session.idle_timeout_secs {
+            errors.push(ConfigValidationError::AbsoluteSessionTimeoutTooShort {
+                idle_timeout_secs: self.http.session.idle_timeout_secs,
+                absolute_timeout_secs: self.http.session.absolute_timeout_secs,
+            });
+        }
+
+        for (cookie_name, cookie) in [
+            ("http.session_cookie", &self.http.session_cookie),
+            ("http.flash_cookie", &self.http.flash_cookie),
+        ] {
+            if cookie.name.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptyCookieName {
+                    cookie: cookie_name,
+                });
+            }
+
+            if cookie.path.trim().is_empty() || !cookie.path.starts_with('/') {
+                errors.push(ConfigValidationError::InvalidCookiePath {
+                    cookie: cookie_name,
+                    path: cookie.path.clone(),
+                });
+            }
+
+            if cookie.same_site == SameSitePolicy::None && !cookie.secure {
+                errors.push(ConfigValidationError::SameSiteNoneRequiresSecure {
+                    cookie: cookie_name,
+                });
+            }
+        }
+
+        if self.http.csrf.enabled {
+            if self.http.csrf.field_name.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptyCsrfFieldName);
+            }
+
+            if self.http.csrf.header_name.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptyCsrfHeaderName);
+            }
+        }
+
         if self.i18n.supported_locales.is_empty() {
             errors.push(ConfigValidationError::MissingSupportedLocales);
         } else {
@@ -129,6 +183,30 @@ impl PlatformConfig {
 
         if self.modules.enabled.is_empty() {
             errors.push(ConfigValidationError::NoModulesEnabled);
+        }
+
+        match self.http.session.store {
+            SessionStore::Redis => {
+                if self.cache.l2 != Some(DistributedCache::Redis) {
+                    errors.push(
+                        ConfigValidationError::SessionStoreRequiresDistributedCache {
+                            store: self.http.session.store,
+                            cache_backend: self.cache.l2,
+                        },
+                    );
+                }
+            }
+            SessionStore::Valkey => {
+                if self.cache.l2 != Some(DistributedCache::Valkey) {
+                    errors.push(
+                        ConfigValidationError::SessionStoreRequiresDistributedCache {
+                            store: self.http.session.store,
+                            cache_backend: self.cache.l2,
+                        },
+                    );
+                }
+            }
+            SessionStore::Memory | SessionStore::Database => {}
         }
 
         match self.tls.mode {
@@ -196,6 +274,59 @@ pub struct ServerConfig {
     pub trusted_proxies: Vec<String>,
     #[serde(default)]
     pub max_body_bytes: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HttpConfig {
+    pub session: SessionConfig,
+    pub session_cookie: CookieConfig,
+    pub flash_cookie: CookieConfig,
+    pub csrf: CsrfConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionConfig {
+    pub store: SessionStore,
+    pub idle_timeout_secs: u64,
+    pub absolute_timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionStore {
+    Memory,
+    Database,
+    Redis,
+    Valkey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CookieConfig {
+    pub name: String,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default = "default_cookie_path")]
+    pub path: String,
+    pub same_site: SameSitePolicy,
+    #[serde(default = "default_true")]
+    pub secure: bool,
+    #[serde(default = "default_true")]
+    pub http_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SameSitePolicy {
+    Lax,
+    Strict,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CsrfConfig {
+    pub enabled: bool,
+    pub field_name: String,
+    pub header_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -396,6 +527,25 @@ pub enum ConfigValidationError {
     EmptyAppName,
     #[error("server.bind must not be empty")]
     EmptyServerBind,
+    #[error("{field} must be greater than zero")]
+    InvalidSessionTimeout { field: &'static str },
+    #[error(
+        "http.session.absolute_timeout_secs ({absolute_timeout_secs}) must be at least idle_timeout_secs ({idle_timeout_secs})"
+    )]
+    AbsoluteSessionTimeoutTooShort {
+        idle_timeout_secs: u64,
+        absolute_timeout_secs: u64,
+    },
+    #[error("{cookie}.name must not be empty")]
+    EmptyCookieName { cookie: &'static str },
+    #[error("{cookie}.path must start with `/`, got `{path}`")]
+    InvalidCookiePath { cookie: &'static str, path: String },
+    #[error("{cookie} must be secure when same_site=none")]
+    SameSiteNoneRequiresSecure { cookie: &'static str },
+    #[error("http.csrf.field_name must not be empty when CSRF is enabled")]
+    EmptyCsrfFieldName,
+    #[error("http.csrf.header_name must not be empty when CSRF is enabled")]
+    EmptyCsrfHeaderName,
     #[error("at least one supported locale must be configured")]
     MissingSupportedLocales,
     #[error("default locale `{default_locale}` is not in supported_locales {supported_locales:?}")]
@@ -439,6 +589,13 @@ pub enum ConfigValidationError {
     CloudflareOriginRequiresOriginCa,
     #[error("tls.mode=manual requires provider=manual-import")]
     ManualTlsRequiresManualProvider,
+    #[error(
+        "http.session.store={store:?} requires cache.l2={store:?} semantics, got {cache_backend:?}"
+    )]
+    SessionStoreRequiresDistributedCache {
+        store: SessionStore,
+        cache_backend: Option<DistributedCache>,
+    },
 }
 
 fn default_sitemap_enabled() -> bool {
@@ -447,6 +604,14 @@ fn default_sitemap_enabled() -> bool {
 
 fn default_retry_limit() -> u32 {
     5
+}
+
+fn default_cookie_path() -> String {
+    "/".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 use std::fmt;
@@ -481,6 +646,30 @@ environment = "production"
 [server]
 bind = "0.0.0.0:8080"
 trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
 
 [tls]
 mode = "acme"
@@ -539,6 +728,7 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(config.tls.challenge, Some(AcmeChallenge::Dns01));
         assert_eq!(config.cache.l1, CacheL1::Moka);
         assert_eq!(config.cache.l2, Some(DistributedCache::Redis));
+        assert_eq!(config.http.session.store, SessionStore::Redis);
     }
 
     #[test]
@@ -592,10 +782,32 @@ cdn_base_url = "https://cdn.example.com"
     }
 
     #[test]
+    fn rejects_session_store_without_matching_distributed_cache() {
+        let invalid = VALID_CONFIG.replace("l2 = \"redis\"", "l2 = \"valkey\"");
+
+        let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
+
+        match error {
+            ConfigError::Validation(errors) => {
+                assert!(errors.0.contains(
+                    &ConfigValidationError::SessionStoreRequiresDistributedCache {
+                        store: SessionStore::Redis,
+                        cache_backend: Some(DistributedCache::Valkey),
+                    }
+                ));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn overlay_toml_can_override_nested_values() {
         let overlay = r#"
 [cache]
 l2 = "valkey"
+
+[http.session]
+store = "valkey"
 
 [seo]
 canonical_host = "preview.example.com"

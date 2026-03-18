@@ -2,8 +2,9 @@ use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    CapabilityValidationError, ModuleManifest, PlatformModule, RegistrationError,
-    ServiceDescriptor, WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
+    BrowserSecurityServices, CapabilityValidationError, ModuleManifest, PlatformModule,
+    RegistrationError, ServiceDescriptor, WasmRuntimeServices, bootstrap_core_services,
+    validate_module_capabilities,
 };
 use thiserror::Error;
 
@@ -59,6 +60,7 @@ where
             config: self.config,
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
+            browser: bootstrap.browser,
             wasm: bootstrap.wasm,
             services: registry.services().cloned().collect(),
             modules: module_manifests,
@@ -71,6 +73,7 @@ pub struct RuntimePlan {
     pub config: PlatformConfig,
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
+    pub browser: BrowserSecurityServices,
     pub wasm: WasmRuntimeServices,
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
@@ -105,6 +108,30 @@ environment = "production"
 [server]
 bind = "0.0.0.0:8080"
 trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
 
 [tls]
 mode = "acme"
@@ -185,6 +212,8 @@ cdn_base_url = "https://cdn.example.com"
             plan.cache_topology.l2(),
             Some(DistributedCacheBackend::Redis)
         );
+        assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
+        assert_eq!(plan.browser.csrf.field_name, "_csrf");
         assert_eq!(plan.wasm.extension_directory, "extensions");
         assert_eq!(
             plan.wasm

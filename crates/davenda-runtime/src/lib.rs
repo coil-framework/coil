@@ -3,8 +3,8 @@ use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     BrowserSecurityServices, CapabilityValidationError, ModuleManifest, PlatformModule,
-    RegistrationError, ServiceDescriptor, WasmRuntimeServices, bootstrap_core_services,
-    validate_module_capabilities,
+    RegistrationError, ServiceDescriptor, TemplateRuntimeServices, WasmRuntimeServices,
+    bootstrap_core_services, validate_module_capabilities,
 };
 use thiserror::Error;
 
@@ -61,6 +61,7 @@ where
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
             browser: bootstrap.browser,
+            template: bootstrap.template,
             wasm: bootstrap.wasm,
             services: registry.services().cloned().collect(),
             modules: module_manifests,
@@ -74,6 +75,7 @@ pub struct RuntimePlan {
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
     pub browser: BrowserSecurityServices,
+    pub template: TemplateRuntimeServices,
     pub wasm: WasmRuntimeServices,
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
@@ -97,6 +99,7 @@ mod tests {
     use davenda_auth::{Capability, DefaultAuthModelPackage};
     use davenda_cache::DistributedCacheBackend;
     use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+    use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
     use std::time::Duration;
 
@@ -214,6 +217,15 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
         assert_eq!(plan.browser.csrf.field_name, "_csrf");
+        assert_eq!(
+            plan.template
+                .namespace_chain(Some(&TemplateNamespace::new("cms-pages").unwrap())),
+            vec![
+                TemplateNamespace::new("customer-app").unwrap(),
+                TemplateNamespace::new("cms-pages").unwrap(),
+                TemplateNamespace::new("core").unwrap(),
+            ]
+        );
         assert_eq!(plan.wasm.extension_directory, "extensions");
         assert_eq!(
             plan.wasm

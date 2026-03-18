@@ -8,5 +8,6 @@ davenda-auth = { path = "../davenda-auth" }
 davenda-cache = { path = "../davenda-cache" }
 davenda-config = { path = "../davenda-config" }
 davenda-core = { path = "../davenda-core" }
+davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "1.0"

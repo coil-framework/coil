@@ -9,6 +9,7 @@ use davenda_config::{
     CookieConfig as HttpCookieConfig, CsrfConfig as HttpCsrfConfig, DistributedCache,
     PlatformConfig, SameSitePolicy, SessionStore as ConfigSessionStore, TlsMode,
 };
+use davenda_template::{TemplateNamespace, TemplateRegistry, TemplateRuntime};
 use davenda_wasm::{ExtensionPointKind, ResourceLimits};
 use hmac::{Hmac, Mac};
 use rand::{RngCore, rngs::OsRng};
@@ -277,11 +278,40 @@ pub enum BrowserSecurityError {
     InvalidCsrfTokenFormat,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateRuntimeServices {
+    pub customer_app_namespace: TemplateNamespace,
+    pub core_namespace: TemplateNamespace,
+    pub registry: TemplateRegistry,
+    pub runtime: TemplateRuntime,
+}
+
+impl TemplateRuntimeServices {
+    pub fn namespace_chain(
+        &self,
+        module_namespace: Option<&TemplateNamespace>,
+    ) -> Vec<TemplateNamespace> {
+        let mut chain = vec![self.customer_app_namespace.clone()];
+
+        if let Some(module_namespace) = module_namespace {
+            if module_namespace != &self.customer_app_namespace
+                && module_namespace != &self.core_namespace
+            {
+                chain.push(module_namespace.clone());
+            }
+        }
+
+        chain.push(self.core_namespace.clone());
+        chain
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CoreBootstrap {
     pub registry: ServiceRegistry,
     pub cache: CacheRuntimeServices,
     pub browser: BrowserSecurityServices,
+    pub template: TemplateRuntimeServices,
     pub wasm: WasmRuntimeServices,
 }
 
@@ -435,6 +465,7 @@ pub fn bootstrap_core_services(
         planner: CachePlanner::new(cache_topology),
     };
     let browser = browser_security_from_config(config);
+    let template = template_runtime_services();
     let wasm = wasm_runtime_from_config(config);
 
     registry.register_core_service("core.config", "Typed platform configuration")?;
@@ -488,6 +519,10 @@ pub fn bootstrap_core_services(
     registry.register_core_service("core.assets", "Asset manifest and CDN publication layer")?;
     registry.register_core_service("core.template", "HTML-first template runtime")?;
     registry.register_core_service(
+        "core.template.fragments",
+        "Named fragment, slot, and partial-rendering composition runtime",
+    )?;
+    registry.register_core_service(
         "core.wasm",
         format!(
             "WASM extension host runtime rooted at `{}` with network {}",
@@ -524,6 +559,7 @@ pub fn bootstrap_core_services(
         registry,
         cache,
         browser,
+        template,
         wasm,
     })
 }
@@ -553,6 +589,7 @@ mod tests {
     use davenda_auth::DefaultAuthModelPackage;
     use davenda_cache::DistributedCacheBackend;
     use davenda_config::PlatformConfig;
+    use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
 
     const VALID_CONFIG: &str = r#"
@@ -657,6 +694,7 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.http.sessions"));
         assert!(ids.contains(&"core.http.cookies"));
         assert!(ids.contains(&"core.http.csrf"));
+        assert!(ids.contains(&"core.template.fragments"));
         assert!(ids.contains(&"core.wasm"));
         assert!(ids.contains(&"core.wasm.limits"));
         assert_eq!(
@@ -677,6 +715,16 @@ cdn_base_url = "https://cdn.example.com"
             "davenda_session"
         );
         assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
+        assert_eq!(
+            bootstrap
+                .template
+                .namespace_chain(Some(&TemplateNamespace::new("events").unwrap())),
+            vec![
+                TemplateNamespace::new("customer-app").unwrap(),
+                TemplateNamespace::new("events").unwrap(),
+                TemplateNamespace::new("core").unwrap(),
+            ]
+        );
         assert_eq!(bootstrap.wasm.extension_directory, "extensions");
         assert!(!bootstrap.wasm.allow_network);
         assert_eq!(
@@ -780,6 +828,19 @@ fn browser_security_from_config(config: &PlatformConfig) -> BrowserSecurityServi
             ),
         },
         csrf: CsrfProtection::from_config(&config.http.csrf),
+    }
+}
+
+fn template_runtime_services() -> TemplateRuntimeServices {
+    let registry = TemplateRegistry::new();
+
+    TemplateRuntimeServices {
+        customer_app_namespace: TemplateNamespace::new("customer-app")
+            .expect("constant template namespace is valid"),
+        core_namespace: TemplateNamespace::new("core")
+            .expect("constant template namespace is valid"),
+        runtime: TemplateRuntime::new(registry.clone()),
+        registry,
     }
 }
 

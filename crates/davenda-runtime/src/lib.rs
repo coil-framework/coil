@@ -673,6 +673,7 @@ pub enum RuntimeBuildError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use davenda_admin::AdminModule;
     use davenda_auth::DefaultAuthModelPackage;
     use davenda_cache::DistributedCacheBackend;
     use davenda_cms::CmsModule;
@@ -781,6 +782,7 @@ cdn_base_url = "https://cdn.example.com"
                     .with_area(RouteArea::Admin)
                     .requiring_session(),
             )
+            .with_module(AdminModule::new())
             .with_module(CmsModule::new())
             .with_module(CommerceModule::new())
             .with_module(MembershipsModule::new())
@@ -840,6 +842,11 @@ cdn_base_url = "https://cdn.example.com"
         assert!(
             plan.services
                 .iter()
+                .any(|service| service.id == "module.admin.shell")
+        );
+        assert!(
+            plan.services
+                .iter()
                 .any(|service| service.id == "module.cms.pages")
         );
         assert!(
@@ -857,11 +864,12 @@ cdn_base_url = "https://cdn.example.com"
                 .iter()
                 .any(|service| service.id == "module.events.bookings")
         );
-        assert_eq!(plan.modules.len(), 4);
-        assert_eq!(plan.modules[0].name, "cms");
-        assert_eq!(plan.modules[1].name, "commerce");
-        assert_eq!(plan.modules[2].name, "memberships");
-        assert_eq!(plan.modules[3].name, "events");
+        assert_eq!(plan.modules.len(), 5);
+        assert_eq!(plan.modules[0].name, "admin");
+        assert_eq!(plan.modules[1].name, "cms");
+        assert_eq!(plan.modules[2].name, "commerce");
+        assert_eq!(plan.modules[3].name, "memberships");
+        assert_eq!(plan.modules[4].name, "events");
     }
 
     #[test]

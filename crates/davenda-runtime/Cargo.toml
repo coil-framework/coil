@@ -13,6 +13,7 @@ davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "1.0"
 
 [dev-dependencies]
+davenda-admin = { path = "../davenda-admin" }
 davenda-commerce = { path = "../davenda-commerce" }
 davenda-cms = { path = "../davenda-cms" }
 davenda-events = { path = "../davenda-events" }

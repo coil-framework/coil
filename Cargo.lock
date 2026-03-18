@@ -371,6 +371,10 @@ version = "0.1.0"
 [[package]]
 name = "davenda-admin"
 version = "0.1.0"
+dependencies = [
+ "davenda-auth",
+ "davenda-core",
+]
 
 [[package]]
 name = "davenda-assets"
@@ -465,6 +469,7 @@ dependencies = [
 name = "davenda-runtime"
 version = "0.1.0"
 dependencies = [
+ "davenda-admin",
  "davenda-auth",
  "davenda-cache",
  "davenda-cms",

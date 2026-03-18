@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use davenda_config::PlatformConfig;
 use thiserror::Error;
+use toml::Value as TomlValue;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(String);
@@ -169,6 +170,7 @@ impl ModuleDescriptor {
 pub struct RegistrationContext<'a> {
     config: &'a PlatformConfig,
     module_id: &'a ModuleId,
+    config_namespace: &'a str,
     registry: &'a mut ServiceRegistry,
 }
 
@@ -176,11 +178,13 @@ impl<'a> RegistrationContext<'a> {
     pub fn new(
         config: &'a PlatformConfig,
         module_id: &'a ModuleId,
+        config_namespace: &'a str,
         registry: &'a mut ServiceRegistry,
     ) -> Self {
         Self {
             config,
             module_id,
+            config_namespace,
             registry,
         }
     }
@@ -191,6 +195,10 @@ impl<'a> RegistrationContext<'a> {
 
     pub fn module_id(&self) -> &ModuleId {
         self.module_id
+    }
+
+    pub fn module_settings(&self) -> Option<&TomlValue> {
+        self.config.modules.settings.get(self.config_namespace)
     }
 
     pub fn register_service(
@@ -237,5 +245,28 @@ mod tests {
     fn module_service_keys_are_namespaced() {
         let key = ServiceKey::module(&ModuleId::new("cms-pages"), "routes");
         assert_eq!(key.as_str(), "module.cms-pages.routes");
+    }
+
+    #[test]
+    fn registration_context_reads_module_scoped_settings() {
+        let config = PlatformConfig::from_toml_str(
+            r#"
+                [app]
+                name = "test-app"
+
+                [modules]
+                enabled = ["events"]
+
+                [modules.settings.events]
+                retries = 3
+            "#,
+        )
+        .unwrap();
+        let module_id = ModuleId::new("events");
+        let mut registry = ServiceRegistry::default();
+        let context = RegistrationContext::new(&config, &module_id, "events", &mut registry);
+
+        let settings = context.module_settings().unwrap();
+        assert_eq!(settings["retries"].as_integer(), Some(3));
     }
 }

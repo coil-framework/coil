@@ -101,9 +101,18 @@ impl PlatformBuilder {
             let registered = available
                 .remove(&enabled)
                 .expect("enabled module existence checked above");
+            let config_namespace = registered
+                .descriptor
+                .config_namespace
+                .as_deref()
+                .unwrap_or_else(|| registered.descriptor.id.as_str());
 
-            let mut context =
-                RegistrationContext::new(&self.config, &registered.descriptor.id, &mut registry);
+            let mut context = RegistrationContext::new(
+                &self.config,
+                &registered.descriptor.id,
+                config_namespace,
+                &mut registry,
+            );
             registered.module.register(&mut context)?;
 
             descriptors.insert(
@@ -296,6 +305,7 @@ mod tests {
         descriptor: ModuleDescriptor,
         service_name: &'static str,
         registration_log: Option<Arc<Mutex<Vec<String>>>>,
+        captured_settings: Option<Arc<Mutex<Vec<String>>>>,
     }
 
     impl FakeModule {
@@ -304,6 +314,7 @@ mod tests {
                 descriptor: ModuleDescriptor::new(id),
                 service_name,
                 registration_log: None,
+                captured_settings: None,
             }
         }
     }
@@ -318,6 +329,18 @@ mod tests {
                 log.lock()
                     .expect("registration log should not be poisoned")
                     .push(self.descriptor.id.as_str().to_owned());
+            }
+            if let Some(settings_log) = &self.captured_settings {
+                let snapshot = context
+                    .module_settings()
+                    .and_then(|value| value.get("label"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("missing")
+                    .to_owned();
+                settings_log
+                    .lock()
+                    .expect("settings log should not be poisoned")
+                    .push(snapshot);
             }
             context.register_service(self.service_name, "module-owned service")
         }
@@ -523,5 +546,33 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, RuntimeError::CircularDependency(_)));
+    }
+
+    #[test]
+    fn registration_context_exposes_module_settings() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let config = PlatformConfig::from_toml_str(
+            r#"
+                [app]
+                name = "settings-app"
+
+                [modules]
+                enabled = ["events"]
+
+                [modules.settings.events]
+                label = "configured"
+            "#,
+        )
+        .unwrap();
+
+        let mut events = FakeModule::new("events", "routes");
+        events.captured_settings = Some(captured.clone());
+
+        PlatformBuilder::new(config)
+            .register_module(events)
+            .build()
+            .unwrap();
+
+        assert_eq!(captured.lock().unwrap().as_slice(), &["configured"]);
     }
 }

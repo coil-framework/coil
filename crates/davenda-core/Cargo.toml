@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 davenda-config = { path = "../davenda-config" }
 thiserror = "1.0"
+toml = "0.8"

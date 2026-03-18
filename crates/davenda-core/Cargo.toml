@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 base64 = "0.22"
+davenda-a11y = { path = "../davenda-a11y" }
 davenda-auth = { path = "../davenda-auth" }
 davenda-cache = { path = "../davenda-cache" }
 davenda-config = { path = "../davenda-config" }

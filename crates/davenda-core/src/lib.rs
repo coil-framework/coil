@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use davenda_a11y::{NavigationContract, ThemeAccessibilityContract};
 use davenda_auth::{AuthModelPackage, Capability};
 use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
 use davenda_config::{
@@ -357,6 +358,12 @@ impl SeoRuntimeServices {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct A11yRuntimeServices {
+    pub navigation: NavigationContract,
+    pub theme_baseline: ThemeAccessibilityContract,
+}
+
 #[derive(Debug, Clone)]
 pub struct CoreBootstrap {
     pub registry: ServiceRegistry,
@@ -364,6 +371,7 @@ pub struct CoreBootstrap {
     pub browser: BrowserSecurityServices,
     pub i18n: I18nRuntimeServices,
     pub seo: SeoRuntimeServices,
+    pub a11y: A11yRuntimeServices,
     pub template: TemplateRuntimeServices,
     pub wasm: WasmRuntimeServices,
 }
@@ -520,6 +528,7 @@ pub fn bootstrap_core_services(
     let browser = browser_security_from_config(config);
     let i18n = i18n_runtime_from_config(config);
     let seo = seo_runtime_from_config(config);
+    let a11y = a11y_runtime_services();
     let template = template_runtime_services();
     let wasm = wasm_runtime_from_config(config);
 
@@ -590,6 +599,10 @@ pub fn bootstrap_core_services(
             }
         ),
     )?;
+    registry.register_core_service(
+        "core.a11y",
+        "Accessibility-aware form, table, dialog, navigation, live-region, and theme-baseline contracts",
+    )?;
     registry.register_core_service("core.template", "HTML-first template runtime")?;
     registry.register_core_service(
         "core.template.fragments",
@@ -634,6 +647,7 @@ pub fn bootstrap_core_services(
         browser,
         i18n,
         seo,
+        a11y,
         template,
         wasm,
     })
@@ -771,6 +785,7 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.http.csrf"));
         assert!(ids.contains(&"core.i18n"));
         assert!(ids.contains(&"core.seo"));
+        assert!(ids.contains(&"core.a11y"));
         assert!(ids.contains(&"core.template.fragments"));
         assert!(ids.contains(&"core.wasm"));
         assert!(ids.contains(&"core.wasm.limits"));
@@ -806,6 +821,8 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert!(bootstrap.seo.emit_json_ld);
         assert!(bootstrap.seo.sitemap_enabled);
+        assert_eq!(bootstrap.a11y.navigation.skip_link_target, "main-content");
+        assert!(bootstrap.a11y.theme_baseline.meets_platform_baseline());
         assert_eq!(
             bootstrap
                 .template
@@ -985,6 +1002,14 @@ fn seo_runtime_from_config(config: &PlatformConfig) -> SeoRuntimeServices {
         canonical_host: config.seo.canonical_host.clone(),
         emit_json_ld: config.seo.emit_json_ld,
         sitemap_enabled: config.seo.sitemap_enabled,
+    }
+}
+
+fn a11y_runtime_services() -> A11yRuntimeServices {
+    A11yRuntimeServices {
+        navigation: NavigationContract::standard(),
+        theme_baseline: ThemeAccessibilityContract::new(4.5, 3.0, 3.0, true, true)
+            .expect("static baseline"),
     }
 }
 

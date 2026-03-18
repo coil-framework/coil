@@ -367,6 +367,9 @@ dependencies = [
 [[package]]
 name = "davenda-a11y"
 version = "0.1.0"
+dependencies = [
+ "davenda-i18n",
+]
 
 [[package]]
 name = "davenda-admin"
@@ -426,6 +429,7 @@ name = "davenda-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "davenda-a11y",
  "davenda-auth",
  "davenda-cache",
  "davenda-config",

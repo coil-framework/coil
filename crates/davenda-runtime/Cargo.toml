@@ -13,4 +13,5 @@ davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "1.0"
 
 [dev-dependencies]
+davenda-commerce = { path = "../davenda-commerce" }
 davenda-cms = { path = "../davenda-cms" }

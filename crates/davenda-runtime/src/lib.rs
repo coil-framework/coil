@@ -313,6 +313,7 @@ mod tests {
     use super::*;
     use davenda_auth::DefaultAuthModelPackage;
     use davenda_cache::DistributedCacheBackend;
+    use davenda_commerce::CommerceModule;
     use davenda_cms::CmsModule;
     use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
@@ -416,6 +417,7 @@ cdn_base_url = "https://cdn.example.com"
                     .requiring_session(),
             )
             .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
             .build()
             .unwrap();
 
@@ -473,8 +475,14 @@ cdn_base_url = "https://cdn.example.com"
                 .iter()
                 .any(|service| service.id == "module.cms.pages")
         );
-        assert_eq!(plan.modules.len(), 1);
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.commerce.checkout")
+        );
+        assert_eq!(plan.modules.len(), 2);
         assert_eq!(plan.modules[0].name, "cms");
+        assert_eq!(plan.modules[1].name, "commerce");
     }
 
     #[test]

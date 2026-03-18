@@ -403,6 +403,10 @@ dependencies = [
 [[package]]
 name = "davenda-commerce"
 version = "0.1.0"
+dependencies = [
+ "davenda-auth",
+ "davenda-core",
+]
 
 [[package]]
 name = "davenda-config"
@@ -452,6 +456,8 @@ version = "0.1.0"
 dependencies = [
  "davenda-auth",
  "davenda-cache",
+ "davenda-cms",
+ "davenda-commerce",
  "davenda-config",
  "davenda-core",
  "davenda-template",

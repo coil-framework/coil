@@ -449,6 +449,11 @@ version = "0.1.0"
 [[package]]
 name = "davenda-memberships"
 version = "0.1.0"
+dependencies = [
+ "davenda-auth",
+ "davenda-commerce",
+ "davenda-core",
+]
 
 [[package]]
 name = "davenda-runtime"

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use davenda_auth::{AuthModelPackage, Capability};
-use davenda_config::{PlatformConfig, TlsMode};
+use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
+use davenda_config::{DistributedCache, PlatformConfig, TlsMode};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +17,28 @@ pub enum ServiceOwner {
     Core,
     Module(String),
     CustomerApp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheRuntimeServices {
+    pub topology: CacheTopology,
+    pub planner: CachePlanner,
+}
+
+impl CacheRuntimeServices {
+    pub fn shared_invalidation_enabled(&self) -> bool {
+        self.topology.supports_shared_invalidation()
+    }
+
+    pub fn distributed_backend(&self) -> Option<DistributedCacheBackend> {
+        self.topology.l2()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CoreBootstrap {
+    pub registry: ServiceRegistry,
+    pub cache: CacheRuntimeServices,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,8 +183,13 @@ pub enum CapabilityValidationError {
 
 pub fn bootstrap_core_services(
     config: &PlatformConfig,
-) -> Result<ServiceRegistry, RegistrationError> {
+) -> Result<CoreBootstrap, RegistrationError> {
     let mut registry = ServiceRegistry::new();
+    let cache_topology = cache_topology_from_config(config);
+    let cache = CacheRuntimeServices {
+        topology: cache_topology,
+        planner: CachePlanner::new(cache_topology),
+    };
 
     registry.register_core_service("core.config", "Typed platform configuration")?;
     registry.register_core_service("core.logging", "Structured logging service")?;
@@ -173,15 +201,23 @@ pub fn bootstrap_core_services(
     registry.register_core_service("core.auth", "Authorization engine and model loader")?;
     registry.register_core_service(
         "core.cache.l1",
-        format!("Local cache backend: {:?}", config.cache.l1),
+        format!("Local cache backend: {}", cache.topology.l1()),
     )?;
 
-    if let Some(distributed) = config.cache.l2 {
+    if let Some(distributed) = cache.distributed_backend() {
         registry.register_core_service(
             "core.cache.l2",
-            format!("Distributed cache backend: {:?}", distributed),
+            format!("Distributed cache backend: {distributed}"),
+        )?;
+        registry.register_core_service(
+            "core.cache.invalidation",
+            format!("Shared invalidation, coalescing, and coordination via {distributed}"),
         )?;
     }
+    registry.register_core_service(
+        "core.cache.http",
+        "HTTP cache-control, validators, variation keys, and surrogate tags",
+    )?;
 
     registry.register_core_service("core.storage", "Storage policy and object access layer")?;
     registry.register_core_service("core.assets", "Asset manifest and CDN publication layer")?;
@@ -204,7 +240,7 @@ pub fn bootstrap_core_services(
         }
     }
 
-    Ok(registry)
+    Ok(CoreBootstrap { registry, cache })
 }
 
 pub fn validate_module_capabilities<P>(
@@ -230,6 +266,7 @@ where
 mod tests {
     use super::*;
     use davenda_auth::DefaultAuthModelPackage;
+    use davenda_cache::DistributedCacheBackend;
     use davenda_config::PlatformConfig;
 
     const VALID_CONFIG: &str = r#"
@@ -291,9 +328,10 @@ cdn_base_url = "https://cdn.example.com"
     #[test]
     fn bootstrap_registers_core_services() {
         let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
-        let registry = bootstrap_core_services(&config).unwrap();
+        let bootstrap = bootstrap_core_services(&config).unwrap();
 
-        let ids = registry
+        let ids = bootstrap
+            .registry
             .services()
             .map(|service| service.id.as_str())
             .collect::<Vec<_>>();
@@ -303,6 +341,13 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.tls"));
         assert!(ids.contains(&"core.cache.l1"));
         assert!(ids.contains(&"core.cache.l2"));
+        assert!(ids.contains(&"core.cache.invalidation"));
+        assert!(ids.contains(&"core.cache.http"));
+        assert_eq!(
+            bootstrap.cache.distributed_backend(),
+            Some(DistributedCacheBackend::Redis)
+        );
+        assert!(bootstrap.cache.shared_invalidation_enabled());
     }
 
     #[test]
@@ -312,5 +357,13 @@ cdn_base_url = "https://cdn.example.com"
             .with_required_capabilities(vec![Capability::CmsPageRead, Capability::CmsPagePublish]);
 
         assert!(validate_module_capabilities(&package, &manifest).is_ok());
+    }
+}
+
+fn cache_topology_from_config(config: &PlatformConfig) -> CacheTopology {
+    match config.cache.l2 {
+        Some(DistributedCache::Redis) => CacheTopology::with_redis(),
+        Some(DistributedCache::Valkey) => CacheTopology::with_valkey(),
+        None => CacheTopology::moka_only(),
     }
 }

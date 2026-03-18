@@ -1,4 +1,5 @@
 use davenda_auth::AuthModelPackage;
+use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     CapabilityValidationError, ModuleManifest, PlatformModule, RegistrationError,
@@ -42,7 +43,8 @@ where
             });
         }
 
-        let mut registry = bootstrap_core_services(&self.config)?;
+        let bootstrap = bootstrap_core_services(&self.config)?;
+        let mut registry = bootstrap.registry;
         let mut module_manifests = Vec::new();
 
         for module in self.modules {
@@ -56,6 +58,7 @@ where
         Ok(RuntimePlan {
             config: self.config,
             auth_package_name: self.auth_package.manifest().name.clone(),
+            cache_topology: bootstrap.cache.topology,
             services: registry.services().cloned().collect(),
             modules: module_manifests,
         })
@@ -66,6 +69,7 @@ where
 pub struct RuntimePlan {
     pub config: PlatformConfig,
     pub auth_package_name: String,
+    pub cache_topology: CacheTopology,
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
 }
@@ -86,6 +90,7 @@ pub enum RuntimeBuildError {
 mod tests {
     use super::*;
     use davenda_auth::{Capability, DefaultAuthModelPackage};
+    use davenda_cache::DistributedCacheBackend;
     use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
 
     const VALID_CONFIG: &str = r#"
@@ -172,6 +177,10 @@ cdn_base_url = "https://cdn.example.com"
             .unwrap();
 
         assert_eq!(plan.auth_package_name, "platform-default-auth");
+        assert_eq!(
+            plan.cache_topology.l2(),
+            Some(DistributedCacheBackend::Redis)
+        );
         assert!(
             plan.services
                 .iter()

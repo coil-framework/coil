@@ -465,6 +465,7 @@ dependencies = [
  "davenda-commerce",
  "davenda-config",
  "davenda-core",
+ "davenda-memberships",
  "davenda-template",
  "davenda-wasm",
  "thiserror",

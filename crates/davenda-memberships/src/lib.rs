@@ -66,7 +66,9 @@ impl fmt::Display for MembershipModelError {
             Self::DuplicateBenefit { key } => {
                 write!(f, "membership benefit `{key}` is duplicated")
             }
-            Self::DuplicateTier { tier_id } => write!(f, "membership tier `{tier_id}` is duplicated"),
+            Self::DuplicateTier { tier_id } => {
+                write!(f, "membership tier `{tier_id}` is duplicated")
+            }
             Self::DuplicateEntitlementKey { entitlement_key } => write!(
                 f,
                 "membership entitlement key `{entitlement_key}` is already assigned to a tier"
@@ -1269,18 +1271,24 @@ mod tests {
                 Capability::MembershipTierEdit,
             ]
         );
-        assert!(manifest
-            .optional_capabilities
-            .contains(&Capability::AdminShellAccess));
+        assert!(
+            manifest
+                .optional_capabilities
+                .contains(&Capability::AdminShellAccess)
+        );
 
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).unwrap();
 
-        assert!(registry
-            .services()
-            .any(|service| service.id == "module.memberships.entitlements"));
-        assert!(registry
-            .services()
-            .any(|service| service.id == "module.memberships.commerce_bridge"));
+        assert!(
+            registry
+                .services()
+                .any(|service| service.id == "module.memberships.entitlements")
+        );
+        assert!(
+            registry
+                .services()
+                .any(|service| service.id == "module.memberships.commerce_bridge")
+        );
     }
 }

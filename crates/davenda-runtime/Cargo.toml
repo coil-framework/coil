@@ -15,3 +15,4 @@ thiserror = "1.0"
 [dev-dependencies]
 davenda-commerce = { path = "../davenda-commerce" }
 davenda-cms = { path = "../davenda-cms" }
+davenda-memberships = { path = "../davenda-memberships" }

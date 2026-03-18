@@ -313,8 +313,9 @@ mod tests {
     use super::*;
     use davenda_auth::DefaultAuthModelPackage;
     use davenda_cache::DistributedCacheBackend;
-    use davenda_commerce::CommerceModule;
     use davenda_cms::CmsModule;
+    use davenda_commerce::CommerceModule;
+    use davenda_memberships::MembershipsModule;
     use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
     use std::time::Duration;
@@ -418,6 +419,7 @@ cdn_base_url = "https://cdn.example.com"
             )
             .with_module(CmsModule::new())
             .with_module(CommerceModule::new())
+            .with_module(MembershipsModule::new())
             .build()
             .unwrap();
 
@@ -480,9 +482,15 @@ cdn_base_url = "https://cdn.example.com"
                 .iter()
                 .any(|service| service.id == "module.commerce.checkout")
         );
-        assert_eq!(plan.modules.len(), 2);
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.memberships.entitlements")
+        );
+        assert_eq!(plan.modules.len(), 3);
         assert_eq!(plan.modules[0].name, "cms");
         assert_eq!(plan.modules[1].name, "commerce");
+        assert_eq!(plan.modules[2].name, "memberships");
     }
 
     #[test]

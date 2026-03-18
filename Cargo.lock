@@ -402,6 +402,7 @@ dependencies = [
 name = "davenda-core"
 version = "0.1.0"
 dependencies = [
+ "davenda-auth",
  "davenda-config",
  "thiserror",
  "toml",
@@ -427,6 +428,7 @@ version = "0.1.0"
 name = "davenda-runtime"
 version = "0.1.0"
 dependencies = [
+ "davenda-auth",
  "davenda-config",
  "davenda-core",
  "thiserror",

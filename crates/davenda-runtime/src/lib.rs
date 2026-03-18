@@ -1,26 +1,30 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-
+use davenda_auth::AuthModelPackage;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    CoreService, ModuleDescriptor, ModuleId, PlatformModule, RegistrationContext,
-    RegistrationError, ServiceRegistry,
+    CapabilityValidationError, ModuleManifest, PlatformModule, RegistrationError,
+    ServiceDescriptor, bootstrap_core_services, validate_module_capabilities,
 };
 use thiserror::Error;
 
-pub struct PlatformBuilder {
+pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
+    auth_package: P,
     modules: Vec<Box<dyn PlatformModule>>,
 }
 
-impl PlatformBuilder {
-    pub fn new(config: PlatformConfig) -> Self {
+impl<P> RuntimeBuilder<P>
+where
+    P: AuthModelPackage,
+{
+    pub fn new(config: PlatformConfig, auth_package: P) -> Self {
         Self {
             config,
+            auth_package,
             modules: Vec::new(),
         }
     }
 
-    pub fn register_module<M>(mut self, module: M) -> Self
+    pub fn with_module<M>(mut self, module: M) -> Self
     where
         M: PlatformModule + 'static,
     {
@@ -28,551 +32,152 @@ impl PlatformBuilder {
         self
     }
 
-    pub fn build(self) -> Result<Platform, RuntimeError> {
-        self.config.validate()?;
+    pub fn build(self) -> Result<RuntimePlan, RuntimeBuildError> {
+        self.config.validate().map_err(ConfigError::Validation)?;
 
-        let mut registry = ServiceRegistry::default();
-        register_core_services(&self.config, &mut registry)?;
+        if self.auth_package.manifest().name != self.config.auth.package {
+            return Err(RuntimeBuildError::AuthPackageMismatch {
+                configured: self.config.auth.package,
+                actual: self.auth_package.manifest().name.clone(),
+            });
+        }
 
-        let mut available = BTreeMap::new();
+        let mut registry = bootstrap_core_services(&self.config)?;
+        let mut module_manifests = Vec::new();
+
         for module in self.modules {
-            let descriptor = module.descriptor();
-            if available
-                .insert(
-                    descriptor.id.clone(),
-                    RegisteredModule { descriptor, module },
-                )
-                .is_some()
-            {
-                return Err(RuntimeError::DuplicateModule(
-                    available
-                        .keys()
-                        .last()
-                        .expect("duplicate insert implies a key exists")
-                        .as_str()
-                        .into(),
-                ));
-            }
+            let manifest = module.manifest();
+            validate_module_capabilities(&self.auth_package, &manifest)?;
+            registry.register_module_manifest(manifest.clone())?;
+            module.register(&mut registry)?;
+            module_manifests.push(manifest);
         }
 
-        let enabled_modules = self
-            .config
-            .modules
-            .enabled
-            .iter()
-            .map(|name| ModuleId::new(name.clone()))
-            .collect::<Vec<_>>();
-
-        for enabled in &enabled_modules {
-            if !available.contains_key(enabled) {
-                return Err(RuntimeError::MissingModule(enabled.as_str().into()));
-            }
-        }
-
-        for enabled in &enabled_modules {
-            let registered = available
-                .get(enabled)
-                .expect("enabled module existence checked above");
-
-            for dependency in &registered.descriptor.dependencies {
-                if !enabled_modules.iter().any(|module| module == dependency) {
-                    return Err(RuntimeError::MissingDependency {
-                        module: enabled.as_str().into(),
-                        dependency: dependency.as_str().into(),
-                    });
-                }
-            }
-
-            for service in &registered.descriptor.required_core_services {
-                let key = davenda_core::ServiceKey::core(service.as_str());
-                if !registry.contains(&key) {
-                    return Err(RuntimeError::MissingCoreService {
-                        module: enabled.as_str().into(),
-                        service: service.as_str().into(),
-                    });
-                }
-            }
-        }
-
-        let ordered_modules = resolve_module_order(&enabled_modules, &available)?;
-        let mut descriptors = BTreeMap::new();
-
-        for enabled in ordered_modules {
-            let registered = available
-                .remove(&enabled)
-                .expect("enabled module existence checked above");
-            let config_namespace = registered
-                .descriptor
-                .config_namespace
-                .as_deref()
-                .unwrap_or_else(|| registered.descriptor.id.as_str());
-
-            let mut context = RegistrationContext::new(
-                &self.config,
-                &registered.descriptor.id,
-                config_namespace,
-                &mut registry,
-            );
-            registered.module.register(&mut context)?;
-
-            descriptors.insert(
-                registered.descriptor.id.as_str().to_owned(),
-                registered.descriptor.clone(),
-            );
-        }
-
-        Ok(Platform {
+        Ok(RuntimePlan {
             config: self.config,
-            services: registry,
-            modules: descriptors,
+            auth_package_name: self.auth_package.manifest().name.clone(),
+            services: registry.services().cloned().collect(),
+            modules: module_manifests,
         })
     }
 }
 
-#[derive(Debug)]
-pub struct Platform {
-    config: PlatformConfig,
-    services: ServiceRegistry,
-    modules: BTreeMap<String, ModuleDescriptor>,
-}
-
-impl Platform {
-    pub fn config(&self) -> &PlatformConfig {
-        &self.config
-    }
-
-    pub fn services(&self) -> &ServiceRegistry {
-        &self.services
-    }
-
-    pub fn modules(&self) -> &BTreeMap<String, ModuleDescriptor> {
-        &self.modules
-    }
-}
-
-struct RegisteredModule {
-    descriptor: ModuleDescriptor,
-    module: Box<dyn PlatformModule>,
-}
-
-fn resolve_module_order(
-    enabled_modules: &[ModuleId],
-    available: &BTreeMap<ModuleId, RegisteredModule>,
-) -> Result<Vec<ModuleId>, RuntimeError> {
-    let enabled_set = enabled_modules.iter().cloned().collect::<BTreeSet<_>>();
-    let mut indegree = enabled_modules
-        .iter()
-        .cloned()
-        .map(|module| (module, 0usize))
-        .collect::<BTreeMap<_, _>>();
-    let mut outgoing = enabled_modules
-        .iter()
-        .cloned()
-        .map(|module| (module, Vec::<ModuleId>::new()))
-        .collect::<BTreeMap<_, _>>();
-
-    for module in enabled_modules {
-        let registered = available
-            .get(module)
-            .expect("enabled module existence checked before ordering");
-
-        for dependency in &registered.descriptor.dependencies {
-            if enabled_set.contains(dependency) {
-                *indegree
-                    .get_mut(module)
-                    .expect("indegree is pre-seeded for all enabled modules") += 1;
-                outgoing
-                    .get_mut(dependency)
-                    .expect("outgoing edges are pre-seeded for all enabled modules")
-                    .push(module.clone());
-            }
-        }
-    }
-
-    let mut queue = indegree
-        .iter()
-        .filter(|(_, degree)| **degree == 0)
-        .map(|(module, _)| module.clone())
-        .collect::<Vec<_>>();
-    queue.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-    let mut queue = VecDeque::from(queue);
-    let mut ordered = Vec::with_capacity(enabled_modules.len());
-
-    while let Some(module) = queue.pop_front() {
-        ordered.push(module.clone());
-
-        if let Some(dependents) = outgoing.get(&module) {
-            let mut dependents = dependents.clone();
-            dependents.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-
-            for dependent in dependents {
-                let remaining = indegree
-                    .get_mut(&dependent)
-                    .expect("indegree is pre-seeded for all enabled modules");
-                *remaining -= 1;
-                if *remaining == 0 {
-                    queue.push_back(dependent);
-                }
-            }
-        }
-    }
-
-    if ordered.len() != enabled_modules.len() {
-        let unresolved = indegree
-            .into_iter()
-            .filter(|(_, degree)| *degree > 0)
-            .map(|(module, _)| module.as_str().to_owned())
-            .collect::<Vec<_>>();
-        return Err(RuntimeError::CircularDependency(unresolved));
-    }
-
-    Ok(ordered)
-}
-
-fn register_core_services(
-    config: &PlatformConfig,
-    registry: &mut ServiceRegistry,
-) -> Result<(), RegistrationError> {
-    registry.register_core(CoreService::Config, "typed platform configuration")?;
-    registry.register_core(CoreService::Cache, "cache policy and adapters")?;
-    registry.register_core(CoreService::Storage, "storage drivers and policy engine")?;
-    registry.register_core(
-        CoreService::Assets,
-        "asset manifest and publication services",
-    )?;
-    registry.register_core(
-        CoreService::Auth,
-        "authorization engine and capability checks",
-    )?;
-    registry.register_core(CoreService::Wasm, "WASM host and extension runtime")?;
-    registry.register_core(CoreService::Jobs, "job scheduler and workers")?;
-    registry.register_core(
-        CoreService::Seo,
-        "SEO metadata and structured data services",
-    )?;
-    registry.register_core(CoreService::I18n, "locale and translation services")?;
-    registry.register_core(CoreService::A11y, "accessibility-aware rendering contracts")?;
-
-    if config.observability.logs {
-        registry.register_core(CoreService::Logging, "structured application logging")?;
-    }
-    if config.observability.metrics {
-        registry.register_core(
-            CoreService::Metrics,
-            "metrics and cardinality-safe telemetry",
-        )?;
-    }
-    if config.observability.tracing {
-        registry.register_core(CoreService::Tracing, "distributed tracing context")?;
-    }
-    if config.observability.health_endpoint {
-        registry.register_core(CoreService::Health, "health and readiness reporting")?;
-    }
-
-    Ok(())
+#[derive(Debug, Clone)]
+pub struct RuntimePlan {
+    pub config: PlatformConfig,
+    pub auth_package_name: String,
+    pub services: Vec<ServiceDescriptor>,
+    pub modules: Vec<ModuleManifest>,
 }
 
 #[derive(Debug, Error)]
-pub enum RuntimeError {
+pub enum RuntimeBuildError {
     #[error(transparent)]
     Config(#[from] ConfigError),
     #[error(transparent)]
     Registration(#[from] RegistrationError),
-    #[error("module `{0}` is enabled in config but not registered with the builder")]
-    MissingModule(String),
-    #[error("module `{module}` requires `{dependency}`, but that dependency is not enabled")]
-    MissingDependency { module: String, dependency: String },
-    #[error("module `{module}` requires core service `{service}`, but it was not registered")]
-    MissingCoreService { module: String, service: String },
-    #[error("module `{0}` was registered more than once")]
-    DuplicateModule(String),
-    #[error("enabled modules contain a circular dependency: {0:?}")]
-    CircularDependency(Vec<String>),
+    #[error(transparent)]
+    Capability(#[from] CapabilityValidationError),
+    #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
+    AuthPackageMismatch { configured: String, actual: String },
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-    use std::sync::{Arc, Mutex};
-
-    use davenda_config::ModulesConfig;
-    use davenda_core::{ModuleId, ServiceKey};
-
     use super::*;
+    use davenda_auth::{Capability, DefaultAuthModelPackage};
+    use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
 
-    #[derive(Clone)]
-    struct FakeModule {
-        descriptor: ModuleDescriptor,
-        service_name: &'static str,
-        registration_log: Option<Arc<Mutex<Vec<String>>>>,
-        captured_settings: Option<Arc<Mutex<Vec<String>>>>,
-    }
+    const VALID_CONFIG: &str = r#"
+[app]
+name = "showcase-events"
+environment = "production"
 
-    impl FakeModule {
-        fn new(id: &str, service_name: &'static str) -> Self {
-            Self {
-                descriptor: ModuleDescriptor::new(id),
-                service_name,
-                registration_log: None,
-                captured_settings: None,
-            }
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+object_store = "s3"
+local_root = "/var/lib/platform"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+
+[seo]
+canonical_host = "www.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#;
+
+    struct CmsPagesModule;
+
+    impl PlatformModule for CmsPagesModule {
+        fn manifest(&self) -> ModuleManifest {
+            ModuleManifest::new("cms-pages").with_required_capabilities(vec![
+                Capability::CmsPageRead,
+                Capability::CmsPagePublish,
+            ])
+        }
+
+        fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
+            registry.register_module_service(
+                "cms-pages",
+                "module.cms.pages",
+                "CMS page routes and content services",
+            )
         }
     }
 
-    impl PlatformModule for FakeModule {
-        fn descriptor(&self) -> ModuleDescriptor {
-            self.descriptor.clone()
-        }
-
-        fn register(&self, context: &mut RegistrationContext<'_>) -> Result<(), RegistrationError> {
-            if let Some(log) = &self.registration_log {
-                log.lock()
-                    .expect("registration log should not be poisoned")
-                    .push(self.descriptor.id.as_str().to_owned());
-            }
-            if let Some(settings_log) = &self.captured_settings {
-                let snapshot = context
-                    .module_settings()
-                    .and_then(|value| value.get("label"))
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("missing")
-                    .to_owned();
-                settings_log
-                    .lock()
-                    .expect("settings log should not be poisoned")
-                    .push(snapshot);
-            }
-            context.register_service(self.service_name, "module-owned service")
-        }
-    }
-
     #[test]
-    fn builder_registers_core_services_and_enabled_modules() {
-        let config = PlatformConfig {
-            modules: ModulesConfig {
-                enabled: vec!["cms-pages".into()],
-                settings: Default::default(),
-            },
-            ..PlatformConfig::default()
-        };
-
-        let platform = PlatformBuilder::new(config)
-            .register_module(FakeModule::new("cms-pages", "routes"))
+    fn runtime_builder_creates_a_runtime_plan() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CmsPagesModule)
             .build()
             .unwrap();
 
+        assert_eq!(plan.auth_package_name, "platform-default-auth");
         assert!(
-            platform
-                .services()
-                .contains(&ServiceKey::core(CoreService::Config.as_str()))
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.cms.pages")
         );
-        assert!(
-            platform
-                .services()
-                .contains(&ServiceKey::module(&ModuleId::new("cms-pages"), "routes"))
-        );
-        assert!(platform.modules().contains_key("cms-pages"));
-    }
-
-    #[test]
-    fn builder_requires_enabled_modules_to_be_registered() {
-        let config = PlatformConfig {
-            modules: ModulesConfig {
-                enabled: vec!["events".into()],
-                settings: Default::default(),
-            },
-            ..PlatformConfig::default()
-        };
-
-        let error = PlatformBuilder::new(config).build().unwrap_err();
-        assert!(matches!(error, RuntimeError::MissingModule(module) if module == "events"));
-    }
-
-    #[test]
-    fn builder_checks_declared_module_dependencies() {
-        let config = PlatformConfig {
-            modules: ModulesConfig {
-                enabled: vec!["events".into()],
-                settings: Default::default(),
-            },
-            ..PlatformConfig::default()
-        };
-
-        let mut events = FakeModule::new("events", "routes");
-        events
-            .descriptor
-            .dependencies
-            .insert(ModuleId::new("memberships"));
-
-        let error = PlatformBuilder::new(config)
-            .register_module(events)
-            .build()
-            .unwrap_err();
-
-        assert!(matches!(
-            error,
-            RuntimeError::MissingDependency { module, dependency }
-                if module == "events" && dependency == "memberships"
-        ));
-    }
-
-    #[test]
-    fn builder_checks_required_core_services() {
-        let config = PlatformConfig {
-            observability: davenda_config::ObservabilityConfig {
-                logs: false,
-                metrics: false,
-                tracing: false,
-                health_endpoint: false,
-            },
-            modules: ModulesConfig {
-                enabled: vec!["metrics-consumer".into()],
-                settings: Default::default(),
-            },
-            ..PlatformConfig::default()
-        };
-
-        let mut module = FakeModule::new("metrics-consumer", "routes");
-        module
-            .descriptor
-            .required_core_services
-            .insert(CoreService::Metrics);
-
-        let error = PlatformBuilder::new(config)
-            .register_module(module)
-            .build()
-            .unwrap_err();
-
-        assert!(matches!(
-            error,
-            RuntimeError::MissingCoreService { module, service }
-                if module == "metrics-consumer" && service == "metrics"
-        ));
-    }
-
-    #[test]
-    fn duplicate_module_registration_is_rejected() {
-        let config = PlatformConfig {
-            modules: ModulesConfig {
-                enabled: vec!["cms-pages".into()],
-                settings: Default::default(),
-            },
-            ..PlatformConfig::default()
-        };
-
-        let error = PlatformBuilder::new(config)
-            .register_module(FakeModule::new("cms-pages", "routes"))
-            .register_module(FakeModule::new("cms-pages", "other-routes"))
-            .build()
-            .unwrap_err();
-
-        assert!(matches!(error, RuntimeError::DuplicateModule(module) if module == "cms-pages"));
-    }
-
-    #[test]
-    fn descriptor_supports_capabilities_and_dependencies() {
-        let mut descriptor = ModuleDescriptor::new("events");
-        descriptor.dependencies = BTreeSet::from([ModuleId::new("memberships")]);
-        descriptor.required_core_services = BTreeSet::from([CoreService::Auth, CoreService::Jobs]);
-        descriptor.capability_contracts =
-            BTreeSet::from(["events.booking.manage".into(), "events.booking.read".into()]);
-
-        assert_eq!(descriptor.dependencies.len(), 1);
-        assert_eq!(descriptor.required_core_services.len(), 2);
-        assert!(
-            descriptor
-                .capability_contracts
-                .contains("events.booking.manage")
-        );
-    }
-
-    #[test]
-    fn modules_register_in_dependency_order() {
-        let order = Arc::new(Mutex::new(Vec::new()));
-        let config = PlatformConfig {
-            modules: ModulesConfig {
-                enabled: vec!["events".into(), "memberships".into()],
-                settings: Default::default(),
-            },
-            ..PlatformConfig::default()
-        };
-
-        let mut memberships = FakeModule::new("memberships", "services");
-        memberships.registration_log = Some(order.clone());
-
-        let mut events = FakeModule::new("events", "routes");
-        events
-            .descriptor
-            .dependencies
-            .insert(ModuleId::new("memberships"));
-        events.registration_log = Some(order.clone());
-
-        PlatformBuilder::new(config)
-            .register_module(events)
-            .register_module(memberships)
-            .build()
-            .unwrap();
-
-        let order = order.lock().unwrap().clone();
-        assert_eq!(order, vec!["memberships".to_string(), "events".to_string()]);
-    }
-
-    #[test]
-    fn circular_module_dependencies_are_rejected() {
-        let config = PlatformConfig {
-            modules: ModulesConfig {
-                enabled: vec!["events".into(), "memberships".into()],
-                settings: Default::default(),
-            },
-            ..PlatformConfig::default()
-        };
-
-        let mut memberships = FakeModule::new("memberships", "services");
-        memberships
-            .descriptor
-            .dependencies
-            .insert(ModuleId::new("events"));
-
-        let mut events = FakeModule::new("events", "routes");
-        events
-            .descriptor
-            .dependencies
-            .insert(ModuleId::new("memberships"));
-
-        let error = PlatformBuilder::new(config)
-            .register_module(events)
-            .register_module(memberships)
-            .build()
-            .unwrap_err();
-
-        assert!(matches!(error, RuntimeError::CircularDependency(_)));
-    }
-
-    #[test]
-    fn registration_context_exposes_module_settings() {
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let config = PlatformConfig::from_toml_str(
-            r#"
-                [app]
-                name = "settings-app"
-
-                [modules]
-                enabled = ["events"]
-
-                [modules.settings.events]
-                label = "configured"
-            "#,
-        )
-        .unwrap();
-
-        let mut events = FakeModule::new("events", "routes");
-        events.captured_settings = Some(captured.clone());
-
-        PlatformBuilder::new(config)
-            .register_module(events)
-            .build()
-            .unwrap();
-
-        assert_eq!(captured.lock().unwrap().as_slice(), &["configured"]);
+        assert_eq!(plan.modules.len(), 1);
+        assert_eq!(plan.modules[0].name, "cms-pages");
     }
 }

@@ -1,272 +1,316 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::HashMap;
 
-use davenda_config::PlatformConfig;
+use davenda_auth::{AuthModelPackage, Capability};
+use davenda_config::{PlatformConfig, TlsMode};
 use thiserror::Error;
-use toml::Value as TomlValue;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ModuleId(String);
-
-impl ModuleId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for ModuleId {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<String> for ModuleId {
-    fn from(value: String) -> Self {
-        Self::new(value)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ServiceKey(String);
-
-impl ServiceKey {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn core(name: &str) -> Self {
-        Self::new(format!("core.{name}"))
-    }
-
-    pub fn module(module: &ModuleId, name: &str) -> Self {
-        Self::new(format!("module.{}.{}", module.as_str(), name))
-    }
-
-    pub fn app(name: &str) -> Self {
-        Self::new(format!("app.{name}"))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CoreService {
-    Config,
-    Logging,
-    Metrics,
-    Tracing,
-    Health,
-    Cache,
-    Storage,
-    Assets,
-    Auth,
-    Wasm,
-    Jobs,
-    Seo,
-    I18n,
-    A11y,
-}
-
-impl CoreService {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Config => "config",
-            Self::Logging => "logging",
-            Self::Metrics => "metrics",
-            Self::Tracing => "tracing",
-            Self::Health => "health",
-            Self::Cache => "cache",
-            Self::Storage => "storage",
-            Self::Assets => "assets",
-            Self::Auth => "auth",
-            Self::Wasm => "wasm",
-            Self::Jobs => "jobs",
-            Self::Seo => "seo",
-            Self::I18n => "i18n",
-            Self::A11y => "a11y",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceDescriptor {
-    pub key: ServiceKey,
+    pub id: String,
+    pub owner: ServiceOwner,
     pub description: String,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ServiceRegistry {
-    services: BTreeMap<ServiceKey, ServiceDescriptor>,
-}
-
-impl ServiceRegistry {
-    pub fn register(
-        &mut self,
-        key: ServiceKey,
-        description: impl Into<String>,
-    ) -> Result<(), RegistrationError> {
-        if self.services.contains_key(&key) {
-            return Err(RegistrationError::DuplicateService(key.as_str().into()));
-        }
-
-        self.services.insert(
-            key.clone(),
-            ServiceDescriptor {
-                key,
-                description: description.into(),
-            },
-        );
-
-        Ok(())
-    }
-
-    pub fn register_core(
-        &mut self,
-        service: CoreService,
-        description: impl Into<String>,
-    ) -> Result<(), RegistrationError> {
-        self.register(ServiceKey::core(service.as_str()), description)
-    }
-
-    pub fn contains(&self, key: &ServiceKey) -> bool {
-        self.services.contains_key(key)
-    }
-
-    pub fn descriptors(&self) -> impl Iterator<Item = &ServiceDescriptor> {
-        self.services.values()
-    }
-
-    pub fn len(&self) -> usize {
-        self.services.len()
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceOwner {
+    Core,
+    Module(String),
+    CustomerApp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleDescriptor {
-    pub id: ModuleId,
-    pub dependencies: BTreeSet<ModuleId>,
-    pub required_core_services: BTreeSet<CoreService>,
-    pub capability_contracts: BTreeSet<String>,
+pub struct ModuleManifest {
+    pub name: String,
+    pub required_capabilities: Vec<Capability>,
+    pub optional_capabilities: Vec<Capability>,
     pub config_namespace: Option<String>,
 }
 
-impl ModuleDescriptor {
-    pub fn new(id: impl Into<ModuleId>) -> Self {
+impl ModuleManifest {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
-            dependencies: BTreeSet::new(),
-            required_core_services: BTreeSet::new(),
-            capability_contracts: BTreeSet::new(),
+            name: name.into(),
+            required_capabilities: Vec::new(),
+            optional_capabilities: Vec::new(),
             config_namespace: None,
         }
     }
+
+    pub fn with_required_capabilities(mut self, capabilities: Vec<Capability>) -> Self {
+        self.required_capabilities = capabilities;
+        self
+    }
+
+    pub fn with_optional_capabilities(mut self, capabilities: Vec<Capability>) -> Self {
+        self.optional_capabilities = capabilities;
+        self
+    }
+
+    pub fn with_config_namespace(mut self, config_namespace: impl Into<String>) -> Self {
+        self.config_namespace = Some(config_namespace.into());
+        self
+    }
 }
 
-pub struct RegistrationContext<'a> {
-    config: &'a PlatformConfig,
-    module_id: &'a ModuleId,
-    config_namespace: &'a str,
-    registry: &'a mut ServiceRegistry,
+pub trait PlatformModule {
+    fn manifest(&self) -> ModuleManifest;
+    fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError>;
 }
 
-impl<'a> RegistrationContext<'a> {
-    pub fn new(
-        config: &'a PlatformConfig,
-        module_id: &'a ModuleId,
-        config_namespace: &'a str,
-        registry: &'a mut ServiceRegistry,
-    ) -> Self {
-        Self {
-            config,
-            module_id,
-            config_namespace,
-            registry,
+#[derive(Debug, Default, Clone)]
+pub struct ServiceRegistry {
+    services: HashMap<String, ServiceDescriptor>,
+    modules: HashMap<String, ModuleManifest>,
+}
+
+impl ServiceRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register_core_service(
+        &mut self,
+        id: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Result<(), RegistrationError> {
+        self.register(ServiceDescriptor {
+            id: id.into(),
+            owner: ServiceOwner::Core,
+            description: description.into(),
+        })
+    }
+
+    pub fn register_module_service(
+        &mut self,
+        module: impl Into<String>,
+        id: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Result<(), RegistrationError> {
+        self.register(ServiceDescriptor {
+            id: id.into(),
+            owner: ServiceOwner::Module(module.into()),
+            description: description.into(),
+        })
+    }
+
+    pub fn register_customer_app_service(
+        &mut self,
+        id: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Result<(), RegistrationError> {
+        self.register(ServiceDescriptor {
+            id: id.into(),
+            owner: ServiceOwner::CustomerApp,
+            description: description.into(),
+        })
+    }
+
+    pub fn register_module_manifest(
+        &mut self,
+        manifest: ModuleManifest,
+    ) -> Result<(), RegistrationError> {
+        if self.modules.contains_key(&manifest.name) {
+            return Err(RegistrationError::DuplicateModule {
+                name: manifest.name.clone(),
+            });
+        }
+
+        self.modules.insert(manifest.name.clone(), manifest);
+        Ok(())
+    }
+
+    pub fn services(&self) -> impl Iterator<Item = &ServiceDescriptor> {
+        self.services.values()
+    }
+
+    pub fn modules(&self) -> impl Iterator<Item = &ModuleManifest> {
+        self.modules.values()
+    }
+
+    fn register(&mut self, service: ServiceDescriptor) -> Result<(), RegistrationError> {
+        if self.services.contains_key(&service.id) {
+            return Err(RegistrationError::DuplicateService {
+                id: service.id.clone(),
+            });
+        }
+
+        self.services.insert(service.id.clone(), service);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RegistrationError {
+    #[error("service `{id}` is already registered")]
+    DuplicateService { id: String },
+    #[error("module `{name}` is already registered")]
+    DuplicateModule { name: String },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CapabilityValidationError {
+    #[error(
+        "module `{module}` requires capability `{capability}` but the active auth package does not bind it"
+    )]
+    MissingCapability {
+        module: String,
+        capability: Capability,
+    },
+}
+
+pub fn bootstrap_core_services(
+    config: &PlatformConfig,
+) -> Result<ServiceRegistry, RegistrationError> {
+    let mut registry = ServiceRegistry::new();
+
+    registry.register_core_service("core.config", "Typed platform configuration")?;
+    registry.register_core_service("core.logging", "Structured logging service")?;
+
+    if config.observability.tracing {
+        registry.register_core_service("core.tracing", "Distributed tracing pipeline")?;
+    }
+
+    registry.register_core_service("core.auth", "Authorization engine and model loader")?;
+    registry.register_core_service(
+        "core.cache.l1",
+        format!("Local cache backend: {:?}", config.cache.l1),
+    )?;
+
+    if let Some(distributed) = config.cache.l2 {
+        registry.register_core_service(
+            "core.cache.l2",
+            format!("Distributed cache backend: {:?}", distributed),
+        )?;
+    }
+
+    registry.register_core_service("core.storage", "Storage policy and object access layer")?;
+    registry.register_core_service("core.assets", "Asset manifest and CDN publication layer")?;
+    registry.register_core_service("core.template", "HTML-first template runtime")?;
+    registry.register_core_service("core.wasm", "WASM extension host runtime")?;
+    registry.register_core_service("core.jobs", "Background jobs and scheduler")?;
+
+    match config.tls.mode {
+        TlsMode::External => {
+            registry.register_core_service(
+                "core.tls.metadata",
+                "Trusted termination metadata and secure transport policy",
+            )?;
+        }
+        _ => {
+            registry.register_core_service(
+                "core.tls",
+                "Certificate lifecycle, TLS termination, and renewal orchestration",
+            )?;
         }
     }
 
-    pub fn config(&self) -> &PlatformConfig {
-        self.config
-    }
-
-    pub fn module_id(&self) -> &ModuleId {
-        self.module_id
-    }
-
-    pub fn module_settings(&self) -> Option<&TomlValue> {
-        self.config.modules.settings.get(self.config_namespace)
-    }
-
-    pub fn register_service(
-        &mut self,
-        name: &str,
-        description: impl Into<String>,
-    ) -> Result<(), RegistrationError> {
-        self.registry
-            .register(ServiceKey::module(self.module_id, name), description)
-    }
+    Ok(registry)
 }
 
-pub trait PlatformModule: Send + Sync {
-    fn descriptor(&self) -> ModuleDescriptor;
+pub fn validate_module_capabilities<P>(
+    package: &P,
+    manifest: &ModuleManifest,
+) -> Result<(), CapabilityValidationError>
+where
+    P: AuthModelPackage,
+{
+    for capability in &manifest.required_capabilities {
+        if package.binding_for(*capability).is_none() {
+            return Err(CapabilityValidationError::MissingCapability {
+                module: manifest.name.clone(),
+                capability: *capability,
+            });
+        }
+    }
 
-    fn register(&self, context: &mut RegistrationContext<'_>) -> Result<(), RegistrationError>;
-}
-
-#[derive(Debug, Error)]
-pub enum RegistrationError {
-    #[error("service `{0}` is already registered")]
-    DuplicateService(String),
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use davenda_auth::DefaultAuthModelPackage;
+    use davenda_config::PlatformConfig;
+
+    const VALID_CONFIG: &str = r#"
+[app]
+name = "showcase-events"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+object_store = "s3"
+local_root = "/var/lib/platform"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+
+[seo]
+canonical_host = "www.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#;
 
     #[test]
-    fn registry_rejects_duplicate_service_keys() {
-        let mut registry = ServiceRegistry::default();
-        registry
-            .register_core(CoreService::Config, "typed config")
-            .unwrap();
+    fn bootstrap_registers_core_services() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let registry = bootstrap_core_services(&config).unwrap();
 
-        let error = registry
-            .register_core(CoreService::Config, "another config")
-            .unwrap_err();
+        let ids = registry
+            .services()
+            .map(|service| service.id.as_str())
+            .collect::<Vec<_>>();
 
-        assert!(matches!(error, RegistrationError::DuplicateService(_)));
+        assert!(ids.contains(&"core.config"));
+        assert!(ids.contains(&"core.auth"));
+        assert!(ids.contains(&"core.tls"));
+        assert!(ids.contains(&"core.cache.l1"));
+        assert!(ids.contains(&"core.cache.l2"));
     }
 
     #[test]
-    fn module_service_keys_are_namespaced() {
-        let key = ServiceKey::module(&ModuleId::new("cms-pages"), "routes");
-        assert_eq!(key.as_str(), "module.cms-pages.routes");
-    }
+    fn validates_module_capabilities_against_auth_package() {
+        let package = DefaultAuthModelPackage::default();
+        let manifest = ModuleManifest::new("cms-pages")
+            .with_required_capabilities(vec![Capability::CmsPageRead, Capability::CmsPagePublish]);
 
-    #[test]
-    fn registration_context_reads_module_scoped_settings() {
-        let config = PlatformConfig::from_toml_str(
-            r#"
-                [app]
-                name = "test-app"
-
-                [modules]
-                enabled = ["events"]
-
-                [modules.settings.events]
-                retries = 3
-            "#,
-        )
-        .unwrap();
-        let module_id = ModuleId::new("events");
-        let mut registry = ServiceRegistry::default();
-        let context = RegistrationContext::new(&config, &module_id, "events", &mut registry);
-
-        let settings = context.module_settings().unwrap();
-        assert_eq!(settings["retries"].as_integer(), Some(3));
+        assert!(validate_module_capabilities(&package, &manifest).is_ok());
     }
 }

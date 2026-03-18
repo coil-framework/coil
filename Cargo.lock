@@ -395,6 +395,10 @@ version = "0.1.0"
 [[package]]
 name = "davenda-cms"
 version = "0.1.0"
+dependencies = [
+ "davenda-auth",
+ "davenda-core",
+]
 
 [[package]]
 name = "davenda-commerce"

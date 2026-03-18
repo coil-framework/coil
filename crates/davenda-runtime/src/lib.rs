@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
@@ -94,10 +94,10 @@ impl PlatformBuilder {
             }
         }
 
+        let ordered_modules = resolve_module_order(&enabled_modules, &available)?;
         let mut descriptors = BTreeMap::new();
-        let mut modules = BTreeMap::new();
 
-        for enabled in enabled_modules {
+        for enabled in ordered_modules {
             let registered = available
                 .remove(&enabled)
                 .expect("enabled module existence checked above");
@@ -110,7 +110,6 @@ impl PlatformBuilder {
                 registered.descriptor.id.as_str().to_owned(),
                 registered.descriptor.clone(),
             );
-            modules.insert(registered.descriptor.id.as_str().to_owned(), registered);
         }
 
         Ok(Platform {
@@ -145,6 +144,80 @@ impl Platform {
 struct RegisteredModule {
     descriptor: ModuleDescriptor,
     module: Box<dyn PlatformModule>,
+}
+
+fn resolve_module_order(
+    enabled_modules: &[ModuleId],
+    available: &BTreeMap<ModuleId, RegisteredModule>,
+) -> Result<Vec<ModuleId>, RuntimeError> {
+    let enabled_set = enabled_modules.iter().cloned().collect::<BTreeSet<_>>();
+    let mut indegree = enabled_modules
+        .iter()
+        .cloned()
+        .map(|module| (module, 0usize))
+        .collect::<BTreeMap<_, _>>();
+    let mut outgoing = enabled_modules
+        .iter()
+        .cloned()
+        .map(|module| (module, Vec::<ModuleId>::new()))
+        .collect::<BTreeMap<_, _>>();
+
+    for module in enabled_modules {
+        let registered = available
+            .get(module)
+            .expect("enabled module existence checked before ordering");
+
+        for dependency in &registered.descriptor.dependencies {
+            if enabled_set.contains(dependency) {
+                *indegree
+                    .get_mut(module)
+                    .expect("indegree is pre-seeded for all enabled modules") += 1;
+                outgoing
+                    .get_mut(dependency)
+                    .expect("outgoing edges are pre-seeded for all enabled modules")
+                    .push(module.clone());
+            }
+        }
+    }
+
+    let mut queue = indegree
+        .iter()
+        .filter(|(_, degree)| **degree == 0)
+        .map(|(module, _)| module.clone())
+        .collect::<Vec<_>>();
+    queue.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    let mut queue = VecDeque::from(queue);
+    let mut ordered = Vec::with_capacity(enabled_modules.len());
+
+    while let Some(module) = queue.pop_front() {
+        ordered.push(module.clone());
+
+        if let Some(dependents) = outgoing.get(&module) {
+            let mut dependents = dependents.clone();
+            dependents.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+
+            for dependent in dependents {
+                let remaining = indegree
+                    .get_mut(&dependent)
+                    .expect("indegree is pre-seeded for all enabled modules");
+                *remaining -= 1;
+                if *remaining == 0 {
+                    queue.push_back(dependent);
+                }
+            }
+        }
+    }
+
+    if ordered.len() != enabled_modules.len() {
+        let unresolved = indegree
+            .into_iter()
+            .filter(|(_, degree)| *degree > 0)
+            .map(|(module, _)| module.as_str().to_owned())
+            .collect::<Vec<_>>();
+        return Err(RuntimeError::CircularDependency(unresolved));
+    }
+
+    Ok(ordered)
 }
 
 fn register_core_services(
@@ -204,11 +277,14 @@ pub enum RuntimeError {
     MissingCoreService { module: String, service: String },
     #[error("module `{0}` was registered more than once")]
     DuplicateModule(String),
+    #[error("enabled modules contain a circular dependency: {0:?}")]
+    CircularDependency(Vec<String>),
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::sync::{Arc, Mutex};
 
     use davenda_config::ModulesConfig;
     use davenda_core::{ModuleId, ServiceKey};
@@ -219,6 +295,7 @@ mod tests {
     struct FakeModule {
         descriptor: ModuleDescriptor,
         service_name: &'static str,
+        registration_log: Option<Arc<Mutex<Vec<String>>>>,
     }
 
     impl FakeModule {
@@ -226,6 +303,7 @@ mod tests {
             Self {
                 descriptor: ModuleDescriptor::new(id),
                 service_name,
+                registration_log: None,
             }
         }
     }
@@ -236,6 +314,11 @@ mod tests {
         }
 
         fn register(&self, context: &mut RegistrationContext<'_>) -> Result<(), RegistrationError> {
+            if let Some(log) = &self.registration_log {
+                log.lock()
+                    .expect("registration log should not be poisoned")
+                    .push(self.descriptor.id.as_str().to_owned());
+            }
             context.register_service(self.service_name, "module-owned service")
         }
     }
@@ -378,5 +461,67 @@ mod tests {
                 .capability_contracts
                 .contains("events.booking.manage")
         );
+    }
+
+    #[test]
+    fn modules_register_in_dependency_order() {
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let config = PlatformConfig {
+            modules: ModulesConfig {
+                enabled: vec!["events".into(), "memberships".into()],
+                settings: Default::default(),
+            },
+            ..PlatformConfig::default()
+        };
+
+        let mut memberships = FakeModule::new("memberships", "services");
+        memberships.registration_log = Some(order.clone());
+
+        let mut events = FakeModule::new("events", "routes");
+        events
+            .descriptor
+            .dependencies
+            .insert(ModuleId::new("memberships"));
+        events.registration_log = Some(order.clone());
+
+        PlatformBuilder::new(config)
+            .register_module(events)
+            .register_module(memberships)
+            .build()
+            .unwrap();
+
+        let order = order.lock().unwrap().clone();
+        assert_eq!(order, vec!["memberships".to_string(), "events".to_string()]);
+    }
+
+    #[test]
+    fn circular_module_dependencies_are_rejected() {
+        let config = PlatformConfig {
+            modules: ModulesConfig {
+                enabled: vec!["events".into(), "memberships".into()],
+                settings: Default::default(),
+            },
+            ..PlatformConfig::default()
+        };
+
+        let mut memberships = FakeModule::new("memberships", "services");
+        memberships
+            .descriptor
+            .dependencies
+            .insert(ModuleId::new("events"));
+
+        let mut events = FakeModule::new("events", "routes");
+        events
+            .descriptor
+            .dependencies
+            .insert(ModuleId::new("memberships"));
+
+        let error = PlatformBuilder::new(config)
+            .register_module(events)
+            .register_module(memberships)
+            .build()
+            .unwrap_err();
+
+        assert!(matches!(error, RuntimeError::CircularDependency(_)));
     }
 }

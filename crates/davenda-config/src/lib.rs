@@ -140,6 +140,10 @@ impl PlatformConfig {
 
         Ok(())
     }
+
+    pub fn redacted_toml(&self) -> Result<String, ConfigError> {
+        Ok(toml::to_string_pretty(self)?)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -228,6 +232,16 @@ impl PlatformConfigLoader {
     pub fn apply_toml_patch_str(&mut self, source: &str) -> Result<&mut Self, ConfigError> {
         let patch: PlatformConfigPatch = toml::from_str(source)?;
         Ok(self.apply_patch(patch))
+    }
+
+    pub fn apply_toml_patch_env(&mut self, var_name: &str) -> Result<&mut Self, ConfigError> {
+        match std::env::var(var_name) {
+            Ok(source) => self.apply_toml_patch_str(&source),
+            Err(std::env::VarError::NotPresent) => Ok(self),
+            Err(std::env::VarError::NotUnicode(_)) => Err(ConfigError::Validation(format!(
+                "environment variable `{var_name}` must be valid Unicode TOML"
+            ))),
+        }
     }
 
     pub fn build(self) -> Result<PlatformConfig, ConfigError> {
@@ -612,6 +626,8 @@ impl Default for AssetsConfig {
 pub enum ConfigError {
     #[error("failed to parse TOML config: {0}")]
     Toml(#[from] toml::de::Error),
+    #[error("failed to serialize TOML config: {0}")]
+    TomlSerialize(#[from] toml::ser::Error),
     #[error("config validation failed: {0}")]
     Validation(String),
 }
@@ -777,5 +793,34 @@ mod tests {
             invalid_cache.validate(),
             Err(ConfigError::Validation(_))
         ));
+    }
+
+    #[test]
+    fn loader_can_apply_env_patch_and_emit_redacted_toml() {
+        let var_name = "DAVENDA_TEST_PATCH";
+        unsafe {
+            std::env::set_var(
+                var_name,
+                r#"
+                    [app]
+                    name = "env-app"
+
+                    [auth]
+                    package = "customer-auth"
+                "#,
+            );
+        }
+
+        let mut loader = PlatformConfigLoader::new();
+        loader.apply_toml_patch_env(var_name).unwrap();
+        let config = loader.build().unwrap();
+        let rendered = config.redacted_toml().unwrap();
+
+        assert_eq!(config.app.name, "env-app");
+        assert!(rendered.contains("customer-auth"));
+
+        unsafe {
+            std::env::remove_var(var_name);
+        }
     }
 }

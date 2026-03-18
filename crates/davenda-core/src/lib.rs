@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use davenda_auth::{AuthModelPackage, Capability};
 use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
 use davenda_config::{DistributedCache, PlatformConfig, TlsMode};
+use davenda_wasm::{ExtensionPointKind, ResourceLimits};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,10 +37,43 @@ impl CacheRuntimeServices {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmRuntimeServices {
+    pub extension_directory: String,
+    pub allow_network: bool,
+    pub limits: WasmLimitsProfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WasmLimitsProfile {
+    pub page: ResourceLimits,
+    pub api: ResourceLimits,
+    pub job: ResourceLimits,
+    pub scheduled_job: ResourceLimits,
+    pub webhook: ResourceLimits,
+    pub admin_widget: ResourceLimits,
+    pub render_hook: ResourceLimits,
+}
+
+impl WasmLimitsProfile {
+    pub fn for_point(&self, point: ExtensionPointKind) -> ResourceLimits {
+        match point {
+            ExtensionPointKind::Page => self.page,
+            ExtensionPointKind::Api => self.api,
+            ExtensionPointKind::Job => self.job,
+            ExtensionPointKind::ScheduledJob => self.scheduled_job,
+            ExtensionPointKind::Webhook => self.webhook,
+            ExtensionPointKind::AdminWidget => self.admin_widget,
+            ExtensionPointKind::RenderHook => self.render_hook,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CoreBootstrap {
     pub registry: ServiceRegistry,
     pub cache: CacheRuntimeServices,
+    pub wasm: WasmRuntimeServices,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +225,7 @@ pub fn bootstrap_core_services(
         topology: cache_topology,
         planner: CachePlanner::new(cache_topology),
     };
+    let wasm = wasm_runtime_from_config(config);
 
     registry.register_core_service("core.config", "Typed platform configuration")?;
     registry.register_core_service("core.logging", "Structured logging service")?;
@@ -222,7 +258,22 @@ pub fn bootstrap_core_services(
     registry.register_core_service("core.storage", "Storage policy and object access layer")?;
     registry.register_core_service("core.assets", "Asset manifest and CDN publication layer")?;
     registry.register_core_service("core.template", "HTML-first template runtime")?;
-    registry.register_core_service("core.wasm", "WASM extension host runtime")?;
+    registry.register_core_service(
+        "core.wasm",
+        format!(
+            "WASM extension host runtime rooted at `{}` with network {}",
+            wasm.extension_directory,
+            if wasm.allow_network {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        ),
+    )?;
+    registry.register_core_service(
+        "core.wasm.limits",
+        "Per-surface WASM resource limits for pages, APIs, jobs, webhooks, and widgets",
+    )?;
     registry.register_core_service("core.jobs", "Background jobs and scheduler")?;
 
     match config.tls.mode {
@@ -240,7 +291,11 @@ pub fn bootstrap_core_services(
         }
     }
 
-    Ok(CoreBootstrap { registry, cache })
+    Ok(CoreBootstrap {
+        registry,
+        cache,
+        wasm,
+    })
 }
 
 pub fn validate_module_capabilities<P>(
@@ -268,6 +323,7 @@ mod tests {
     use davenda_auth::DefaultAuthModelPackage;
     use davenda_cache::DistributedCacheBackend;
     use davenda_config::PlatformConfig;
+    use davenda_wasm::ExtensionPointKind;
 
     const VALID_CONFIG: &str = r#"
 [app]
@@ -343,11 +399,31 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.cache.l2"));
         assert!(ids.contains(&"core.cache.invalidation"));
         assert!(ids.contains(&"core.cache.http"));
+        assert!(ids.contains(&"core.wasm"));
+        assert!(ids.contains(&"core.wasm.limits"));
         assert_eq!(
             bootstrap.cache.distributed_backend(),
             Some(DistributedCacheBackend::Redis)
         );
         assert!(bootstrap.cache.shared_invalidation_enabled());
+        assert_eq!(bootstrap.wasm.extension_directory, "extensions");
+        assert!(!bootstrap.wasm.allow_network);
+        assert_eq!(
+            bootstrap
+                .wasm
+                .limits
+                .for_point(ExtensionPointKind::Page)
+                .max_runtime,
+            Duration::from_millis(50)
+        );
+        assert_eq!(
+            bootstrap
+                .wasm
+                .limits
+                .for_point(ExtensionPointKind::Job)
+                .max_runtime,
+            Duration::from_secs(30)
+        );
     }
 
     #[test]
@@ -366,4 +442,31 @@ fn cache_topology_from_config(config: &PlatformConfig) -> CacheTopology {
         Some(DistributedCache::Valkey) => CacheTopology::with_valkey(),
         None => CacheTopology::moka_only(),
     }
+}
+
+fn wasm_runtime_from_config(config: &PlatformConfig) -> WasmRuntimeServices {
+    let request_limit = Duration::from_millis(config.wasm.default_time_limit_ms);
+    let tighten = |point| tighten_runtime_limit(ResourceLimits::baseline_for(point), request_limit);
+
+    WasmRuntimeServices {
+        extension_directory: config.wasm.directory.clone(),
+        allow_network: config.wasm.allow_network,
+        limits: WasmLimitsProfile {
+            page: tighten(ExtensionPointKind::Page),
+            api: tighten(ExtensionPointKind::Api),
+            admin_widget: tighten(ExtensionPointKind::AdminWidget),
+            render_hook: tighten(ExtensionPointKind::RenderHook),
+            webhook: tighten(ExtensionPointKind::Webhook),
+            job: ResourceLimits::baseline_for(ExtensionPointKind::Job),
+            scheduled_job: ResourceLimits::baseline_for(ExtensionPointKind::ScheduledJob),
+        },
+    }
+}
+
+fn tighten_runtime_limit(mut limits: ResourceLimits, max_runtime: Duration) -> ResourceLimits {
+    if max_runtime < limits.max_runtime {
+        limits.max_runtime = max_runtime;
+    }
+
+    limits
 }

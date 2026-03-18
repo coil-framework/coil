@@ -7,5 +7,6 @@ edition = "2024"
 davenda-auth = { path = "../davenda-auth" }
 davenda-cache = { path = "../davenda-cache" }
 davenda-config = { path = "../davenda-config" }
+davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "1.0"
 toml = "0.8"

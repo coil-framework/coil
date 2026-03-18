@@ -3,7 +3,7 @@ use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     CapabilityValidationError, ModuleManifest, PlatformModule, RegistrationError,
-    ServiceDescriptor, bootstrap_core_services, validate_module_capabilities,
+    ServiceDescriptor, WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
 };
 use thiserror::Error;
 
@@ -59,6 +59,7 @@ where
             config: self.config,
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
+            wasm: bootstrap.wasm,
             services: registry.services().cloned().collect(),
             modules: module_manifests,
         })
@@ -70,6 +71,7 @@ pub struct RuntimePlan {
     pub config: PlatformConfig,
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
+    pub wasm: WasmRuntimeServices,
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
 }
@@ -92,6 +94,8 @@ mod tests {
     use davenda_auth::{Capability, DefaultAuthModelPackage};
     use davenda_cache::DistributedCacheBackend;
     use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+    use davenda_wasm::ExtensionPointKind;
+    use std::time::Duration;
 
     const VALID_CONFIG: &str = r#"
 [app]
@@ -180,6 +184,14 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(
             plan.cache_topology.l2(),
             Some(DistributedCacheBackend::Redis)
+        );
+        assert_eq!(plan.wasm.extension_directory, "extensions");
+        assert_eq!(
+            plan.wasm
+                .limits
+                .for_point(ExtensionPointKind::Page)
+                .max_runtime,
+            Duration::from_millis(50)
         );
         assert!(
             plan.services

@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+davenda-storage = { path = "../davenda-storage" }
+thiserror = "1.0"
+
+[dev-dependencies]
+davenda-config = { path = "../davenda-config" }

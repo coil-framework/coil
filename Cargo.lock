@@ -437,6 +437,12 @@ dependencies = [
 [[package]]
 name = "davenda-events"
 version = "0.1.0"
+dependencies = [
+ "davenda-auth",
+ "davenda-commerce",
+ "davenda-core",
+ "davenda-memberships",
+]
 
 [[package]]
 name = "davenda-i18n"
@@ -465,6 +471,7 @@ dependencies = [
  "davenda-commerce",
  "davenda-config",
  "davenda-core",
+ "davenda-events",
  "davenda-memberships",
  "davenda-template",
  "davenda-wasm",

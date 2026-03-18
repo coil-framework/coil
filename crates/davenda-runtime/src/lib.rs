@@ -678,6 +678,7 @@ mod tests {
     use davenda_cms::CmsModule;
     use davenda_commerce::CommerceModule;
     use davenda_core::CookieSigner;
+    use davenda_events::EventsModule;
     use davenda_memberships::MembershipsModule;
     use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
@@ -783,6 +784,7 @@ cdn_base_url = "https://cdn.example.com"
             .with_module(CmsModule::new())
             .with_module(CommerceModule::new())
             .with_module(MembershipsModule::new())
+            .with_module(EventsModule::new())
             .build()
             .unwrap();
 
@@ -850,10 +852,16 @@ cdn_base_url = "https://cdn.example.com"
                 .iter()
                 .any(|service| service.id == "module.memberships.entitlements")
         );
-        assert_eq!(plan.modules.len(), 3);
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.events.bookings")
+        );
+        assert_eq!(plan.modules.len(), 4);
         assert_eq!(plan.modules[0].name, "cms");
         assert_eq!(plan.modules[1].name, "commerce");
         assert_eq!(plan.modules[2].name, "memberships");
+        assert_eq!(plan.modules[3].name, "events");
     }
 
     #[test]

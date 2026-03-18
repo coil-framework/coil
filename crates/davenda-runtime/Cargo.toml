@@ -11,3 +11,6 @@ davenda-core = { path = "../davenda-core" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "1.0"
+
+[dev-dependencies]
+davenda-cms = { path = "../davenda-cms" }

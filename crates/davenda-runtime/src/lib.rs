@@ -311,9 +311,9 @@ pub enum RuntimeBuildError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use davenda_auth::{Capability, DefaultAuthModelPackage};
+    use davenda_auth::DefaultAuthModelPackage;
     use davenda_cache::DistributedCacheBackend;
-    use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+    use davenda_cms::CmsModule;
     use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
     use std::time::Duration;
@@ -399,25 +399,6 @@ publish_manifest = true
 cdn_base_url = "https://cdn.example.com"
 "#;
 
-    struct CmsPagesModule;
-
-    impl PlatformModule for CmsPagesModule {
-        fn manifest(&self) -> ModuleManifest {
-            ModuleManifest::new("cms-pages").with_required_capabilities(vec![
-                Capability::CmsPageRead,
-                Capability::CmsPagePublish,
-            ])
-        }
-
-        fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
-            registry.register_module_service(
-                "cms-pages",
-                "module.cms.pages",
-                "CMS page routes and content services",
-            )
-        }
-    }
-
     #[test]
     fn runtime_builder_creates_a_runtime_plan() {
         let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
@@ -434,7 +415,7 @@ cdn_base_url = "https://cdn.example.com"
                     .with_area(RouteArea::Admin)
                     .requiring_session(),
             )
-            .with_module(CmsPagesModule)
+            .with_module(CmsModule::new())
             .build()
             .unwrap();
 
@@ -493,7 +474,7 @@ cdn_base_url = "https://cdn.example.com"
                 .any(|service| service.id == "module.cms.pages")
         );
         assert_eq!(plan.modules.len(), 1);
-        assert_eq!(plan.modules[0].name, "cms-pages");
+        assert_eq!(plan.modules[0].name, "cms");
     }
 
     #[test]

@@ -1,10 +1,12 @@
+use std::collections::HashSet;
+
 use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    BrowserSecurityServices, CapabilityValidationError, ModuleManifest, PlatformModule,
-    RegistrationError, ServiceDescriptor, TemplateRuntimeServices, WasmRuntimeServices,
-    bootstrap_core_services, validate_module_capabilities,
+    BrowserSecurityServices, CapabilityValidationError, CookieSigner, ModuleManifest,
+    PlatformModule, RegistrationError, ServiceDescriptor, TemplateRuntimeServices,
+    WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
 };
 use thiserror::Error;
 
@@ -16,6 +18,12 @@ pub enum HttpMethod {
     Put,
     Patch,
     Delete,
+}
+
+impl HttpMethod {
+    pub const fn is_state_changing(self) -> bool {
+        matches!(self, Self::Post | Self::Put | Self::Patch | Self::Delete)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +150,17 @@ impl HttpRuntimePlan {
         host: &str,
         path: &str,
     ) -> Option<ResolvedRoute> {
+        self.resolve_match(config, method, host, path)
+            .map(|matched| matched.resolved)
+    }
+
+    pub fn resolve_match(
+        &self,
+        config: &PlatformConfig,
+        method: HttpMethod,
+        host: &str,
+        path: &str,
+    ) -> Option<ResolvedRouteMatch> {
         self.routes.iter().find_map(|route| {
             if route.method != method {
                 return None;
@@ -156,10 +175,13 @@ impl HttpRuntimePlan {
             match route.locale_policy {
                 LocalePolicy::DefaultOnly => {
                     if route.path == path {
-                        Some(ResolvedRoute {
-                            route_name: route.name.clone(),
-                            locale: None,
-                            auth: route.auth,
+                        Some(ResolvedRouteMatch {
+                            route: route.clone(),
+                            resolved: ResolvedRoute {
+                                route_name: route.name.clone(),
+                                locale: None,
+                                auth: route.auth,
+                            },
                         })
                     } else {
                         None
@@ -172,10 +194,13 @@ impl HttpRuntimePlan {
                             locale.trim_matches('/'),
                             route.path.trim_start_matches('/')
                         );
-                        (localized_path == path).then(|| ResolvedRoute {
-                            route_name: route.name.clone(),
-                            locale: Some(locale.clone()),
-                            auth: route.auth,
+                        (localized_path == path).then(|| ResolvedRouteMatch {
+                            route: route.clone(),
+                            resolved: ResolvedRoute {
+                                route_name: route.name.clone(),
+                                locale: Some(locale.clone()),
+                                auth: route.auth,
+                            },
                         })
                     })
                 }
@@ -190,6 +215,134 @@ pub struct ResolvedRoute {
     pub route_name: String,
     pub locale: Option<String>,
     pub auth: RouteAuthGate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRouteMatch {
+    pub route: RouteDefinition,
+    pub resolved: ResolvedRoute,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestInput {
+    pub method: HttpMethod,
+    pub host: String,
+    pub path: String,
+    pub scheme: String,
+    pub forwarded_proto: Option<String>,
+    pub request_id: Option<String>,
+    pub session_id: Option<String>,
+    pub session_cookie: Option<String>,
+    pub csrf_token: Option<String>,
+    pub csrf_action: Option<String>,
+    pub principal_id: Option<String>,
+    pub granted_capabilities: HashSet<davenda_auth::Capability>,
+}
+
+impl RequestInput {
+    pub fn new(
+        method: HttpMethod,
+        host: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Result<Self, RouteBuildError> {
+        Ok(Self {
+            method,
+            host: validate_host(host.into())?,
+            path: validate_route_path(path.into())?,
+            scheme: "https".to_string(),
+            forwarded_proto: None,
+            request_id: None,
+            session_id: None,
+            session_cookie: None,
+            csrf_token: None,
+            csrf_action: None,
+            principal_id: None,
+            granted_capabilities: HashSet::new(),
+        })
+    }
+
+    pub fn with_scheme(mut self, scheme: impl Into<String>) -> Self {
+        self.scheme = scheme.into();
+        self
+    }
+
+    pub fn with_forwarded_proto(mut self, proto: impl Into<String>) -> Self {
+        self.forwarded_proto = Some(proto.into());
+        self
+    }
+
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
+        self
+    }
+
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+
+    pub fn with_session_cookie(mut self, session_cookie: impl Into<String>) -> Self {
+        self.session_cookie = Some(session_cookie.into());
+        self
+    }
+
+    pub fn with_csrf_token(mut self, csrf_token: impl Into<String>) -> Self {
+        self.csrf_token = Some(csrf_token.into());
+        self
+    }
+
+    pub fn with_csrf_action(mut self, csrf_action: impl Into<String>) -> Self {
+        self.csrf_action = Some(csrf_action.into());
+        self
+    }
+
+    pub fn with_principal(mut self, principal_id: impl Into<String>) -> Self {
+        self.principal_id = Some(principal_id.into());
+        self
+    }
+
+    pub fn grant_capability(mut self, capability: davenda_auth::Capability) -> Self {
+        self.granted_capabilities.insert(capability);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestTraceContext {
+    pub request_id: String,
+    pub transport_scheme: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionContext {
+    pub session_id: Option<String>,
+    pub resolved_from_cookie: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrincipalContext {
+    pub principal_id: Option<String>,
+    pub granted_capabilities: HashSet<davenda_auth::Capability>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheDisposition {
+    Public,
+    Private,
+    Uncacheable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestExecution {
+    pub customer_app: String,
+    pub route: ResolvedRoute,
+    pub route_area: RouteArea,
+    pub locale: String,
+    pub trace: RequestTraceContext,
+    pub session: SessionContext,
+    pub principal: PrincipalContext,
+    pub cache: CacheDisposition,
+    pub middleware: Vec<MiddlewareStage>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -209,6 +362,31 @@ pub enum RouteBuildError {
         name: String,
         capability: davenda_auth::Capability,
     },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RequestExecutionError {
+    #[error("no route matches {method:?} {host}{path}")]
+    RouteNotFound {
+        method: HttpMethod,
+        host: String,
+        path: String,
+    },
+    #[error("route `{route}` requires a resolved session")]
+    SessionRequired { route: String },
+    #[error("route `{route}` requires capability `{capability}`")]
+    CapabilityRequired {
+        route: String,
+        capability: davenda_auth::Capability,
+    },
+    #[error("route `{route}` requires a CSRF token")]
+    MissingCsrfToken { route: String },
+    #[error("route `{route}` requires a session before CSRF can be validated")]
+    MissingSessionForCsrf { route: String },
+    #[error("route `{route}` supplied an invalid CSRF token")]
+    InvalidCsrfToken { route: String },
+    #[error("session cookie failed validation: {0}")]
+    InvalidSessionCookie(String),
 }
 
 pub struct RuntimeBuilder<P> {
@@ -294,6 +472,190 @@ pub struct RuntimePlan {
     pub modules: Vec<ModuleManifest>,
 }
 
+impl RuntimePlan {
+    pub fn execute_request(
+        &self,
+        request: RequestInput,
+        cookie_secret: &[u8],
+        csrf_secret: &[u8],
+    ) -> Result<RequestExecution, RequestExecutionError> {
+        let matched = self
+            .http
+            .resolve_match(&self.config, request.method, &request.host, &request.path)
+            .ok_or_else(|| RequestExecutionError::RouteNotFound {
+                method: request.method,
+                host: request.host.clone(),
+                path: request.path.clone(),
+            })?;
+
+        let trace = RequestTraceContext {
+            request_id: request.request_id.clone().unwrap_or_else(|| {
+                format!(
+                    "req:{:?}:{}:{}",
+                    request.method, request.host, matched.resolved.route_name
+                )
+            }),
+            transport_scheme: request
+                .forwarded_proto
+                .clone()
+                .unwrap_or_else(|| request.scheme.clone()),
+        };
+
+        let mut resolved_from_cookie = false;
+        let session_id = if let Some(session_id) = request.session_id.clone() {
+            Some(session_id)
+        } else if let Some(cookie) = request.session_cookie.as_deref() {
+            resolved_from_cookie = true;
+            Some(self.verify_session_cookie(cookie_secret, cookie)?)
+        } else {
+            None
+        };
+
+        let session = SessionContext {
+            session_id: session_id.clone(),
+            resolved_from_cookie,
+        };
+        let principal = PrincipalContext {
+            principal_id: request.principal_id,
+            granted_capabilities: request.granted_capabilities,
+        };
+
+        self.enforce_route_auth(&matched.resolved, &session, &principal)?;
+        self.enforce_browser_policy(
+            &matched.route,
+            &matched.resolved,
+            request.method,
+            request.csrf_action.as_deref(),
+            request.csrf_token.as_deref(),
+            &session,
+            csrf_secret,
+        )?;
+
+        Ok(RequestExecution {
+            customer_app: self.config.app.name.clone(),
+            route: matched.resolved.clone(),
+            route_area: matched.route.area,
+            locale: matched
+                .resolved
+                .locale
+                .clone()
+                .unwrap_or_else(|| self.config.i18n.default_locale.clone()),
+            trace,
+            session: session.clone(),
+            principal,
+            cache: cache_disposition_for_route(request.method, &matched.resolved.auth, &session),
+            middleware: self.http.middleware.clone(),
+        })
+    }
+
+    fn verify_session_cookie(
+        &self,
+        cookie_secret: &[u8],
+        cookie: &str,
+    ) -> Result<String, RequestExecutionError> {
+        let signer = CookieSigner::new(self.browser.sessions.session_cookie.clone());
+        signer
+            .verify(cookie_secret, cookie)
+            .map_err(|error| RequestExecutionError::InvalidSessionCookie(error.to_string()))
+    }
+
+    fn enforce_route_auth(
+        &self,
+        route: &ResolvedRoute,
+        session: &SessionContext,
+        principal: &PrincipalContext,
+    ) -> Result<(), RequestExecutionError> {
+        match route.auth {
+            RouteAuthGate::Public => Ok(()),
+            RouteAuthGate::Session => {
+                if session.session_id.is_some() {
+                    Ok(())
+                } else {
+                    Err(RequestExecutionError::SessionRequired {
+                        route: route.route_name.clone(),
+                    })
+                }
+            }
+            RouteAuthGate::Capability(capability) => {
+                if session.session_id.is_none() {
+                    return Err(RequestExecutionError::SessionRequired {
+                        route: route.route_name.clone(),
+                    });
+                }
+
+                if principal.granted_capabilities.contains(&capability) {
+                    Ok(())
+                } else {
+                    Err(RequestExecutionError::CapabilityRequired {
+                        route: route.route_name.clone(),
+                        capability,
+                    })
+                }
+            }
+        }
+    }
+
+    fn enforce_browser_policy(
+        &self,
+        route: &RouteDefinition,
+        resolved: &ResolvedRoute,
+        method: HttpMethod,
+        csrf_action: Option<&str>,
+        csrf_token: Option<&str>,
+        session: &SessionContext,
+        csrf_secret: &[u8],
+    ) -> Result<(), RequestExecutionError> {
+        let requires_csrf = method.is_state_changing()
+            && route.area != RouteArea::Api
+            && self.browser.csrf.enabled
+            && !matches!(resolved.auth, RouteAuthGate::Public);
+
+        if !requires_csrf {
+            return Ok(());
+        }
+
+        let session_id = session.session_id.as_deref().ok_or_else(|| {
+            RequestExecutionError::MissingSessionForCsrf {
+                route: resolved.route_name.clone(),
+            }
+        })?;
+        let token = csrf_token.ok_or_else(|| RequestExecutionError::MissingCsrfToken {
+            route: resolved.route_name.clone(),
+        })?;
+        let action = csrf_action.unwrap_or(&resolved.route_name);
+        let valid = self
+            .browser
+            .csrf
+            .verify_token(csrf_secret, session_id, action, token)
+            .map_err(|_| RequestExecutionError::InvalidCsrfToken {
+                route: resolved.route_name.clone(),
+            })?;
+
+        if valid {
+            Ok(())
+        } else {
+            Err(RequestExecutionError::InvalidCsrfToken {
+                route: resolved.route_name.clone(),
+            })
+        }
+    }
+}
+
+fn cache_disposition_for_route(
+    method: HttpMethod,
+    auth: &RouteAuthGate,
+    session: &SessionContext,
+) -> CacheDisposition {
+    if method.is_state_changing() {
+        return CacheDisposition::Uncacheable;
+    }
+
+    match auth {
+        RouteAuthGate::Public if session.session_id.is_none() => CacheDisposition::Public,
+        _ => CacheDisposition::Private,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeBuildError {
     #[error(transparent)]
@@ -315,6 +677,7 @@ mod tests {
     use davenda_cache::DistributedCacheBackend;
     use davenda_cms::CmsModule;
     use davenda_commerce::CommerceModule;
+    use davenda_core::CookieSigner;
     use davenda_memberships::MembershipsModule;
     use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
@@ -511,6 +874,149 @@ cdn_base_url = "https://cdn.example.com"
             }
             other => panic!("expected duplicate route error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn execute_request_derives_context_and_session_from_cookie() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_route(
+                RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                    .unwrap()
+                    .with_area(RouteArea::Account)
+                    .requiring_session(),
+            )
+            .build()
+            .unwrap();
+
+        let cookie_secret = b"01234567012345670123456701234567";
+        let csrf_secret = b"76543210765432107654321076543210";
+        let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+            .sign(cookie_secret, "session-123")
+            .unwrap();
+
+        let execution = plan
+            .execute_request(
+                RequestInput::new(HttpMethod::Get, "www.example.com", "/account")
+                    .unwrap()
+                    .with_session_cookie(session_cookie)
+                    .with_principal("user-1"),
+                cookie_secret,
+                csrf_secret,
+            )
+            .unwrap();
+
+        assert_eq!(execution.customer_app, "showcase-events");
+        assert_eq!(execution.route.route_name, "account.dashboard");
+        assert_eq!(execution.route_area, RouteArea::Account);
+        assert_eq!(execution.locale, "en-GB");
+        assert_eq!(execution.session.session_id.as_deref(), Some("session-123"));
+        assert!(execution.session.resolved_from_cookie);
+        assert_eq!(execution.cache, CacheDisposition::Private);
+        assert_eq!(execution.trace.transport_scheme, "https");
+        assert_eq!(execution.middleware, plan.http.middleware);
+    }
+
+    #[test]
+    fn execute_request_enforces_csrf_for_state_changing_browser_routes() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_route(
+                RouteDefinition::new("cms.publish", HttpMethod::Post, "/admin/pages/publish")
+                    .unwrap()
+                    .with_area(RouteArea::Admin)
+                    .requiring_session(),
+            )
+            .build()
+            .unwrap();
+
+        let cookie_secret = b"01234567012345670123456701234567";
+        let csrf_secret = b"76543210765432107654321076543210";
+        let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+            .sign(cookie_secret, "session-123")
+            .unwrap();
+
+        let missing_token = plan.execute_request(
+            RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/pages/publish")
+                .unwrap()
+                .with_session_cookie(session_cookie.clone()),
+            cookie_secret,
+            csrf_secret,
+        );
+        assert_eq!(
+            missing_token.unwrap_err(),
+            RequestExecutionError::MissingCsrfToken {
+                route: "cms.publish".to_string(),
+            }
+        );
+
+        let token = plan
+            .browser
+            .csrf
+            .issue_token(csrf_secret, "session-123", "cms.publish")
+            .unwrap();
+        let execution = plan
+            .execute_request(
+                RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/pages/publish")
+                    .unwrap()
+                    .with_session_cookie(session_cookie)
+                    .with_csrf_token(token),
+                cookie_secret,
+                csrf_secret,
+            )
+            .unwrap();
+
+        assert_eq!(execution.cache, CacheDisposition::Uncacheable);
+        assert_eq!(execution.route.route_name, "cms.publish");
+    }
+
+    #[test]
+    fn execute_request_requires_capability_for_capability_gated_routes() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_route(
+                RouteDefinition::new("cms.preview", HttpMethod::Get, "/admin/pages/preview")
+                    .unwrap()
+                    .with_area(RouteArea::Admin)
+                    .requiring_capability(davenda_auth::Capability::CmsPageRead),
+            )
+            .build()
+            .unwrap();
+
+        let cookie_secret = b"01234567012345670123456701234567";
+        let csrf_secret = b"76543210765432107654321076543210";
+        let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+            .sign(cookie_secret, "session-123")
+            .unwrap();
+
+        let denied = plan.execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/admin/pages/preview")
+                .unwrap()
+                .with_session_cookie(session_cookie.clone()),
+            cookie_secret,
+            csrf_secret,
+        );
+        assert_eq!(
+            denied.unwrap_err(),
+            RequestExecutionError::CapabilityRequired {
+                route: "cms.preview".to_string(),
+                capability: davenda_auth::Capability::CmsPageRead,
+            }
+        );
+
+        let allowed = plan
+            .execute_request(
+                RequestInput::new(HttpMethod::Get, "www.example.com", "/admin/pages/preview")
+                    .unwrap()
+                    .with_session_cookie(session_cookie)
+                    .grant_capability(davenda_auth::Capability::CmsPageRead),
+                cookie_secret,
+                csrf_secret,
+            )
+            .unwrap();
+
+        assert_eq!(allowed.route.route_name, "cms.preview");
+        assert_eq!(allowed.cache, CacheDisposition::Private);
     }
 }
 

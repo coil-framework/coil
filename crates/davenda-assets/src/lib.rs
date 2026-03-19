@@ -8,9 +8,9 @@ mod tests;
 mod validation;
 
 pub use delivery::{
-    authorized_delivery_plan, public_delivery_plan, public_deployment_override, AssetDeliveryPlan,
-    AssetDeliveryTarget, AssetKind, ContentFingerprint, DeliveryAudience, DeliveryContext,
-    FingerprintAlgorithm,
+    AssetDeliveryPlan, AssetDeliveryTarget, AssetKind, ContentFingerprint, DeliveryAudience,
+    DeliveryContext, FingerprintAlgorithm, authorized_delivery_plan, public_delivery_plan,
+    public_deployment_override,
 };
 pub use error::AssetModelError;
 pub use identifiers::{AssetId, ReleaseId, RevisionId};

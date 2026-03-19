@@ -1,7 +1,7 @@
+use crate::OpsModelError;
 use crate::bulk::BulkCatalog;
 use crate::reports::ReportCatalog;
 use crate::search::SearchCatalog;
-use crate::OpsModelError;
 use davenda_core::ModuleManifest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

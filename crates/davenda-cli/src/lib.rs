@@ -7,8 +7,8 @@ mod tests;
 mod validation;
 
 pub use command::{
-    baseline_commands, CommandDescriptor, CommandExecutionPlan, CommandInvocation, CommandOwner,
-    OutputMode,
+    CommandDescriptor, CommandExecutionPlan, CommandInvocation, CommandOwner, OutputMode,
+    baseline_commands,
 };
 pub use error::CliModelError;
 pub use registry::{CliRuntime, CommandRegistry};

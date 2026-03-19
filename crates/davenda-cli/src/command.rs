@@ -1,5 +1,5 @@
-use crate::validation::{require_non_empty, validate_token};
 use crate::CliModelError;
+use crate::validation::{require_non_empty, validate_token};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {

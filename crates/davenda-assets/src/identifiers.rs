@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{require_non_empty, AssetModelError};
+use crate::{AssetModelError, require_non_empty};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetId(String);

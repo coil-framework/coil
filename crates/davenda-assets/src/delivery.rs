@@ -4,7 +4,7 @@ use davenda_storage::{
     DeliveryMode, DurableStore, Sensitivity, StoragePlan, StoragePolicyOverride, SyncMode,
 };
 
-use crate::{join_delivery_base, require_non_empty, AssetModelError, RevisionId};
+use crate::{AssetModelError, RevisionId, join_delivery_base, require_non_empty};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetKind {

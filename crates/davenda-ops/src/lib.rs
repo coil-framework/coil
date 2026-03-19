@@ -40,8 +40,8 @@ pub use error::OpsModelError;
 pub use identifiers::{
     BulkExecutionId, BulkOperationId, ReportExportId, ReportId, SearchFieldId, SearchIndexId,
 };
-pub(crate) use planner::default_retry_policy;
 pub use planner::OpsPlanner;
+pub(crate) use planner::default_retry_policy;
 pub use reports::{
     ReportCatalog, ReportDefinition, ReportDeliveryMode, ReportExportPlan, ReportExportRequest,
     ReportFormat, ReportParameter, ReportSensitivity,

@@ -11,8 +11,8 @@ pub use catalog::{MembershipCatalog, ProvisionedSubscription, RenewalWorkItem};
 pub use error::MembershipModelError;
 pub use model::{
     BenefitKey, BenefitKind, BillingInterval, MemberAccountId, MembershipBenefit,
-    MembershipInstant, MembershipTier, MembershipTierId, SubscriptionEvent, SubscriptionEventKind,
-    SubscriptionId, SubscriptionStatus, TierChangeKind, TierVisibility, SECONDS_PER_DAY,
+    MembershipInstant, MembershipTier, MembershipTierId, SECONDS_PER_DAY, SubscriptionEvent,
+    SubscriptionEventKind, SubscriptionId, SubscriptionStatus, TierChangeKind, TierVisibility,
 };
 pub use module::MembershipsModule;
-pub use subscription::{default_retry_policy, EntitlementGrant, EntitlementStatus, Subscription};
+pub use subscription::{EntitlementGrant, EntitlementStatus, Subscription, default_retry_policy};

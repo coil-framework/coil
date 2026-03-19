@@ -2,7 +2,7 @@ use crate::error::MediaModelError;
 use crate::identifiers::{MediaAssetId, MediaFolderId, MediaLibraryId, MediaRevisionId, MediaSlug};
 use crate::library::MediaLibrary;
 use crate::model::{
-    is_public_revision, MediaDerivative, MediaMetadata, MediaTechnicalMetadata, PublicationStatus,
+    MediaDerivative, MediaMetadata, MediaTechnicalMetadata, PublicationStatus, is_public_revision,
 };
 use crate::validation::require_non_empty;
 use davenda_assets::AssetId;

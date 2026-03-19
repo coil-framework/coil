@@ -2,7 +2,7 @@ use crate::checkout::CheckoutLine;
 use crate::error::CommerceModelError;
 use crate::identifiers::{CurrencyCode, OrderId, RefundId, Sku};
 use crate::model::{Money, OrderStatus, ProductKind};
-use crate::pricing::{ensure_same_currency, PriceQuote};
+use crate::pricing::{PriceQuote, ensure_same_currency};
 use crate::validation::require_non_empty;
 use davenda_data::{DomainWrite, TransactionIsolation, TransactionPlan};
 

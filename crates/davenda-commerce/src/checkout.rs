@@ -2,7 +2,7 @@ use crate::error::CommerceModelError;
 use crate::identifiers::{CheckoutId, CurrencyCode, OrderId, Sku};
 use crate::model::{CheckoutStatus, Money, OrderStatus, ProductKind};
 use crate::orders::Order;
-use crate::pricing::{ensure_same_currency, PriceQuote, PricingPolicy};
+use crate::pricing::{PriceQuote, PricingPolicy, ensure_same_currency};
 use crate::validation::require_non_empty;
 use davenda_data::{DomainWrite, TransactionIsolation, TransactionPlan};
 use std::collections::BTreeMap;

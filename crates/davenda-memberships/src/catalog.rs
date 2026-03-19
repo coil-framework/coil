@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use davenda_commerce::{EntitlementKey, OrderId, OrderOutcome};
 
+use crate::MembershipModelError;
 use crate::model::{
     MemberAccountId, MembershipInstant, MembershipTier, MembershipTierId, SubscriptionId,
 };
 use crate::subscription::Subscription;
 use crate::validation::ensure_positive_quantity;
-use crate::MembershipModelError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionedSubscription {

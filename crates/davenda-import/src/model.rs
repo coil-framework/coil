@@ -3,7 +3,7 @@ use std::fmt;
 
 use davenda_cli::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
 
-use super::validation::{require_non_empty, validate_token, ImportModelError};
+use super::validation::{ImportModelError, require_non_empty, validate_token};
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {

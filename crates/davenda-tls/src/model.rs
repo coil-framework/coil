@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use davenda_config::AcmeChallenge;
 
-use crate::validation::validate_token;
 use crate::TlsModelError;
+use crate::validation::validate_token;
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {

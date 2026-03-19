@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use davenda_commerce::{EntitlementKey, OrderId};
 
-use crate::validation::{require_non_empty, validate_token};
 use crate::MembershipModelError;
+use crate::validation::{require_non_empty, validate_token};
 
 pub const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 

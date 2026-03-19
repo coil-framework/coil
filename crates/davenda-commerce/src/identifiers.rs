@@ -1,5 +1,5 @@
-use crate::validation::validate_token;
 use crate::CommerceModelError;
+use crate::validation::validate_token;
 use std::fmt;
 
 macro_rules! token_type {

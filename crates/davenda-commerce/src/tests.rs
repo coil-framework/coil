@@ -61,12 +61,16 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             Capability::OrderRefundIssue,
         ]
     );
-    assert!(manifest
-        .optional_capabilities
-        .contains(&Capability::AdminShellAccess));
-    assert!(manifest
-        .optional_capabilities
-        .contains(&Capability::AssetRead));
+    assert!(
+        manifest
+            .optional_capabilities
+            .contains(&Capability::AdminShellAccess)
+    );
+    assert!(
+        manifest
+            .optional_capabilities
+            .contains(&Capability::AssetRead)
+    );
     assert_eq!(manifest.migrations.len(), 3);
     assert_eq!(manifest.route_surfaces.len(), 4);
     assert_eq!(manifest.http_surfaces.len(), 4);
@@ -74,21 +78,29 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 2);
     assert_eq!(manifest.report_definitions.len(), 1);
-    assert!(manifest
-        .module_dependencies
-        .iter()
-        .any(|dependency| dependency.module == "memberships"));
-    assert!(manifest
-        .core_service_dependencies
-        .contains(&CoreServiceDependency::Jobs));
-    assert!(manifest
-        .extension_slots
-        .iter()
-        .any(|slot| slot.kind == ExtensionSlotKind::Webhook));
+    assert!(
+        manifest
+            .module_dependencies
+            .iter()
+            .any(|dependency| dependency.module == "memberships")
+    );
+    assert!(
+        manifest
+            .core_service_dependencies
+            .contains(&CoreServiceDependency::Jobs)
+    );
+    assert!(
+        manifest
+            .extension_slots
+            .iter()
+            .any(|slot| slot.kind == ExtensionSlotKind::Webhook)
+    );
     assert_eq!(manifest.admin_resources.len(), 4);
-    assert!(registry
-        .services()
-        .any(|service| service.id == "module.commerce.membership_bridge"));
+    assert!(
+        registry
+            .services()
+            .any(|service| service.id == "module.commerce.membership_bridge")
+    );
     assert_eq!(module.admin_resources().len(), 4);
 }
 
@@ -353,10 +365,12 @@ fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
     let completion = checkout.completion_transaction_plan(&order).unwrap();
     assert_eq!(completion.isolation, TransactionIsolation::Serializable);
     assert_eq!(completion.writes.len(), 4);
-    assert!(completion
-        .after_commit_events
-        .iter()
-        .any(|event| event == "commerce.order.created:ord-ops"));
+    assert!(
+        completion
+            .after_commit_events
+            .iter()
+            .any(|event| event == "commerce.order.created:ord-ops")
+    );
 
     let fulfillment = order.fulfillment_transaction_plan().unwrap();
     assert_eq!(fulfillment.writes[0].resource, "order");
@@ -364,10 +378,12 @@ fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
     let refund = Refund::new(RefundId::new("refund-ops").unwrap(), gbp(500), "partial").unwrap();
     let refund_plan = order.refund_transaction_plan(&refund).unwrap();
     assert_eq!(refund_plan.writes[0].resource, "order_refund");
-    assert!(refund_plan
-        .after_commit_jobs
-        .iter()
-        .any(|job| job == "commerce.jobs.refund.reconcile:refund-ops"));
+    assert!(
+        refund_plan
+            .after_commit_jobs
+            .iter()
+            .any(|job| job == "commerce.jobs.refund.reconcile:refund-ops")
+    );
 
     let module = CommerceModule::new();
     let migrations = module.migration_plan().unwrap();

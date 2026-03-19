@@ -99,7 +99,7 @@ fn folder_and_asset_policies_compose_in_order() {
     )
     .unwrap()
     .with_folder(folder.id.clone())
-    .with_storage_override(StoragePolicyOverride::force_local_only());
+    .with_storage_override(StoragePolicyOverride::force_single_node_escape_hatch());
 
     let mut library = library;
     library.insert_folder(folder).unwrap();

@@ -1,7 +1,5 @@
-use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheLookupState, CacheMetrics,
@@ -15,11 +13,6 @@ pub enum CacheBackendKind {
     Redis,
     Valkey,
 }
-
-static CACHE_BACKEND_DEPLOYMENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-static DISTRIBUTED_CACHE_REGISTRY: OnceLock<
-    Mutex<HashMap<(CacheBackendKind, u64), Arc<dyn DistributedCacheRuntime>>>,
-> = OnceLock::new();
 
 #[derive(Debug, Clone, Default)]
 struct CacheBackendState {
@@ -183,21 +176,16 @@ impl DistributedCacheClient {
         Self { kind, runtime }
     }
 
-    fn emulated(kind: CacheBackendKind, deployment_id: u64) -> Self {
-        let registry = DISTRIBUTED_CACHE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = registry
-            .lock()
-            .expect("distributed cache registry mutex poisoned");
-        let runtime = guard
-            .entry((kind, deployment_id))
-            .or_insert_with(|| Arc::new(EmulatedDistributedCacheRuntime::new()))
-            .clone();
-
-        Self::new(kind, runtime)
+    pub fn in_memory(kind: CacheBackendKind) -> Self {
+        Self::new(kind, Arc::new(EmulatedDistributedCacheRuntime::new()))
     }
 
     pub fn kind(&self) -> CacheBackendKind {
         self.kind
+    }
+
+    pub fn is_shared(&self) -> bool {
+        Arc::strong_count(&self.runtime) > 1
     }
 
     pub fn insert(&self, entry: CacheEntry) {
@@ -295,7 +283,7 @@ pub struct CacheBackendAdapter {
 
 impl CacheBackendAdapter {
     pub fn new(topology: CacheTopology) -> Self {
-        Self::for_deployment(topology, issue_cache_backend_deployment_id())
+        Self::for_deployment(topology, 0)
     }
 
     pub fn distributed(topology: CacheTopology, client: DistributedCacheClient) -> Self {
@@ -306,17 +294,13 @@ impl CacheBackendAdapter {
         }
     }
 
-    pub(crate) fn for_deployment(topology: CacheTopology, deployment_id: u64) -> Self {
+    pub(crate) fn for_deployment(topology: CacheTopology, _deployment_id: u64) -> Self {
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
             None => CacheBackendKind::Local,
         };
-        let storage = if topology.supports_shared_invalidation() {
-            CacheBackendStorage::Distributed(DistributedCacheClient::emulated(kind, deployment_id))
-        } else {
-            CacheBackendStorage::Local(LocalCacheBackendAdapter::new())
-        };
+        let storage = CacheBackendStorage::Local(LocalCacheBackendAdapter::new());
 
         Self {
             kind,
@@ -334,7 +318,10 @@ impl CacheBackendAdapter {
     }
 
     pub fn is_shared(&self) -> bool {
-        matches!(self.storage, CacheBackendStorage::Distributed(_))
+        match &self.storage {
+            CacheBackendStorage::Local(_) => false,
+            CacheBackendStorage::Distributed(client) => client.is_shared(),
+        }
     }
 
     pub fn insert(&mut self, entry: CacheEntry) {
@@ -383,8 +370,4 @@ impl CacheBackendAdapter {
             CacheBackendStorage::Distributed(client) => client.metrics(),
         }
     }
-}
-
-fn issue_cache_backend_deployment_id() -> u64 {
-    CACHE_BACKEND_DEPLOYMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }

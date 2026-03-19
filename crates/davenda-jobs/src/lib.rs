@@ -1,15 +1,10 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use davenda_config::{JobBackend, JobsConfig};
-
-static JOBS_BACKEND_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-static JOBS_BACKEND_REGISTRY: OnceLock<Mutex<HashMap<u64, Arc<dyn JobsCoordinationRuntime>>>> =
-    OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobsModelError {
@@ -442,7 +437,6 @@ pub struct JobsRuntime {
     pub backend: JobBackend,
     pub topology: QueueTopology,
     pub default_retry_limit: u32,
-    backend_id: u64,
 }
 
 impl JobsRuntime {
@@ -504,7 +498,6 @@ impl JobsRuntime {
             backend: config.backend,
             topology,
             default_retry_limit: config.retry_limit.max(1),
-            backend_id: JOBS_BACKEND_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         })
     }
 
@@ -517,7 +510,7 @@ impl JobsRuntime {
     }
 
     pub fn coordinator(&self) -> JobsCoordinator {
-        self.coordinator_with_backend(JobsBackendAdapter::shared_emulated(self))
+        self.coordinator_with_backend(JobsBackendAdapter::in_memory(self))
     }
 
     pub fn coordinator_with_backend(&self, backend: JobsBackendAdapter) -> JobsCoordinator {
@@ -863,15 +856,15 @@ pub enum JobFailureDisposition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct JobsCoordinatorSnapshot {
-    ready: Vec<QueuedJobRecord>,
-    scheduled: Vec<QueuedJobRecord>,
-    in_flight: Vec<JobLease>,
-    dead_letters: Vec<DeadLetterOutcome>,
-    leadership: Option<SchedulerLeadership>,
+pub struct JobsCoordinatorSnapshot {
+    pub ready: Vec<QueuedJobRecord>,
+    pub scheduled: Vec<QueuedJobRecord>,
+    pub in_flight: Vec<JobLease>,
+    pub dead_letters: Vec<DeadLetterOutcome>,
+    pub leadership: Option<SchedulerLeadership>,
 }
 
-pub(crate) trait JobsCoordinationRuntime: Send + Sync + 'static {
+pub trait JobsCoordinationRuntime: Send + Sync + 'static {
     fn snapshot(&self) -> JobsCoordinatorSnapshot;
     fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError>;
     fn acquire_scheduler_leadership(
@@ -991,7 +984,7 @@ pub struct JobsBackendAdapter {
 }
 
 impl JobsBackendAdapter {
-    pub(crate) fn new(
+    pub fn new(
         backend: JobBackend,
         queue_topology: QueueTopology,
         runtime: Arc<dyn JobsCoordinationRuntime>,
@@ -1003,17 +996,12 @@ impl JobsBackendAdapter {
         }
     }
 
-    fn shared_emulated(runtime: &JobsRuntime) -> Self {
-        let registry = JOBS_BACKEND_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = registry
-            .lock()
-            .expect("jobs backend registry mutex poisoned");
-        let shared = guard
-            .entry(runtime.backend_id)
-            .or_insert_with(|| Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())))
-            .clone();
-
-        Self::new(runtime.backend, runtime.topology.clone(), shared)
+    pub fn in_memory(runtime: &JobsRuntime) -> Self {
+        Self::new(
+            runtime.backend,
+            runtime.topology.clone(),
+            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())),
+        )
     }
 
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
@@ -1353,7 +1341,7 @@ pub struct JobsCoordinator {
 
 impl JobsCoordinator {
     pub fn new(runtime: JobsRuntime) -> Self {
-        let backend = JobsBackendAdapter::shared_emulated(&runtime);
+        let backend = JobsBackendAdapter::in_memory(&runtime);
         Self::with_backend(runtime, backend)
     }
 
@@ -1949,10 +1937,38 @@ mod tests {
     }
 
     #[test]
-    fn distributed_coordinators_share_backend_across_fresh_handles() {
+    fn distributed_coordinators_do_not_share_backend_without_explicit_adapter_reuse() {
         let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
         let mut left = runtime.coordinator();
         let mut right = runtime.coordinator();
+
+        left.enqueue(
+            JobSpec::new(
+                JobId::new("job-shared").unwrap(),
+                JobName::new("shared-work").unwrap(),
+                runtime.describe().work_queue.clone(),
+                "shared backend work item",
+            )
+            .unwrap()
+            .with_idempotency_key(IdempotencyKey::new("shared-work:v1").unwrap()),
+            JobInstant::from_unix_seconds(10),
+        )
+        .unwrap();
+
+        right.refresh();
+        assert_eq!(right.ready_jobs().len(), 0);
+
+        left.refresh();
+        assert_eq!(left.ready_jobs().len(), 1);
+        assert_eq!(left.ready_jobs()[0].spec.job_id.as_str(), "job-shared");
+    }
+
+    #[test]
+    fn distributed_coordinators_share_backend_when_reusing_an_explicit_adapter() {
+        let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+        let adapter = JobsBackendAdapter::in_memory(&runtime);
+        let mut left = runtime.coordinator_with_backend(adapter.clone());
+        let mut right = runtime.coordinator_with_backend(adapter);
 
         left.enqueue(
             JobSpec::new(

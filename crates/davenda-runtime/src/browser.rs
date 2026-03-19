@@ -1,8 +1,7 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Write;
-use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,6 +17,17 @@ pub enum SessionStoreBackendKind {
     Database,
     Redis,
     Valkey,
+}
+
+fn session_store_backend_kind(
+    store: davenda_core::SessionStoreTopology,
+) -> SessionStoreBackendKind {
+    match store {
+        davenda_core::SessionStoreTopology::Memory => SessionStoreBackendKind::Local,
+        davenda_core::SessionStoreTopology::Database => SessionStoreBackendKind::Database,
+        davenda_core::SessionStoreTopology::Redis => SessionStoreBackendKind::Redis,
+        davenda_core::SessionStoreTopology::Valkey => SessionStoreBackendKind::Valkey,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -77,7 +87,7 @@ pub struct BrowserSessionRecord {
 
 #[derive(Debug, Clone, Default)]
 struct SessionStoreState {
-    sessions: HashMap<String, BrowserSessionRecord>,
+    sessions: BTreeMap<String, BrowserSessionRecord>,
 }
 
 impl SessionStoreState {
@@ -130,7 +140,7 @@ impl SessionStoreState {
     }
 }
 
-trait DistributedSessionStoreRuntime: Send + Sync + 'static {
+pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
     fn issue(&self, record: BrowserSessionRecord);
     fn session(&self, session_id: &str) -> Option<BrowserSessionRecord>;
     fn delete(&self, session_id: &str);
@@ -188,45 +198,33 @@ impl DistributedSessionStoreRuntime for EmulatedDistributedSessionStoreRuntime {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SessionStoreNamespace {
-    customer_app: String,
-    kind: SessionStoreBackendKind,
-    session_cookie_name: String,
-}
-
-impl Hash for SessionStoreNamespace {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.customer_app.hash(state);
-        self.kind.hash(state);
-        self.session_cookie_name.hash(state);
-    }
-}
-
-static DISTRIBUTED_SESSION_STORE_REGISTRY: OnceLock<
-    Mutex<HashMap<SessionStoreNamespace, Arc<dyn DistributedSessionStoreRuntime>>>,
-> = OnceLock::new();
-
 #[derive(Clone)]
-struct DistributedSessionStoreClient {
+pub struct DistributedSessionStoreClient {
     kind: SessionStoreBackendKind,
     runtime: Arc<dyn DistributedSessionStoreRuntime>,
 }
 
 impl DistributedSessionStoreClient {
-    fn shared_emulated(namespace: SessionStoreNamespace) -> Self {
-        let registry =
-            DISTRIBUTED_SESSION_STORE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = registry
-            .lock()
-            .expect("distributed session registry mutex poisoned");
-        let kind = namespace.kind;
-        let runtime = guard
-            .entry(namespace)
-            .or_insert_with(|| Arc::new(EmulatedDistributedSessionStoreRuntime::new()))
-            .clone();
-
+    pub fn new(
+        kind: SessionStoreBackendKind,
+        runtime: Arc<dyn DistributedSessionStoreRuntime>,
+    ) -> Self {
         Self { kind, runtime }
+    }
+
+    pub fn in_memory(kind: SessionStoreBackendKind) -> Self {
+        Self::new(
+            kind,
+            Arc::new(EmulatedDistributedSessionStoreRuntime::new()),
+        )
+    }
+
+    pub fn kind(&self) -> SessionStoreBackendKind {
+        self.kind
+    }
+
+    pub fn is_shared(&self) -> bool {
+        Arc::strong_count(&self.runtime) > 1
     }
 
     fn issue(&self, record: BrowserSessionRecord) {
@@ -272,7 +270,7 @@ enum SessionStoreBackend {
 
 impl SessionStoreBackend {
     fn new(
-        customer_app: &str,
+        _customer_app: &str,
         services: &davenda_core::SessionSecurityServices,
     ) -> (SessionStoreBackendKind, Self) {
         match services.store {
@@ -282,39 +280,49 @@ impl SessionStoreBackend {
             ),
             davenda_core::SessionStoreTopology::Database => (
                 SessionStoreBackendKind::Database,
-                Self::Distributed(DistributedSessionStoreClient::shared_emulated(
-                    SessionStoreNamespace {
-                        customer_app: customer_app.to_string(),
-                        kind: SessionStoreBackendKind::Database,
-                        session_cookie_name: services.session_cookie.name.clone(),
-                    },
+                Self::Distributed(DistributedSessionStoreClient::in_memory(
+                    SessionStoreBackendKind::Database,
                 )),
             ),
             davenda_core::SessionStoreTopology::Redis => (
                 SessionStoreBackendKind::Redis,
-                Self::Distributed(DistributedSessionStoreClient::shared_emulated(
-                    SessionStoreNamespace {
-                        customer_app: customer_app.to_string(),
-                        kind: SessionStoreBackendKind::Redis,
-                        session_cookie_name: services.session_cookie.name.clone(),
-                    },
+                Self::Distributed(DistributedSessionStoreClient::in_memory(
+                    SessionStoreBackendKind::Redis,
                 )),
             ),
             davenda_core::SessionStoreTopology::Valkey => (
                 SessionStoreBackendKind::Valkey,
-                Self::Distributed(DistributedSessionStoreClient::shared_emulated(
-                    SessionStoreNamespace {
-                        customer_app: customer_app.to_string(),
-                        kind: SessionStoreBackendKind::Valkey,
-                        session_cookie_name: services.session_cookie.name.clone(),
-                    },
+                Self::Distributed(DistributedSessionStoreClient::in_memory(
+                    SessionStoreBackendKind::Valkey,
                 )),
             ),
         }
     }
 
+    fn with_client(
+        services: &davenda_core::SessionSecurityServices,
+        client: DistributedSessionStoreClient,
+    ) -> Result<(SessionStoreBackendKind, Self), BrowserHostBuildError> {
+        let expected = session_store_backend_kind(services.store);
+        if expected == SessionStoreBackendKind::Local {
+            return Err(BrowserHostBuildError::MemoryStoreCannotUseDistributedClient);
+        }
+
+        if client.kind() != expected {
+            return Err(BrowserHostBuildError::SessionStoreClientKindMismatch {
+                expected,
+                actual: client.kind(),
+            });
+        }
+
+        Ok((expected, Self::Distributed(client)))
+    }
+
     fn is_shared(&self) -> bool {
-        matches!(self, Self::Distributed(_))
+        match self {
+            Self::Local(_) => false,
+            Self::Distributed(client) => client.is_shared(),
+        }
     }
 
     fn issue(&mut self, record: BrowserSessionRecord) {
@@ -459,6 +467,17 @@ pub enum RuntimeBrowserError {
     InvalidFlashLevel { level: String },
 }
 
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum BrowserHostBuildError {
+    #[error("memory session stores cannot use a distributed session client")]
+    MemoryStoreCannotUseDistributedClient,
+    #[error("session store client kind mismatch: expected `{expected:?}`, got `{actual:?}`")]
+    SessionStoreClientKindMismatch {
+        expected: SessionStoreBackendKind,
+        actual: SessionStoreBackendKind,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct BrowserHost {
     pub customer_app: String,
@@ -477,6 +496,21 @@ impl BrowserHost {
             session_store_kind,
             sessions,
         }
+    }
+
+    pub fn with_session_store_client(
+        customer_app: String,
+        services: BrowserSecurityServices,
+        client: DistributedSessionStoreClient,
+    ) -> Result<Self, BrowserHostBuildError> {
+        let (session_store_kind, sessions) =
+            SessionStoreBackend::with_client(&services.sessions, client)?;
+        Ok(Self {
+            customer_app,
+            services,
+            session_store_kind,
+            sessions,
+        })
     }
 
     pub fn session_store_kind(&self) -> SessionStoreBackendKind {
@@ -849,10 +883,42 @@ mod tests {
     }
 
     #[test]
-    fn database_session_hosts_share_backend_across_fresh_handles() {
+    fn database_session_hosts_do_not_share_backend_without_explicit_client_wiring() {
         let services = services(SessionStoreTopology::Database);
         let mut left = BrowserHost::new("browser-db-shared".to_string(), services.clone());
         let right = BrowserHost::new("browser-db-shared".to_string(), services);
+
+        let issued = left
+            .issue_session(
+                SessionIssueRequest::new()
+                    .for_principal("member-db")
+                    .unwrap(),
+                b"01234567012345670123456701234567",
+                BrowserInstant::from_unix_seconds(100),
+            )
+            .unwrap();
+
+        assert_eq!(left.session_store_kind(), SessionStoreBackendKind::Database);
+        assert!(!left.session_store_is_shared());
+        assert_eq!(right.session(&issued.record.session_id), None);
+    }
+
+    #[test]
+    fn database_session_hosts_share_backend_when_reusing_an_explicit_client() {
+        let services = services(SessionStoreTopology::Database);
+        let client = DistributedSessionStoreClient::in_memory(SessionStoreBackendKind::Database);
+        let mut left = BrowserHost::with_session_store_client(
+            "browser-db-shared".to_string(),
+            services.clone(),
+            client.clone(),
+        )
+        .unwrap();
+        let right = BrowserHost::with_session_store_client(
+            "browser-db-shared".to_string(),
+            services,
+            client,
+        )
+        .unwrap();
 
         let issued = left
             .issue_session(

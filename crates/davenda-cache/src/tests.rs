@@ -237,13 +237,13 @@ fn local_cache_runtime_clones_do_not_share_state() {
 }
 
 #[test]
-fn distributed_cache_runtime_clones_share_state() {
+fn distributed_cache_runtime_clones_do_not_share_state_without_explicit_client_wiring() {
     let planner = CachePlanner::new(CacheTopology::with_valkey());
     let mut left = planner.runtime();
     let mut right = left.clone();
 
     assert_eq!(left.backend_kind(), CacheBackendKind::Valkey);
-    assert!(left.backend_is_shared());
+    assert!(!left.backend_is_shared());
 
     let plan = planner
         .plan(
@@ -280,7 +280,7 @@ fn distributed_cache_runtime_clones_share_state() {
         plan.application().unwrap().key(),
         CacheInstant::from_unix_seconds(110),
     );
-    assert_eq!(lookup.state, CacheLookupState::Fresh);
+    assert_eq!(lookup.state, CacheLookupState::Miss);
 }
 
 #[test]
@@ -628,7 +628,7 @@ fn runtime_coalesces_duplicate_fill_requests() {
 }
 
 #[test]
-fn distributed_planner_runtimes_share_backend_across_fresh_handles() {
+fn distributed_planner_runtimes_do_not_share_backend_without_explicit_client_wiring() {
     let planner = CachePlanner::new(CacheTopology::with_redis());
     let plan = planner
         .plan(
@@ -657,6 +657,53 @@ fn distributed_planner_runtimes_share_backend_across_fresh_handles() {
 
     let mut left = planner.runtime();
     let mut right = planner.runtime();
+    left.insert(
+        plan.application().unwrap(),
+        "<html>shared-across-handles</html>",
+        CacheInstant::from_unix_seconds(200),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(210),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Miss);
+}
+
+#[test]
+fn distributed_runtimes_share_backend_when_reusing_an_explicit_client() {
+    let planner = CachePlanner::new(CacheTopology::with_redis());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:shared",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let adapter = CacheBackendAdapter::distributed(
+        CacheTopology::with_redis(),
+        DistributedCacheClient::in_memory(CacheBackendKind::Redis),
+    );
+    let mut left = CacheRuntime::with_backend(CacheTopology::with_redis(), adapter.clone());
+    let mut right = CacheRuntime::with_backend(CacheTopology::with_redis(), adapter);
+
     left.insert(
         plan.application().unwrap(),
         "<html>shared-across-handles</html>",

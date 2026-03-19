@@ -1,8 +1,4 @@
-use davenda_data::{
-    DataModelError, DomainWrite, FilterOperator, PageRequest, PublicationVisibility,
-    QueryCacheScope, QueryContext, QueryField, QueryFilter, QuerySort, QuerySpec, RepositorySpec,
-    TableName, TransactionIsolation, TransactionPlan,
-};
+use davenda_data::{DataModelError, DomainWrite, QuerySpec, TransactionIsolation, TransactionPlan};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;

@@ -1,7 +1,8 @@
+#[cfg(test)]
 use davenda_assets::{AssetId, ContentFingerprint};
-use davenda_auth::{
-    Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
-};
+use davenda_auth::Capability;
+#[cfg(test)]
+use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution, CapabilityContract,
     CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
@@ -13,6 +14,7 @@ use davenda_core::{
     SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
+#[cfg(test)]
 use davenda_storage::{DeliveryMode, Sensitivity, StoragePolicy, StoragePolicyOverride};
 
 mod asset;

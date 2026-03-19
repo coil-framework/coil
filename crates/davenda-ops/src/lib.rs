@@ -10,6 +10,10 @@ use davenda_core::{
     PlatformModule, RegistrationError, ReportDefinition as ManifestReportDefinition,
     ReportDeliveryMode as ManifestReportDeliveryMode, ReportFormat as ManifestReportFormat,
     ReportSensitivity as ManifestReportSensitivity, RouteSurface, RouteSurfaceKind,
+    ServiceRegistry,
+};
+#[cfg(test)]
+use davenda_core::{
     SearchDocumentKind as ManifestSearchDocumentKind,
     SearchFieldContribution as ManifestSearchFieldContribution,
     SearchFieldRole as ManifestSearchFieldRole,
@@ -17,10 +21,12 @@ use davenda_core::{
     SearchInvalidationRule as ManifestSearchInvalidationRule,
     SearchInvalidationTrigger as ManifestSearchInvalidationTrigger,
     SearchRebuildStrategy as ManifestSearchRebuildStrategy,
-    SearchVisibility as ManifestSearchVisibility, ServiceRegistry,
+    SearchVisibility as ManifestSearchVisibility,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
-use davenda_jobs::{IdempotencyKey, JobInstant, JobsRuntime};
+use davenda_jobs::JobsRuntime;
+#[cfg(test)]
+use davenda_jobs::{IdempotencyKey, JobInstant};
 
 mod bulk;
 mod catalog;

@@ -163,6 +163,53 @@ fn cache_runtime_new_uses_shared_backend_for_distributed_topologies() {
 }
 
 #[test]
+fn cache_runtime_new_uses_shared_backend_for_single_node_topologies() {
+    let mut left = CacheRuntime::new(CacheTopology::moka_only());
+    let mut right = left.clone();
+
+    assert_eq!(left.backend_kind(), CacheBackendKind::Local);
+    assert!(left.backend_is_shared());
+
+    let planner = CachePlanner::new(CacheTopology::moka_only());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:test-shared",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    left.insert(
+        plan.application().unwrap(),
+        "<html>shared-test</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Fresh);
+}
+
+#[test]
 fn explicit_test_local_cache_runtime_keeps_state_isolated() {
     let mut left = CacheRuntime::local_for_testing(CacheTopology::moka_only());
     let mut right = left.clone();

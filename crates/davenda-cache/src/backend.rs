@@ -178,6 +178,7 @@ impl DistributedCacheClient {
     }
 
     #[allow(dead_code)]
+    #[doc(hidden)]
     pub fn local_for_testing(kind: CacheBackendKind) -> Self {
         Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
     }
@@ -345,11 +346,8 @@ impl CacheBackendAdapter {
             None => CacheBackendKind::Local,
         };
         let scope = scope.into();
-        let storage = if topology.supports_shared_invalidation() {
-            CacheBackendStorage::Distributed(DistributedCacheClient::scoped_shared(kind, scope))
-        } else {
-            CacheBackendStorage::Local(LocalCacheBackendAdapter::new())
-        };
+        let storage =
+            CacheBackendStorage::Distributed(DistributedCacheClient::scoped_shared(kind, scope));
 
         Self {
             kind,

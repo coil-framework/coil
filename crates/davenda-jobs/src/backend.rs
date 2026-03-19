@@ -199,6 +199,7 @@ impl JobsBackendAdapter {
         Self::local_for_testing(runtime)
     }
 
+    #[doc(hidden)]
     pub fn local_for_testing(runtime: &JobsRuntime) -> Self {
         Self::new(
             runtime.backend,

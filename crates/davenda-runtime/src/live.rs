@@ -89,71 +89,21 @@ impl LiveExecutionReceipts {
     }
 
     pub(crate) fn compose_page_html(&self, html: String) -> String {
-        let mut html = html;
-        let mut body_fragments = Vec::new();
-
-        if let Some(output) = self.request_surface_output()
-            && let Some(fragment) = typed_output_fragment(output)
-        {
-            body_fragments.push(fragment);
-        }
-
-        for output in self.render_hook_outputs() {
-            if let Some(fragment) = typed_output_fragment(output) {
-                body_fragments.push(fragment);
-            }
-        }
-
-        for output in self.admin_widget_outputs() {
-            if let Some(fragment) = typed_output_fragment(output) {
-                body_fragments.push(fragment);
-            }
-        }
-
-        if !body_fragments.is_empty() {
-            html = inject_body_markup(html, &body_fragments.join(""));
-        }
-
-        html
+        self.compose_html_output(html)
     }
 
     pub(crate) fn compose_fragment_html(&self, html: String) -> String {
-        let mut html = html;
-        let mut body_fragments = Vec::new();
-
-        if let Some(output) = self.request_surface_output()
-            && let Some(fragment) = typed_output_fragment(output)
-        {
-            body_fragments.push(fragment);
-        }
-
-        for output in self.render_hook_outputs() {
-            if let Some(fragment) = typed_output_fragment(output) {
-                body_fragments.push(fragment);
-            }
-        }
-
-        for output in self.admin_widget_outputs() {
-            if let Some(fragment) = typed_output_fragment(output) {
-                body_fragments.push(fragment);
-            }
-        }
-
-        if !body_fragments.is_empty() {
-            html = inject_body_markup(html, &body_fragments.join(""));
-        }
-
-        html
+        self.compose_html_output(html)
     }
 
     pub(crate) fn compose_json_payload(
         &self,
         mut payload: BTreeMap<String, String>,
     ) -> BTreeMap<String, String> {
-        if let Some(output) = self.request_surface_output()
-            && let TypedResponseBody::JsonObject(typed_payload) = &output.body
-        {
-            payload.extend(typed_payload.clone());
+        if let Some(output) = self.request_surface_output() {
+            if let TypedResponseBody::JsonObject(typed_payload) = &output.body {
+                payload.extend(typed_payload.clone());
+            }
         }
 
         payload
@@ -324,6 +274,20 @@ impl LiveExecutionReceipts {
         headers
     }
 
+    fn compose_html_output(&self, html: String) -> String {
+        let body_fragments = self
+            .typed_outputs()
+            .into_iter()
+            .filter_map(typed_output_fragment)
+            .collect::<Vec<_>>();
+
+        if body_fragments.is_empty() {
+            html
+        } else {
+            inject_body_markup(html, &body_fragments.join(""))
+        }
+    }
+
     pub(crate) fn compose_response(
         &self,
         plan: &RuntimePlan,
@@ -379,10 +343,10 @@ impl LiveExecutionReceipts {
 
     fn typed_outputs(&self) -> Vec<&TypedExecutionOutput> {
         let mut outputs = Vec::new();
-        if let Some(receipt) = &self.request_surface
-            && let Some(output) = receipt.typed_output.as_ref()
-        {
-            outputs.push(output);
+        if let Some(receipt) = &self.request_surface {
+            if let Some(output) = receipt.typed_output.as_ref() {
+                outputs.push(output);
+            }
         }
         outputs.extend(
             self.render_hooks
@@ -395,20 +359,6 @@ impl LiveExecutionReceipts {
                 .filter_map(|receipt| receipt.typed_output.as_ref()),
         );
         outputs
-    }
-
-    fn render_hook_outputs(&self) -> Vec<&TypedExecutionOutput> {
-        self.render_hooks
-            .iter()
-            .filter_map(|receipt| receipt.typed_output.as_ref())
-            .collect()
-    }
-
-    fn admin_widget_outputs(&self) -> Vec<&TypedExecutionOutput> {
-        self.admin_widgets
-            .iter()
-            .filter_map(|receipt| receipt.typed_output.as_ref())
-            .collect()
     }
 }
 

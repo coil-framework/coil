@@ -50,11 +50,8 @@ impl RuntimeBackendMaterializer {
         customer_app: &str,
         runtime: &JobsRuntimeServices,
     ) -> JobsCoordinator {
-        let backend = if self.plans.jobs.shared {
-            JobsBackendAdapter::shared_scoped(runtime, format!("{}:{customer_app}", self.scope))
-        } else {
-            JobsBackendAdapter::in_memory(runtime)
-        };
+        let backend =
+            JobsBackendAdapter::shared_scoped(runtime, format!("{}:{customer_app}", self.scope));
         runtime.coordinator_with_backend(backend)
     }
 }

@@ -161,6 +161,7 @@ impl CachePlanner {
         )
     }
 
+    #[doc(hidden)]
     pub fn local_for_testing(&self) -> crate::CacheRuntime {
         crate::CacheRuntime::local_for_testing(self.topology)
     }

@@ -96,6 +96,7 @@ impl JobsRuntime {
         self.coordinator_for_testing()
     }
 
+    #[doc(hidden)]
     pub fn coordinator_for_testing(&self) -> JobsCoordinator {
         self.coordinator_with_backend(JobsBackendAdapter::local_for_testing(self))
     }

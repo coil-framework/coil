@@ -91,6 +91,7 @@ impl CacheRuntime {
     }
 
     #[allow(dead_code)]
+    #[doc(hidden)]
     pub fn local_for_testing(topology: CacheTopology) -> Self {
         Self::with_backend(
             topology,

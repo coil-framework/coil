@@ -92,11 +92,13 @@ pub struct BrowserSessionRecord {
     pub revoked_at: Option<BrowserInstant>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 struct SessionStoreState {
     sessions: BTreeMap<String, BrowserSessionRecord>,
 }
 
+#[cfg(test)]
 impl SessionStoreState {
     fn issue(&mut self, record: BrowserSessionRecord) {
         self.sessions.insert(record.session_id.clone(), record);
@@ -161,11 +163,13 @@ pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
     fn is_shared_backend(&self) -> bool;
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct SharedDistributedSessionStoreRuntime {
     state: Mutex<SessionStoreState>,
 }
 
+#[cfg(test)]
 impl SharedDistributedSessionStoreRuntime {
     fn new() -> Self {
         Self {
@@ -174,6 +178,7 @@ impl SharedDistributedSessionStoreRuntime {
     }
 }
 
+#[cfg(test)]
 impl DistributedSessionStoreRuntime for SharedDistributedSessionStoreRuntime {
     fn issue(&self, record: BrowserSessionRecord) {
         let mut guard = self.state.lock().expect("session backend mutex poisoned");
@@ -324,6 +329,7 @@ fn test_scope() -> String {
 
 #[derive(Debug, Clone)]
 enum SessionStoreBackend {
+    #[cfg(test)]
     Local(SessionStoreState),
     Distributed(DistributedSessionStoreClient),
 }
@@ -424,6 +430,7 @@ impl SessionStoreBackend {
 
     fn is_shared(&self) -> bool {
         match self {
+            #[cfg(test)]
             Self::Local(_) => false,
             Self::Distributed(client) => client.is_shared(),
         }
@@ -431,6 +438,7 @@ impl SessionStoreBackend {
 
     fn issue(&mut self, record: BrowserSessionRecord) {
         match self {
+            #[cfg(test)]
             Self::Local(state) => state.issue(record),
             Self::Distributed(client) => client.issue(record),
         }
@@ -438,6 +446,7 @@ impl SessionStoreBackend {
 
     fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
         match self {
+            #[cfg(test)]
             Self::Local(state) => state.session(session_id),
             Self::Distributed(client) => client.session(session_id),
         }
@@ -445,6 +454,7 @@ impl SessionStoreBackend {
 
     fn delete(&mut self, session_id: &str) {
         match self {
+            #[cfg(test)]
             Self::Local(state) => {
                 state.sessions.remove(session_id);
             }
@@ -454,6 +464,7 @@ impl SessionStoreBackend {
 
     fn revoke(&mut self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
         match self {
+            #[cfg(test)]
             Self::Local(state) => state.revoke(session_id, now),
             Self::Distributed(client) => client.revoke(session_id, now),
         }
@@ -466,6 +477,7 @@ impl SessionStoreBackend {
         now: BrowserInstant,
     ) -> Result<Option<String>, RuntimeBrowserError> {
         match self {
+            #[cfg(test)]
             Self::Local(state) => state.touch_active_session(session_id, idle_timeout, now),
             Self::Distributed(client) => client.touch_active_session(session_id, idle_timeout, now),
         }

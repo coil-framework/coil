@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 
 use davenda_wasm::{CacheVisibility, ExecutionReceipt, TypedCacheHint, TypedMetadata};
@@ -548,6 +548,7 @@ fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
 mod tests {
     use super::*;
     use axum::body::to_bytes;
+    use axum::http::HeaderMap;
     use davenda_wasm::{CacheVisibility, TypedCacheHint, TypedMetadata};
 
     #[test]

@@ -6,7 +6,9 @@ use crate::error::WasmModelError;
 use crate::grants::{
     HostCapabilityGrant, HostGrantSet, MetadataGrant, ResourceLimits, StorageClassGrant,
 };
+use crate::host_services::HostServiceSessionState;
 use crate::ids::{ExtensionId, ExtensionPointKind, HandlerId, HttpMethod};
+use crate::output::TypedExecutionOutput;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomerAppContext {
@@ -403,39 +405,6 @@ pub enum HostCall {
     },
 }
 
-impl HostCall {
-    fn required_grant(&self) -> HostCapabilityGrant {
-        match self {
-            Self::DataRead { resource } => HostCapabilityGrant::DataRead {
-                resource: resource.clone(),
-            },
-            Self::DataWrite { resource } => HostCapabilityGrant::DataWrite {
-                resource: resource.clone(),
-            },
-            Self::AuthCheck => HostCapabilityGrant::AuthCheck,
-            Self::AuthList => HostCapabilityGrant::AuthList,
-            Self::AuthLookup => HostCapabilityGrant::AuthLookup,
-            Self::AuthTupleWrite => HostCapabilityGrant::AuthTupleWrite,
-            Self::StorageRead { class } => HostCapabilityGrant::StorageRead { class: *class },
-            Self::StorageWrite { class, .. } => HostCapabilityGrant::StorageWrite { class: *class },
-            Self::RenderFragment { slot } => {
-                HostCapabilityGrant::RenderFragment { slot: slot.clone() }
-            }
-            Self::MetadataWrite { kind } => HostCapabilityGrant::MetadataWrite { kind: *kind },
-            Self::CacheHintWrite => HostCapabilityGrant::CacheHintWrite,
-            Self::OutboundHttp { integration, .. } => HostCapabilityGrant::OutboundHttp {
-                integration: integration.clone(),
-            },
-            Self::SecretRead { secret } => HostCapabilityGrant::SecretRead {
-                secret: secret.clone(),
-            },
-            Self::EnqueueJob { queue } => HostCapabilityGrant::EnqueueJob {
-                queue: queue.clone(),
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvocationOutcome {
     Page,
@@ -448,18 +417,6 @@ pub enum InvocationOutcome {
 }
 
 impl InvocationOutcome {
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Page => "page",
-            Self::ApiJson => "api_json",
-            Self::JobCompleted => "job_completed",
-            Self::ScheduledJobCompleted => "scheduled_job_completed",
-            Self::WebhookAccepted => "webhook_accepted",
-            Self::AdminWidget => "admin_widget",
-            Self::RenderHook => "render_hook",
-        }
-    }
-
     pub fn engine_code(&self) -> i32 {
         match self {
             Self::Page => 0,
@@ -504,164 +461,55 @@ pub struct ExecutionReceipt {
     pub usage: ExecutionUsage,
     pub outcome: InvocationOutcome,
     pub host_calls: Vec<HostCall>,
+    pub typed_output: Option<TypedExecutionOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WasmExecutionSession {
-    plan: InvocationPlan,
-    usage: ExecutionUsage,
-    active_concurrency: u16,
-    host_calls: Vec<HostCall>,
+    state: HostServiceSessionState,
 }
 
 impl WasmExecutionSession {
     pub fn new(plan: InvocationPlan) -> Self {
         Self {
-            plan,
-            usage: ExecutionUsage::default(),
-            active_concurrency: 0,
-            host_calls: Vec::new(),
+            state: HostServiceSessionState::new(plan),
         }
     }
 
     pub fn plan(&self) -> &InvocationPlan {
-        &self.plan
+        self.state.plan()
     }
 
     pub fn usage(&self) -> &ExecutionUsage {
-        &self.usage
+        self.state.usage()
     }
 
     pub fn host_calls(&self) -> &[HostCall] {
-        &self.host_calls
+        self.state.host_calls()
     }
 
     pub fn grant_slots(&self) -> Vec<HostCapabilityGrant> {
-        self.plan.grant_slots()
+        self.state.grant_slots()
     }
 
     pub fn record_host_call(&mut self, call: HostCall) -> Result<(), WasmModelError> {
-        let grant = call.required_grant();
-        if !self.plan.granted_capabilities.contains(&grant) {
-            return Err(WasmModelError::HostGrantDenied {
-                handler_id: self.plan.handler_id.to_string(),
-                grant,
-            });
-        }
-
-        match call {
-            HostCall::StorageWrite { bytes, .. } => {
-                self.usage.storage_writes = self.usage.storage_writes.saturating_add(1);
-                self.usage.storage_bytes = self.usage.storage_bytes.saturating_add(bytes);
-                if self.usage.storage_writes > self.plan.limits.max_storage_writes {
-                    return Err(WasmModelError::ResourceLimitExceeded {
-                        handler_id: self.plan.handler_id.to_string(),
-                        field: "max_storage_writes",
-                    });
-                }
-                if self.usage.storage_bytes > self.plan.limits.max_storage_bytes {
-                    return Err(WasmModelError::ResourceLimitExceeded {
-                        handler_id: self.plan.handler_id.to_string(),
-                        field: "max_storage_bytes",
-                    });
-                }
-            }
-            HostCall::OutboundHttp { response_bytes, .. } => {
-                self.usage.outbound_requests = self.usage.outbound_requests.saturating_add(1);
-                self.usage.outbound_response_bytes = self
-                    .usage
-                    .outbound_response_bytes
-                    .saturating_add(response_bytes);
-                if self.usage.outbound_requests > self.plan.limits.max_outbound_requests {
-                    return Err(WasmModelError::ResourceLimitExceeded {
-                        handler_id: self.plan.handler_id.to_string(),
-                        field: "max_outbound_requests",
-                    });
-                }
-                if self.usage.outbound_response_bytes > self.plan.limits.max_outbound_response_bytes
-                {
-                    return Err(WasmModelError::ResourceLimitExceeded {
-                        handler_id: self.plan.handler_id.to_string(),
-                        field: "max_outbound_response_bytes",
-                    });
-                }
-            }
-            _ => {}
-        }
-
-        self.host_calls.push(call);
-
-        Ok(())
+        self.state.record_host_call(call)
     }
 
     pub fn reserve_concurrency(&mut self, units: u16) -> Result<(), WasmModelError> {
-        self.active_concurrency = self.active_concurrency.saturating_add(units);
-        self.usage.peak_concurrency = self.usage.peak_concurrency.max(self.active_concurrency);
-        if self.usage.peak_concurrency > self.plan.limits.max_concurrency {
-            return Err(WasmModelError::ResourceLimitExceeded {
-                handler_id: self.plan.handler_id.to_string(),
-                field: "max_concurrency",
-            });
-        }
-        Ok(())
+        self.state.reserve_concurrency(units)
     }
 
     pub fn release_concurrency(&mut self, units: u16) {
-        self.active_concurrency = self.active_concurrency.saturating_sub(units);
+        self.state.release_concurrency(units)
     }
 
     pub fn finish(
         self,
         runtime: Duration,
         outcome: InvocationOutcome,
+        typed_output: Option<TypedExecutionOutput>,
     ) -> Result<ExecutionReceipt, WasmModelError> {
-        if runtime > self.plan.limits.max_runtime {
-            return Err(WasmModelError::RuntimeBudgetExceeded {
-                handler_id: self.plan.handler_id.to_string(),
-                max_runtime: self.plan.limits.max_runtime,
-                actual_runtime: runtime,
-            });
-        }
-
-        let valid = matches!(
-            (self.plan.point, &outcome),
-            (ExtensionPointKind::Page, InvocationOutcome::Page)
-                | (ExtensionPointKind::Api, InvocationOutcome::ApiJson)
-                | (ExtensionPointKind::Job, InvocationOutcome::JobCompleted)
-                | (
-                    ExtensionPointKind::ScheduledJob,
-                    InvocationOutcome::ScheduledJobCompleted
-                )
-                | (
-                    ExtensionPointKind::Webhook,
-                    InvocationOutcome::WebhookAccepted
-                )
-                | (
-                    ExtensionPointKind::AdminWidget,
-                    InvocationOutcome::AdminWidget
-                )
-                | (
-                    ExtensionPointKind::RenderHook,
-                    InvocationOutcome::RenderHook
-                )
-        );
-
-        if !valid {
-            return Err(WasmModelError::InvalidOutcomeForPoint {
-                handler_id: self.plan.handler_id.to_string(),
-                point: self.plan.point,
-                outcome: outcome.label(),
-            });
-        }
-
-        Ok(ExecutionReceipt {
-            extension_id: self.plan.extension_id,
-            handler_id: self.plan.handler_id,
-            point: self.plan.point,
-            runtime,
-            usage: self.usage,
-            outcome,
-            host_calls: self.host_calls,
-        })
+        self.state.finish(runtime, outcome, typed_output)
     }
 }

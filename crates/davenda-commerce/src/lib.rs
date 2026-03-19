@@ -4,6 +4,7 @@ use std::fmt;
 
 use davenda_auth::Capability;
 use davenda_core::{
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
     ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
@@ -1271,31 +1272,10 @@ impl Order {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdminResourceDescriptor {
-    pub route: String,
-    pub capability: Capability,
-    pub title: String,
-}
-
-impl AdminResourceDescriptor {
-    pub fn new(
-        route: impl Into<String>,
-        capability: Capability,
-        title: impl Into<String>,
-    ) -> Result<Self, CommerceModelError> {
-        Ok(Self {
-            route: validate_route("admin_route", route.into())?,
-            capability,
-            title: require_non_empty("admin_title", title.into())?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommerceModule {
     name: String,
     config_namespace: String,
-    admin_resources: Vec<AdminResourceDescriptor>,
+    admin_resources: Vec<AdminResourceContribution>,
 }
 
 impl CommerceModule {
@@ -1304,35 +1284,47 @@ impl CommerceModule {
             name: "commerce".to_string(),
             config_namespace: "commerce".to_string(),
             admin_resources: vec![
-                AdminResourceDescriptor::new(
+                AdminResourceContribution::new(
+                    "commerce.catalog",
                     "/admin/commerce/catalog",
-                    Capability::CatalogProductRead,
                     "Catalog",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                    "Catalog",
+                    AdminNavigationSection::Commerce,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::CatalogProductRead,
+                ),
+                AdminResourceContribution::new(
+                    "commerce.collections",
                     "/admin/commerce/collections",
-                    Capability::CatalogCollectionEdit,
                     "Collections",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                    "Collections",
+                    AdminNavigationSection::Commerce,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::CatalogCollectionEdit,
+                ),
+                AdminResourceContribution::new(
+                    "commerce.checkouts",
                     "/admin/commerce/checkouts",
-                    Capability::CheckoutSessionCreate,
                     "Checkouts",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                    "Checkouts",
+                    AdminNavigationSection::Commerce,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::CheckoutSessionCreate,
+                ),
+                AdminResourceContribution::new(
+                    "commerce.orders",
                     "/admin/commerce/orders",
-                    Capability::OrderRead,
                     "Orders",
-                )
-                .expect("constant admin route is valid"),
+                    "Orders",
+                    AdminNavigationSection::Commerce,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::OrderRead,
+                ),
             ],
         }
     }
 
-    pub fn admin_resources(&self) -> &[AdminResourceDescriptor] {
+    pub fn admin_resources(&self) -> &[AdminResourceContribution] {
         &self.admin_resources
     }
 
@@ -1568,6 +1560,7 @@ impl PlatformModule for CommerceModule {
                     "Allows payment-provider integrations to enter the system through explicit webhook contracts",
                 ),
             ])
+            .with_admin_resources(self.admin_resources.clone())
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1656,18 +1649,6 @@ fn validate_token(field: &'static str, value: String) -> Result<String, Commerce
         Err(CommerceModelError::InvalidToken {
             field,
             value: trimmed,
-        })
-    }
-}
-
-fn validate_route(field: &'static str, value: String) -> Result<String, CommerceModelError> {
-    let route = require_non_empty(field, value)?;
-    if route.starts_with('/') {
-        Ok(route)
-    } else {
-        Err(CommerceModelError::InvalidRoute {
-            field,
-            value: route,
         })
     }
 }
@@ -1763,6 +1744,7 @@ mod tests {
             .extension_slots
             .iter()
             .any(|slot| slot.kind == ExtensionSlotKind::Webhook));
+        assert_eq!(manifest.admin_resources.len(), 4);
         assert!(
             registry
                 .services()

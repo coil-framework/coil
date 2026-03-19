@@ -7,6 +7,7 @@ use davenda_auth::{
     Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
 };
 use davenda_core::{
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
     ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
@@ -985,6 +986,26 @@ impl PlatformModule for MediaModule {
                     "Allows controlled metadata enrichment without bypassing the shared storage and publication rules",
                 ),
             ])
+            .with_admin_resources(vec![
+                AdminResourceContribution::new(
+                    "media.library",
+                    "/admin/media",
+                    "Media library",
+                    "Media",
+                    AdminNavigationSection::Media,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::AssetRead,
+                ),
+                AdminResourceContribution::new(
+                    "media.storage",
+                    "/admin/media/storage",
+                    "Storage policies",
+                    "Storage",
+                    AdminNavigationSection::Media,
+                    AdminContributionKind::Settings,
+                    Capability::AssetManageStorage,
+                ),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1330,6 +1351,7 @@ mod tests {
         assert_eq!(manifest.route_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
+        assert_eq!(manifest.admin_resources.len(), 2);
         assert!(manifest
             .behaviors
             .contains(&ModuleBehavior::AuthGovernedPublication));

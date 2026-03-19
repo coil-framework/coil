@@ -8,6 +8,7 @@ use davenda_auth::{
 };
 use davenda_commerce::OrderId;
 use davenda_core::{
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
     ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
@@ -1819,31 +1820,10 @@ impl EventCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdminResourceDescriptor {
-    pub route: String,
-    pub capability: Capability,
-    pub title: String,
-}
-
-impl AdminResourceDescriptor {
-    pub fn new(
-        route: impl Into<String>,
-        capability: Capability,
-        title: impl Into<String>,
-    ) -> Result<Self, EventModelError> {
-        Ok(Self {
-            route: validate_route("admin_route", route.into())?,
-            capability,
-            title: require_non_empty("admin_title", title.into())?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventsModule {
     name: String,
     config_namespace: String,
-    admin_resources: Vec<AdminResourceDescriptor>,
+    admin_resources: Vec<AdminResourceContribution>,
 }
 
 impl EventsModule {
@@ -1852,35 +1832,47 @@ impl EventsModule {
             name: "events".to_string(),
             config_namespace: "events".to_string(),
             admin_resources: vec![
-                AdminResourceDescriptor::new(
+                AdminResourceContribution::new(
+                    "events.events",
                     "/admin/events/events",
-                    Capability::EventsEventPublish,
                     "Events",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                    "Events",
+                    AdminNavigationSection::Events,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::EventsEventPublish,
+                ),
+                AdminResourceContribution::new(
+                    "events.slots",
                     "/admin/events/slots",
-                    Capability::EventsSlotManage,
                     "Slots",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                    "Slots",
+                    AdminNavigationSection::Events,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::EventsSlotManage,
+                ),
+                AdminResourceContribution::new(
+                    "events.bookings",
                     "/admin/events/bookings",
-                    Capability::EventsBookingCreate,
                     "Bookings",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                    "Bookings",
+                    AdminNavigationSection::Events,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::EventsBookingCreate,
+                ),
+                AdminResourceContribution::new(
+                    "events.check-in",
                     "/admin/events/check-in",
-                    Capability::EventsBookingCheckIn,
                     "Check-in",
-                )
-                .expect("constant admin route is valid"),
+                    "Check-in",
+                    AdminNavigationSection::Events,
+                    AdminContributionKind::Workflow,
+                    Capability::EventsBookingCheckIn,
+                ),
             ],
         }
     }
 
-    pub fn admin_resources(&self) -> &[AdminResourceDescriptor] {
+    pub fn admin_resources(&self) -> &[AdminResourceContribution] {
         &self.admin_resources
     }
 }
@@ -2115,6 +2107,7 @@ impl PlatformModule for EventsModule {
                     "Allows controlled customer embellishments around event page rendering",
                 ),
             ])
+            .with_admin_resources(self.admin_resources.clone())
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -2499,6 +2492,7 @@ mod tests {
         assert_eq!(manifest.route_surfaces.len(), 6);
         assert_eq!(manifest.jobs.len(), 3);
         assert_eq!(manifest.event_subscriptions.len(), 2);
+        assert_eq!(manifest.admin_resources.len(), 4);
         assert!(manifest
             .module_dependencies
             .iter()

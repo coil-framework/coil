@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use davenda_auth::Capability;
 use davenda_core::{
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
     ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
@@ -1368,6 +1369,35 @@ impl PlatformModule for OpsModule {
                     "Allows search backends to participate through explicit background job contracts",
                 ),
             ])
+            .with_admin_resources(vec![
+                AdminResourceContribution::new(
+                    "ops.search",
+                    "/admin/search",
+                    "Search",
+                    "Search",
+                    AdminNavigationSection::System,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::AdminShellAccess,
+                ),
+                AdminResourceContribution::new(
+                    "ops.reports",
+                    "/admin/reports",
+                    "Reports",
+                    "Reports",
+                    AdminNavigationSection::System,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::AdminAuditRead,
+                ),
+                AdminResourceContribution::new(
+                    "ops.bulk",
+                    "/admin/bulk",
+                    "Bulk operations",
+                    "Bulk",
+                    AdminNavigationSection::System,
+                    AdminContributionKind::Workflow,
+                    Capability::SystemModuleManage,
+                ),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1989,6 +2019,7 @@ mod tests {
         assert_eq!(manifest.route_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 3);
         assert_eq!(manifest.event_subscriptions.len(), 3);
+        assert_eq!(manifest.admin_resources.len(), 3);
         assert!(manifest
             .core_service_dependencies
             .contains(&CoreServiceDependency::Storage));

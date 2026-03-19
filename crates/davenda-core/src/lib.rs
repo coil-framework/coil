@@ -411,6 +411,7 @@ pub struct ModuleManifest {
     pub integration_points: Vec<IntegrationPoint>,
     pub behaviors: Vec<ModuleBehavior>,
     pub extension_slots: Vec<ExtensionSlotDescriptor>,
+    pub admin_resources: Vec<AdminResourceContribution>,
 }
 
 impl ModuleManifest {
@@ -430,6 +431,7 @@ impl ModuleManifest {
             integration_points: Vec::new(),
             behaviors: Vec::new(),
             extension_slots: Vec::new(),
+            admin_resources: Vec::new(),
         }
     }
 
@@ -501,6 +503,11 @@ impl ModuleManifest {
 
     pub fn with_extension_slots(mut self, extension_slots: Vec<ExtensionSlotDescriptor>) -> Self {
         self.extension_slots = extension_slots;
+        self
+    }
+
+    pub fn with_admin_resources(mut self, admin_resources: Vec<AdminResourceContribution>) -> Self {
+        self.admin_resources = admin_resources;
         self
     }
 }
@@ -819,6 +826,60 @@ impl ExtensionSlotDescriptor {
             kind,
             surface: surface.into(),
             description: description.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminNavigationSection {
+    Overview,
+    Content,
+    Commerce,
+    Memberships,
+    Events,
+    Media,
+    System,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminContributionKind {
+    Dashboard,
+    ResourceIndex,
+    DetailView,
+    Workflow,
+    Audit,
+    Settings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminResourceContribution {
+    pub id: String,
+    pub route: String,
+    pub title: String,
+    pub nav_label: String,
+    pub section: AdminNavigationSection,
+    pub kind: AdminContributionKind,
+    pub required_capability: Capability,
+}
+
+impl AdminResourceContribution {
+    pub fn new(
+        id: impl Into<String>,
+        route: impl Into<String>,
+        title: impl Into<String>,
+        nav_label: impl Into<String>,
+        section: AdminNavigationSection,
+        kind: AdminContributionKind,
+        required_capability: Capability,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            route: route.into(),
+            title: title.into(),
+            nav_label: nav_label.into(),
+            section,
+            kind,
+            required_capability,
         }
     }
 }

@@ -4,6 +4,7 @@ use std::fmt;
 
 use davenda_auth::Capability;
 use davenda_core::{
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
     ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
@@ -558,31 +559,10 @@ impl RedirectRule {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdminResourceDescriptor {
-    pub route: String,
-    pub capability: Capability,
-    pub title: String,
-}
-
-impl AdminResourceDescriptor {
-    pub fn new(
-        route: impl Into<String>,
-        capability: Capability,
-        title: impl Into<String>,
-    ) -> Result<Self, CmsModelError> {
-        Ok(Self {
-            route: validate_path("admin_route", route.into())?,
-            capability,
-            title: require_non_empty("admin_title", title.into())?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CmsModule {
     name: String,
     config_namespace: String,
-    admin_resources: Vec<AdminResourceDescriptor>,
+    admin_resources: Vec<AdminResourceContribution>,
 }
 
 impl CmsModule {
@@ -591,21 +571,38 @@ impl CmsModule {
             name: "cms".to_string(),
             config_namespace: "cms".to_string(),
             admin_resources: vec![
-                AdminResourceDescriptor::new("/admin/cms/pages", Capability::CmsPageRead, "Pages")
-                    .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                AdminResourceContribution::new(
+                    "cms.pages",
+                    "/admin/cms/pages",
+                    "Pages",
+                    "Pages",
+                    AdminNavigationSection::Content,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::CmsPageRead,
+                ),
+                AdminResourceContribution::new(
+                    "cms.navigation",
                     "/admin/cms/navigation",
-                    Capability::CmsNavigationEdit,
                     "Navigation",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new("/admin/cms/media", Capability::AssetRead, "Media")
-                    .expect("constant admin route is valid"),
+                    "Navigation",
+                    AdminNavigationSection::Content,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::CmsNavigationEdit,
+                ),
+                AdminResourceContribution::new(
+                    "cms.media",
+                    "/admin/cms/media",
+                    "Media",
+                    "Media",
+                    AdminNavigationSection::Content,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::AssetRead,
+                ),
             ],
         }
     }
 
-    pub fn admin_resources(&self) -> &[AdminResourceDescriptor] {
+    pub fn admin_resources(&self) -> &[AdminResourceContribution] {
         &self.admin_resources
     }
 
@@ -920,6 +917,7 @@ impl PlatformModule for CmsModule {
                     "Allows bounded content embellishments during page rendering",
                 ),
             ])
+            .with_admin_resources(self.admin_resources.clone())
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1120,6 +1118,7 @@ mod tests {
             .extension_slots
             .iter()
             .any(|slot| slot.kind == ExtensionSlotKind::RenderHook));
+        assert_eq!(manifest.admin_resources.len(), 3);
         assert!(
             registry
                 .services()

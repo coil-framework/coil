@@ -6,6 +6,7 @@ use std::time::Duration;
 use davenda_auth::Capability;
 use davenda_commerce::{EntitlementKey, OrderId, OrderOutcome};
 use davenda_core::{
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
     ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
@@ -872,31 +873,10 @@ impl RenewalWorkItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdminResourceDescriptor {
-    pub route: String,
-    pub capability: Capability,
-    pub title: String,
-}
-
-impl AdminResourceDescriptor {
-    pub fn new(
-        route: impl Into<String>,
-        capability: Capability,
-        title: impl Into<String>,
-    ) -> Result<Self, MembershipModelError> {
-        Ok(Self {
-            route: validate_route("admin_route", route.into())?,
-            capability,
-            title: require_non_empty("admin_title", title.into())?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipsModule {
     name: String,
     config_namespace: String,
-    admin_resources: Vec<AdminResourceDescriptor>,
+    admin_resources: Vec<AdminResourceContribution>,
 }
 
 impl MembershipsModule {
@@ -905,23 +885,29 @@ impl MembershipsModule {
             name: "memberships".to_string(),
             config_namespace: "memberships".to_string(),
             admin_resources: vec![
-                AdminResourceDescriptor::new(
+                AdminResourceContribution::new(
+                    "memberships.tiers",
                     "/admin/memberships/tiers",
-                    Capability::MembershipTierEdit,
                     "Membership tiers",
-                )
-                .expect("constant admin route is valid"),
-                AdminResourceDescriptor::new(
+                    "Tiers",
+                    AdminNavigationSection::Memberships,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::MembershipTierEdit,
+                ),
+                AdminResourceContribution::new(
+                    "memberships.subscriptions",
                     "/admin/memberships/subscriptions",
-                    Capability::MembershipSubscriptionManage,
                     "Subscriptions",
-                )
-                .expect("constant admin route is valid"),
+                    "Subscriptions",
+                    AdminNavigationSection::Memberships,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::MembershipSubscriptionManage,
+                ),
             ],
         }
     }
 
-    pub fn admin_resources(&self) -> &[AdminResourceDescriptor] {
+    pub fn admin_resources(&self) -> &[AdminResourceContribution] {
         &self.admin_resources
     }
 }
@@ -1077,6 +1063,7 @@ impl PlatformModule for MembershipsModule {
                 "memberships.subscription.summary",
                 "Allows customer app widgets to augment subscription detail views with bounded insights",
             )])
+            .with_admin_resources(self.admin_resources.clone())
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1178,18 +1165,6 @@ fn validate_token(field: &'static str, value: String) -> Result<String, Membersh
         Err(MembershipModelError::InvalidToken {
             field,
             value: trimmed.to_string(),
-        })
-    }
-}
-
-fn validate_route(field: &'static str, value: String) -> Result<String, MembershipModelError> {
-    let route = require_non_empty(field, value)?;
-    if route.starts_with('/') {
-        Ok(route)
-    } else {
-        Err(MembershipModelError::InvalidRoute {
-            field,
-            value: route,
         })
     }
 }
@@ -1474,6 +1449,7 @@ mod tests {
         assert_eq!(manifest.route_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
+        assert_eq!(manifest.admin_resources.len(), 2);
         assert_eq!(
             module
                 .install_migration_plan()

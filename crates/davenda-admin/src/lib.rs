@@ -4,6 +4,8 @@ use std::fmt;
 
 use davenda_auth::Capability;
 use davenda_core::{
+    AdminContributionKind as CoreAdminContributionKind,
+    AdminNavigationSection as CoreAdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
     ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
     MigrationContract, ModuleBehavior, ModuleManifest, PlatformModule, RegistrationError,
@@ -162,6 +164,47 @@ impl AdminResourceDescriptor {
             required_capability,
         })
     }
+
+    pub fn from_contribution(
+        contribution: &AdminResourceContribution,
+    ) -> Result<Self, AdminModelError> {
+        Self::new(
+            AdminResourceId::new(contribution.id.clone())?,
+            contribution.route.clone(),
+            contribution.title.clone(),
+            contribution.nav_label.clone(),
+            contribution.section.into(),
+            contribution.kind.into(),
+            contribution.required_capability,
+        )
+    }
+}
+
+impl From<CoreAdminNavigationSection> for NavigationSection {
+    fn from(value: CoreAdminNavigationSection) -> Self {
+        match value {
+            CoreAdminNavigationSection::Overview => Self::Overview,
+            CoreAdminNavigationSection::Content => Self::Content,
+            CoreAdminNavigationSection::Commerce => Self::Commerce,
+            CoreAdminNavigationSection::Memberships => Self::Memberships,
+            CoreAdminNavigationSection::Events => Self::Events,
+            CoreAdminNavigationSection::Media => Self::Media,
+            CoreAdminNavigationSection::System => Self::System,
+        }
+    }
+}
+
+impl From<CoreAdminContributionKind> for AdminResourceKind {
+    fn from(value: CoreAdminContributionKind) -> Self {
+        match value {
+            CoreAdminContributionKind::Dashboard => Self::Dashboard,
+            CoreAdminContributionKind::ResourceIndex => Self::ResourceIndex,
+            CoreAdminContributionKind::DetailView => Self::DetailView,
+            CoreAdminContributionKind::Workflow => Self::Workflow,
+            CoreAdminContributionKind::Audit => Self::Audit,
+            CoreAdminContributionKind::Settings => Self::Settings,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,6 +361,19 @@ impl AdminShell {
             .filter(|resource| operator.allows(resource.required_capability))
             .cloned()
             .collect()
+    }
+
+    pub fn compose_module_resources(
+        manifests: &[ModuleManifest],
+    ) -> Result<Vec<AdminResourceDescriptor>, AdminModelError> {
+        let mut resources = Vec::new();
+        for manifest in manifests {
+            for contribution in &manifest.admin_resources {
+                resources.push(AdminResourceDescriptor::from_contribution(contribution)?);
+            }
+        }
+        ensure_unique_resources(&resources)?;
+        Ok(resources)
     }
 
     pub fn navigation_by_section(
@@ -838,5 +894,39 @@ mod tests {
                 .services()
                 .any(|service| service.id == "module.admin.accessibility")
         );
+    }
+
+    #[test]
+    fn admin_shell_composes_shared_module_resource_contributions() {
+        let manifests = vec![
+            ModuleManifest::new("cms").with_admin_resources(vec![
+                AdminResourceContribution::new(
+                    "cms.pages",
+                    "/admin/cms/pages",
+                    "Pages",
+                    "Pages",
+                    CoreAdminNavigationSection::Content,
+                    CoreAdminContributionKind::ResourceIndex,
+                    Capability::CmsPageRead,
+                ),
+            ]),
+            ModuleManifest::new("events").with_admin_resources(vec![
+                AdminResourceContribution::new(
+                    "events.check-in",
+                    "/admin/events/check-in",
+                    "Check-in",
+                    "Check-in",
+                    CoreAdminNavigationSection::Events,
+                    CoreAdminContributionKind::Workflow,
+                    Capability::EventsBookingCheckIn,
+                ),
+            ]),
+        ];
+
+        let resources = AdminShell::compose_module_resources(&manifests).unwrap();
+        assert_eq!(resources.len(), 2);
+        assert_eq!(resources[0].route, "/admin/cms/pages");
+        assert_eq!(resources[0].section, NavigationSection::Content);
+        assert_eq!(resources[1].kind, AdminResourceKind::Workflow);
     }
 }

@@ -1,5 +1,9 @@
 use super::*;
-use davenda_data::TransactionIsolation;
+use davenda_auth::Capability;
+use davenda_core::{CoreServiceDependency, ExtensionSlotKind, PlatformModule, ServiceRegistry};
+use davenda_data::{
+    MigrationOwner, PublicationVisibility, QueryCacheScope, TransactionIsolation,
+};
 
 fn gbp(value: i64) -> Money {
     Money::new(CurrencyCode::new("GBP").unwrap(), value).unwrap()

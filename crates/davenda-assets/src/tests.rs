@@ -1,0 +1,264 @@
+use super::*;
+use davenda_config::ObjectStoreKind;
+use davenda_storage::{ObjectStoreTarget, StorageBackendKind, StoragePolicySet, StorageTopology};
+
+fn object_store_planner() -> StoragePlanner {
+    StoragePlanner::new(
+        StorageTopology {
+            local_root: "/srv/davenda".to_string(),
+            default_class: davenda_config::StorageClass::PublicUpload,
+            object_store: Some(ObjectStoreTarget {
+                kind: ObjectStoreKind::S3,
+            }),
+        },
+        StoragePolicySet::default(),
+    )
+}
+
+fn local_only_planner() -> StoragePlanner {
+    StoragePlanner::new(
+        StorageTopology {
+            local_root: "/srv/davenda".to_string(),
+            default_class: davenda_config::StorageClass::LocalOnlySensitive,
+            object_store: None,
+        },
+        StoragePolicySet::default(),
+    )
+}
+
+fn fingerprint(seed: &str) -> ContentFingerprint {
+    ContentFingerprint::new(FingerprintAlgorithm::Sha256, seed).unwrap()
+}
+
+#[test]
+fn deployment_release_publishes_hashed_artifacts_to_a_manifest() {
+    let planner = object_store_planner();
+    let release = DeploymentRelease::new(
+        ReleaseId::new("release-20260318").unwrap(),
+        [DeploymentArtifact::new(
+            "theme/app.css",
+            "deploy/theme/app.abc123.css",
+            fingerprint("abc123"),
+            "text/css",
+            4096,
+        )
+        .unwrap()],
+    )
+    .unwrap();
+
+    let manifest = release
+        .publish(&planner, "https://cdn.example.com/assets")
+        .unwrap();
+    let entry = manifest.resolve("theme/app.css").unwrap();
+
+    assert_eq!(manifest.release_id().as_str(), "release-20260318");
+    assert_eq!(entry.delivery().asset_kind(), AssetKind::DeploymentArtifact);
+    assert_eq!(entry.delivery().audience(), DeliveryAudience::Public);
+    assert_eq!(entry.delivery().delivery_mode(), DeliveryMode::PublicCdn);
+    assert_eq!(entry.delivery().durable_store(), DurableStore::ObjectStore);
+    assert!(entry.delivery().immutable());
+    assert_eq!(
+        entry
+            .delivery()
+            .storage_plan()
+            .primary_write_target()
+            .unwrap()
+            .backend,
+        StorageBackendKind::S3Compatible
+    );
+    assert_eq!(
+        entry.delivery().target(),
+        &AssetDeliveryTarget::Cdn {
+            public_url: "https://cdn.example.com/assets/deploy/theme/app.abc123.css".to_string(),
+            object_key: "deploy/theme/app.abc123.css".to_string(),
+        }
+    );
+}
+
+#[test]
+fn deployment_release_rejects_duplicate_logical_paths() {
+    let planner = object_store_planner();
+    let release = DeploymentRelease::new(
+        ReleaseId::new("release-dup").unwrap(),
+        [
+            DeploymentArtifact::new(
+                "theme/app.css",
+                "deploy/theme/app.abc123.css",
+                fingerprint("abc123"),
+                "text/css",
+                4096,
+            )
+            .unwrap(),
+            DeploymentArtifact::new(
+                "theme/app.css",
+                "deploy/theme/app.def456.css",
+                fingerprint("def456"),
+                "text/css",
+                8192,
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(
+        release
+            .publish(&planner, "https://cdn.example.com")
+            .unwrap_err(),
+        AssetModelError::DuplicateDeploymentArtifact {
+            release_id: "release-dup".to_string(),
+            logical_path: "theme/app.css".to_string(),
+        }
+    );
+}
+
+#[test]
+fn managed_assets_require_publication_before_public_delivery() {
+    let planner = object_store_planner();
+    let revision = ManagedAssetRevision::plan(
+        RevisionId::new("rev-1").unwrap(),
+        &planner,
+        "media/brochure.pdf",
+        Some(StoragePolicyOverride {
+            delivery_mode: Some(DeliveryMode::PublicCdn),
+            sync_mode: Some(SyncMode::ObjectStore),
+            sensitivity: Some(Sensitivity::Public),
+        }),
+        "application/pdf",
+        1024,
+        fingerprint("rev1"),
+    )
+    .unwrap();
+
+    let asset = ManagedAsset::new(
+        AssetId::new("asset-brochure").unwrap(),
+        "Event brochure",
+        revision,
+    )
+    .unwrap();
+
+    assert_eq!(
+        asset
+            .plan_public_delivery(
+                &DeliveryContext::default().with_cdn_base_url("https://cdn.example.com")
+            )
+            .unwrap_err(),
+        AssetModelError::MissingLiveRevision {
+            asset_id: "asset-brochure".to_string(),
+        }
+    );
+}
+
+#[test]
+fn replacing_a_managed_asset_keeps_the_live_revision_until_republished() {
+    let planner = object_store_planner();
+    let mut asset = ManagedAsset::new(
+        AssetId::new("asset-hero").unwrap(),
+        "Homepage hero",
+        ManagedAssetRevision::plan(
+            RevisionId::new("rev-1").unwrap(),
+            &planner,
+            "media/hero-v1.jpg",
+            Some(StoragePolicyOverride {
+                delivery_mode: Some(DeliveryMode::PublicCdn),
+                sync_mode: Some(SyncMode::ObjectStore),
+                sensitivity: Some(Sensitivity::Public),
+            }),
+            "image/jpeg",
+            2048,
+            fingerprint("hero1"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    asset.publish_current();
+    let first_live = asset
+        .plan_public_delivery(
+            &DeliveryContext::default().with_cdn_base_url("https://cdn.example.com"),
+        )
+        .unwrap();
+    assert_eq!(
+        first_live.revision_id().map(RevisionId::as_str),
+        Some("rev-1")
+    );
+
+    asset.replace_current_revision(
+        ManagedAssetRevision::plan(
+            RevisionId::new("rev-2").unwrap(),
+            &planner,
+            "media/hero-v2.jpg",
+            Some(StoragePolicyOverride {
+                delivery_mode: Some(DeliveryMode::PublicCdn),
+                sync_mode: Some(SyncMode::ObjectStore),
+                sensitivity: Some(Sensitivity::Public),
+            }),
+            "image/jpeg",
+            3072,
+            fingerprint("hero2"),
+        )
+        .unwrap(),
+    );
+
+    assert!(asset.has_pending_changes());
+    let still_live = asset
+        .plan_public_delivery(
+            &DeliveryContext::default().with_cdn_base_url("https://cdn.example.com"),
+        )
+        .unwrap();
+    assert_eq!(
+        still_live.revision_id().map(RevisionId::as_str),
+        Some("rev-1")
+    );
+
+    asset.publish_current();
+    let republished = asset
+        .plan_public_delivery(
+            &DeliveryContext::default().with_cdn_base_url("https://cdn.example.com"),
+        )
+        .unwrap();
+    assert_eq!(
+        republished.revision_id().map(RevisionId::as_str),
+        Some("rev-2")
+    );
+}
+
+#[test]
+fn private_assets_plan_authorized_delivery_from_storage_policy() {
+    let planner = local_only_planner();
+    let revision = ManagedAssetRevision::plan(
+        RevisionId::new("rev-local").unwrap(),
+        &planner,
+        "staff/exports/orders.csv",
+        Some(StoragePolicyOverride::force_local_only()),
+        "text/csv",
+        512,
+        fingerprint("orders1"),
+    )
+    .unwrap();
+
+    let asset = ManagedAsset::new(
+        AssetId::new("asset-orders-export").unwrap(),
+        "Orders export",
+        revision,
+    )
+    .unwrap();
+
+    let plan = asset
+        .plan_authorized_delivery(
+            &DeliveryContext::default().with_app_proxy_base("/admin/downloads"),
+        )
+        .unwrap();
+
+    assert_eq!(plan.asset_kind(), AssetKind::ManagedAsset);
+    assert_eq!(plan.audience(), DeliveryAudience::Authorized);
+    assert_eq!(plan.delivery_mode(), DeliveryMode::LocalOnly);
+    assert_eq!(plan.durable_store(), DurableStore::LocalDisk);
+    assert_eq!(plan.sensitivity(), Sensitivity::Secret);
+    assert_eq!(
+        plan.target(),
+        &AssetDeliveryTarget::LocalPath {
+            path: "/srv/davenda/staff/exports/orders.csv".to_string(),
+        }
+    );
+}

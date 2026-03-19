@@ -1,6 +1,9 @@
 use super::*;
 use davenda_config::ObjectStoreKind;
-use davenda_storage::{ObjectStoreTarget, StorageBackendKind, StoragePolicySet, StorageTopology};
+use davenda_storage::{
+    DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind, StoragePlanner,
+    StoragePolicyOverride, StoragePolicySet, StorageTopology, SyncMode,
+};
 
 fn object_store_planner() -> StoragePlanner {
     StoragePlanner::new(

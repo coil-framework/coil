@@ -1,4 +1,7 @@
 use super::*;
+use davenda_auth::Capability;
+use davenda_commerce::{EntitlementKey, OrderId, OrderOutcome};
+use davenda_core::{CoreServiceDependency, PlatformModule, ServiceRegistry};
 
 fn instant(days: u64) -> MembershipInstant {
     MembershipInstant::from_days(days)
@@ -240,22 +243,16 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
             Capability::MembershipTierEdit,
         ]
     );
-    assert!(
-        manifest
-            .optional_capabilities
-            .contains(&Capability::AdminShellAccess)
-    );
-    assert!(
-        manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "commerce")
-    );
-    assert!(
-        manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Jobs)
-    );
+    assert!(manifest
+        .optional_capabilities
+        .contains(&Capability::AdminShellAccess));
+    assert!(manifest
+        .module_dependencies
+        .iter()
+        .any(|dependency| dependency.module == "commerce"));
+    assert!(manifest
+        .core_service_dependencies
+        .contains(&CoreServiceDependency::Jobs));
     assert_eq!(manifest.migrations.len(), 3);
     assert_eq!(manifest.route_surfaces.len(), 3);
     assert_eq!(manifest.http_surfaces.len(), 3);
@@ -276,14 +273,10 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
     let mut registry = ServiceRegistry::new();
     module.register(&mut registry).unwrap();
 
-    assert!(
-        registry
-            .services()
-            .any(|service| service.id == "module.memberships.entitlements")
-    );
-    assert!(
-        registry
-            .services()
-            .any(|service| service.id == "module.memberships.commerce_bridge")
-    );
+    assert!(registry
+        .services()
+        .any(|service| service.id == "module.memberships.entitlements"));
+    assert!(registry
+        .services()
+        .any(|service| service.id == "module.memberships.commerce_bridge"));
 }

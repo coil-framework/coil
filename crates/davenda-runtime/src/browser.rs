@@ -212,7 +212,8 @@ impl DistributedSessionStoreClient {
         Self { kind, runtime }
     }
 
-    pub fn in_memory(kind: SessionStoreBackendKind) -> Self {
+    #[allow(dead_code)]
+    pub(crate) fn in_memory(kind: SessionStoreBackendKind) -> Self {
         Self::local_for_testing(kind)
     }
 

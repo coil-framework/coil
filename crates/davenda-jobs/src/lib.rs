@@ -516,7 +516,8 @@ impl JobsRuntime {
         ))
     }
 
-    pub fn coordinator_in_memory(&self) -> JobsCoordinator {
+    #[allow(dead_code)]
+    pub(crate) fn coordinator_in_memory(&self) -> JobsCoordinator {
         self.coordinator_for_testing()
     }
 
@@ -1007,6 +1008,7 @@ impl JobsBackendAdapter {
         }
     }
 
+    #[doc(hidden)]
     pub fn in_memory(runtime: &JobsRuntime) -> Self {
         Self::local_for_testing(runtime)
     }
@@ -1390,7 +1392,8 @@ impl JobsCoordinator {
         Self::with_backend(runtime, backend)
     }
 
-    pub fn new_in_memory(runtime: JobsRuntime) -> Self {
+    #[allow(dead_code)]
+    pub(crate) fn new_in_memory(runtime: JobsRuntime) -> Self {
         Self::new_for_testing(runtime)
     }
 

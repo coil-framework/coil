@@ -90,12 +90,9 @@ impl CacheRuntime {
         Self::with_backend(topology, crate::CacheBackendAdapter::shared(topology))
     }
 
-    pub fn in_memory(topology: CacheTopology) -> Self {
-        Self::local_for_testing(topology)
-    }
-
+    #[allow(dead_code)]
     pub fn local_for_testing(topology: CacheTopology) -> Self {
-        Self::with_backend(topology, crate::CacheBackendAdapter::in_memory(topology))
+        Self::with_backend(topology, crate::CacheBackendAdapter::local_for_testing(topology))
     }
 
     pub fn with_backend(topology: CacheTopology, backend: crate::CacheBackendAdapter) -> Self {

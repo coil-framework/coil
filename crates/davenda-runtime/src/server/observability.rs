@@ -86,6 +86,34 @@ pub(crate) async fn serve_diagnostics_probe(
     State(state): State<Arc<RuntimeServerState>>,
 ) -> Response<Body> {
     let backends = &state.backends;
+    let metadata_audit = match state.wasm_host.metadata_audit_snapshot(25) {
+        Ok(snapshot) => json!({
+            "backend": "sqlite",
+            "shared_namespace": state.plan.shared_backend_namespace(),
+            "path": snapshot.path.display().to_string(),
+            "entry_count": snapshot.entry_count,
+            "recent_records": snapshot
+                .recent_records
+                .into_iter()
+                .map(|record| json!({
+                    "id": record.id,
+                    "recorded_at_unix_seconds": record.recorded_at_unix_seconds,
+                    "kind": record.kind,
+                    "app_id": record.app_id,
+                    "trace_id": record.trace_id,
+                    "request_id": record.request_id,
+                    "principal_kind": record.principal_kind,
+                    "principal_id": record.principal_id,
+                }))
+                .collect::<Vec<_>>(),
+        }),
+        Err(error) => json!({
+            "backend": "sqlite",
+            "shared_namespace": state.plan.shared_backend_namespace(),
+            "path": state.plan.metadata_audit_path().display().to_string(),
+            "error": error,
+        }),
+    };
 
     observability_response(
         StatusCode::OK,
@@ -137,6 +165,7 @@ pub(crate) async fn serve_diagnostics_probe(
                         "local_root": backend.local_root,
                     })),
             },
+            "metadata": metadata_audit,
         }),
     )
 }

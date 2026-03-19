@@ -11,7 +11,7 @@ mod jobs;
 mod metadata;
 mod secrets;
 
-pub(crate) use metadata::{MetadataAuditRecord, MetadataAuditSnapshot};
+pub(crate) use metadata::MetadataAuditSnapshot;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeWasmHostServices {
@@ -122,13 +122,6 @@ impl RuntimeWasmHostServices {
         context: &InvocationContext,
     ) -> Result<MetadataExecution, String> {
         self.metadata.record(kind, context)
-    }
-
-    pub(crate) fn metadata_records(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<MetadataAuditRecord>, String> {
-        self.metadata.recent_records(limit)
     }
 
     pub(crate) fn metadata_snapshot(

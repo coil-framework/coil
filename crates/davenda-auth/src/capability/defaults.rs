@@ -86,20 +86,47 @@ pub fn configured_auth_model_package(name: impl Into<String>) -> ConfiguredAuthM
     ConfiguredAuthModelPackage::new(name)
 }
 
+/// Build an auth package selection from the deployment-configured package identity.
+///
+/// This preserves the configured manifest name while reusing the shipped default
+/// schema and capability bindings so replacement packages remain live-explainable.
+pub fn configured_auth_model_package_selection(
+    name: impl Into<String>,
+) -> AuthModelPackageSelection {
+    AuthModelPackageSelection::new(configured_auth_model_package(name))
+}
+
+/// Compatibility alias for callers that already refer to the deployment-selected
+/// package identity.
 pub fn deployment_auth_model_package(name: impl Into<String>) -> ConfiguredAuthModelPackage {
     ConfiguredAuthModelPackage::new(name)
 }
 
+/// Compatibility alias for callers that already refer to the deployment-selected
+/// package identity.
 pub fn deployment_auth_model_package_selection(
     name: impl Into<String>,
 ) -> AuthModelPackageSelection {
-    AuthModelPackageSelection::new(deployment_auth_model_package(name))
+    configured_auth_model_package_selection(name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{AuthModelPackage, Capability};
+
+    #[test]
+    fn configured_package_selection_preserves_identity_and_bindings() {
+        let package = configured_auth_model_package_selection("platform-extended-auth");
+
+        assert_eq!(package.manifest().name, "platform-extended-auth");
+        assert_eq!(
+            package.package().binding_for(Capability::CmsPageRead).unwrap(),
+            DefaultAuthModelPackage::default()
+                .binding_for(Capability::CmsPageRead)
+                .unwrap()
+        );
+    }
 
     #[test]
     fn deployment_package_preserves_identity_while_reusing_default_bindings() {

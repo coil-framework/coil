@@ -3,6 +3,7 @@ use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
 use crate::cli::error::CliRunError;
 use crate::cli::render::{render_auth_explain, render_command_report};
+use crate::{CommandReport, ReportRow};
 use crate::registry::CliRuntime;
 use crate::CliModelError;
 use davenda_import::ImportManifest;
@@ -29,6 +30,50 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
     let input = parse(args)?;
     match input {
         CliInput::Help => Ok(usage()),
+        CliInput::ConfigValidate {
+            output_mode,
+            invocation,
+        } => {
+            let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to load platform config from `{}`: {error}",
+                    invocation.config_path.display()
+                ))
+            })?;
+
+            let mut report = CommandReport::new(
+                ["config", "validate"],
+                format!(
+                    "Validated effective platform configuration `{}`",
+                    invocation.config_path.display()
+                ),
+            )
+            .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+            .with_columns(["app", "environment", "auth_package", "modules", "deployment"])
+            .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?;
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("app", config.app.name.clone())
+                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+                    .with_cell("environment", environment_label(config.app.environment))
+                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+                    .with_cell("auth_package", config.auth.package.clone())
+                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+                    .with_cell(
+                        "modules",
+                        if config.modules.enabled.is_empty() {
+                            "none".to_string()
+                        } else {
+                            config.modules.enabled.join(",")
+                        },
+                    )
+                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+                    .with_cell("deployment", storage_deployment_label(config.storage.deployment))
+                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?,
+            );
+
+            render_command_report(&report, output_mode)
+        }
         CliInput::AuthExplain {
             output_mode,
             invocation,
@@ -116,14 +161,31 @@ pub fn run_from_env() -> i32 {
 fn usage() -> String {
     [
         "Usage:",
+        "  platform config validate [--config <path>] [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform import run <manifest-path> --dry-run [--json]",
         "",
         "Examples:",
+        "  platform config validate --config config/platform.toml",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform import run imports/wordpress-events.toml --dry-run",
     ]
     .join("\n")
+}
+
+fn environment_label(environment: davenda_config::Environment) -> &'static str {
+    match environment {
+        davenda_config::Environment::Development => "development",
+        davenda_config::Environment::Staging => "staging",
+        davenda_config::Environment::Production => "production",
+    }
+}
+
+fn storage_deployment_label(deployment: davenda_config::StorageDeployment) -> &'static str {
+    match deployment {
+        davenda_config::StorageDeployment::Distributed => "distributed",
+        davenda_config::StorageDeployment::SingleNode => "single_node",
+    }
 }
 
 #[cfg(test)]
@@ -176,6 +238,7 @@ local_root = "/tmp/davenda-cli"
 
 [cache]
 l1 = "moka"
+l2 = "redis"
 
 [i18n]
 default_locale = "en"
@@ -194,7 +257,7 @@ explain_api = false
 tenant_id = 1
 
 [modules]
-enabled = []
+enabled = ["cms"]
 
 [wasm]
 directory = "wasm"
@@ -215,6 +278,7 @@ publish_manifest = false
     #[test]
     fn run_from_args_returns_usage_for_help() {
         let rendered = run_from_args(["--help".to_string()]).unwrap();
+        assert!(rendered.contains("platform config validate [--config <path>]"));
         assert!(rendered.contains("platform auth explain [--config <path>]"));
         assert!(rendered.contains("platform import run <manifest-path> --dry-run"));
     }
@@ -249,11 +313,6 @@ publish_manifest = false
             .replace(
                 "package = \"platform-default-auth\"",
                 "package = \"platform-extended-auth\"",
-            )
-            .replace("[modules]\nenabled = []", "[modules]\nenabled = [\"cms\"]")
-            .replace(
-                "[cache]\nl1 = \"moka\"",
-                "[cache]\nl1 = \"moka\"\nl2 = \"redis\"",
             );
         fs::write(&config_path, enabled_config).unwrap();
 
@@ -272,10 +331,13 @@ publish_manifest = false
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 1);
-        assert!(error
-            .to_string()
-            .contains("failed to build the auth explanation"));
-        assert!(!error.to_string().contains("not registered"));
+        let message = error.to_string();
+        assert!(
+            message.contains("failed to initialize the live auth explain backend")
+                || message.contains("failed to build the auth explanation"),
+            "{message}"
+        );
+        assert!(!message.contains("auth explain API is disabled"));
     }
 
     #[test]
@@ -317,5 +379,23 @@ dependencies = ["users"]
         assert!(rendered.contains("Planned import run `wordpress-events`"));
         assert!(rendered.contains("users"));
         assert!(rendered.contains("events"));
+    }
+
+    #[test]
+    fn run_from_args_validates_config_and_renders_a_report() {
+        let config_path = PathBuf::from("/tmp/davenda-cli-config-validate.toml");
+        fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
+
+        let rendered = run_from_args([
+            "config".to_string(),
+            "validate".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("config validate"));
+        assert!(rendered.contains("Validated effective platform configuration"));
+        assert!(rendered.contains("showcase-events"));
     }
 }

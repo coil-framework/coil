@@ -191,7 +191,7 @@ pub enum WasmModelError {
     },
     TypedReturnBodyMismatch {
         point: ExtensionPointKind,
-        body: crate::output::TypedResponseBodyKind,
+        body: String,
     },
 }
 

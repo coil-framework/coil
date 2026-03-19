@@ -16,7 +16,7 @@ pub enum TypedResponseBody {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypedResponseBodyKind {
+pub(crate) enum TypedResponseBodyKind {
     HtmlDocument,
     HtmlFragment,
     JsonObject,
@@ -170,13 +170,13 @@ impl TypedExecutionOutput {
             if self.body_kind() != expected_body_kind {
                 return Err(WasmModelError::TypedReturnBodyMismatch {
                     point,
-                    body: self.body_kind(),
+                    body: self.body_kind().to_string(),
                 });
             }
         } else {
             return Err(WasmModelError::TypedReturnBodyMismatch {
                 point,
-                body: self.body_kind(),
+                body: self.body_kind().to_string(),
             });
         }
 

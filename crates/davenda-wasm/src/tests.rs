@@ -898,7 +898,7 @@ fn typed_execution_output_rejects_surface_mismatches_on_decode() {
         error,
         WasmModelError::TypedReturnBodyMismatch {
             point: ExtensionPointKind::Page,
-            body: TypedResponseBodyKind::JsonObject,
+            body: "json_object".to_string(),
         }
     );
 }

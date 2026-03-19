@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
@@ -30,6 +32,10 @@ pub enum RuntimeServerError {
     Execution(#[from] RequestExecutionError),
     #[error(transparent)]
     Secret(#[from] SecretResolutionError),
+    #[error("live request authorization does not support auth package `{package}`")]
+    UnsupportedAuthPackage { package: String },
+    #[error("live request authorization failed: {reason}")]
+    Authorization { reason: String },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -64,12 +70,11 @@ impl StaticSecretResolver {
 
 impl SecretResolver for StaticSecretResolver {
     fn resolve(&self, secret: &SecretRef) -> Result<String, SecretResolutionError> {
-        self.values
-            .get(&secret.redacted())
-            .cloned()
-            .ok_or_else(|| SecretResolutionError::MissingSecret {
+        self.values.get(&secret.redacted()).cloned().ok_or_else(|| {
+            SecretResolutionError::MissingSecret {
                 reference: secret.redacted(),
-            })
+            }
+        })
     }
 }
 
@@ -140,17 +145,211 @@ impl SharedBackendClients {
             .as_ref()
             .map(|secret| resolver.resolve(secret))
             .transpose()?;
-        let object_store = config.storage.object_store.map(|kind| ObjectStoreClientTarget {
-            kind,
-            credential_reference: object_store_credentials.clone(),
-            local_root: config.storage.local_root.clone(),
-        });
+        let object_store = config
+            .storage
+            .object_store
+            .map(|kind| ObjectStoreClientTarget {
+                kind,
+                credential_reference: object_store_credentials.clone(),
+                local_root: config.storage.local_root.clone(),
+            });
 
         Ok(Self {
             database,
             distributed_cache,
             jobs,
             object_store,
+        })
+    }
+}
+
+type RouteAuthorizationFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<bool, RuntimeServerError>> + Send + 'a>>;
+
+trait LiveRouteCapabilityAuthorizer: Send + Sync {
+    fn check_capability<'a>(
+        &'a self,
+        subject: &'a davenda_auth::DefaultSubject,
+        capability: davenda_auth::Capability,
+        object: &'a davenda_auth::Entity,
+    ) -> RouteAuthorizationFuture<'a>;
+}
+
+struct DeferredPostgresRouteCapabilityAuthorizer {
+    data: DataRuntimeServices,
+    auth_package_name: String,
+    authorizer: OnceLock<Result<PostgresRouteCapabilityAuthorizer, String>>,
+}
+
+impl DeferredPostgresRouteCapabilityAuthorizer {
+    const TENANT_ID: i64 = 1;
+
+    fn new(data: DataRuntimeServices, auth_package_name: String) -> Self {
+        Self {
+            data,
+            auth_package_name,
+            authorizer: OnceLock::new(),
+        }
+    }
+
+    fn authorizer(&self) -> Result<&PostgresRouteCapabilityAuthorizer, RuntimeServerError> {
+        match self.authorizer.get_or_init(|| self.build_authorizer()) {
+            Ok(authorizer) => Ok(authorizer),
+            Err(reason) => Err(RuntimeServerError::Authorization {
+                reason: reason.clone(),
+            }),
+        }
+    }
+
+    fn build_authorizer(&self) -> Result<PostgresRouteCapabilityAuthorizer, String> {
+        let package =
+            default_live_auth_package(&self.auth_package_name).map_err(|error| match error {
+                RuntimeServerError::UnsupportedAuthPackage { package } => {
+                    format!("unsupported auth package `{package}`")
+                }
+                other => other.to_string(),
+            })?;
+        let client = self
+            .data
+            .connect_lazy_postgres()
+            .map_err(|error| error.to_string())?;
+        let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
+
+        Ok(PostgresRouteCapabilityAuthorizer {
+            auth: davenda_auth::DavendaAuth::new(engine, Self::TENANT_ID),
+            package,
+        })
+    }
+}
+
+impl fmt::Debug for DeferredPostgresRouteCapabilityAuthorizer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeferredPostgresRouteCapabilityAuthorizer")
+            .field("auth_package_name", &self.auth_package_name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl LiveRouteCapabilityAuthorizer for DeferredPostgresRouteCapabilityAuthorizer {
+    fn check_capability<'a>(
+        &'a self,
+        subject: &'a davenda_auth::DefaultSubject,
+        capability: davenda_auth::Capability,
+        object: &'a davenda_auth::Entity,
+    ) -> RouteAuthorizationFuture<'a> {
+        Box::pin(async move {
+            self.authorizer()?
+                .check_capability(subject, capability, object)
+                .await
+        })
+    }
+}
+
+struct PostgresRouteCapabilityAuthorizer {
+    auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+    package: davenda_auth::DefaultAuthModelPackage,
+}
+
+impl PostgresRouteCapabilityAuthorizer {
+    async fn check_capability(
+        &self,
+        subject: &davenda_auth::DefaultSubject,
+        capability: davenda_auth::Capability,
+        object: &davenda_auth::Entity,
+    ) -> Result<bool, RuntimeServerError> {
+        self.auth
+            .check_capability(&self.package, subject, capability, object)
+            .await
+            .map_err(|error| RuntimeServerError::Authorization {
+                reason: error.to_string(),
+            })
+    }
+}
+
+impl fmt::Debug for PostgresRouteCapabilityAuthorizer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PostgresRouteCapabilityAuthorizer")
+            .field("tenant_id", &self.auth.tenant_id())
+            .field("auth_package", &self.package.manifest().name)
+            .finish()
+    }
+}
+
+fn default_live_auth_package(
+    auth_package_name: &str,
+) -> Result<davenda_auth::DefaultAuthModelPackage, RuntimeServerError> {
+    let package = davenda_auth::DefaultAuthModelPackage::default();
+    if package.manifest().name == auth_package_name {
+        Ok(package)
+    } else {
+        Err(RuntimeServerError::UnsupportedAuthPackage {
+            package: auth_package_name.to_string(),
+        })
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveAuthorizationCheck {
+    pub subject: davenda_auth::DefaultSubject,
+    pub capability: davenda_auth::Capability,
+    pub object: davenda_auth::Entity,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StaticLiveRouteCapabilityAuthorizer {
+    allowed: Vec<LiveAuthorizationCheck>,
+    checks: Arc<Mutex<Vec<LiveAuthorizationCheck>>>,
+}
+
+#[cfg(test)]
+impl StaticLiveRouteCapabilityAuthorizer {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn allowing(
+        mut self,
+        subject: davenda_auth::DefaultSubject,
+        capability: davenda_auth::Capability,
+        object: davenda_auth::Entity,
+    ) -> Self {
+        self.allowed.push(LiveAuthorizationCheck {
+            subject,
+            capability,
+            object,
+        });
+        self
+    }
+
+    pub(crate) fn checks(&self) -> Vec<LiveAuthorizationCheck> {
+        self.checks
+            .lock()
+            .expect("static live authorizer mutex poisoned")
+            .clone()
+    }
+}
+
+#[cfg(test)]
+impl LiveRouteCapabilityAuthorizer for StaticLiveRouteCapabilityAuthorizer {
+    fn check_capability<'a>(
+        &'a self,
+        subject: &'a davenda_auth::DefaultSubject,
+        capability: davenda_auth::Capability,
+        object: &'a davenda_auth::Entity,
+    ) -> RouteAuthorizationFuture<'a> {
+        Box::pin(async move {
+            let check = LiveAuthorizationCheck {
+                subject: subject.clone(),
+                capability,
+                object: object.clone(),
+            };
+            self.checks
+                .lock()
+                .expect("static live authorizer mutex poisoned")
+                .push(check.clone());
+            Ok(self.allowed.iter().any(|allowed| allowed == &check))
         })
     }
 }
@@ -177,7 +376,9 @@ impl LiveHttpRequest {
         let headers = request.headers();
         let host = header_value(headers, HOST)?.ok_or(RuntimeServerError::MissingHost)?;
         let forwarded_proto = header_value(headers, "x-forwarded-proto")?;
-        let scheme = forwarded_proto.clone().unwrap_or_else(|| "http".to_string());
+        let scheme = forwarded_proto
+            .clone()
+            .unwrap_or_else(|| "http".to_string());
         let request_id = header_value(headers, "x-request-id")?;
         let cookies = parse_cookie_header(headers)?;
 
@@ -196,8 +397,8 @@ impl LiveHttpRequest {
     }
 
     pub fn into_request_input(self) -> Result<RequestInput, RuntimeServerError> {
-        let mut request = RequestInput::new(self.method, self.host, self.path)?
-            .with_scheme(self.scheme);
+        let mut request =
+            RequestInput::new(self.method, self.host, self.path)?.with_scheme(self.scheme);
 
         if let Some(proto) = self.forwarded_proto {
             request = request.with_forwarded_proto(proto);
@@ -222,13 +423,23 @@ impl LiveHttpRequest {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct RuntimeServerState {
     plan: RuntimePlan,
     browser: Mutex<BrowserHost>,
     cookie_secret: Vec<u8>,
     csrf_secret: Vec<u8>,
     backends: SharedBackendClients,
+    route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
+}
+
+impl fmt::Debug for RuntimeServerState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeServerState")
+            .field("plan", &self.plan)
+            .field("browser", &self.browser)
+            .field("backends", &self.backends)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -244,12 +455,28 @@ impl HttpServerHost {
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
     ) -> Self {
+        let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
+            Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
+                plan.data.clone(),
+                plan.auth_package_name.clone(),
+            ));
+        Self::new_with_authorizer(plan, backends, cookie_secret, csrf_secret, route_authorizer)
+    }
+
+    pub(crate) fn new_with_authorizer(
+        plan: RuntimePlan,
+        backends: SharedBackendClients,
+        cookie_secret: Vec<u8>,
+        csrf_secret: Vec<u8>,
+        route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
+    ) -> Self {
         let state = Arc::new(RuntimeServerState {
             browser: Mutex::new(plan.browser_host()),
             plan,
             cookie_secret,
             csrf_secret,
             backends,
+            route_authorizer,
         });
         let router = Router::new()
             .route("/", any(serve_runtime_request))
@@ -284,13 +511,11 @@ impl HttpServerHost {
         &self,
         request: Request<Body>,
     ) -> Result<Response<Body>, RuntimeServerError> {
-        self.router
-            .clone()
-            .oneshot(request)
-            .await
-            .map_err(|error| RuntimeServerError::UnsupportedMethod {
+        self.router.clone().oneshot(request).await.map_err(|error| {
+            RuntimeServerError::UnsupportedMethod {
                 method: error.to_string(),
-            })
+            }
+        })
     }
 
     pub async fn serve(self, listener: tokio::net::TcpListener) -> std::io::Result<()> {
@@ -304,17 +529,18 @@ pub(crate) async fn serve_runtime_request(
     State(state): State<Arc<RuntimeServerState>>,
     request: Request<Body>,
 ) -> Response<Body> {
-    match execute_live_request(&state, request) {
+    match execute_live_request(&state, request).await {
         Ok(response) => response,
         Err(error) => error_response(error),
     }
 }
 
-fn execute_live_request(
+async fn execute_live_request(
     state: &RuntimeServerState,
     request: Request<Body>,
 ) -> Result<Response<Body>, RuntimeServerError> {
-    let request = LiveHttpRequest::from_request(&request, &state.plan.browser)?.into_request_input()?;
+    let mut request =
+        LiveHttpRequest::from_request(&request, &state.plan.browser)?.into_request_input()?;
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -322,21 +548,113 @@ fn execute_live_request(
             .as_secs(),
     );
     let execution = if request.session_cookie.is_some() || request.flash_cookie.is_some() {
-        let mut browser = state.browser.lock().expect("runtime browser mutex poisoned");
-        state.plan.execute_browser_request(
-            &mut browser,
-            request,
-            &state.cookie_secret,
-            &state.csrf_secret,
-            now,
-        )?
+        let resolved = {
+            let mut browser = state
+                .browser
+                .lock()
+                .expect("runtime browser mutex poisoned");
+            browser
+                .resolve_request(&request, &state.cookie_secret, now)
+                .map_err(RequestExecutionError::from_browser_error)?
+        };
+
+        request.session_id = resolved.session.session_id.clone();
+        request.session_cookie = None;
+        request.flash_cookie = None;
+
+        if request.principal_id.is_none() {
+            request.principal_id = resolved.principal_id.clone();
+        }
+
+        authorize_live_request(state, &mut request).await?;
+
+        let mut execution =
+            state
+                .plan
+                .execute_request(request, &state.cookie_secret, &state.csrf_secret)?;
+        execution.session = resolved.session;
+        if execution.principal.principal_id.is_none() {
+            execution.principal.principal_id = resolved.principal_id;
+        }
+        execution.flash_messages = resolved.flash_messages;
+        execution.response_cookies = resolved.response_cookies;
+        execution
     } else {
+        authorize_live_request(state, &mut request).await?;
         state
             .plan
             .execute_request(request, &state.cookie_secret, &state.csrf_secret)?
     };
 
     Ok(execution_response(execution))
+}
+
+async fn authorize_live_request(
+    state: &RuntimeServerState,
+    request: &mut RequestInput,
+) -> Result<(), RuntimeServerError> {
+    let matched = state
+        .plan
+        .http
+        .resolve_match(
+            &state.plan.config,
+            request.method,
+            &request.host,
+            &request.path,
+        )
+        .ok_or_else(|| {
+            RuntimeServerError::Execution(RequestExecutionError::RouteNotFound {
+                method: request.method,
+                host: request.host.clone(),
+                path: request.path.clone(),
+            })
+        })?;
+
+    let RouteAuthGate::Capability(capability) = matched.resolved.auth else {
+        return Ok(());
+    };
+    if request.session_id.is_none() {
+        return Ok(());
+    }
+
+    let Some(principal_id) = request.principal_id.as_deref() else {
+        return Ok(());
+    };
+    let package = default_live_auth_package(&state.plan.auth_package_name)?;
+    let module_manifest = matched.route.module.as_deref().and_then(|module_name| {
+        state
+            .plan
+            .modules
+            .iter()
+            .find(|manifest| manifest.name == module_name)
+    });
+    let Some(object) = matched
+        .resolved
+        .capability_auth_resource(&matched.route, module_manifest, &package)
+        .map_err(|error| RuntimeServerError::Authorization {
+            reason: error.to_string(),
+        })?
+    else {
+        return Ok(());
+    };
+    let subject =
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(principal_id.to_string()));
+    let allowed = state
+        .route_authorizer
+        .check_capability(&subject, capability, &object)
+        .await?;
+
+    if allowed {
+        request.granted_capabilities.insert(capability);
+        Ok(())
+    } else {
+        Err(RuntimeServerError::Execution(
+            RequestExecutionError::CapabilityRequired {
+                route: matched.resolved.route_name.clone(),
+                capability,
+            },
+        ))
+    }
 }
 
 fn execution_response(execution: RequestExecution) -> Response<Body> {
@@ -365,7 +683,11 @@ fn execution_response(execution: RequestExecution) -> Response<Body> {
         HandlerResponse::Json(json) => {
             let mut parts = Vec::new();
             for (key, value) in json.payload {
-                parts.push(format!("\"{}\":\"{}\"", escape_json(&key), escape_json(&value)));
+                parts.push(format!(
+                    "\"{}\":\"{}\"",
+                    escape_json(&key),
+                    escape_json(&value)
+                ));
             }
             let mut response = text_response(
                 StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK),
@@ -480,7 +802,9 @@ fn map_http_method(method: &Method) -> Result<HttpMethod, RuntimeServerError> {
     }
 }
 
-fn parse_cookie_header(headers: &HeaderMap) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+fn parse_cookie_header(
+    headers: &HeaderMap,
+) -> Result<BTreeMap<String, String>, RuntimeServerError> {
     let Some(raw) = headers.get(COOKIE) else {
         return Ok(BTreeMap::new());
     };

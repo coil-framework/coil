@@ -269,10 +269,100 @@ pub struct ResolvedRoute {
     pub params: BTreeMap<String, String>,
 }
 
+impl ResolvedRoute {
+    pub fn capability_auth_resource<P>(
+        &self,
+        route: &RouteDefinition,
+        module_manifest: Option<&ModuleManifest>,
+        package: &P,
+    ) -> Result<Option<davenda_auth::Entity>, davenda_auth::DavendaAuthError>
+    where
+        P: davenda_auth::AuthModelPackage,
+    {
+        let RouteAuthGate::Capability(capability) = self.auth else {
+            return Ok(None);
+        };
+
+        let binding = package
+            .binding_for(capability)
+            .ok_or(davenda_auth::DavendaAuthError::MissingCapabilityBinding { capability })?;
+        let namespace = binding
+            .resource_namespaces
+            .first()
+            .copied()
+            .expect("route capability bindings must expose at least one namespace");
+        let contract_kind = module_manifest
+            .and_then(|manifest| {
+                manifest
+                    .capability_contracts
+                    .iter()
+                    .find(|contract| contract.capability == capability)
+            })
+            .and_then(|contract| contract.resource_kinds.first())
+            .map(String::as_str);
+
+        Ok(Some(route_capability_resource(
+            namespace,
+            route.module.as_deref(),
+            contract_kind,
+            &self.route_name,
+        )))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRouteMatch {
     pub route: RouteDefinition,
     pub resolved: ResolvedRoute,
+}
+
+fn route_capability_resource(
+    namespace: davenda_auth::Namespace,
+    module: Option<&str>,
+    contract_kind: Option<&str>,
+    route_name: &str,
+) -> davenda_auth::Entity {
+    let resource_id = match (module, contract_kind) {
+        (Some(module), Some(contract_kind)) => {
+            format!("http.surface.module.{module}.{contract_kind}.{route_name}")
+        }
+        (Some(module), None) => format!("http.surface.module.{module}.{route_name}"),
+        (None, Some(contract_kind)) => format!("http.surface.{contract_kind}.{route_name}"),
+        (None, None) => format!("http.surface.{route_name}"),
+    };
+
+    match namespace {
+        davenda_auth::Namespace::Tenant => davenda_auth::Entity::tenant(resource_id),
+        davenda_auth::Namespace::Site => davenda_auth::Entity::site(resource_id),
+        davenda_auth::Namespace::Brand => davenda_auth::Entity::brand(resource_id),
+        davenda_auth::Namespace::Storefront => davenda_auth::Entity::storefront(resource_id),
+        davenda_auth::Namespace::User => davenda_auth::Entity::user(resource_id),
+        davenda_auth::Namespace::Group => davenda_auth::Entity::group(resource_id),
+        davenda_auth::Namespace::Team => davenda_auth::Entity::team(resource_id),
+        davenda_auth::Namespace::ServiceAccount => {
+            davenda_auth::Entity::service_account(resource_id)
+        }
+        davenda_auth::Namespace::Page => davenda_auth::Entity::page(resource_id),
+        davenda_auth::Namespace::Navigation => davenda_auth::Entity::navigation(resource_id),
+        davenda_auth::Namespace::Product => davenda_auth::Entity::product(resource_id),
+        davenda_auth::Namespace::Collection => davenda_auth::Entity::collection(resource_id),
+        davenda_auth::Namespace::Order => davenda_auth::Entity::order(resource_id),
+        davenda_auth::Namespace::Subscription => davenda_auth::Entity::subscription(resource_id),
+        davenda_auth::Namespace::MembershipTier => {
+            davenda_auth::Entity::membership_tier(resource_id)
+        }
+        davenda_auth::Namespace::Event => davenda_auth::Entity::event(resource_id),
+        davenda_auth::Namespace::EventSlot => davenda_auth::Entity::event_slot(resource_id),
+        davenda_auth::Namespace::Booking => davenda_auth::Entity::booking(resource_id),
+        davenda_auth::Namespace::Media => davenda_auth::Entity::media(resource_id),
+        davenda_auth::Namespace::MediaLibrary => davenda_auth::Entity::media_library(resource_id),
+        davenda_auth::Namespace::Asset => davenda_auth::Entity::asset(resource_id),
+        davenda_auth::Namespace::AssetFolder => davenda_auth::Entity::asset_folder(resource_id),
+        davenda_auth::Namespace::ThemeAssetBundle => {
+            davenda_auth::Entity::theme_asset_bundle(resource_id)
+        }
+        davenda_auth::Namespace::AdminModule => davenda_auth::Entity::admin_module(resource_id),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

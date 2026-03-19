@@ -39,6 +39,7 @@ use davenda_wasm::{
     JobExtensionPoint, PrincipalKind, RenderHookExtensionPoint, ResourceLimits,
     ScheduledJobExtensionPoint, WasmModelError, WebhookExtensionPoint,
 };
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const VALID_CONFIG: &str = r#"
@@ -1401,6 +1402,142 @@ async fn server_host_adapts_live_requests_into_runtime_execution() {
     assert_eq!(
         response.headers().get("cache-control").unwrap(),
         "private, max-age=60, stale-while-revalidate=30"
+    );
+}
+
+#[tokio::test]
+async fn server_host_authorizes_capability_routes_through_live_authorizer() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .build()
+        .unwrap();
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("editor-live-1")),
+        Capability::CmsPageRead,
+        davenda_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
+    ));
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        cookie_secret.to_vec(),
+        csrf_secret.to_vec(),
+        authorizer.clone(),
+    );
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("editor-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/pages/preview")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-davenda-route").unwrap(),
+        "cms.preview"
+    );
+    assert_eq!(
+        authorizer.checks(),
+        vec![LiveAuthorizationCheck {
+            subject: davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
+                "editor-live-1",
+            )),
+            capability: Capability::CmsPageRead,
+            object: davenda_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn server_host_rejects_capability_routes_when_live_authorizer_denies() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .build()
+        .unwrap();
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new());
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        cookie_secret.to_vec(),
+        csrf_secret.to_vec(),
+        authorizer.clone(),
+    );
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("editor-live-2")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/pages/preview")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        authorizer.checks(),
+        vec![LiveAuthorizationCheck {
+            subject: davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
+                "editor-live-2",
+            )),
+            capability: Capability::CmsPageRead,
+            object: davenda_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
+        }]
     );
 }
 

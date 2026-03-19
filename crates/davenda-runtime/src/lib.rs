@@ -182,17 +182,17 @@ impl HttpRuntimePlan {
 
             match route.locale_policy {
                 LocalePolicy::DefaultOnly => {
-                    if route.path == path {
-                        Some(ResolvedRouteMatch {
+                    match match_route_path(&route.path, path) {
+                        Some(params) => Some(ResolvedRouteMatch {
                             route: route.clone(),
                             resolved: ResolvedRoute {
                                 route_name: route.name.clone(),
                                 locale: None,
                                 auth: route.auth,
+                                params,
                             },
-                        })
-                    } else {
-                        None
+                        }),
+                        None => None,
                     }
                 }
                 LocalePolicy::Localized if config.i18n.localized_routes => {
@@ -202,12 +202,13 @@ impl HttpRuntimePlan {
                             locale.trim_matches('/'),
                             route.path.trim_start_matches('/')
                         );
-                        (localized_path == path).then(|| ResolvedRouteMatch {
+                        match_route_path(&localized_path, path).map(|params| ResolvedRouteMatch {
                             route: route.clone(),
                             resolved: ResolvedRoute {
                                 route_name: route.name.clone(),
                                 locale: Some(locale.clone()),
                                 auth: route.auth,
+                                params,
                             },
                         })
                     })
@@ -223,6 +224,7 @@ pub struct ResolvedRoute {
     pub route_name: String,
     pub locale: Option<String>,
     pub auth: RouteAuthGate,
+    pub params: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1058,6 +1060,38 @@ fn file_delivery_mode_from_surface(mode: HttpFileDeliveryMode) -> FileDeliveryMo
     }
 }
 
+fn match_route_path(pattern: &str, actual: &str) -> Option<BTreeMap<String, String>> {
+    let pattern_segments = path_segments(pattern);
+    let actual_segments = path_segments(actual);
+    if pattern_segments.len() != actual_segments.len() {
+        return None;
+    }
+
+    let mut params = BTreeMap::new();
+    for (pattern_segment, actual_segment) in pattern_segments.iter().zip(actual_segments.iter()) {
+        if pattern_segment.starts_with('{')
+            && pattern_segment.ends_with('}')
+            && pattern_segment.len() > 2
+        {
+            params.insert(
+                pattern_segment[1..pattern_segment.len() - 1].to_string(),
+                (*actual_segment).to_string(),
+            );
+        } else if pattern_segment != actual_segment {
+            return None;
+        }
+    }
+
+    Some(params)
+}
+
+fn path_segments(path: &str) -> Vec<&str> {
+    path.trim_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeBuildError {
     #[error(transparent)]
@@ -1291,6 +1325,7 @@ cdn_base_url = "https://cdn.example.com"
                 route_name: "events.show".to_string(),
                 locale: Some("fr-FR".to_string()),
                 auth: RouteAuthGate::Public,
+                params: BTreeMap::new(),
             })
         );
         assert_eq!(
@@ -1721,6 +1756,42 @@ cdn_base_url = "https://cdn.example.com"
             execution.response,
             HandlerResponse::Page(PageResponse {
                 template: "media/library".to_string(),
+                status: 200,
+            })
+        );
+    }
+
+    #[test]
+    fn runtime_builder_matches_parameterized_module_routes() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(EventsModule::new())
+            .build()
+            .unwrap();
+
+        let execution = plan
+            .execute_request(
+                RequestInput::new(
+                    HttpMethod::Get,
+                    "www.example.com",
+                    "/en-GB/events/summer-gala",
+                )
+                .unwrap(),
+                b"01234567012345670123456701234567",
+                b"76543210765432107654321076543210",
+            )
+            .unwrap();
+
+        assert_eq!(execution.route.route_name, "events.detail");
+        assert_eq!(execution.locale, "en-GB");
+        assert_eq!(
+            execution.route.params.get("event_slug").map(String::as_str),
+            Some("summer-gala")
+        );
+        assert_eq!(
+            execution.response,
+            HandlerResponse::Page(PageResponse {
+                template: "events/detail".to_string(),
                 status: 200,
             })
         );

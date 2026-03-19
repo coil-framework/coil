@@ -94,9 +94,12 @@ impl BrowserSessionRecord {
 }
 
 pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
-    fn issue(&self, record: BrowserSessionRecord);
-    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord>;
-    fn delete(&self, session_id: &str);
+    fn issue(&self, record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError>;
+    fn session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError>;
+    fn delete(&self, session_id: &str) -> Result<(), RuntimeBrowserError>;
     fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError>;
     fn touch_active_session(
         &self,
@@ -136,9 +139,7 @@ impl DistributedSessionStoreClient {
 
         #[cfg(not(test))]
         {
-            let _ = kind;
-            let _ = scope;
-            panic!("test_only_sqlite_shared_runtime is only available in test builds");
+            super::shared::live_rejection_shared_runtime(kind, scope.into())
         }
     }
 
@@ -167,16 +168,19 @@ impl DistributedSessionStoreClient {
         self.runtime.supports_live_shared_state()
     }
 
-    pub(super) fn issue(&self, record: BrowserSessionRecord) {
-        self.runtime.issue(record);
+    pub(super) fn issue(&self, record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
+        self.runtime.issue(record)
     }
 
-    pub(super) fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+    pub(super) fn session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
         self.runtime.session(session_id)
     }
 
-    pub(super) fn delete(&self, session_id: &str) {
-        self.runtime.delete(session_id);
+    pub(super) fn delete(&self, session_id: &str) -> Result<(), RuntimeBrowserError> {
+        self.runtime.delete(session_id)
     }
 
     pub(super) fn revoke(
@@ -219,31 +223,33 @@ impl LiveRejectionDistributedSessionStoreRuntime {
         Self { kind, scope }
     }
 
-    fn unsupported_message(&self) -> String {
-        format!(
-            "live browser session store `{kind:?}` for `{scope}` requires an explicit distributed runtime; file-backed shared state is test-only",
-            kind = self.kind,
-            scope = self.scope
-        )
+    fn unavailable_error(&self) -> RuntimeBrowserError {
+        RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+            kind: self.kind,
+            scope: self.scope.clone(),
+        }
     }
 }
 
 #[cfg(not(test))]
 impl DistributedSessionStoreRuntime for LiveRejectionDistributedSessionStoreRuntime {
-    fn issue(&self, _record: BrowserSessionRecord) {
-        panic!("{}", self.unsupported_message());
+    fn issue(&self, _record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
+        Err(self.unavailable_error())
     }
 
-    fn session(&self, _session_id: &str) -> Option<BrowserSessionRecord> {
-        panic!("{}", self.unsupported_message());
+    fn session(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
+        Err(self.unavailable_error())
     }
 
-    fn delete(&self, _session_id: &str) {
-        panic!("{}", self.unsupported_message());
+    fn delete(&self, _session_id: &str) -> Result<(), RuntimeBrowserError> {
+        Err(self.unavailable_error())
     }
 
     fn revoke(&self, _session_id: &str, _now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
-        panic!("{}", self.unsupported_message());
+        Err(self.unavailable_error())
     }
 
     fn touch_active_session(
@@ -252,7 +258,7 @@ impl DistributedSessionStoreRuntime for LiveRejectionDistributedSessionStoreRunt
         _idle_timeout: Duration,
         _now: BrowserInstant,
     ) -> Result<Option<String>, RuntimeBrowserError> {
-        panic!("{}", self.unsupported_message());
+        Err(self.unavailable_error())
     }
 
     fn is_shared_backend(&self) -> bool {
@@ -350,27 +356,37 @@ impl SessionStoreBackend {
         }
     }
 
-    pub(super) fn issue(&mut self, record: BrowserSessionRecord) {
+    pub(super) fn issue(
+        &mut self,
+        record: BrowserSessionRecord,
+    ) -> Result<(), RuntimeBrowserError> {
         match self {
             #[cfg(test)]
-            Self::Local(state) => state.issue(record),
+            Self::Local(state) => {
+                state.issue(record);
+                Ok(())
+            }
             Self::Distributed(client) => client.issue(record),
         }
     }
 
-    pub(super) fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+    pub(super) fn session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
         match self {
             #[cfg(test)]
-            Self::Local(state) => state.session(session_id),
+            Self::Local(state) => Ok(state.session(session_id)),
             Self::Distributed(client) => client.session(session_id),
         }
     }
 
-    pub(super) fn delete(&mut self, session_id: &str) {
+    pub(super) fn delete(&mut self, session_id: &str) -> Result<(), RuntimeBrowserError> {
         match self {
             #[cfg(test)]
             Self::Local(state) => {
                 state.sessions.remove(session_id);
+                Ok(())
             }
             Self::Distributed(client) => client.delete(session_id),
         }
@@ -432,6 +448,6 @@ pub(super) fn issue_session(
         revoked_at: None,
     };
     let issued = host.issue_cookie_for_record(record.clone(), cookie_secret)?;
-    host.sessions.issue(record);
+    host.sessions.issue(record)?;
     Ok(issued)
 }

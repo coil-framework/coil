@@ -93,6 +93,7 @@ mod tests {
         assert_eq!(
             right
                 .session(&issued.record.session_id)
+                .unwrap()
                 .and_then(|record| record.principal_id),
             Some("member-db".to_string())
         );
@@ -131,6 +132,7 @@ mod tests {
         assert_eq!(
             right
                 .session(&issued.record.session_id)
+                .unwrap()
                 .and_then(|record| record.principal_id),
             Some("member-db".to_string())
         );
@@ -168,6 +170,7 @@ mod tests {
         assert_eq!(
             right
                 .session(&issued.record.session_id)
+                .unwrap()
                 .and_then(|record| record.principal_id),
             Some("member-db".to_string())
         );
@@ -192,13 +195,20 @@ mod tests {
         struct UnconfiguredLiveSessionStoreRuntime;
 
         impl DistributedSessionStoreRuntime for UnconfiguredLiveSessionStoreRuntime {
-            fn issue(&self, _record: BrowserSessionRecord) {}
-
-            fn session(&self, _session_id: &str) -> Option<BrowserSessionRecord> {
-                None
+            fn issue(&self, _record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
+                Ok(())
             }
 
-            fn delete(&self, _session_id: &str) {}
+            fn session(
+                &self,
+                _session_id: &str,
+            ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
+                Ok(None)
+            }
+
+            fn delete(&self, _session_id: &str) -> Result<(), RuntimeBrowserError> {
+                Ok(())
+            }
 
             fn revoke(
                 &self,
@@ -236,6 +246,90 @@ mod tests {
             error,
             BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime {
                 kind: SessionStoreBackendKind::Database,
+            }
+        );
+    }
+
+    #[test]
+    fn live_browser_session_client_returns_typed_runtime_errors() {
+        #[derive(Debug)]
+        struct RejectedLiveSessionStoreRuntime;
+
+        impl DistributedSessionStoreRuntime for RejectedLiveSessionStoreRuntime {
+            fn issue(&self, _record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
+                Err(RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+                    kind: SessionStoreBackendKind::Database,
+                    scope: "browser-live".to_string(),
+                })
+            }
+
+            fn session(
+                &self,
+                _session_id: &str,
+            ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
+                Err(RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+                    kind: SessionStoreBackendKind::Database,
+                    scope: "browser-live".to_string(),
+                })
+            }
+
+            fn delete(&self, _session_id: &str) -> Result<(), RuntimeBrowserError> {
+                Err(RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+                    kind: SessionStoreBackendKind::Database,
+                    scope: "browser-live".to_string(),
+                })
+            }
+
+            fn revoke(
+                &self,
+                _session_id: &str,
+                _now: BrowserInstant,
+            ) -> Result<(), RuntimeBrowserError> {
+                Err(RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+                    kind: SessionStoreBackendKind::Database,
+                    scope: "browser-live".to_string(),
+                })
+            }
+
+            fn touch_active_session(
+                &self,
+                _session_id: &str,
+                _idle_timeout: Duration,
+                _now: BrowserInstant,
+            ) -> Result<Option<String>, RuntimeBrowserError> {
+                Err(RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+                    kind: SessionStoreBackendKind::Database,
+                    scope: "browser-live".to_string(),
+                })
+            }
+
+            fn is_shared_backend(&self) -> bool {
+                false
+            }
+        }
+
+        let client = DistributedSessionStoreClient::new(
+            SessionStoreBackendKind::Database,
+            Arc::new(RejectedLiveSessionStoreRuntime),
+        );
+
+        let error = client
+            .issue(BrowserSessionRecord {
+                session_id: "session-1".to_string(),
+                principal_id: Some("member".to_string()),
+                issued_at: BrowserInstant::from_unix_seconds(1),
+                last_seen_at: BrowserInstant::from_unix_seconds(1),
+                idle_expires_at: BrowserInstant::from_unix_seconds(60),
+                absolute_expires_at: BrowserInstant::from_unix_seconds(120),
+                revoked_at: None,
+            })
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+                kind: SessionStoreBackendKind::Database,
+                scope: "browser-live".to_string(),
             }
         );
     }

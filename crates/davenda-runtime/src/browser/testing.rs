@@ -82,19 +82,24 @@ impl TestOnlySqliteSharedDistributedSessionStoreRuntime {
 
 #[cfg(test)]
 impl DistributedSessionStoreRuntime for TestOnlySqliteSharedDistributedSessionStoreRuntime {
-    fn issue(&self, record: BrowserSessionRecord) {
+    fn issue(&self, record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
         let mut guard = self.state.lock().expect("session backend mutex poisoned");
         guard.issue(record);
+        Ok(())
     }
 
-    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+    fn session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
         let guard = self.state.lock().expect("session backend mutex poisoned");
-        guard.session(session_id)
+        Ok(guard.session(session_id))
     }
 
-    fn delete(&self, session_id: &str) {
+    fn delete(&self, session_id: &str) -> Result<(), RuntimeBrowserError> {
         let mut guard = self.state.lock().expect("session backend mutex poisoned");
         guard.sessions.remove(session_id);
+        Ok(())
     }
 
     fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {

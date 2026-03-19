@@ -36,7 +36,7 @@ impl TlsHost {
     pub(crate) fn new(
         customer_app: String,
         runtime: TlsRuntimeServices,
-        data_runtime: DataRuntimeServices,
+        _data_runtime: DataRuntimeServices,
         shared_backend_namespace: String,
     ) -> Result<Self, RuntimeTlsError> {
         let material_seed = {
@@ -50,7 +50,7 @@ impl TlsHost {
 
             #[cfg(not(test))]
             {
-                data_runtime.resolve_connection_url()?
+                _data_runtime.resolve_connection_url()?
             }
         };
         let material_protector = TlsMaterialProtector::from_seed(material_seed)?;
@@ -60,7 +60,7 @@ impl TlsHost {
         #[cfg(not(test))]
         let control_plane = TlsControlPlaneRuntime::with_distributed_postgres_control_plane(
             runtime.clone(),
-            &data_runtime,
+            &_data_runtime,
             format!("customer-app:{}:{}", customer_app, shared_backend_namespace),
         )?;
         let material_executor =

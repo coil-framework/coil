@@ -38,6 +38,13 @@ pub enum RuntimeBrowserError {
     InvalidFlashPayload,
     #[error("flash cookie contains unknown level `{level}`")]
     InvalidFlashLevel { level: String },
+    #[error(
+        "live browser session store `{kind:?}` for `{scope}` requires an explicit distributed runtime"
+    )]
+    LiveSharedSessionStoreUnavailable {
+        kind: SessionStoreBackendKind,
+        scope: String,
+    },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -129,7 +136,7 @@ impl BrowserHost {
         now: BrowserInstant,
     ) -> Result<RotatedBrowserSession, RuntimeBrowserError> {
         let session_id = validate_browser_value("session_id", session_id.to_string())?;
-        let existing = self.sessions.session(&session_id).ok_or_else(|| {
+        let existing = self.sessions.session(&session_id)?.ok_or_else(|| {
             RuntimeBrowserError::UnknownSession {
                 session_id: session_id.clone(),
             }
@@ -140,7 +147,7 @@ impl BrowserHost {
                 existing.principal_id.clone()
             }
             BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
-                self.sessions.delete(&session_id);
+                self.sessions.delete(&session_id)?;
                 return Err(RuntimeBrowserError::ExpiredSession { session_id });
             }
             BrowserSessionStatus::Revoked => {
@@ -211,7 +218,10 @@ impl BrowserHost {
             .render_set_cookie("", Some(Duration::from_secs(0)))
     }
 
-    pub fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+    pub fn session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
         self.sessions.session(session_id)
     }
 

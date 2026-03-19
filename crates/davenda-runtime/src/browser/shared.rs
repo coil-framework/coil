@@ -6,7 +6,7 @@ use super::{
     SessionStoreBackendKind,
 };
 #[cfg(test)]
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 #[cfg(test)]
 use std::collections::BTreeMap;
 #[cfg(test)]
@@ -62,28 +62,34 @@ impl TestOnlySqliteSharedSessionStoreRuntime {
 
 #[cfg(test)]
 impl DistributedSessionStoreRuntime for TestOnlySqliteSharedSessionStoreRuntime {
-    fn issue(&self, record: BrowserSessionRecord) {
+    fn issue(&self, record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
         self.store
             .with_state_mut(|state| {
                 state.issue(record);
                 Ok(())
             })
             .expect("persistent session backend issue failed");
+        Ok(())
     }
 
-    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
-        self.store
+    fn session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
+        Ok(self
+            .store
             .read_state(|state| state.session(session_id))
-            .expect("persistent session backend lookup failed")
+            .expect("persistent session backend lookup failed"))
     }
 
-    fn delete(&self, session_id: &str) {
+    fn delete(&self, session_id: &str) -> Result<(), RuntimeBrowserError> {
         self.store
             .with_state_mut(|state| {
                 state.sessions.remove(session_id);
                 Ok(())
             })
             .expect("persistent session backend delete failed");
+        Ok(())
     }
 
     fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
@@ -125,31 +131,33 @@ impl LiveRejectionDistributedSessionStoreRuntime {
         Self { kind, namespace }
     }
 
-    fn unsupported_message(&self) -> String {
-        format!(
-            "live browser session store `{kind:?}` for `{namespace}` requires an explicit distributed runtime; file-backed shared state is test-only",
-            kind = self.kind,
-            namespace = self.namespace
-        )
+    fn unavailable_error(&self) -> RuntimeBrowserError {
+        RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
+            kind: self.kind,
+            scope: self.namespace.clone(),
+        }
     }
 }
 
 #[cfg(not(test))]
 impl DistributedSessionStoreRuntime for LiveRejectionDistributedSessionStoreRuntime {
-    fn issue(&self, _record: BrowserSessionRecord) {
-        panic!("{}", self.unsupported_message());
+    fn issue(&self, _record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
+        Err(self.unavailable_error())
     }
 
-    fn session(&self, _session_id: &str) -> Option<BrowserSessionRecord> {
-        panic!("{}", self.unsupported_message());
+    fn session(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
+        Err(self.unavailable_error())
     }
 
-    fn delete(&self, _session_id: &str) {
-        panic!("{}", self.unsupported_message());
+    fn delete(&self, _session_id: &str) -> Result<(), RuntimeBrowserError> {
+        Err(self.unavailable_error())
     }
 
     fn revoke(&self, _session_id: &str, _now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
-        panic!("{}", self.unsupported_message());
+        Err(self.unavailable_error())
     }
 
     fn touch_active_session(
@@ -158,7 +166,7 @@ impl DistributedSessionStoreRuntime for LiveRejectionDistributedSessionStoreRunt
         _idle_timeout: std::time::Duration,
         _now: BrowserInstant,
     ) -> Result<Option<String>, RuntimeBrowserError> {
-        panic!("{}", self.unsupported_message());
+        Err(self.unavailable_error())
     }
 
     fn is_shared_backend(&self) -> bool {

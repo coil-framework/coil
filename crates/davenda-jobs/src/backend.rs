@@ -177,6 +177,7 @@ impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
 pub struct JobsBackendAdapter {
     backend: davenda_config::JobBackend,
     queue_topology: QueueTopology,
+    shared: bool,
     runtime: Arc<dyn JobsCoordinationRuntime>,
 }
 
@@ -186,14 +187,23 @@ impl JobsBackendAdapter {
         queue_topology: QueueTopology,
         runtime: Arc<dyn JobsCoordinationRuntime>,
     ) -> Self {
+        Self::with_runtime(backend, queue_topology, runtime)
+    }
+
+    pub fn with_runtime(
+        backend: davenda_config::JobBackend,
+        queue_topology: QueueTopology,
+        runtime: Arc<dyn JobsCoordinationRuntime>,
+    ) -> Self {
         Self {
             backend,
             queue_topology,
+            shared: true,
             runtime,
         }
     }
 
-    pub fn with_runtime(
+    pub fn with_shared_runtime(
         backend: davenda_config::JobBackend,
         queue_topology: QueueTopology,
         runtime: Arc<dyn JobsCoordinationRuntime>,
@@ -212,27 +222,34 @@ impl JobsBackendAdapter {
 
     #[doc(hidden)]
     pub fn local_for_testing(runtime: &JobsRuntime) -> Self {
-        Self::new(
-            runtime.backend,
-            runtime.topology.clone(),
-            Self::emulated_shared_runtime(runtime),
-        )
+        Self {
+            backend: runtime.backend,
+            queue_topology: runtime.topology.clone(),
+            shared: false,
+            runtime: Self::emulated_shared_runtime(runtime),
+        }
     }
 
     #[allow(dead_code)]
+    #[doc(hidden)]
     #[deprecated(
-        note = "use with_runtime(backend, topology, runtime) or local_for_testing(runtime)"
+        note = "compatibility shim; behaves like local_for_testing(runtime). use with_shared_runtime(backend, topology, runtime) or local_for_testing(runtime)"
     )]
     pub fn shared(runtime: &JobsRuntime) -> Self {
         Self::local_for_testing(runtime)
     }
 
     #[allow(dead_code)]
+    #[doc(hidden)]
     #[deprecated(
-        note = "use with_runtime(backend, topology, runtime) or local_for_testing(runtime)"
+        note = "compatibility shim; behaves like local_for_testing(runtime). use with_shared_runtime(backend, topology, runtime) or local_for_testing(runtime)"
     )]
     pub fn shared_scoped(runtime: &JobsRuntime, _scope: impl Into<String>) -> Self {
         Self::local_for_testing(runtime)
+    }
+
+    pub fn is_shared(&self) -> bool {
+        self.shared
     }
 
     pub(crate) fn snapshot(&self) -> JobsCoordinatorSnapshot {

@@ -395,6 +395,32 @@ fn default_coordinators_are_local_even_for_distributed_topologies() {
 }
 
 #[test]
+#[allow(deprecated)]
+fn compatibility_shared_shims_remain_local_only() {
+    let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+    let adapter = JobsBackendAdapter::shared(&runtime);
+    let scoped = JobsBackendAdapter::shared_scoped(&runtime, "runtime-jobs-shim");
+
+    assert!(!adapter.is_shared());
+    assert!(!scoped.is_shared());
+}
+
+#[test]
+fn explicit_shared_runtime_constructors_report_shared_state_honestly() {
+    let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+    let shared_runtime = JobsBackendAdapter::emulated_shared_runtime(&runtime);
+    let shared = JobsBackendAdapter::with_shared_runtime(
+        runtime.backend,
+        runtime.topology.clone(),
+        shared_runtime,
+    );
+    let local = JobsBackendAdapter::local_for_testing(&runtime);
+
+    assert!(shared.is_shared());
+    assert!(!local.is_shared());
+}
+
+#[test]
 fn distributed_coordinators_share_backend_when_using_an_explicit_shared_runtime() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
     let shared_runtime = JobsBackendAdapter::emulated_shared_runtime(&runtime);

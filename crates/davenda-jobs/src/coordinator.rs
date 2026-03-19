@@ -34,7 +34,7 @@ impl JobsCoordinator {
         runtime: JobsRuntime,
         shared_runtime: Arc<dyn crate::JobsCoordinationRuntime>,
     ) -> Self {
-        let backend = JobsBackendAdapter::with_runtime(
+        let backend = JobsBackendAdapter::with_shared_runtime(
             runtime.backend,
             runtime.topology.clone(),
             shared_runtime,

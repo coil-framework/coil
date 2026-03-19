@@ -163,6 +163,16 @@ fn cache_runtime_new_keeps_distributed_topologies_local_until_explicitly_shared(
 }
 
 #[test]
+#[allow(deprecated)]
+fn compatibility_shared_shims_remain_local_only() {
+    let client = DistributedCacheClient::shared(CacheBackendKind::Redis);
+    let adapter = CacheBackendAdapter::shared(CacheTopology::with_redis());
+
+    assert!(!client.is_shared());
+    assert!(!adapter.is_shared());
+}
+
+#[test]
 fn cache_runtime_new_uses_local_backend_for_single_node_topologies() {
     let mut left = CacheRuntime::new(CacheTopology::moka_only());
     let mut right = left.clone();
@@ -387,7 +397,8 @@ fn planner_runtime_defaults_are_local_even_for_distributed_topologies() {
 
 #[test]
 fn distributed_planner_runtimes_share_backend_when_reusing_an_explicit_handle() {
-    let planner = CachePlanner::new(CacheTopology::with_valkey());
+    let topology = CacheTopology::with_valkey();
+    let planner = CachePlanner::new(topology);
     let plan = planner
         .plan(
             CachePlanRequest::new(
@@ -414,8 +425,12 @@ fn distributed_planner_runtimes_share_backend_when_reusing_an_explicit_handle() 
         .unwrap();
 
     let shared_runtime = DistributedCacheClient::emulated_shared_runtime(CacheBackendKind::Valkey);
-    let mut left = planner.runtime_with_shared_runtime(shared_runtime.clone());
-    let mut right = planner.runtime_with_shared_runtime(shared_runtime);
+    let adapter = CacheBackendAdapter::with_shared_runtime(topology, shared_runtime);
+    let mut left = CacheRuntime::with_backend(topology, adapter.clone());
+    let mut right = CacheRuntime::with_backend(topology, adapter);
+
+    assert_eq!(left.backend_kind(), CacheBackendKind::Valkey);
+    assert!(left.backend_is_shared());
 
     left.insert(
         plan.application().unwrap(),

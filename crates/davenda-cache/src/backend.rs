@@ -168,16 +168,28 @@ impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
 #[derive(Clone)]
 pub struct DistributedCacheClient {
     kind: CacheBackendKind,
+    shared: bool,
     runtime: Arc<dyn DistributedCacheRuntime>,
 }
 
 impl DistributedCacheClient {
     pub fn new(kind: CacheBackendKind, runtime: Arc<dyn DistributedCacheRuntime>) -> Self {
-        Self { kind, runtime }
+        Self::with_runtime(kind, runtime)
     }
 
     pub fn with_runtime(kind: CacheBackendKind, runtime: Arc<dyn DistributedCacheRuntime>) -> Self {
-        Self::new(kind, runtime)
+        Self::with_shared_runtime(kind, runtime)
+    }
+
+    pub fn with_shared_runtime(
+        kind: CacheBackendKind,
+        runtime: Arc<dyn DistributedCacheRuntime>,
+    ) -> Self {
+        Self {
+            kind,
+            shared: true,
+            runtime,
+        }
     }
 
     pub fn emulated_shared_runtime(_kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
@@ -187,17 +199,27 @@ impl DistributedCacheClient {
     #[allow(dead_code)]
     #[doc(hidden)]
     pub fn local_for_testing(kind: CacheBackendKind) -> Self {
-        Self::with_runtime(kind, Self::emulated_shared_runtime(kind))
+        Self {
+            kind,
+            shared: false,
+            runtime: Self::emulated_shared_runtime(kind),
+        }
     }
 
     #[allow(dead_code)]
-    #[deprecated(note = "use with_runtime(kind, runtime) or local_for_testing(kind)")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "compatibility shim; behaves like local_for_testing(kind). use with_shared_runtime(kind, runtime) or local_for_testing(kind)"
+    )]
     pub fn shared(kind: CacheBackendKind) -> Self {
         Self::local_for_testing(kind)
     }
 
     #[allow(dead_code)]
-    #[deprecated(note = "use with_runtime(kind, runtime) or local_for_testing(kind)")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "compatibility shim; behaves like local_for_testing(kind). use with_shared_runtime(kind, runtime) or local_for_testing(kind)"
+    )]
     pub fn scoped_shared(kind: CacheBackendKind, _scope: impl Into<String>) -> Self {
         Self::local_for_testing(kind)
     }
@@ -207,7 +229,7 @@ impl DistributedCacheClient {
     }
 
     pub fn is_shared(&self) -> bool {
-        !matches!(self.kind, CacheBackendKind::Local)
+        self.shared
     }
 
     pub fn insert(&self, entry: CacheEntry) {
@@ -329,7 +351,7 @@ impl CacheBackendAdapter {
         Self {
             kind: client.kind(),
             topology,
-            shared: false,
+            shared: client.is_shared(),
             storage: CacheBackendStorage::Distributed(client),
         }
     }
@@ -347,20 +369,26 @@ impl CacheBackendAdapter {
             kind,
             topology,
             shared: true,
-            storage: CacheBackendStorage::Distributed(DistributedCacheClient::with_runtime(
+            storage: CacheBackendStorage::Distributed(DistributedCacheClient::with_shared_runtime(
                 kind, runtime,
             )),
         }
     }
 
     #[allow(dead_code)]
-    #[deprecated(note = "use with_shared_runtime(topology, runtime)")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "compatibility shim; behaves like local_for_testing(topology). use with_shared_runtime(topology, runtime) or local_for_testing(topology)"
+    )]
     pub fn shared(topology: CacheTopology) -> Self {
         Self::local_for_testing(topology)
     }
 
     #[allow(dead_code)]
-    #[deprecated(note = "use with_shared_runtime(topology, runtime)")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "compatibility shim; behaves like local_for_testing(topology). use with_shared_runtime(topology, runtime) or local_for_testing(topology)"
+    )]
     pub fn scoped_shared(topology: CacheTopology, _scope: impl Into<String>) -> Self {
         Self::local_for_testing(topology)
     }

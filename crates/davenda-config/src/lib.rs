@@ -20,6 +20,7 @@ pub use infra::{
 };
 pub use platform::{
     AuthConfig, ConfigError, I18nConfig, ModulesConfig, PlatformConfig, SeoConfig, WasmConfig,
+    WasmOutboundHttpIntegration,
 };
 pub use secret::SecretRef;
 pub use validation::{ConfigValidationError, ConfigValidationErrors};

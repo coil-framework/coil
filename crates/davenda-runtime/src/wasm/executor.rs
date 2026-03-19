@@ -8,6 +8,7 @@ use super::*;
 use davenda_wasm::MetadataGrant;
 use std::sync::OnceLock;
 use std::time::Duration;
+use url::Url;
 
 #[derive(Debug)]
 pub(super) struct RuntimeHostServiceExecutor {
@@ -18,15 +19,6 @@ pub(super) struct RuntimeHostServiceExecutor {
 }
 
 impl RuntimeHostServiceExecutor {
-    pub(super) fn new(plan: RuntimePlan) -> Self {
-        Self {
-            services: RuntimeWasmHostServices::new(plan.clone()),
-            plan,
-            auth_backend: OnceLock::new(),
-            data_backend: OnceLock::new(),
-        }
-    }
-
     pub(super) fn with_services(plan: RuntimePlan, services: RuntimeWasmHostServices) -> Self {
         Self {
             services,
@@ -413,8 +405,10 @@ mod tests {
         SecretExecution, TraceContext,
     };
     use std::collections::BTreeMap;
+    use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::thread;
 
@@ -508,11 +502,17 @@ publish_manifest = false
         let (endpoint, server) = spawn_http_server("live-response");
 
         let mut http_targets = BTreeMap::new();
-        http_targets.insert("crm".to_string(), endpoint.clone());
+        http_targets.insert("crm".to_string(), Url::parse(&endpoint).unwrap());
         let mut secrets = BTreeMap::new();
         secrets.insert("api-token".to_string(), "super-secret".to_string());
 
-        let services = RuntimeWasmHostServices::with_backends(plan.clone(), http_targets, secrets);
+        let shared_root = shared_state_root("metadata");
+        let services = RuntimeWasmHostServices::with_shared_state_root(
+            shared_root.clone(),
+            plan.clone(),
+            http_targets,
+            secrets,
+        );
         let executor = RuntimeHostServiceExecutor::with_services(plan.clone(), services.clone());
         let session_plan = InvocationPlan {
             extension_id: ExtensionId::new("extensions.live").unwrap(),
@@ -560,7 +560,7 @@ publish_manifest = false
                 status,
                 response_bytes,
             }) if integration == "crm"
-                && recorded_endpoint == endpoint
+                && recorded_endpoint == Url::parse(&endpoint).unwrap().to_string()
                 && status == 200
                 && response_bytes == "live-response".len() as u64
         ));
@@ -635,14 +635,22 @@ publish_manifest = false
                 journal_entries: 2,
             })
         ));
-        let records = services.metadata_records();
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].kind, MetadataGrant::JsonLd);
-        assert_eq!(records[0].trace_id, "trace-1");
-        assert_eq!(records[0].app_id, "customer-app");
-        assert_eq!(records[1].kind, MetadataGrant::JsonLd);
-        assert_eq!(records[1].trace_id, "trace-1");
-        assert_eq!(records[1].app_id, "customer-app");
+        let reopened = RuntimeWasmHostServices::with_shared_state_root(
+            shared_root,
+            plan.clone(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
+        let snapshot = reopened.metadata_snapshot(10).unwrap();
+        assert_eq!(snapshot.entry_count, 2);
+        assert_eq!(snapshot.recent_records.len(), 2);
+        assert!(snapshot.path.exists());
+        assert_eq!(snapshot.recent_records[0].kind, "json_ld");
+        assert_eq!(snapshot.recent_records[0].trace_id, "trace-1");
+        assert_eq!(snapshot.recent_records[0].app_id, "customer-app");
+        assert_eq!(snapshot.recent_records[1].kind, "json_ld");
+        assert_eq!(snapshot.recent_records[1].trace_id, "trace-1");
+        assert_eq!(snapshot.recent_records[1].app_id, "customer-app");
 
         server.join().unwrap();
     }
@@ -737,6 +745,17 @@ publish_manifest = false
             .unwrap_err();
 
         assert!(format!("{error:?}").contains("was not provided to runtime"));
+    }
+
+    fn shared_state_root(label: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "davenda-wasm-host-{}-{}",
+            std::process::id(),
+            label
+        ));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
     }
 
     fn spawn_http_server(body: &'static str) -> (String, thread::JoinHandle<()>) {

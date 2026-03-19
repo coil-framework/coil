@@ -1,7 +1,6 @@
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use tower::util::ServiceExt;
 use davenda_admin::AdminModule;
 use davenda_assets::{
     AssetDeliveryTarget, AssetId, ContentFingerprint, DeliveryAudience, DeploymentArtifact,
@@ -49,6 +48,7 @@ use davenda_wasm::{
     PrincipalKind, RenderHookExtensionPoint, ResourceLimits, ScheduledJobExtensionPoint,
     TypedCacheHint, TypedExecutionOutput, TypedMetadata, WasmModelError, WebhookExtensionPoint,
 };
+use tower::util::ServiceExt;
 
 struct PermissiveLiveRouteCapabilityAuthorizer;
 
@@ -113,7 +113,7 @@ provider = "cloudflare-dns"
 default_class = "public_upload"
 single_node_escape_hatch = "explicit_single_node"
 object_store = "s3"
-local_root = "/var/lib/platform"
+local_root = "/tmp/davenda-runtime-tests"
 deployment = "single_node"
 
 [cache]
@@ -197,6 +197,14 @@ fn config_with_auth_package(package: &str) -> PlatformConfig {
     PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
         "package = \"platform-default-auth\"",
         &format!("package = \"{package}\""),
+    ))
+    .unwrap()
+}
+
+fn config_with_outbound_http() -> PlatformConfig {
+    PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+        "\n[jobs]\nbackend = \"redis\"\n",
+        "\n[[wasm.outbound_http]]\nintegration = \"crm\"\nendpoint = \"https://crm.example.com/api\"\n\n[jobs]\nbackend = \"redis\"\n",
     ))
     .unwrap()
 }
@@ -783,8 +791,8 @@ fn content_fingerprint(fill: char) -> ContentFingerprint {
 
 fn config_with_backend_secrets() -> String {
     let with_storage_secret = VALID_CONFIG.replace(
-        "local_root = \"/var/lib/platform\"",
-        "local_root = \"/var/lib/platform\"\nobject_store_secret = { kind = \"env\", var = \"OBJECT_STORE_URL\" }",
+        "local_root = \"/tmp/davenda-runtime-tests\"",
+        "local_root = \"/tmp/davenda-runtime-tests\"\nobject_store_secret = { kind = \"env\", var = \"OBJECT_STORE_URL\" }",
     );
     format!(
         "{with_storage_secret}\n[database]\nurl = {{ kind = \"env\", var = \"DATABASE_URL\" }}\n"
@@ -795,6 +803,13 @@ fn config_with_wasm_secret_bindings() -> String {
     VALID_CONFIG.replace(
         "allow_network = false",
         "allow_network = false\nsecret_bindings = { api_token = { kind = \"env\", var = \"WASM_API_TOKEN\" } }",
+    )
+}
+
+fn config_with_wasm_outbound_http() -> String {
+    VALID_CONFIG.replace(
+        "allow_network = false",
+        "allow_network = false\n[[wasm.outbound_http]]\nintegration = \"crm\"\nendpoint = \"https://crm.example.com/api\"",
     )
 }
 
@@ -1876,7 +1891,29 @@ fn runtime_plan_resolves_wasm_secret_bindings_from_config_secrets() {
 
     let secrets = plan.wasm_secret_values(&resolver).unwrap();
 
-    assert_eq!(secrets.get("api_token"), Some(&"runtime-secret".to_string()));
+    assert_eq!(
+        secrets.get("api_token"),
+        Some(&"runtime-secret".to_string())
+    );
+}
+
+#[test]
+fn runtime_plan_exposes_declared_wasm_outbound_http_endpoints() {
+    let config = PlatformConfig::from_toml_str(&config_with_wasm_outbound_http()).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+
+    let approved = plan.approved_outbound_http_endpoints();
+
+    assert_eq!(approved.len(), 1);
+    assert_eq!(
+        approved
+            .get("crm")
+            .map(|endpoint| endpoint.as_str())
+            .as_deref(),
+        Some("https://crm.example.com/api")
+    );
 }
 
 #[test]
@@ -2066,6 +2103,9 @@ async fn server_router_exposes_health_readiness_metrics_and_diagnostics_probes()
     .unwrap();
     assert!(diagnostics_body.contains("\"customer_app\""));
     assert!(diagnostics_body.contains("\"database\""));
+    assert!(diagnostics_body.contains("\"metadata\""));
+    assert!(diagnostics_body.contains("\"backend\":\"sqlite\""));
+    assert!(diagnostics_body.contains("\"path\""));
 }
 
 #[tokio::test]
@@ -2079,11 +2119,10 @@ async fn server_host_rejects_request_bodies_over_the_configured_limit_before_han
                 .with_area(RouteArea::Account)
                 .requiring_session(),
         )
-        .with_handler(HandlerDefinition::json(
-            "account.dashboard",
-            std::collections::BTreeMap::new(),
+        .with_handler(
+            HandlerDefinition::json("account.dashboard", std::collections::BTreeMap::new())
+                .unwrap(),
         )
-        .unwrap())
         .build()
         .unwrap();
     let resolver = StaticSecretResolver::new()
@@ -2533,6 +2572,21 @@ async fn server_host_emits_hreflang_links_for_localized_page_routes() {
     assert!(body.contains("https://www.example.com/fr-FR/events"));
     assert!(body.contains("hreflang=\"en-GB\""));
     assert!(body.contains("https://www.example.com/en-GB/events"));
+}
+
+#[test]
+fn runtime_plan_exposes_declared_outbound_http_endpoints() {
+    let config = config_with_outbound_http();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        plan.approved_outbound_http_endpoints()
+            .get("crm")
+            .map(|endpoint| endpoint.as_str()),
+        Some("https://crm.example.com/api")
+    );
 }
 
 #[tokio::test]
@@ -4380,9 +4434,7 @@ fn storage_host_applies_path_rules_for_sensitive_files() {
 
     let storage_plan = plan
         .storage_host()
-        .plan_single_node_escape_hatch_write(
-            StoragePlanRequest::new("secure/reports/march.csv"),
-        )
+        .plan_single_node_escape_hatch_write(StoragePlanRequest::new("secure/reports/march.csv"))
         .unwrap();
 
     assert_eq!(storage_plan.storage_class, StorageClass::LocalOnlySensitive);
@@ -4392,7 +4444,7 @@ fn storage_host_applies_path_rules_for_sensitive_files() {
     );
     assert_eq!(
         storage_plan.local_path.as_deref(),
-        Some("/var/lib/platform/sensitive/secure/reports/march.csv")
+        Some("/tmp/davenda-runtime-tests/sensitive/secure/reports/march.csv")
     );
     assert_eq!(
         storage_plan.deployment_scope,
@@ -4494,14 +4546,14 @@ fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
 
     let restricted_revision = host
         .plan_managed_revision_with_single_node_escape_hatch(
-        RevisionId::new("rev-secret-1").unwrap(),
-        "secure/docs/orders.csv",
-        Some(StoragePolicyOverride::force_single_node_escape_hatch()),
-        "text/csv",
-        256,
-        content_fingerprint('c'),
-    )
-    .unwrap();
+            RevisionId::new("rev-secret-1").unwrap(),
+            "secure/docs/orders.csv",
+            Some(StoragePolicyOverride::force_single_node_escape_hatch()),
+            "text/csv",
+            256,
+            content_fingerprint('c'),
+        )
+        .unwrap();
     let restricted_asset = ManagedAsset::new(
         AssetId::new("asset-orders").unwrap(),
         "Orders Export",
@@ -4515,9 +4567,9 @@ fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
     assert_eq!(authorized_delivery.delivery_mode(), DeliveryMode::LocalOnly);
     assert_eq!(authorized_delivery.audience(), DeliveryAudience::Authorized);
     assert!(matches!(
-        authorized_delivery.target(),
-        AssetDeliveryTarget::LocalPath { path }
-            if path == "/var/lib/platform/vault/secure/docs/orders.csv"
+    authorized_delivery.target(),
+    AssetDeliveryTarget::LocalPath { path }
+        if path == "/tmp/davenda-runtime-tests/vault/secure/docs/orders.csv"
     ));
 }
 

@@ -1,49 +1,381 @@
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use davenda_wasm::{MetadataExecution, MetadataGrant};
+use rusqlite::{Connection, params};
 
 use super::super::*;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(super) struct RuntimeMetadataBackend {
-    entries: Arc<Mutex<Vec<MetadataWriteRecord>>>,
+    store: MetadataAuditStore,
 }
 
 impl RuntimeMetadataBackend {
+    #[cfg(test)]
+    pub(super) fn open_for_test(namespace: impl Into<String>) -> Self {
+        let namespace = namespace.into();
+        Self {
+            store: MetadataAuditStore::open(test_shared_state_root(&namespace), namespace),
+        }
+    }
+
+    pub(super) fn open(root: impl Into<PathBuf>, namespace: impl Into<String>) -> Self {
+        Self {
+            store: MetadataAuditStore::open(root.into(), namespace.into()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_root(root: impl Into<PathBuf>, namespace: impl Into<String>) -> Self {
+        Self::open(root, namespace)
+    }
+
     pub(super) fn record(
         &self,
         kind: MetadataGrant,
         context: &InvocationContext,
     ) -> Result<MetadataExecution, String> {
-        let mut entries = self
-            .entries
-            .lock()
-            .map_err(|_| "metadata backend is poisoned".to_string())?;
-        entries.push(MetadataWriteRecord {
-            kind,
-            trace_id: context.trace.trace_id.clone(),
-            app_id: context.customer_app.app_id.clone(),
-        });
+        let record = MetadataAuditRecord::from_context(kind, context);
+        self.store.insert(&record)?;
+        let journal_entries = self.store.count()?;
 
         Ok(MetadataExecution {
             kind,
             recorded: true,
-            journal_entries: entries.len(),
+            journal_entries,
         })
     }
 
-    #[cfg(test)]
-    pub(super) fn records(&self) -> Vec<MetadataWriteRecord> {
-        self.entries
-            .lock()
-            .expect("metadata backend poisoned")
-            .clone()
+    pub(super) fn snapshot(&self, limit: usize) -> Result<MetadataAuditSnapshot, String> {
+        Ok(MetadataAuditSnapshot {
+            path: self.store.path().to_path_buf(),
+            entry_count: self.store.count()?,
+            recent_records: self.store.recent(limit)?,
+        })
+    }
+
+    pub(super) fn recent_records(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
+        self.store.recent(limit)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct MetadataWriteRecord {
-    pub kind: MetadataGrant,
-    pub trace_id: String,
+pub(crate) struct MetadataAuditSnapshot {
+    pub path: PathBuf,
+    pub entry_count: usize,
+    pub recent_records: Vec<MetadataAuditRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MetadataAuditRecord {
+    pub id: i64,
+    pub recorded_at_unix_seconds: i64,
+    pub kind: String,
     pub app_id: String,
+    pub trace_id: String,
+    pub request_id: Option<String>,
+    pub principal_kind: String,
+    pub principal_id: Option<String>,
+}
+
+impl MetadataAuditRecord {
+    fn from_context(kind: MetadataGrant, context: &InvocationContext) -> Self {
+        Self {
+            id: 0,
+            recorded_at_unix_seconds: unix_seconds_now(),
+            kind: kind.to_string(),
+            app_id: context.customer_app.app_id.clone(),
+            trace_id: context.trace.trace_id.clone(),
+            request_id: context.trace.request_id.clone(),
+            principal_kind: context.principal.kind.to_string(),
+            principal_id: context.principal.id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MetadataAuditStore {
+    path: PathBuf,
+    connection: std::sync::Arc<Mutex<Connection>>,
+}
+
+impl MetadataAuditStore {
+    fn open(root: PathBuf, namespace: String) -> Self {
+        let path = database_path(&root, &namespace);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+                panic!(
+                    "failed to create metadata audit directory `{}`: {error}",
+                    parent.display()
+                )
+            });
+        }
+
+        let connection = Connection::open(&path).unwrap_or_else(|error| {
+            panic!(
+                "failed to open metadata audit store `{}`: {error}",
+                path.display()
+            )
+        });
+        connection
+            .execute_batch(
+                r#"
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+                CREATE TABLE IF NOT EXISTS metadata_audit_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recorded_at_unix_seconds INTEGER NOT NULL,
+                    app_id TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    request_id TEXT,
+                    principal_kind TEXT NOT NULL,
+                    principal_id TEXT,
+                    kind TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS metadata_audit_entries_recent
+                    ON metadata_audit_entries (recorded_at_unix_seconds DESC, id DESC);
+                "#,
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to initialize metadata audit store `{}`: {error}",
+                    path.display()
+                )
+            });
+
+        Self {
+            path,
+            connection: std::sync::Arc::new(Mutex::new(connection)),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn insert(&self, record: &MetadataAuditRecord) -> Result<(), String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| "metadata audit store is poisoned".to_string())?;
+        let tx = connection
+            .transaction()
+            .map_err(|error| format!("failed to start metadata audit transaction: {error}"))?;
+        tx.execute(
+            r#"
+            INSERT INTO metadata_audit_entries (
+                recorded_at_unix_seconds,
+                app_id,
+                trace_id,
+                request_id,
+                principal_kind,
+                principal_id,
+                kind
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                record.recorded_at_unix_seconds,
+                record.app_id,
+                record.trace_id,
+                record.request_id,
+                record.principal_kind,
+                record.principal_id,
+                record.kind,
+            ],
+        )
+        .map_err(|error| format!("failed to write metadata audit entry: {error}"))?;
+        tx.commit()
+            .map_err(|error| format!("failed to commit metadata audit entry: {error}"))?;
+        Ok(())
+    }
+
+    fn count(&self) -> Result<usize, String> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "metadata audit store is poisoned".to_string())?;
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM metadata_audit_entries", [], |row| {
+                row.get(0)
+            })
+            .map_err(|error| format!("failed to count metadata audit entries: {error}"))?;
+        usize::try_from(count)
+            .map_err(|_| "metadata audit entry count overflowed usize".to_string())
+    }
+
+    fn recent(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "metadata audit store is poisoned".to_string())?;
+        let mut statement = connection
+            .prepare(
+                r#"
+                SELECT
+                    id,
+                    recorded_at_unix_seconds,
+                    app_id,
+                    trace_id,
+                    request_id,
+                    principal_kind,
+                    principal_id,
+                    kind
+                FROM metadata_audit_entries
+                ORDER BY recorded_at_unix_seconds DESC, id DESC
+                LIMIT ?1
+                "#,
+            )
+            .map_err(|error| format!("failed to query metadata audit entries: {error}"))?;
+
+        let mut records = statement
+            .query_map(params![limit as i64], |row| {
+                Ok(MetadataAuditRecord {
+                    id: row.get(0)?,
+                    recorded_at_unix_seconds: row.get(1)?,
+                    app_id: row.get(2)?,
+                    trace_id: row.get(3)?,
+                    request_id: row.get(4)?,
+                    principal_kind: row.get(5)?,
+                    principal_id: row.get(6)?,
+                    kind: row.get(7)?,
+                })
+            })
+            .map_err(|error| format!("failed to map metadata audit entries: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to collect metadata audit entries: {error}"))?;
+        records.reverse();
+        Ok(records)
+    }
+}
+
+fn database_path(root: &Path, namespace: &str) -> PathBuf {
+    root.join("wasm")
+        .join("metadata")
+        .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
+}
+
+fn sanitize_namespace(namespace: &str) -> String {
+    namespace
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn unix_seconds_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+#[cfg(test)]
+static TEST_SHARED_STATE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+fn test_shared_state_root(namespace: &str) -> PathBuf {
+    let root = std::env::temp_dir().join("davenda-shared").join(format!(
+        "wasm-metadata-{}-{}-{}",
+        sanitize_namespace(namespace),
+        std::process::id(),
+        TEST_SHARED_STATE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn execution_context(trace_id: &str, request_id: Option<&str>) -> InvocationContext {
+        let trace = if let Some(request_id) = request_id {
+            TraceContext::new(trace_id)
+                .unwrap()
+                .with_request_id(request_id)
+                .unwrap()
+        } else {
+            TraceContext::new(trace_id).unwrap()
+        };
+
+        InvocationContext::new(
+            CustomerAppContext::new("audit-app")
+                .unwrap()
+                .with_tenant_id("101")
+                .unwrap()
+                .with_locale("en-GB")
+                .unwrap(),
+            PrincipalRef::user("alice").unwrap(),
+            trace,
+            InvocationInput::Page(
+                PageInvocation::new("/metadata", davenda_wasm::HttpMethod::Get).unwrap(),
+            ),
+        )
+    }
+
+    fn shared_state_root(label: &str) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("davenda-metadata-{}-{}", std::process::id(), label));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn runtime_metadata_backend_persists_and_queries_audit_records() {
+        let root = shared_state_root("persistence");
+        let backend = RuntimeMetadataBackend::with_root(root.clone(), "audit-suite");
+
+        let first = backend
+            .record(
+                MetadataGrant::JsonLd,
+                &execution_context("trace-1", Some("req-1")),
+            )
+            .unwrap();
+        assert_eq!(first.journal_entries, 1);
+
+        let second = backend
+            .record(
+                MetadataGrant::SeoHead,
+                &execution_context("trace-2", Some("req-2")),
+            )
+            .unwrap();
+        assert_eq!(second.journal_entries, 2);
+
+        let reopened = RuntimeMetadataBackend::with_root(root, "audit-suite");
+        let snapshot = reopened.snapshot(10).unwrap();
+        assert_eq!(snapshot.entry_count, 2);
+        assert!(snapshot.path.exists());
+        let records = reopened.recent_records(10).unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].kind, "json_ld");
+        assert_eq!(records[0].trace_id, "trace-1");
+        assert_eq!(records[0].request_id.as_deref(), Some("req-1"));
+        assert_eq!(records[0].principal_kind, "user");
+        assert_eq!(records[1].kind, "seo_head");
+        assert_eq!(records[1].trace_id, "trace-2");
+        assert_eq!(records[1].request_id.as_deref(), Some("req-2"));
+
+        let last_only = reopened.recent_records(1).unwrap();
+        assert_eq!(last_only.len(), 1);
+        assert_eq!(last_only[0].kind, "seo_head");
+    }
 }

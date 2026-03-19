@@ -71,6 +71,18 @@ pub enum ConfigValidationError {
     InvalidAuthTenantId { tenant_id: i64 },
     #[error("wasm.default_time_limit_ms must be greater than zero")]
     InvalidWasmTimeLimit,
+    #[error("wasm.outbound_http contains an entry with an empty integration name")]
+    EmptyWasmOutboundHttpIntegration,
+    #[error("wasm.outbound_http contains duplicate integration `{integration}`")]
+    DuplicateWasmOutboundHttpIntegration { integration: String },
+    #[error(
+        "wasm.outbound_http integration `{integration}` must use http or https, got `{scheme}`"
+    )]
+    InvalidWasmOutboundHttpScheme { integration: String, scheme: String },
+    #[error("wasm.outbound_http integration `{integration}` must include a host")]
+    MissingWasmOutboundHttpHost { integration: String },
+    #[error("wasm.outbound_http integration `{integration}` must not include embedded credentials")]
+    WasmOutboundHttpHasCredentials { integration: String },
     #[error("storage.local_root must not be empty")]
     EmptyLocalStorageRoot,
     #[error(
@@ -237,6 +249,46 @@ impl PlatformConfig {
 
         if self.wasm.default_time_limit_ms == 0 {
             errors.push(ConfigValidationError::InvalidWasmTimeLimit);
+        }
+
+        let mut outbound_http_integrations = std::collections::BTreeSet::new();
+        for integration in &self.wasm.outbound_http {
+            if integration.integration.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptyWasmOutboundHttpIntegration);
+                continue;
+            }
+
+            if !outbound_http_integrations.insert(integration.integration.clone()) {
+                errors.push(
+                    ConfigValidationError::DuplicateWasmOutboundHttpIntegration {
+                        integration: integration.integration.clone(),
+                    },
+                );
+            }
+
+            match integration.endpoint.scheme() {
+                "http" | "https" => {}
+                scheme => {
+                    errors.push(ConfigValidationError::InvalidWasmOutboundHttpScheme {
+                        integration: integration.integration.clone(),
+                        scheme: scheme.to_string(),
+                    });
+                }
+            }
+
+            if integration.endpoint.host_str().is_none() {
+                errors.push(ConfigValidationError::MissingWasmOutboundHttpHost {
+                    integration: integration.integration.clone(),
+                });
+            }
+
+            if !integration.endpoint.username().is_empty()
+                || integration.endpoint.password().is_some()
+            {
+                errors.push(ConfigValidationError::WasmOutboundHttpHasCredentials {
+                    integration: integration.integration.clone(),
+                });
+            }
         }
 
         if self.storage.local_root.trim().is_empty() {

@@ -15,7 +15,7 @@ mod principal;
 mod services;
 
 pub use principal::ExtensionPrincipal;
-pub(crate) use services::RuntimeWasmHostServices;
+pub(crate) use services::{MetadataAuditSnapshot, RuntimeWasmHostServices};
 
 #[derive(Debug, Error)]
 pub enum LiveWasmExecutionError {
@@ -56,6 +56,7 @@ pub struct WasmHost {
     tenant_id: i64,
     default_locale: String,
     registered_jobs: Vec<RuntimeJobDefinition>,
+    host_services: RuntimeWasmHostServices,
     host_service_executor: Arc<dyn HostServiceExecutor>,
     compiled_modules: Arc<cache::CompiledModuleCache<String, CompiledWasmModule>>,
 }
@@ -69,7 +70,11 @@ impl WasmHost {
         default_locale: String,
         registered_jobs: Vec<RuntimeJobDefinition>,
     ) -> Self {
-        let host_service_executor = Arc::new(RuntimeHostServiceExecutor::new(plan.clone()));
+        let host_services = RuntimeWasmHostServices::new(plan.clone());
+        let host_service_executor = Arc::new(RuntimeHostServiceExecutor::with_services(
+            plan.clone(),
+            host_services.clone(),
+        ));
         Self {
             customer_app,
             runtime,
@@ -78,6 +83,7 @@ impl WasmHost {
             tenant_id: plan.tenant_id(),
             default_locale,
             registered_jobs,
+            host_services,
             host_service_executor,
             compiled_modules: Arc::new(cache::CompiledModuleCache::default()),
         }
@@ -94,7 +100,7 @@ impl WasmHost {
     ) -> Self {
         let host_service_executor = Arc::new(RuntimeHostServiceExecutor::with_services(
             plan.clone(),
-            services,
+            services.clone(),
         ));
         Self {
             customer_app,
@@ -104,9 +110,17 @@ impl WasmHost {
             tenant_id: plan.tenant_id(),
             default_locale,
             registered_jobs,
+            host_services: services,
             host_service_executor,
             compiled_modules: Arc::new(cache::CompiledModuleCache::default()),
         }
+    }
+
+    pub(crate) fn metadata_audit_snapshot(
+        &self,
+        limit: usize,
+    ) -> Result<MetadataAuditSnapshot, String> {
+        self.host_services.metadata_snapshot(limit)
     }
 
     pub fn compile_module(&self, bytes: &[u8]) -> Result<CompiledWasmModule, WasmModelError> {

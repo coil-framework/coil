@@ -141,7 +141,7 @@ impl CustomerAppManifest {
         config: Option<&PlatformConfig>,
     ) -> Result<ReleaseDoctorReport, AppModelError>
     where
-        P: AuthModelPackage,
+        P: AuthModelPackage + 'static,
     {
         let composition = self.compose(auth_package, manifests)?;
         let mut report = composition.release_doctor(config);

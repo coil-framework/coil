@@ -70,6 +70,9 @@ enabled = ["cms-pages", "admin-shell", "memberships", "events", "media-library"]
 directory = "extensions"
 default_time_limit_ms = 50
 allow_network = false
+[[wasm.outbound_http]]
+integration = "crm"
+endpoint = "https://crm.example.com/api"
 
 [jobs]
 backend = "redis"
@@ -104,6 +107,12 @@ fn parses_reference_config() {
     assert_eq!(
         config.http.session_cookie.protection,
         CookieProtection::Signed
+    );
+    assert_eq!(config.wasm.outbound_http.len(), 1);
+    assert_eq!(config.wasm.outbound_http[0].integration, "crm");
+    assert_eq!(
+        config.wasm.outbound_http[0].endpoint.as_str(),
+        "https://crm.example.com/api"
     );
 }
 
@@ -257,6 +266,98 @@ fn rejects_invalid_trusted_proxy_entries() {
                     .0
                     .contains(&ConfigValidationError::InvalidTrustedProxy {
                         value: "not-a-proxy".to_string(),
+                    })
+            );
+        }
+        other => panic!("expected validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_duplicate_wasm_outbound_http_integrations() {
+    let invalid = VALID_CONFIG.replace(
+        "[[wasm.outbound_http]]\nintegration = \"crm\"\nendpoint = \"https://crm.example.com/api\"\n",
+        "[[wasm.outbound_http]]\nintegration = \"crm\"\nendpoint = \"https://crm.example.com/api\"\n[[wasm.outbound_http]]\nintegration = \"crm\"\nendpoint = \"https://billing.example.com/api\"\n",
+    );
+
+    let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
+
+    match error {
+        ConfigError::Validation(errors) => {
+            assert!(errors.0.contains(
+                &ConfigValidationError::DuplicateWasmOutboundHttpIntegration {
+                    integration: "crm".to_string(),
+                }
+            ));
+        }
+        other => panic!("expected validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_non_http_wasm_outbound_http_endpoints() {
+    let invalid = VALID_CONFIG.replace(
+        "endpoint = \"https://crm.example.com/api\"",
+        "endpoint = \"ftp://crm.example.com/api\"",
+    );
+
+    let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
+
+    match error {
+        ConfigError::Validation(errors) => {
+            assert!(
+                errors
+                    .0
+                    .contains(&ConfigValidationError::InvalidWasmOutboundHttpScheme {
+                        integration: "crm".to_string(),
+                        scheme: "ftp".to_string(),
+                    })
+            );
+        }
+        other => panic!("expected validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_wasm_outbound_http_integrations_with_invalid_scheme() {
+    let invalid = VALID_CONFIG.replace(
+        "endpoint = \"https://crm.example.com/api\"",
+        "endpoint = \"ftp://crm.example.com/api\"",
+    );
+
+    let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
+
+    match error {
+        ConfigError::Validation(errors) => {
+            assert!(
+                errors
+                    .0
+                    .contains(&ConfigValidationError::InvalidWasmOutboundHttpScheme {
+                        integration: "crm".to_string(),
+                        scheme: "ftp".to_string(),
+                    })
+            );
+        }
+        other => panic!("expected validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_wasm_outbound_http_integrations_with_credentials() {
+    let invalid = VALID_CONFIG.replace(
+        "endpoint = \"https://crm.example.com/api\"",
+        "endpoint = \"https://user:secret@crm.example.com/api\"",
+    );
+
+    let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
+
+    match error {
+        ConfigError::Validation(errors) => {
+            assert!(
+                errors
+                    .0
+                    .contains(&ConfigValidationError::WasmOutboundHttpHasCredentials {
+                        integration: "crm".to_string(),
                     })
             );
         }

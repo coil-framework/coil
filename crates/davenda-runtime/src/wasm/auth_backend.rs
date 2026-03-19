@@ -306,7 +306,7 @@ provider = "cloudflare-dns"
 default_class = "public_upload"
 deployment = "distributed"
 object_store = "s3"
-local_root = "/var/lib/platform"
+local_root = "/tmp/davenda-runtime-tests"
 
 [cache]
 l1 = "moka"
@@ -482,9 +482,21 @@ cdn_base_url = "https://cdn.example.com"
                 .expect("memory auth engine mutex poisoned");
             Ok(tuples
                 .iter()
-                .filter(|tuple| object.as_ref().is_none_or(|expected| &tuple.object == expected))
-                .filter(|tuple| relation.as_ref().is_none_or(|expected| &tuple.relation == expected))
-                .filter(|tuple| subject.as_ref().is_none_or(|expected| &tuple.subject == expected))
+                .filter(|tuple| {
+                    object
+                        .as_ref()
+                        .is_none_or(|expected| &tuple.object == expected)
+                })
+                .filter(|tuple| {
+                    relation
+                        .as_ref()
+                        .is_none_or(|expected| &tuple.relation == expected)
+                })
+                .filter(|tuple| {
+                    subject
+                        .as_ref()
+                        .is_none_or(|expected| &tuple.subject == expected)
+                })
                 .cloned()
                 .collect())
         }
@@ -513,8 +525,13 @@ cdn_base_url = "https://cdn.example.com"
             let mut results = Vec::with_capacity(requests.len());
             for request in requests {
                 results.push(
-                    self.check(tenant_id, &request.subject, &request.relation, &request.object)
-                        .await?,
+                    self.check(
+                        tenant_id,
+                        &request.subject,
+                        &request.relation,
+                        &request.object,
+                    )
+                    .await?,
                 );
             }
             Ok(results)
@@ -582,58 +599,50 @@ cdn_base_url = "https://cdn.example.com"
                 .unwrap(),
             PrincipalRef::user(principal_id).unwrap(),
             TraceContext::new("trace-auth").unwrap(),
-            InvocationInput::Api(ApiInvocation::new("/auth", davenda_wasm::HttpMethod::Get).unwrap()),
+            InvocationInput::Api(
+                ApiInvocation::new("/auth", davenda_wasm::HttpMethod::Get).unwrap(),
+            ),
         )
     }
 
     #[test]
     fn runtime_auth_backend_new_accepts_replacement_packages_without_hard_failing() {
-        let package = TestAuthModelPackage::new(
-            "platform-extended-auth",
-            davenda_auth::PackageMode::Replace,
-        );
+        let package =
+            TestAuthModelPackage::new("platform-extended-auth", davenda_auth::PackageMode::Replace);
         let plan = RuntimeBuilder::new(config_with_auth_package("platform-extended-auth"), package)
             .build()
             .unwrap();
         let backend = RuntimeAuthBackend::new(&plan).unwrap();
 
         assert_eq!(backend.package().manifest().name, "platform-extended-auth");
-        assert_eq!(backend.package().manifest().mode, davenda_auth::PackageMode::Replace);
+        assert_eq!(
+            backend.package().manifest().mode,
+            davenda_auth::PackageMode::Replace
+        );
         assert!(backend.auth.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn runtime_auth_backend_accepts_replacement_packages_and_uses_selected_bindings() {
-        let package = package_selection("platform-extended-auth", davenda_auth::PackageMode::Extend);
+        let package =
+            package_selection("platform-extended-auth", davenda_auth::PackageMode::Extend);
         let engine = MemoryRebacEngine::default()
             .with_tuple(MemoryRebacEngine::tuple(
-                "tenant",
-                "101",
-                "view",
-                "user",
-                "alice",
-                None,
+                "tenant", "101", "view", "user", "alice", None,
             ))
             .with_tuple(MemoryRebacEngine::tuple(
-                "page",
-                "home",
-                "view",
-                "user",
-                "alice",
-                None,
+                "page", "home", "view", "user", "alice", None,
             ))
             .with_tuple(MemoryRebacEngine::tuple(
-                "tenant",
-                "101",
-                "manage",
-                "user",
-                "alice",
-                None,
+                "tenant", "101", "manage", "user", "alice", None,
             ));
         let auth = davenda_auth::DavendaAuth::new(engine, 101);
         let backend = RuntimeAuthBackend::from_auth(auth, package);
         assert_eq!(backend.package().manifest().name, "platform-extended-auth");
-        assert_eq!(backend.package().manifest().mode, davenda_auth::PackageMode::Extend);
+        assert_eq!(
+            backend.package().manifest().mode,
+            davenda_auth::PackageMode::Extend
+        );
 
         let context = invocation_context("alice");
 

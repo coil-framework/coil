@@ -1,4 +1,6 @@
 use super::*;
+use std::path::PathBuf;
+use url::Url;
 
 mod execution;
 #[cfg(test)]
@@ -12,6 +14,7 @@ pub struct RuntimePlan {
     pub config: PlatformConfig,
     pub auth_package_name: String,
     pub auth_package: AuthModelPackageSelection,
+    pub approved_outbound_http_endpoints: BTreeMap<String, Url>,
     pub shared_backend_scope: String,
     pub cache_topology: CacheTopology,
     pub cache_planner: CachePlanner,
@@ -49,6 +52,10 @@ pub struct RuntimePlan {
 impl RuntimePlan {
     pub fn auth_package(&self) -> &dyn AuthModelPackage {
         self.auth_package.package()
+    }
+
+    pub fn approved_outbound_http_endpoints(&self) -> &BTreeMap<String, Url> {
+        &self.approved_outbound_http_endpoints
     }
 
     pub fn tenant_id(&self) -> i64 {
@@ -231,4 +238,27 @@ impl RuntimePlan {
             self.config.app.name, self.shared_backend_scope
         )
     }
+
+    pub(crate) fn metadata_audit_path(&self) -> PathBuf {
+        PathBuf::from(&self.config.storage.local_root)
+            .join("wasm")
+            .join("metadata")
+            .join(format!(
+                "{}.sqlite3",
+                sanitize_namespace(&self.shared_backend_namespace())
+            ))
+    }
+}
+
+fn sanitize_namespace(namespace: &str) -> String {
+    namespace
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }

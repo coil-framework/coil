@@ -8,7 +8,6 @@ use ureq::{Agent, AgentBuilder};
 use url::Url;
 
 use super::super::*;
-use super::keys;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -18,18 +17,14 @@ const MAX_RESPONSE_BYTES_FROM_HINT: u64 = 4 * 1024 * 1024;
 #[derive(Debug, Clone)]
 pub(super) struct RuntimeOutboundHttpBackend {
     allow_network: bool,
-    targets: Arc<BTreeMap<String, String>>,
+    targets: Arc<BTreeMap<String, Url>>,
     client: Agent,
     request_timeout: Duration,
     max_response_bytes: u64,
 }
 
 impl RuntimeOutboundHttpBackend {
-    pub(super) fn new(allow_network: bool) -> Self {
-        Self::with_targets(allow_network, BTreeMap::new())
-    }
-
-    pub(super) fn with_targets(allow_network: bool, targets: BTreeMap<String, String>) -> Self {
+    pub(super) fn with_targets(allow_network: bool, targets: BTreeMap<String, Url>) -> Self {
         Self::with_settings(
             allow_network,
             targets,
@@ -40,7 +35,7 @@ impl RuntimeOutboundHttpBackend {
 
     pub(super) fn with_settings(
         allow_network: bool,
-        targets: BTreeMap<String, String>,
+        targets: BTreeMap<String, Url>,
         request_timeout: Duration,
         max_response_bytes: u64,
     ) -> Self {
@@ -70,7 +65,7 @@ impl RuntimeOutboundHttpBackend {
         let byte_limit = self.response_byte_limit(response_bytes_hint)?;
         let response = self
             .client
-            .get(&endpoint)
+            .get(endpoint.as_str())
             .timeout(self.request_timeout)
             .call()
             .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?;
@@ -89,26 +84,23 @@ impl RuntimeOutboundHttpBackend {
 
         Ok(NetworkExecution {
             integration: integration.to_string(),
-            endpoint,
+            endpoint: endpoint.to_string(),
             status,
             response_bytes: response_bytes.len() as u64,
         })
     }
 
-    fn resolve_endpoint(&self, integration: &str) -> Result<String, String> {
+    fn resolve_endpoint(&self, integration: &str) -> Result<Url, String> {
         // The guest only names an integration here; the backend resolves it to an approved
-        // endpoint. Raw absolute URLs are rejected to keep guest-controlled SSRF out of the host.
+        // endpoint declared in config. Raw absolute URLs are rejected to keep guest-controlled
+        // SSRF out of the host.
         if let Some(endpoint) = self.targets.get(integration) {
-            validate_approved_endpoint(integration, endpoint)?;
             return Ok(endpoint.clone());
         }
 
-        let env_key = integration_env_key(integration);
-        let endpoint = std::env::var(&env_key).map_err(|_| {
-            format!("integration `{integration}` is not mapped to an outbound HTTP endpoint")
-        })?;
-        validate_approved_endpoint(integration, &endpoint)?;
-        Ok(endpoint)
+        Err(format!(
+            "integration `{integration}` is not mapped to an outbound HTTP endpoint"
+        ))
     }
 
     fn response_byte_limit(&self, response_bytes_hint: u64) -> Result<u64, String> {
@@ -129,47 +121,29 @@ impl RuntimeOutboundHttpBackend {
     }
 }
 
-fn validate_approved_endpoint(integration: &str, endpoint: &str) -> Result<(), String> {
-    let parsed = Url::parse(endpoint).map_err(|error| {
-        format!(
-            "integration `{integration}` is mapped to an invalid outbound HTTP endpoint `{endpoint}`: {error}"
-        )
-    })?;
-
-    match parsed.scheme() {
-        "http" | "https" => {}
-        scheme => {
-            return Err(format!(
-                "integration `{integration}` is mapped to unsupported outbound HTTP scheme `{scheme}`"
-            ));
-        }
-    }
-
-    if parsed.host_str().is_none() {
-        return Err(format!(
-            "integration `{integration}` is mapped to an outbound HTTP endpoint without a host"
-        ));
-    }
-
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err(format!(
-            "integration `{integration}` is mapped to an outbound HTTP endpoint with embedded credentials"
-        ));
-    }
-
-    Ok(())
-}
-
-fn integration_env_key(integration: &str) -> String {
-    format!("DAVENDA_WASM_HTTP_{}", keys::env_key_component(integration))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous.take() {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     fn execution_context() -> InvocationContext {
         InvocationContext::new(
@@ -228,10 +202,36 @@ mod tests {
     }
 
     #[test]
+    fn runtime_outbound_http_backend_ignores_environment_fallbacks() {
+        let env_key = "DAVENDA_WASM_HTTP_NO_FALLBACK";
+        let previous = std::env::var_os(env_key);
+        unsafe {
+            std::env::set_var(env_key, "https://env.example.com/api");
+        }
+        let _guard = EnvVarGuard {
+            key: env_key,
+            previous,
+        };
+
+        let backend = RuntimeOutboundHttpBackend::with_settings(
+            true,
+            BTreeMap::new(),
+            Duration::from_millis(100),
+            1024,
+        );
+
+        let error = backend
+            .execute("no-fallback", 64, &execution_context())
+            .unwrap_err();
+
+        assert!(error.contains("not mapped"), "unexpected error: {error}");
+    }
+
+    #[test]
     fn runtime_outbound_http_backend_uses_explicit_endpoint_mappings() {
         let (endpoint, server) = spawn_http_server("mapped-response", None);
         let mut targets = BTreeMap::new();
-        targets.insert("crm".to_string(), endpoint.clone());
+        targets.insert("crm".to_string(), Url::parse(&endpoint).unwrap());
 
         let backend =
             RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
@@ -240,7 +240,10 @@ mod tests {
             .expect("mapped endpoint should succeed");
 
         assert_eq!(execution.integration, "crm");
-        assert_eq!(execution.endpoint, endpoint);
+        assert_eq!(
+            execution.endpoint,
+            Url::parse(&endpoint).unwrap().to_string()
+        );
         assert_eq!(execution.status, 200);
         assert_eq!(execution.response_bytes, "mapped-response".len() as u64);
 
@@ -251,7 +254,7 @@ mod tests {
     fn runtime_outbound_http_backend_enforces_response_size_limits() {
         let (endpoint, server) = spawn_http_server("too-many-bytes", None);
         let mut targets = BTreeMap::new();
-        targets.insert("search".to_string(), endpoint);
+        targets.insert("search".to_string(), Url::parse(&endpoint).unwrap());
 
         let backend =
             RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
@@ -272,7 +275,7 @@ mod tests {
         let (endpoint, server) =
             spawn_http_server("slow-response", Some(Duration::from_millis(200)));
         let mut targets = BTreeMap::new();
-        targets.insert("billing".to_string(), endpoint);
+        targets.insert("billing".to_string(), Url::parse(&endpoint).unwrap());
 
         let backend = RuntimeOutboundHttpBackend::with_settings(
             true,

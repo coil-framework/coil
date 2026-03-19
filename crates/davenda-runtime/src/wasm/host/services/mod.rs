@@ -4,17 +4,14 @@ use davenda_wasm::{
 
 use super::super::*;
 
-#[cfg(test)]
 use std::collections::BTreeMap;
 
 mod http;
 mod jobs;
-mod keys;
 mod metadata;
 mod secrets;
 
-#[cfg(test)]
-pub(crate) use metadata::MetadataWriteRecord;
+pub(crate) use metadata::{MetadataAuditRecord, MetadataAuditSnapshot};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeWasmHostServices {
@@ -26,11 +23,23 @@ pub(crate) struct RuntimeWasmHostServices {
 
 impl RuntimeWasmHostServices {
     pub(crate) fn new(plan: RuntimePlan) -> Self {
+        let jobs = jobs::RuntimeJobBackend::new(plan.clone());
+        #[cfg(test)]
+        let metadata =
+            metadata::RuntimeMetadataBackend::open_for_test(plan.shared_backend_namespace());
+        #[cfg(not(test))]
+        let metadata = metadata::RuntimeMetadataBackend::open(
+            plan.config.storage.local_root.clone(),
+            plan.shared_backend_namespace(),
+        );
         Self {
-            http: http::RuntimeOutboundHttpBackend::new(plan.wasm.allow_network),
+            http: http::RuntimeOutboundHttpBackend::with_targets(
+                plan.wasm.allow_network,
+                plan.approved_outbound_http_endpoints().clone(),
+            ),
             secrets: secrets::RuntimeSecretBackend::deny_all(plan.config.app.name.clone()),
-            jobs: jobs::RuntimeJobBackend::new(plan),
-            metadata: metadata::RuntimeMetadataBackend::default(),
+            jobs,
+            metadata,
         }
     }
 
@@ -38,31 +47,47 @@ impl RuntimeWasmHostServices {
         plan: RuntimePlan,
         secrets: BTreeMap<String, String>,
     ) -> Self {
+        let jobs = jobs::RuntimeJobBackend::new(plan.clone());
+        #[cfg(test)]
+        let metadata =
+            metadata::RuntimeMetadataBackend::open_for_test(plan.shared_backend_namespace());
+        #[cfg(not(test))]
+        let metadata = metadata::RuntimeMetadataBackend::open(
+            plan.config.storage.local_root.clone(),
+            plan.shared_backend_namespace(),
+        );
         Self {
-            http: http::RuntimeOutboundHttpBackend::new(plan.wasm.allow_network),
+            http: http::RuntimeOutboundHttpBackend::with_targets(
+                plan.wasm.allow_network,
+                plan.approved_outbound_http_endpoints().clone(),
+            ),
             secrets: secrets::RuntimeSecretBackend::runtime_scoped(
                 plan.config.app.name.clone(),
                 secrets,
             ),
-            jobs: jobs::RuntimeJobBackend::new(plan),
-            metadata: metadata::RuntimeMetadataBackend::default(),
+            jobs,
+            metadata,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn with_backends(
+    pub(crate) fn with_shared_state_root(
+        root: impl Into<std::path::PathBuf>,
         plan: RuntimePlan,
-        http_targets: BTreeMap<String, String>,
+        http_targets: BTreeMap<String, url::Url>,
         secrets: BTreeMap<String, String>,
     ) -> Self {
+        let jobs = jobs::RuntimeJobBackend::new(plan.clone());
+        let metadata =
+            metadata::RuntimeMetadataBackend::with_root(root, plan.shared_backend_namespace());
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
                 plan.wasm.allow_network,
                 http_targets,
             ),
             secrets: secrets::RuntimeSecretBackend::with_values(secrets),
-            jobs: jobs::RuntimeJobBackend::new(plan),
-            metadata: metadata::RuntimeMetadataBackend::default(),
+            jobs,
+            metadata,
         }
     }
 
@@ -99,8 +124,10 @@ impl RuntimeWasmHostServices {
         self.metadata.record(kind, context)
     }
 
-    #[cfg(test)]
-    pub(crate) fn metadata_records(&self) -> Vec<MetadataWriteRecord> {
-        self.metadata.records()
+    pub(crate) fn metadata_records(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<MetadataAuditRecord>, String> {
+        self.metadata.recent_records(limit)
     }
 }

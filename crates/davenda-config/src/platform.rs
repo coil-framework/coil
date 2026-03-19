@@ -1,9 +1,10 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::{
     AppConfig, AssetsConfig, CacheConfig, ConfigValidationErrors, DatabaseConfig, HttpConfig,
@@ -113,6 +114,14 @@ pub struct WasmConfig {
     pub allow_network: bool,
     #[serde(default)]
     pub secret_bindings: BTreeMap<String, SecretRef>,
+    #[serde(default)]
+    pub outbound_http: Vec<WasmOutboundHttpIntegration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WasmOutboundHttpIntegration {
+    pub integration: String,
+    pub endpoint: Url,
 }
 
 #[derive(Debug, thiserror::Error)]

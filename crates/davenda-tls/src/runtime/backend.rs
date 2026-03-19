@@ -5,19 +5,17 @@ use super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
 use super::state::TlsAutomationState;
 use crate::{CertificateId, CertificateRecord, TlsInstant, TlsModelError};
 
-#[cfg(test)]
-mod file;
 mod memory;
 mod shared;
-
 #[cfg(test)]
-pub(super) use file::FileTlsAutomationBackend;
+mod testing;
+
 pub(super) use memory::MemoryTlsAutomationBackend;
 #[cfg(test)]
-pub(crate) fn test_state_path(scope: impl Into<String>) -> std::path::PathBuf {
-    file::test_state_path(scope)
-}
+pub(crate) use testing::TestFileTlsAutomationBackend;
 pub use shared::SharedTlsAutomationBackend;
+#[cfg(test)]
+pub(crate) use testing::test_file_state_path;
 
 pub trait TlsAutomationBackend: fmt::Debug + Send + Sync {
     fn snapshot(&self) -> TlsAutomationState;

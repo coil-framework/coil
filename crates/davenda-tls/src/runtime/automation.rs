@@ -29,11 +29,11 @@ impl TlsAutomationRuntime {
     }
 
     #[cfg(test)]
-    pub fn with_file_backend_for_testing(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
+    pub fn with_test_file_backend(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
         Self::with_backend(
             runtime,
-            Arc::new(super::backend::FileTlsAutomationBackend::new(
-                super::backend::test_state_path(scope),
+            Arc::new(super::backend::TestFileTlsAutomationBackend::new(
+                super::backend::test_file_state_path(scope),
             )),
         )
     }

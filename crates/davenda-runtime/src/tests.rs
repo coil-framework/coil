@@ -4037,6 +4037,8 @@ fn storage_host_applies_path_rules_for_sensitive_files() {
 
     let storage_plan = plan
         .storage_host()
+        .planner
+        .single_node_escape_hatch()
         .plan_write(StoragePlanRequest::new("secure/reports/march.csv"))
         .unwrap();
 
@@ -4147,16 +4149,19 @@ fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
             ))
     );
 
-    let restricted_revision = host
-        .plan_managed_revision(
-            RevisionId::new("rev-secret-1").unwrap(),
-            "secure/docs/orders.csv",
-            None,
-            "text/csv",
-            256,
-            content_fingerprint('c'),
-        )
+    let restricted_storage_plan = host
+        .planner
+        .single_node_escape_hatch()
+        .plan_write(StoragePlanRequest::new("secure/docs/orders.csv"))
         .unwrap();
+    let restricted_revision = ManagedAssetRevision::new(
+        RevisionId::new("rev-secret-1").unwrap(),
+        restricted_storage_plan,
+        "text/csv",
+        256,
+        content_fingerprint('c'),
+    )
+    .unwrap();
     let restricted_asset = ManagedAsset::new(
         AssetId::new("asset-orders").unwrap(),
         "Orders Export",

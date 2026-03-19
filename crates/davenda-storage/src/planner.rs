@@ -124,6 +124,10 @@ impl StoragePlanner {
         &self.policies
     }
 
+    pub fn single_node_escape_hatch(&self) -> SingleNodeEscapeHatchPlanner {
+        SingleNodeEscapeHatchPlanner::new(self.topology.clone(), self.policies.clone())
+    }
+
     pub fn plan_scalable_write(
         &self,
         request: StoragePlanRequest,
@@ -139,31 +143,11 @@ impl StoragePlanner {
         self.plan_resolved_scalable_write(logical_path, resolved)
     }
 
-    pub fn plan_single_node_escape_hatch_write(
-        &self,
-        request: StoragePlanRequest,
-    ) -> Result<StoragePlan, StoragePlanningError> {
-        let logical_path = normalize_relative_path(&request.logical_path)?;
-        let storage_class = request.storage_class.unwrap_or(self.topology.default_class);
-        let resolved = self.policies.resolve(
-            storage_class,
-            &logical_path,
-            request.override_policy.as_ref(),
-        )?;
-
-        self.plan_resolved_single_node_escape_hatch_write(logical_path, resolved)
-    }
-
     pub fn plan_write(
         &self,
         request: StoragePlanRequest,
     ) -> Result<StoragePlan, StoragePlanningError> {
-        self.plan_scalable_write(request.clone()).or_else(|error| match error {
-            StoragePlanningError::SingleNodeEscapeHatchRequested { .. } => {
-                self.plan_single_node_escape_hatch_write(request)
-            }
-            other => Err(other),
-        })
+        self.plan_scalable_write(request)
     }
 
     fn plan_resolved_scalable_write(
@@ -218,50 +202,6 @@ impl StoragePlanner {
         })
     }
 
-    fn plan_resolved_single_node_escape_hatch_write(
-        &self,
-        logical_path: String,
-        resolved: crate::ResolvedStoragePolicy,
-    ) -> Result<StoragePlan, StoragePlanningError> {
-        let policy = resolved.policy;
-        if policy.sync_mode != SyncMode::LocalOnly {
-            return self.plan_resolved_scalable_write(logical_path, resolved);
-        }
-
-        if !self.topology.allows_explicit_local_only() {
-            return Err(StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
-                logical_path,
-                policy,
-                deployment: self.topology.deployment,
-                single_node_escape_hatch: self.topology.single_node_escape_hatch,
-            });
-        }
-
-        let local_path = Some(join_local_path(
-            &self.topology.local_root,
-            resolved.local_subdir.as_deref(),
-            &logical_path,
-        ));
-        let write_targets = vec![WriteTarget {
-            backend: StorageBackendKind::LocalDisk,
-            locator: local_path
-                .clone()
-                .expect("local path is present for local policies"),
-            kind: WriteTargetKind::Primary,
-        }];
-
-        Ok(StoragePlan {
-            logical_path,
-            storage_class: resolved.storage_class,
-            policy,
-            durable_store: policy.durable_store(),
-            object_key: None,
-            local_path,
-            matched_rule_prefix: resolved.matched_rule_prefix,
-            write_targets,
-            deployment_scope: StorageDeploymentScope::SingleNodeOnly,
-        })
-    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -298,4 +238,84 @@ pub enum StoragePlanningError {
         deployment: davenda_config::StorageDeployment,
         single_node_escape_hatch: davenda_config::SingleNodeStorageMode,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SingleNodeEscapeHatchPlanner {
+    topology: StorageTopology,
+    policies: StoragePolicySet,
+}
+
+impl SingleNodeEscapeHatchPlanner {
+    pub fn from_config(config: &PlatformConfig) -> Self {
+        Self {
+            topology: StorageTopology::from_config(config),
+            policies: StoragePolicySet::default(),
+        }
+    }
+
+    pub fn new(topology: StorageTopology, policies: StoragePolicySet) -> Self {
+        Self { topology, policies }
+    }
+
+    pub fn plan_write(
+        &self,
+        request: StoragePlanRequest,
+    ) -> Result<StoragePlan, StoragePlanningError> {
+        let logical_path = normalize_relative_path(&request.logical_path)?;
+        let storage_class = request.storage_class.unwrap_or(self.topology.default_class);
+        let resolved = self.policies.resolve(
+            storage_class,
+            &logical_path,
+            request.override_policy.as_ref(),
+        )?;
+
+        self.plan_resolved_single_node_escape_hatch_write(logical_path, resolved)
+    }
+
+    fn plan_resolved_single_node_escape_hatch_write(
+        &self,
+        logical_path: String,
+        resolved: crate::ResolvedStoragePolicy,
+    ) -> Result<StoragePlan, StoragePlanningError> {
+        let policy = resolved.policy;
+        if policy.sync_mode != SyncMode::LocalOnly {
+            return StoragePlanner::new(self.topology.clone(), self.policies.clone())
+                .plan_resolved_scalable_write(logical_path, resolved);
+        }
+
+        if !self.topology.allows_explicit_local_only() {
+            return Err(StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
+                logical_path,
+                policy,
+                deployment: self.topology.deployment,
+                single_node_escape_hatch: self.topology.single_node_escape_hatch,
+            });
+        }
+
+        let local_path = Some(join_local_path(
+            &self.topology.local_root,
+            resolved.local_subdir.as_deref(),
+            &logical_path,
+        ));
+        let write_targets = vec![WriteTarget {
+            backend: StorageBackendKind::LocalDisk,
+            locator: local_path
+                .clone()
+                .expect("local path is present for local policies"),
+            kind: WriteTargetKind::Primary,
+        }];
+
+        Ok(StoragePlan {
+            logical_path,
+            storage_class: resolved.storage_class,
+            policy,
+            durable_store: policy.durable_store(),
+            object_key: None,
+            local_path,
+            matched_rule_prefix: resolved.matched_rule_prefix,
+            write_targets,
+            deployment_scope: StorageDeploymentScope::SingleNodeOnly,
+        })
+    }
 }

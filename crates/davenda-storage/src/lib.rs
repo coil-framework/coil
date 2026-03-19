@@ -2,8 +2,8 @@ mod planner;
 mod policy;
 
 pub use planner::{
-    StorageDeploymentScope, StoragePlan, StoragePlanRequest, StoragePlanner, StoragePlanningError,
-    WriteTarget, WriteTargetKind,
+    SingleNodeEscapeHatchPlanner, StorageDeploymentScope, StoragePlan, StoragePlanRequest,
+    StoragePlanner, StoragePlanningError, WriteTarget, WriteTargetKind,
 };
 pub use policy::{
     DeliveryMode, DurableStore, ObjectStoreTarget, PathPolicyRule, ResolvedStoragePolicy,

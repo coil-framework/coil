@@ -160,7 +160,8 @@ fn single_node_escape_hatch_override_keeps_sensitive_files_on_server() {
     let planner = StoragePlanner::from_config(&test_config());
 
     let plan = planner
-        .plan_single_node_escape_hatch_write(
+        .single_node_escape_hatch()
+        .plan_write(
             StoragePlanRequest::new("secure/reports/march.csv")
                 .with_storage_class(davenda_config::StorageClass::PrivateShared)
                 .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),
@@ -188,7 +189,8 @@ fn single_node_escape_hatch_override_is_rejected_for_distributed_deployments() {
     let planner = StoragePlanner::from_config(&config);
 
     let error = planner
-        .plan_single_node_escape_hatch_write(
+        .single_node_escape_hatch()
+        .plan_write(
             StoragePlanRequest::new("secure/reports/march.csv")
                 .with_storage_class(davenda_config::StorageClass::PrivateShared)
                 .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),

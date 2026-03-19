@@ -2,13 +2,14 @@ use std::fmt;
 use std::time::Duration;
 
 use davenda_config::AcmeChallenge;
+use serde::{Deserialize, Serialize};
 
 use crate::TlsModelError;
 use crate::validation::validate_token;
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub struct $name(String);
 
         impl $name {
@@ -34,7 +35,7 @@ token_type!(Hostname, "hostname");
 token_type!(CustomerAppId, "customer_app_id");
 token_type!(CertificateFingerprint, "certificate_fingerprint");
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SecretMaterialRef(String);
 
 impl SecretMaterialRef {
@@ -68,7 +69,7 @@ impl fmt::Display for SecretMaterialRef {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TlsInstant(u64);
 
 impl TlsInstant {
@@ -91,7 +92,7 @@ impl fmt::Display for TlsInstant {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChallengeStrategy {
     Http01,
     TlsAlpn01,
@@ -114,14 +115,14 @@ impl From<AcmeChallenge> for ChallengeStrategy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EdgeMode {
     DirectTermination,
     ExternalTermination,
     CloudflareOriginOnly,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CertificateProviderKind {
     Acme,
     CloudflareDns,
@@ -140,19 +141,19 @@ impl fmt::Display for CertificateProviderKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CertificateStateStore {
     SharedSecrets,
     ExternalTermination,
     OperatorManaged,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CloudflareEncryptionMode {
     FullStrict,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CertificateStatus {
     PendingIssuance,
     Active,
@@ -169,7 +170,7 @@ pub struct RenewalWindow {
     pub retry_interval: Duration,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostnameBinding {
     pub hostname: Hostname,
     pub customer_app: CustomerAppId,
@@ -190,7 +191,7 @@ impl HostnameBinding {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CertificateRecord {
     pub id: CertificateId,
     pub provider: CertificateProviderKind,

@@ -26,8 +26,18 @@ pub struct TlsHost {
 }
 
 impl TlsHost {
-    pub(crate) fn new(customer_app: String, runtime: TlsRuntimeServices) -> Self {
-        let automation = runtime.automation();
+    pub(crate) fn new(
+        customer_app: String,
+        runtime: TlsRuntimeServices,
+        _shared_backend_scope: String,
+    ) -> Self {
+        #[cfg(test)]
+        let automation = TlsAutomationRuntime::ephemeral(runtime.clone());
+        #[cfg(not(test))]
+        let automation = TlsAutomationRuntime::with_persistent_backend(
+            runtime.clone(),
+            format!("{}:{}", customer_app, _shared_backend_scope),
+        );
         Self {
             customer_app,
             runtime,

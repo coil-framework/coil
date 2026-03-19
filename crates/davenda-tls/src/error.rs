@@ -37,4 +37,8 @@ pub enum TlsModelError {
     },
     #[error("certificate `{certificate_id}` has no pending replacement")]
     MissingReplacementCertificate { certificate_id: String },
+    #[error("tls automation state `{path}` is invalid: {reason}")]
+    CorruptAutomationState { path: String, reason: String },
+    #[error("failed to persist tls automation state `{path}`: {reason}")]
+    AutomationStatePersistence { path: String, reason: String },
 }

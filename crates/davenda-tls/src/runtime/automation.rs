@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use super::backend::{MemoryTlsAutomationBackend, TlsAutomationBackend};
+use super::backend::{
+    FileTlsAutomationBackend, MemoryTlsAutomationBackend, TlsAutomationBackend, default_state_path,
+};
 use super::planning::TlsRuntime;
 use super::state::{CertificateInventory, TlsAutomationState};
 use crate::{
-    CertificateId, CertificateRecord, ChallengeTicket, HotReloadEvent, RenewalPlan,
-    TlsModelError, TlsInstant,
+    CertificateId, CertificateRecord, ChallengeTicket, HotReloadEvent, RenewalPlan, TlsInstant,
+    TlsModelError,
 };
 
 #[derive(Debug, Clone)]
@@ -17,6 +19,19 @@ pub struct TlsAutomationRuntime {
 impl TlsAutomationRuntime {
     pub fn new(runtime: TlsRuntime) -> Self {
         Self::with_backend(runtime, Arc::new(MemoryTlsAutomationBackend::new()))
+    }
+
+    pub fn ephemeral(runtime: TlsRuntime) -> Self {
+        Self::with_backend(runtime, Arc::new(MemoryTlsAutomationBackend::new()))
+    }
+
+    pub fn with_persistent_backend(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
+        Self::with_backend(
+            runtime,
+            Arc::new(FileTlsAutomationBackend::new(default_state_path(
+                scope.into(),
+            ))),
+        )
     }
 
     pub fn with_backend(runtime: TlsRuntime, backend: Arc<dyn TlsAutomationBackend>) -> Self {
@@ -52,7 +67,8 @@ impl TlsAutomationRuntime {
         certificate_id: &CertificateId,
         now: TlsInstant,
     ) -> Result<RenewalPlan, TlsModelError> {
-        self.backend.queue_renewal(&self.runtime, certificate_id, now)
+        self.backend
+            .queue_renewal(&self.runtime, certificate_id, now)
     }
 
     pub fn begin_renewal(

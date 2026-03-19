@@ -145,7 +145,11 @@ impl RuntimePlan {
     }
 
     pub fn tls_host(&self) -> TlsHost {
-        TlsHost::new(self.config.app.name.clone(), self.tls.clone())
+        TlsHost::new(
+            self.config.app.name.clone(),
+            self.tls.clone(),
+            self.shared_backend_scope.clone(),
+        )
     }
 
     pub fn storage_host(&self) -> StorageHost {

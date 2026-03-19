@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use super::*;
 use davenda_config::{AcmeChallenge, SecretRef, TlsConfig, TlsMode, TlsProvider};
 
@@ -139,7 +141,7 @@ fn wildcard_bindings_are_rejected_without_dns_validation() {
 #[test]
 fn inventory_rejects_duplicate_active_hostname_bindings() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = runtime.automation();
+    let automation = TlsAutomationRuntime::ephemeral(runtime);
     let binding = HostnameBinding::new(
         Hostname::new("www.example.com").unwrap(),
         CustomerAppId::new("storefront").unwrap(),
@@ -189,7 +191,7 @@ fn inventory_rejects_duplicate_active_hostname_bindings() {
 #[test]
 fn renewal_failure_keeps_current_certificate_bound() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = runtime.automation();
+    let automation = TlsAutomationRuntime::ephemeral(runtime);
     let certificate_id = CertificateId::new("cert-active").unwrap();
     let binding = HostnameBinding::new(
         Hostname::new("www.example.com").unwrap(),
@@ -243,7 +245,7 @@ fn renewal_failure_keeps_current_certificate_bound() {
 #[test]
 fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = runtime.automation();
+    let automation = TlsAutomationRuntime::ephemeral(runtime);
     let certificate_id = CertificateId::new("cert-live").unwrap();
     let binding = HostnameBinding::new(
         Hostname::new("shop.example.com").unwrap(),
@@ -308,4 +310,61 @@ fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
         CertificateStatus::Superseded
     );
     assert_eq!(automation.hot_reload_events().len(), 1);
+}
+
+#[test]
+fn file_backend_persists_tls_state_between_instances() {
+    let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
+    let path = temp_tls_state_path();
+    let automation = TlsAutomationRuntime::with_persistent_backend(
+        runtime.clone(),
+        path.to_string_lossy().to_string(),
+    );
+    let certificate_id = CertificateId::new("cert-persistent").unwrap();
+
+    automation
+        .import_certificate(
+            CertificateRecord::new(
+                certificate_id.clone(),
+                CertificateProviderKind::Acme,
+                CertificateStatus::Active,
+                CertificateFingerprint::new("sha256:persistent").unwrap(),
+                TlsInstant::from_unix_seconds(1_000),
+                TlsInstant::from_unix_seconds(4_000_000),
+                SecretMaterialRef::new("secrets/tls/cert-persistent").unwrap(),
+                CertificateStateStore::SharedSecrets,
+            )
+            .with_binding(HostnameBinding::new(
+                Hostname::new("persistent.example.com").unwrap(),
+                CustomerAppId::new("storefront").unwrap(),
+            )),
+        )
+        .unwrap();
+
+    let second_automation =
+        TlsAutomationRuntime::with_persistent_backend(runtime, path.to_string_lossy().to_string());
+    assert_eq!(
+        second_automation
+            .inventory()
+            .record(&certificate_id)
+            .unwrap()
+            .status,
+        CertificateStatus::Active
+    );
+}
+
+fn temp_tls_state_path() -> PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "davenda-tls-{}-{}",
+        std::process::id(),
+        TlsInstant::from_unix_seconds(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+    ));
+    path.push("state.json");
+    path
 }

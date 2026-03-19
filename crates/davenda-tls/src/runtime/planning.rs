@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use davenda_config::{SecretRef, TlsConfig, TlsMode, TlsProvider};
+use serde::{Deserialize, Serialize};
 
 use super::automation::TlsAutomationRuntime;
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
     TlsInstant, TlsModelError,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssuancePlan {
     pub edge_mode: EdgeMode,
     pub provider: CertificateProviderKind,
@@ -22,7 +23,7 @@ pub struct IssuancePlan {
     pub cloudflare_mode: Option<CloudflareEncryptionMode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenewalPlan {
     pub certificate_id: CertificateId,
     pub provider: CertificateProviderKind,
@@ -34,7 +35,7 @@ pub struct RenewalPlan {
     pub requires_hot_reload: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChallengeTicket {
     pub certificate_id: CertificateId,
     pub replacement_certificate_id: Option<CertificateId>,
@@ -44,7 +45,7 @@ pub struct ChallengeTicket {
     pub account_secret_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HotReloadEvent {
     pub certificate_id: CertificateId,
     pub bindings: Vec<HostnameBinding>,
@@ -132,6 +133,22 @@ impl TlsRuntime {
         TlsPlanner {
             runtime: self.clone(),
         }
+    }
+
+    pub fn control_plane_scope(&self) -> String {
+        format!(
+            "mode={:?};edge={:?};provider={:?};challenge={:?};store={:?};shared={};hot_reload={};cloudflare={:?};trusted_termination={};account={}",
+            self.mode,
+            self.edge_mode,
+            self.provider,
+            self.challenge,
+            self.state_store,
+            self.shared_across_nodes,
+            self.hot_reload_supported,
+            self.cloudflare_mode,
+            self.requires_trusted_termination_metadata,
+            self.account_secret_ref.as_deref().unwrap_or("none"),
+        )
     }
 
     pub fn automation(&self) -> TlsAutomationRuntime {

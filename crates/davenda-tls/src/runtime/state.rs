@@ -1,10 +1,9 @@
-use crate::{
-    CertificateId, CertificateRecord, CertificateStatus, Hostname, TlsModelError,
-};
+use crate::{CertificateId, CertificateRecord, CertificateStatus, Hostname, TlsModelError};
+use serde::{Deserialize, Serialize};
 
 use super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TlsAutomationState {
     pub inventory: CertificateInventory,
     pub renewal_queue: Vec<RenewalPlan>,
@@ -12,7 +11,7 @@ pub struct TlsAutomationState {
     pub hot_reload_events: Vec<HotReloadEvent>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CertificateInventory {
     certificates: Vec<CertificateRecord>,
 }

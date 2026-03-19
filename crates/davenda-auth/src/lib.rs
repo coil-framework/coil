@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 
@@ -62,6 +62,36 @@ impl Namespace {
             Self::AssetFolder => "asset_folder",
             Self::ThemeAssetBundle => "theme_asset_bundle",
             Self::AdminModule => "admin_module",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "tenant" => Some(Self::Tenant),
+            "site" => Some(Self::Site),
+            "brand" => Some(Self::Brand),
+            "storefront" => Some(Self::Storefront),
+            "user" => Some(Self::User),
+            "group" => Some(Self::Group),
+            "team" => Some(Self::Team),
+            "service_account" => Some(Self::ServiceAccount),
+            "page" => Some(Self::Page),
+            "navigation" => Some(Self::Navigation),
+            "product" => Some(Self::Product),
+            "collection" => Some(Self::Collection),
+            "order" => Some(Self::Order),
+            "subscription" => Some(Self::Subscription),
+            "membership_tier" => Some(Self::MembershipTier),
+            "event" => Some(Self::Event),
+            "event_slot" => Some(Self::EventSlot),
+            "booking" => Some(Self::Booking),
+            "media" => Some(Self::Media),
+            "media_library" => Some(Self::MediaLibrary),
+            "asset" => Some(Self::Asset),
+            "asset_folder" => Some(Self::AssetFolder),
+            "theme_asset_bundle" => Some(Self::ThemeAssetBundle),
+            "admin_module" => Some(Self::AdminModule),
+            _ => None,
         }
     }
 }
@@ -135,6 +165,40 @@ impl Relation {
             Self::ManageStorage => "manage_storage",
             Self::Book => "book",
             Self::CheckIn => "check_in",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "tenant" => Some(Self::Tenant),
+            "site" => Some(Self::Site),
+            "brand" => Some(Self::Brand),
+            "storefront" => Some(Self::Storefront),
+            "event" => Some(Self::Event),
+            "slot" => Some(Self::Slot),
+            "folder" => Some(Self::Folder),
+            "library" => Some(Self::Library),
+            "member" => Some(Self::Member),
+            "owner" => Some(Self::Owner),
+            "admin" => Some(Self::Admin),
+            "editor" => Some(Self::Editor),
+            "viewer" => Some(Self::Viewer),
+            "support" => Some(Self::Support),
+            "view" => Some(Self::View),
+            "edit" => Some(Self::Edit),
+            "publish" => Some(Self::Publish),
+            "manage" => Some(Self::Manage),
+            "checkout" => Some(Self::Checkout),
+            "refund" => Some(Self::Refund),
+            "read" => Some(Self::Read),
+            "read_public" => Some(Self::ReadPublic),
+            "replace" => Some(Self::Replace),
+            "delete" => Some(Self::Delete),
+            "unpublish" => Some(Self::Unpublish),
+            "manage_storage" => Some(Self::ManageStorage),
+            "book" => Some(Self::Book),
+            "check_in" => Some(Self::CheckIn),
+            _ => None,
         }
     }
 }
@@ -339,6 +403,37 @@ impl Entity {
         }
     }
 
+    pub fn from_object(object: &Object) -> Option<Self> {
+        let id = object.id.clone();
+
+        match Namespace::from_str(&object.namespace)? {
+            Namespace::Tenant => Some(Self::Tenant(id)),
+            Namespace::Site => Some(Self::Site(id)),
+            Namespace::Brand => Some(Self::Brand(id)),
+            Namespace::Storefront => Some(Self::Storefront(id)),
+            Namespace::User => Some(Self::User(id)),
+            Namespace::Group => Some(Self::Group(id)),
+            Namespace::Team => Some(Self::Team(id)),
+            Namespace::ServiceAccount => Some(Self::ServiceAccount(id)),
+            Namespace::Page => Some(Self::Page(id)),
+            Namespace::Navigation => Some(Self::Navigation(id)),
+            Namespace::Product => Some(Self::Product(id)),
+            Namespace::Collection => Some(Self::Collection(id)),
+            Namespace::Order => Some(Self::Order(id)),
+            Namespace::Subscription => Some(Self::Subscription(id)),
+            Namespace::MembershipTier => Some(Self::MembershipTier(id)),
+            Namespace::Event => Some(Self::Event(id)),
+            Namespace::EventSlot => Some(Self::EventSlot(id)),
+            Namespace::Booking => Some(Self::Booking(id)),
+            Namespace::Media => Some(Self::Media(id)),
+            Namespace::MediaLibrary => Some(Self::MediaLibrary(id)),
+            Namespace::Asset => Some(Self::Asset(id)),
+            Namespace::AssetFolder => Some(Self::AssetFolder(id)),
+            Namespace::ThemeAssetBundle => Some(Self::ThemeAssetBundle(id)),
+            Namespace::AdminModule => Some(Self::AdminModule(id)),
+        }
+    }
+
     pub fn as_subject(&self) -> DefaultSubject {
         DefaultSubject::Entity(self.clone())
     }
@@ -386,6 +481,16 @@ impl DefaultSubject {
             },
         }
     }
+
+    pub fn from_subject(subject: &Subject) -> Option<Self> {
+        match subject {
+            Subject::Entity(object) => Some(Self::Entity(Entity::from_object(object)?)),
+            Subject::Userset { object, relation } => Some(Self::Userset {
+                object: Entity::from_object(object)?,
+                relation: Relation::from_str(relation)?,
+            }),
+        }
+    }
 }
 
 impl From<&DefaultSubject> for Subject {
@@ -422,6 +527,14 @@ impl DefaultTuple {
             relation: self.relation.to_string(),
             subject: self.subject.to_subject(),
         }
+    }
+
+    pub fn from_tuple(tuple: &Tuple) -> Option<Self> {
+        Some(Self {
+            object: Entity::from_object(&tuple.object)?,
+            relation: Relation::from_str(&tuple.relation)?,
+            subject: DefaultSubject::from_subject(&tuple.subject)?,
+        })
     }
 }
 
@@ -614,6 +727,158 @@ impl CapabilityBinding {
     }
 }
 
+pub const DEFAULT_EXPLAIN_MAX_DEPTH: usize = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExplainOptions {
+    pub max_depth: usize,
+    pub cycle_protection: bool,
+}
+
+impl ExplainOptions {
+    pub const fn new(max_depth: usize) -> Self {
+        Self {
+            max_depth,
+            cycle_protection: true,
+        }
+    }
+
+    pub const fn with_cycle_protection(mut self, cycle_protection: bool) -> Self {
+        self.cycle_protection = cycle_protection;
+        self
+    }
+
+    pub const fn normalized(self) -> Self {
+        let max_depth = if self.max_depth == 0 {
+            1
+        } else {
+            self.max_depth
+        };
+
+        Self {
+            max_depth,
+            cycle_protection: self.cycle_protection,
+        }
+    }
+}
+
+impl Default for ExplainOptions {
+    fn default() -> Self {
+        Self {
+            max_depth: DEFAULT_EXPLAIN_MAX_DEPTH,
+            cycle_protection: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExplainDecision {
+    Allow,
+    Deny,
+}
+
+impl ExplainDecision {
+    pub const fn is_allowed(self) -> bool {
+        matches!(self, Self::Allow)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExplainedNode {
+    pub object: Entity,
+    pub relation: Option<Relation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExplainStep {
+    Start {
+        node: ExplainedNode,
+    },
+    DirectSubjectMatch {
+        node: ExplainedNode,
+    },
+    TupleSubjectMatch {
+        from: ExplainedNode,
+        tuple: DefaultTuple,
+    },
+    Inherit {
+        from: ExplainedNode,
+        to: ExplainedNode,
+    },
+    TupleTraversal {
+        from: ExplainedNode,
+        tuple: DefaultTuple,
+        to: ExplainedNode,
+    },
+    Computed {
+        from: ExplainedNode,
+        via_tuple: DefaultTuple,
+        to: ExplainedNode,
+    },
+    TupleToUserset {
+        from: ExplainedNode,
+        via_tuple: DefaultTuple,
+        to: ExplainedNode,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeniedReason {
+    NoMatchingPath,
+    RecursionLimitReached { max_depth: usize },
+    CycleDetected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeniedAttempt {
+    Inherit {
+        step: ExplainStep,
+        result: Box<DeniedExplanation>,
+    },
+    TupleTraversal {
+        step: ExplainStep,
+        result: Box<DeniedExplanation>,
+    },
+    Computed {
+        step: ExplainStep,
+        result: Box<DeniedExplanation>,
+    },
+    TupleToUserset {
+        step: ExplainStep,
+        result: Box<DeniedExplanation>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeniedExplanation {
+    pub node: ExplainedNode,
+    pub reason: DeniedReason,
+    pub attempts: Vec<DeniedAttempt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllowedExplanation {
+    pub steps: Vec<ExplainStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExplainTrace {
+    Allowed(AllowedExplanation),
+    Denied(DeniedExplanation),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityExplanation {
+    pub manifest: AuthModelManifest,
+    pub subject: DefaultSubject,
+    pub capability: Capability,
+    pub object: Entity,
+    pub binding: CapabilityBinding,
+    pub decision: ExplainDecision,
+    pub options: ExplainOptions,
+    pub trace: ExplainTrace,
+}
+
 #[derive(Debug)]
 pub enum DavendaAuthError {
     Rebac(RebacError),
@@ -624,6 +889,12 @@ pub enum DavendaAuthError {
         capability: Capability,
         actual: Namespace,
         expected: Vec<Namespace>,
+    },
+    UnsupportedExplainNamespace {
+        namespace: String,
+    },
+    UnsupportedExplainRelation {
+        relation: String,
     },
 }
 
@@ -647,6 +918,18 @@ impl fmt::Display for DavendaAuthError {
                 write!(
                     f,
                     "capability `{capability}` does not apply to `{actual}` resources; expected one of [{expected}]"
+                )
+            }
+            Self::UnsupportedExplainNamespace { namespace } => {
+                write!(
+                    f,
+                    "cannot explain tuples or schema entries for unsupported namespace `{namespace}`"
+                )
+            }
+            Self::UnsupportedExplainRelation { relation } => {
+                write!(
+                    f,
+                    "cannot explain tuples or schema entries for unsupported relation `{relation}`"
                 )
             }
         }
@@ -827,6 +1110,77 @@ where
             subject,
             capability,
             object,
+        )
+        .await
+    }
+
+    pub async fn explain_capability<P>(
+        &self,
+        package: &P,
+        subject: &DefaultSubject,
+        capability: Capability,
+        object: &Entity,
+    ) -> Result<CapabilityExplanation, DavendaAuthError>
+    where
+        P: AuthModelPackage,
+    {
+        self.explain_capability_with_options(
+            package,
+            subject,
+            capability,
+            object,
+            ExplainOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn explain_capability_with_options<P>(
+        &self,
+        package: &P,
+        subject: &DefaultSubject,
+        capability: Capability,
+        object: &Entity,
+        options: ExplainOptions,
+    ) -> Result<CapabilityExplanation, DavendaAuthError>
+    where
+        P: AuthModelPackage,
+    {
+        let tuples = self
+            .engine
+            .read_tuples(self.tenant_id, None, None, None)
+            .await?;
+
+        build_capability_explanation(package, &tuples, subject, capability, object, options)
+    }
+
+    pub async fn explain_default_capability(
+        &self,
+        subject: &DefaultSubject,
+        capability: Capability,
+        object: &Entity,
+    ) -> Result<CapabilityExplanation, DavendaAuthError> {
+        self.explain_default_capability_with_options(
+            subject,
+            capability,
+            object,
+            ExplainOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn explain_default_capability_with_options(
+        &self,
+        subject: &DefaultSubject,
+        capability: Capability,
+        object: &Entity,
+        options: ExplainOptions,
+    ) -> Result<CapabilityExplanation, DavendaAuthError> {
+        self.explain_capability_with_options(
+            &DefaultAuthModelPackage::default(),
+            subject,
+            capability,
+            object,
+            options,
         )
         .await
     }
@@ -1295,6 +1649,436 @@ fn computed(tuple_relation: Relation, target_relation: Relation) -> RelationRule
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct GraphNode {
+    object: Object,
+    relation: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ExplainIndex {
+    tuples_by_node: HashMap<GraphNode, Vec<Tuple>>,
+}
+
+impl ExplainIndex {
+    fn new(tuples: &[Tuple]) -> Self {
+        let mut tuples_by_node = HashMap::new();
+
+        for tuple in tuples {
+            let node = GraphNode {
+                object: tuple.object.clone(),
+                relation: Some(tuple.relation.clone()),
+            };
+            tuples_by_node
+                .entry(node)
+                .or_insert_with(Vec::new)
+                .push(tuple.clone());
+        }
+
+        Self { tuples_by_node }
+    }
+
+    fn tuples_for(&self, node: &GraphNode) -> &[Tuple] {
+        self.tuples_by_node
+            .get(node)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+}
+
+enum Evaluation {
+    Allowed(Vec<ExplainStep>),
+    Denied(DeniedExplanation),
+}
+
+fn build_capability_explanation<P>(
+    package: &P,
+    tuples: &[Tuple],
+    subject: &DefaultSubject,
+    capability: Capability,
+    object: &Entity,
+    options: ExplainOptions,
+) -> Result<CapabilityExplanation, DavendaAuthError>
+where
+    P: AuthModelPackage,
+{
+    let binding = package.resolve_binding(capability, object)?.clone();
+    let trace = build_relation_trace(
+        package.schema(),
+        tuples,
+        subject,
+        binding.relation,
+        object,
+        options,
+    )?;
+    let decision = match &trace {
+        ExplainTrace::Allowed(_) => ExplainDecision::Allow,
+        ExplainTrace::Denied(_) => ExplainDecision::Deny,
+    };
+
+    Ok(CapabilityExplanation {
+        manifest: package.manifest().clone(),
+        subject: subject.clone(),
+        capability,
+        object: object.clone(),
+        binding,
+        decision,
+        options: options.normalized(),
+        trace,
+    })
+}
+
+fn build_relation_trace(
+    schema: &Schema,
+    tuples: &[Tuple],
+    subject: &DefaultSubject,
+    relation: Relation,
+    object: &Entity,
+    options: ExplainOptions,
+) -> Result<ExplainTrace, DavendaAuthError> {
+    let options = options.normalized();
+    let root = GraphNode {
+        object: object.to_object(),
+        relation: Some(relation.to_string()),
+    };
+    let subject = subject.to_subject();
+    let index = ExplainIndex::new(tuples);
+    let mut visiting = HashSet::new();
+
+    match explain_node(schema, &index, &subject, &root, 1, options, &mut visiting)? {
+        Evaluation::Allowed(mut steps) => {
+            steps.insert(
+                0,
+                ExplainStep::Start {
+                    node: typed_node(&root)?,
+                },
+            );
+            Ok(ExplainTrace::Allowed(AllowedExplanation { steps }))
+        }
+        Evaluation::Denied(denied) => Ok(ExplainTrace::Denied(denied)),
+    }
+}
+
+fn explain_node(
+    schema: &Schema,
+    index: &ExplainIndex,
+    subject: &Subject,
+    node: &GraphNode,
+    depth: usize,
+    options: ExplainOptions,
+    visiting: &mut HashSet<GraphNode>,
+) -> Result<Evaluation, DavendaAuthError> {
+    if options.cycle_protection && !visiting.insert(node.clone()) {
+        return Ok(Evaluation::Denied(DeniedExplanation {
+            node: typed_node(node)?,
+            reason: DeniedReason::CycleDetected,
+            attempts: Vec::new(),
+        }));
+    }
+
+    let result = explain_node_inner(schema, index, subject, node, depth, options, visiting);
+
+    if options.cycle_protection {
+        visiting.remove(node);
+    }
+
+    result
+}
+
+fn explain_node_inner(
+    schema: &Schema,
+    index: &ExplainIndex,
+    subject: &Subject,
+    node: &GraphNode,
+    depth: usize,
+    options: ExplainOptions,
+    visiting: &mut HashSet<GraphNode>,
+) -> Result<Evaluation, DavendaAuthError> {
+    if subject_matches_node(node, subject) {
+        return Ok(Evaluation::Allowed(vec![ExplainStep::DirectSubjectMatch {
+            node: typed_node(node)?,
+        }]));
+    }
+
+    for tuple in index.tuples_for(node) {
+        if subject_matches_subject(&tuple.subject, subject) {
+            return Ok(Evaluation::Allowed(vec![ExplainStep::TupleSubjectMatch {
+                from: typed_node(node)?,
+                tuple: typed_tuple(tuple)?,
+            }]));
+        }
+    }
+
+    if depth >= options.max_depth {
+        return Ok(Evaluation::Denied(DeniedExplanation {
+            node: typed_node(node)?,
+            reason: DeniedReason::RecursionLimitReached {
+                max_depth: options.max_depth,
+            },
+            attempts: Vec::new(),
+        }));
+    }
+
+    let mut attempts = Vec::new();
+
+    for rule in inherit_rules_for(schema, node)? {
+        let next = GraphNode {
+            object: node.object.clone(),
+            relation: Some(rule.to_string()),
+        };
+        let step = ExplainStep::Inherit {
+            from: typed_node(node)?,
+            to: typed_node(&next)?,
+        };
+
+        match explain_node(schema, index, subject, &next, depth + 1, options, visiting)? {
+            Evaluation::Allowed(mut steps) => {
+                steps.insert(0, step);
+                return Ok(Evaluation::Allowed(steps));
+            }
+            Evaluation::Denied(result) => {
+                attempts.push(DeniedAttempt::Inherit {
+                    step,
+                    result: Box::new(result),
+                });
+            }
+        }
+    }
+
+    for tuple in index.tuples_for(node) {
+        let next = graph_node_from_subject(&tuple.subject);
+        let step = ExplainStep::TupleTraversal {
+            from: typed_node(node)?,
+            tuple: typed_tuple(tuple)?,
+            to: typed_node(&next)?,
+        };
+
+        match explain_node(schema, index, subject, &next, depth + 1, options, visiting)? {
+            Evaluation::Allowed(mut steps) => {
+                steps.insert(0, step);
+                return Ok(Evaluation::Allowed(steps));
+            }
+            Evaluation::Denied(result) => {
+                attempts.push(DeniedAttempt::TupleTraversal {
+                    step,
+                    result: Box::new(result),
+                });
+            }
+        }
+    }
+
+    for (tuple_relation, target_relation, is_tuple_to_userset) in
+        userset_jump_rules_for(schema, node)?
+    {
+        let jump_node = GraphNode {
+            object: node.object.clone(),
+            relation: Some(tuple_relation.to_string()),
+        };
+
+        for tuple in index.tuples_for(&jump_node) {
+            let next = graph_node_from_subject_with_relation(&tuple.subject, target_relation);
+            let step = if is_tuple_to_userset {
+                ExplainStep::TupleToUserset {
+                    from: typed_node(node)?,
+                    via_tuple: typed_tuple(tuple)?,
+                    to: typed_node(&next)?,
+                }
+            } else {
+                ExplainStep::Computed {
+                    from: typed_node(node)?,
+                    via_tuple: typed_tuple(tuple)?,
+                    to: typed_node(&next)?,
+                }
+            };
+
+            match explain_node(schema, index, subject, &next, depth + 1, options, visiting)? {
+                Evaluation::Allowed(mut steps) => {
+                    steps.insert(0, step);
+                    return Ok(Evaluation::Allowed(steps));
+                }
+                Evaluation::Denied(result) => {
+                    attempts.push(if is_tuple_to_userset {
+                        DeniedAttempt::TupleToUserset {
+                            step,
+                            result: Box::new(result),
+                        }
+                    } else {
+                        DeniedAttempt::Computed {
+                            step,
+                            result: Box::new(result),
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(Evaluation::Denied(DeniedExplanation {
+        node: typed_node(node)?,
+        reason: DeniedReason::NoMatchingPath,
+        attempts,
+    }))
+}
+
+fn inherit_rules_for(schema: &Schema, node: &GraphNode) -> Result<Vec<Relation>, DavendaAuthError> {
+    let Some(relation) = node.relation.as_deref() else {
+        return Ok(Vec::new());
+    };
+
+    let Some(config) = schema.namespaces.get(node.object.namespace.as_str()) else {
+        return Ok(Vec::new());
+    };
+
+    let Some(rules) = config.rules.get(relation) else {
+        return Ok(Vec::new());
+    };
+
+    let mut parsed = Vec::new();
+    for rule in rules {
+        if let RelationRule::Inherit(target_relation) = rule {
+            parsed.push(parse_relation(target_relation)?);
+        }
+    }
+    Ok(parsed)
+}
+
+fn userset_jump_rules_for(
+    schema: &Schema,
+    node: &GraphNode,
+) -> Result<Vec<(Relation, Relation, bool)>, DavendaAuthError> {
+    let Some(relation) = node.relation.as_deref() else {
+        return Ok(Vec::new());
+    };
+
+    let Some(config) = schema.namespaces.get(node.object.namespace.as_str()) else {
+        return Ok(Vec::new());
+    };
+
+    let Some(rules) = config.rules.get(relation) else {
+        return Ok(Vec::new());
+    };
+
+    let mut parsed = Vec::new();
+    for rule in rules {
+        match rule {
+            RelationRule::Computed {
+                tuple_relation,
+                target_relation,
+            } => parsed.push((
+                parse_relation(tuple_relation)?,
+                parse_relation(target_relation)?,
+                false,
+            )),
+            RelationRule::TupleToUserset {
+                tuple_relation,
+                target_relation,
+            } => parsed.push((
+                parse_relation(tuple_relation)?,
+                parse_relation(target_relation)?,
+                true,
+            )),
+            RelationRule::Inherit(_) => {}
+        }
+    }
+    Ok(parsed)
+}
+
+fn graph_node_from_subject(subject: &Subject) -> GraphNode {
+    match subject {
+        Subject::Entity(object) => GraphNode {
+            object: object.clone(),
+            relation: None,
+        },
+        Subject::Userset { object, relation } => GraphNode {
+            object: object.clone(),
+            relation: Some(relation.clone()),
+        },
+    }
+}
+
+fn graph_node_from_subject_with_relation(subject: &Subject, relation: Relation) -> GraphNode {
+    let object = match subject {
+        Subject::Entity(object) | Subject::Userset { object, .. } => object.clone(),
+    };
+
+    GraphNode {
+        object,
+        relation: Some(relation.to_string()),
+    }
+}
+
+fn typed_node(node: &GraphNode) -> Result<ExplainedNode, DavendaAuthError> {
+    let object = Entity::from_object(&node.object).ok_or_else(|| {
+        DavendaAuthError::UnsupportedExplainNamespace {
+            namespace: node.object.namespace.clone(),
+        }
+    })?;
+    let relation = match &node.relation {
+        Some(relation) => Some(parse_relation(relation)?),
+        None => None,
+    };
+
+    Ok(ExplainedNode { object, relation })
+}
+
+fn typed_tuple(tuple: &Tuple) -> Result<DefaultTuple, DavendaAuthError> {
+    DefaultTuple::from_tuple(tuple).ok_or_else(|| {
+        if Entity::from_object(&tuple.object).is_none() {
+            DavendaAuthError::UnsupportedExplainNamespace {
+                namespace: tuple.object.namespace.clone(),
+            }
+        } else {
+            DavendaAuthError::UnsupportedExplainRelation {
+                relation: tuple.relation.clone(),
+            }
+        }
+    })
+}
+
+fn parse_relation(relation: &str) -> Result<Relation, DavendaAuthError> {
+    Relation::from_str(relation).ok_or_else(|| DavendaAuthError::UnsupportedExplainRelation {
+        relation: relation.to_string(),
+    })
+}
+
+fn subject_matches_node(node: &GraphNode, subject: &Subject) -> bool {
+    match subject {
+        Subject::Entity(object) => {
+            relation_matches(node.relation.as_deref(), None) && object_matches(&node.object, object)
+        }
+        Subject::Userset { object, relation } => {
+            relation_matches(node.relation.as_deref(), Some(relation.as_str()))
+                && object_matches(&node.object, object)
+        }
+    }
+}
+
+fn subject_matches_subject(candidate: &Subject, target: &Subject) -> bool {
+    match (candidate, target) {
+        (Subject::Entity(left), Subject::Entity(right)) => object_matches(left, right),
+        (
+            Subject::Userset {
+                object: left_object,
+                relation: left_relation,
+            },
+            Subject::Userset {
+                object: right_object,
+                relation: right_relation,
+            },
+        ) => object_matches(left_object, right_object) && left_relation == right_relation,
+        _ => false,
+    }
+}
+
+fn object_matches(candidate: &Object, target: &Object) -> bool {
+    (candidate.namespace == target.namespace || candidate.namespace == "*")
+        && (candidate.id == target.id || candidate.id == "*")
+}
+
+fn relation_matches(candidate: Option<&str>, target: Option<&str>) -> bool {
+    candidate == target
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1475,5 +2259,184 @@ mod tests {
             }
             other => panic!("expected namespace mismatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn explain_capability_returns_allow_path_for_inherited_access() {
+        let package = DefaultAuthModelPackage::default();
+        let page = Entity::page("homepage");
+        let site = Entity::site("main");
+        let subject = DefaultSubject::entity(Entity::user("alice"));
+        let tuples = vec![
+            DefaultTuple::new(page.clone(), Relation::Site, site.clone().as_subject()).to_tuple(),
+            DefaultTuple::new(site.clone(), Relation::Viewer, subject.clone()).to_tuple(),
+        ];
+
+        let explanation = build_capability_explanation(
+            &package,
+            &tuples,
+            &subject,
+            Capability::CmsPageRead,
+            &page,
+            ExplainOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(explanation.decision, ExplainDecision::Allow);
+        assert_eq!(explanation.binding.relation, Relation::View);
+
+        let ExplainTrace::Allowed(trace) = explanation.trace else {
+            panic!("expected allow trace");
+        };
+        assert_eq!(
+            trace.steps.first(),
+            Some(&ExplainStep::Start {
+                node: ExplainedNode {
+                    object: page.clone(),
+                    relation: Some(Relation::View),
+                },
+            })
+        );
+        assert!(trace.steps.iter().any(|step| matches!(
+            step,
+            ExplainStep::Computed {
+                from,
+                via_tuple,
+                to,
+            } if *from == ExplainedNode {
+                object: page.clone(),
+                relation: Some(Relation::Viewer),
+            } && *via_tuple == DefaultTuple::new(
+                page.clone(),
+                Relation::Site,
+                site.clone().as_subject(),
+            ) && *to == ExplainedNode {
+                object: site.clone(),
+                relation: Some(Relation::Viewer),
+            }
+        )));
+        assert!(trace.steps.iter().any(|step| matches!(
+            step,
+            ExplainStep::TupleSubjectMatch { from, tuple }
+                if *from == ExplainedNode {
+                    object: site.clone(),
+                    relation: Some(Relation::Viewer),
+                } && *tuple == DefaultTuple::new(site.clone(), Relation::Viewer, subject.clone())
+        )));
+    }
+
+    #[test]
+    fn explain_capability_returns_deny_tree_when_required_publish_path_is_missing() {
+        let package = DefaultAuthModelPackage::default();
+        let page = Entity::page("homepage");
+        let site = Entity::site("main");
+        let subject = DefaultSubject::entity(Entity::user("alice"));
+        let tuples = vec![
+            DefaultTuple::new(page.clone(), Relation::Site, site.clone().as_subject()).to_tuple(),
+            DefaultTuple::new(site.clone(), Relation::Viewer, subject.clone()).to_tuple(),
+        ];
+
+        let explanation = build_capability_explanation(
+            &package,
+            &tuples,
+            &subject,
+            Capability::CmsPagePublish,
+            &page,
+            ExplainOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(explanation.decision, ExplainDecision::Deny);
+
+        let ExplainTrace::Denied(trace) = explanation.trace else {
+            panic!("expected deny trace");
+        };
+        assert_eq!(
+            trace.node,
+            ExplainedNode {
+                object: page.clone(),
+                relation: Some(Relation::Publish),
+            }
+        );
+        assert_eq!(trace.reason, DeniedReason::NoMatchingPath);
+        assert_eq!(trace.attempts.len(), 2);
+        assert!(
+            trace
+                .attempts
+                .iter()
+                .all(|attempt| matches!(attempt, DeniedAttempt::Inherit { .. }))
+        );
+    }
+
+    #[test]
+    fn explain_capability_honors_public_wildcard_subjects() {
+        let package = DefaultAuthModelPackage::default();
+        let asset = Entity::asset("hero");
+        let subject = DefaultSubject::entity(Entity::user("alice"));
+        let tuples = vec![
+            DefaultTuple::new(
+                asset.clone(),
+                Relation::ReadPublic,
+                DefaultSubject::entity(Entity::any_user()),
+            )
+            .to_tuple(),
+        ];
+
+        let explanation = build_capability_explanation(
+            &package,
+            &tuples,
+            &subject,
+            Capability::AssetReadPublic,
+            &asset,
+            ExplainOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(explanation.decision, ExplainDecision::Allow);
+
+        let ExplainTrace::Allowed(trace) = explanation.trace else {
+            panic!("expected allow trace");
+        };
+        assert!(trace.steps.iter().any(|step| matches!(
+            step,
+            ExplainStep::TupleSubjectMatch { tuple, .. }
+                if *tuple == DefaultTuple::new(
+                    asset.clone(),
+                    Relation::ReadPublic,
+                    DefaultSubject::entity(Entity::any_user()),
+                )
+        )));
+    }
+
+    #[test]
+    fn explain_capability_reports_recursion_limit_when_depth_budget_is_exhausted() {
+        let package = DefaultAuthModelPackage::default();
+        let page = Entity::page("homepage");
+        let site = Entity::site("main");
+        let subject = DefaultSubject::entity(Entity::user("alice"));
+        let tuples = vec![
+            DefaultTuple::new(page.clone(), Relation::Site, site.clone().as_subject()).to_tuple(),
+            DefaultTuple::new(site.clone(), Relation::Viewer, subject.clone()).to_tuple(),
+        ];
+
+        let explanation = build_capability_explanation(
+            &package,
+            &tuples,
+            &subject,
+            Capability::CmsPageRead,
+            &page,
+            ExplainOptions::new(1),
+        )
+        .unwrap();
+
+        assert_eq!(explanation.decision, ExplainDecision::Deny);
+
+        let ExplainTrace::Denied(trace) = explanation.trace else {
+            panic!("expected deny trace");
+        };
+        assert_eq!(
+            trace.reason,
+            DeniedReason::RecursionLimitReached { max_depth: 1 }
+        );
     }
 }

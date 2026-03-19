@@ -40,7 +40,12 @@ use davenda_tls::{
     TlsAutomationRuntime, TlsInstant, TlsModelError,
 };
 use davenda_wasm::{
-    ContractVersion, ExtensionPointKind, ExtensionRegistry, InstalledExtension, WasmModelError,
+    AdminWidgetInvocation, ApiInvocation, ContractVersion, CustomerAppContext,
+    ExtensionPointKind, ExtensionRegistry, InstalledExtension, InvocationContext, InvocationInput,
+    InvocationPlan, JobInvocation, PageInvocation,
+    PrincipalRef, RenderHookInvocation, ScheduledJobInvocation, TraceContext, WasmExecutionSession,
+    WasmModelError, WebhookInvocation,
+    HttpMethod as WasmHttpMethod,
 };
 use thiserror::Error;
 
@@ -438,6 +443,9 @@ pub enum CacheDisposition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestExecution {
     pub customer_app: String,
+    pub method: HttpMethod,
+    pub host: String,
+    pub path: String,
     pub route: ResolvedRoute,
     pub route_area: RouteArea,
     pub locale: String,
@@ -1550,6 +1558,261 @@ impl CacheHost {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtensionPrincipal {
+    Anonymous,
+    User(String),
+    ServiceAccount(String),
+}
+
+impl ExtensionPrincipal {
+    pub fn anonymous() -> Self {
+        Self::Anonymous
+    }
+
+    pub fn user(id: impl Into<String>) -> Self {
+        Self::User(id.into())
+    }
+
+    pub fn service_account(id: impl Into<String>) -> Self {
+        Self::ServiceAccount(id.into())
+    }
+
+    fn to_wasm_principal(&self) -> Result<PrincipalRef, WasmModelError> {
+        match self {
+            Self::Anonymous => Ok(PrincipalRef::anonymous()),
+            Self::User(id) => PrincipalRef::user(id.clone()),
+            Self::ServiceAccount(id) => PrincipalRef::service_account(id.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WasmHost {
+    pub customer_app: String,
+    pub runtime: WasmRuntimeServices,
+    registry: ExtensionRegistry,
+    default_locale: String,
+}
+
+impl WasmHost {
+    pub fn prepare_page_invocation(
+        &self,
+        execution: &RequestExecution,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        let method = http_method_to_wasm(execution.method);
+        let input = InvocationInput::Page(PageInvocation::new(execution.path.clone(), method)?);
+        let context = self.request_context(execution, input)?;
+        self.registry
+            .prepare_page_invocation(&execution.path, method, context)
+    }
+
+    pub fn begin_page_invocation(
+        &self,
+        execution: &RequestExecution,
+    ) -> Result<Option<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_page_invocation(execution)?
+            .map(InvocationPlan::begin_execution))
+    }
+
+    pub fn prepare_api_invocation(
+        &self,
+        execution: &RequestExecution,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        let method = http_method_to_wasm(execution.method);
+        let input = InvocationInput::Api(ApiInvocation::new(execution.path.clone(), method)?);
+        let context = self.request_context(execution, input)?;
+        self.registry
+            .prepare_api_invocation(&execution.path, method, context)
+    }
+
+    pub fn begin_api_invocation(
+        &self,
+        execution: &RequestExecution,
+    ) -> Result<Option<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_api_invocation(execution)?
+            .map(InvocationPlan::begin_execution))
+    }
+
+    pub fn prepare_job_invocation(
+        &self,
+        job_name: &str,
+        attempt: u32,
+        trace_id: impl Into<String>,
+        principal: ExtensionPrincipal,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        let input = InvocationInput::Job(JobInvocation::new(job_name.to_string(), attempt)?);
+        let context = self.async_context(trace_id.into(), principal, input)?;
+        self.registry.prepare_job_invocation(job_name, context)
+    }
+
+    pub fn begin_job_invocation(
+        &self,
+        job_name: &str,
+        attempt: u32,
+        trace_id: impl Into<String>,
+        principal: ExtensionPrincipal,
+    ) -> Result<Option<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_job_invocation(job_name, attempt, trace_id, principal)?
+            .map(InvocationPlan::begin_execution))
+    }
+
+    pub fn prepare_scheduled_job_invocation(
+        &self,
+        job_name: &str,
+        trace_id: impl Into<String>,
+        principal: ExtensionPrincipal,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        let input = InvocationInput::ScheduledJob(ScheduledJobInvocation::new(
+            job_name.to_string(),
+        )?);
+        let context = self.async_context(trace_id.into(), principal, input)?;
+        self.registry
+            .prepare_scheduled_job_invocation(job_name, context)
+    }
+
+    pub fn begin_scheduled_job_invocation(
+        &self,
+        job_name: &str,
+        trace_id: impl Into<String>,
+        principal: ExtensionPrincipal,
+    ) -> Result<Option<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_scheduled_job_invocation(job_name, trace_id, principal)?
+            .map(InvocationPlan::begin_execution))
+    }
+
+    pub fn prepare_webhook_invocation(
+        &self,
+        source: &str,
+        event: &str,
+        verified: bool,
+        replay_protected: bool,
+        trace_id: impl Into<String>,
+        principal: ExtensionPrincipal,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        let input = InvocationInput::Webhook(WebhookInvocation::new(
+            source.to_string(),
+            event.to_string(),
+            verified,
+            replay_protected,
+        )?);
+        let context = self.async_context(trace_id.into(), principal, input)?;
+        self.registry.prepare_webhook_invocation(source, event, context)
+    }
+
+    pub fn begin_webhook_invocation(
+        &self,
+        source: &str,
+        event: &str,
+        verified: bool,
+        replay_protected: bool,
+        trace_id: impl Into<String>,
+        principal: ExtensionPrincipal,
+    ) -> Result<Option<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_webhook_invocation(
+                source,
+                event,
+                verified,
+                replay_protected,
+                trace_id,
+                principal,
+            )?
+            .map(InvocationPlan::begin_execution))
+    }
+
+    pub fn prepare_admin_widget_invocations(
+        &self,
+        slot: &str,
+        execution: &RequestExecution,
+    ) -> Result<Vec<InvocationPlan>, WasmModelError> {
+        let input =
+            InvocationInput::AdminWidget(AdminWidgetInvocation::new(slot.to_string())?);
+        let context = self.request_context(execution, input)?;
+        self.registry.prepare_admin_widget_invocations(slot, context)
+    }
+
+    pub fn begin_admin_widget_invocations(
+        &self,
+        slot: &str,
+        execution: &RequestExecution,
+    ) -> Result<Vec<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_admin_widget_invocations(slot, execution)?
+            .into_iter()
+            .map(InvocationPlan::begin_execution)
+            .collect())
+    }
+
+    pub fn prepare_render_hook_invocations(
+        &self,
+        slot: &str,
+        execution: &RequestExecution,
+    ) -> Result<Vec<InvocationPlan>, WasmModelError> {
+        let input = InvocationInput::RenderHook(RenderHookInvocation::new(slot.to_string())?);
+        let context = self.request_context(execution, input)?;
+        self.registry.prepare_render_hook_invocations(slot, context)
+    }
+
+    pub fn begin_render_hook_invocations(
+        &self,
+        slot: &str,
+        execution: &RequestExecution,
+    ) -> Result<Vec<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_render_hook_invocations(slot, execution)?
+            .into_iter()
+            .map(InvocationPlan::begin_execution)
+            .collect())
+    }
+
+    fn request_context(
+        &self,
+        execution: &RequestExecution,
+        input: InvocationInput,
+    ) -> Result<InvocationContext, WasmModelError> {
+        let customer_app = self.customer_app_context(Some(&execution.locale))?;
+        let principal = match execution.principal.principal_id.as_deref() {
+            Some(principal_id) => PrincipalRef::user(principal_id.to_string())?,
+            None => PrincipalRef::anonymous(),
+        };
+        let trace = TraceContext::new(execution.trace.request_id.clone())?
+            .with_request_id(execution.trace.request_id.clone())?;
+
+        Ok(InvocationContext::new(customer_app, principal, trace, input))
+    }
+
+    fn async_context(
+        &self,
+        trace_id: String,
+        principal: ExtensionPrincipal,
+        input: InvocationInput,
+    ) -> Result<InvocationContext, WasmModelError> {
+        let customer_app = self.customer_app_context(None)?;
+        let principal = principal.to_wasm_principal()?;
+        let trace = TraceContext::new(trace_id)?;
+
+        Ok(InvocationContext::new(customer_app, principal, trace, input))
+    }
+
+    fn customer_app_context(
+        &self,
+        locale: Option<&str>,
+    ) -> Result<CustomerAppContext, WasmModelError> {
+        let mut customer_app = CustomerAppContext::new(self.customer_app.clone())?;
+        customer_app = customer_app.with_locale(
+            locale
+                .unwrap_or(self.default_locale.as_str())
+                .to_string(),
+        )?;
+        Ok(customer_app)
+    }
+}
+
 impl RuntimePlan {
     pub fn jobs_host(
         &self,
@@ -1597,6 +1860,15 @@ impl RuntimePlan {
             customer_app: self.config.app.name.clone(),
             runtime: self.tls.clone(),
             automation: self.tls.automation(),
+        }
+    }
+
+    pub fn wasm_host(&self) -> WasmHost {
+        WasmHost {
+            customer_app: self.config.app.name.clone(),
+            runtime: self.wasm.clone(),
+            registry: self.extension_registry.clone(),
+            default_locale: self.config.i18n.default_locale.clone(),
         }
     }
 
@@ -1684,6 +1956,9 @@ impl RuntimePlan {
 
         Ok(RequestExecution {
             customer_app: self.config.app.name.clone(),
+            method: request.method,
+            host: request.host,
+            path: request.path,
             route: matched.resolved.clone(),
             route_area: matched.route.area,
             locale: matched
@@ -2024,6 +2299,17 @@ fn cache_headers_from_plan(plan: &CachePlan) -> BTreeMap<String, String> {
     }
 
     headers
+}
+
+fn http_method_to_wasm(method: HttpMethod) -> WasmHttpMethod {
+    match method {
+        HttpMethod::Get => WasmHttpMethod::Get,
+        HttpMethod::Head => WasmHttpMethod::Head,
+        HttpMethod::Post => WasmHttpMethod::Post,
+        HttpMethod::Put => WasmHttpMethod::Put,
+        HttpMethod::Patch => WasmHttpMethod::Patch,
+        HttpMethod::Delete => WasmHttpMethod::Delete,
+    }
 }
 
 fn module_http_contributions(
@@ -2601,7 +2887,9 @@ mod tests {
     use davenda_wasm::{
         AdminWidgetExtensionPoint, ContractVersion, ExtensionInstallation, ExtensionManifest,
         ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest,
-        HostCapabilityGrant, HostGrantSet, InstalledExtension, ResourceLimits,
+        HostCapabilityGrant, HostGrantSet, HostCall, InstalledExtension, InvocationInput,
+        InvocationOutcome, JobExtensionPoint, PrincipalKind, RenderHookExtensionPoint,
+        ResourceLimits, WasmModelError, WebhookExtensionPoint,
     };
     use std::time::Duration;
 
@@ -2722,6 +3010,121 @@ cdn_base_url = "https://cdn.example.com"
                             resource: "events.waitlist".to_string(),
                         },
                     ]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn installed_render_hook_extension() -> InstalledExtension {
+        InstalledExtension::install(
+            ExtensionManifest::new(
+                davenda_wasm::ExtensionId::new("cms.loyalty").unwrap(),
+                "CMS Loyalty Fragments",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::RenderHook),
+                vec![
+                    HandlerManifest::new(
+                        HandlerId::new("loyalty-badge").unwrap(),
+                        "exports.loyalty_badge",
+                        ExtensionPoint::RenderHook(
+                            RenderHookExtensionPoint::new("cms.page.render").unwrap(),
+                        ),
+                        HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                            slot: "cms.page.render".to_string(),
+                        }]),
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "showcase-events",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("loyalty-badge").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                        slot: "cms.page.render".to_string(),
+                    }]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn installed_job_extension() -> InstalledExtension {
+        InstalledExtension::install(
+            ExtensionManifest::new(
+                davenda_wasm::ExtensionId::new("ops.search.worker").unwrap(),
+                "Ops Search Worker",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::Job),
+                vec![
+                    HandlerManifest::new(
+                        HandlerId::new("search-adapter").unwrap(),
+                        "exports.search_adapter",
+                        ExtensionPoint::Job(
+                            JobExtensionPoint::new("ops.search.adapter", "jobs.work").unwrap(),
+                        ),
+                        HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                            queue: "jobs.work".to_string(),
+                        }]),
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "showcase-events",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("search-adapter").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn installed_webhook_extension() -> InstalledExtension {
+        InstalledExtension::install(
+            ExtensionManifest::new(
+                davenda_wasm::ExtensionId::new("commerce.payment.webhooks").unwrap(),
+                "Commerce Payment Webhooks",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::Webhook),
+                vec![
+                    HandlerManifest::new(
+                        HandlerId::new("payment-authorized").unwrap(),
+                        "exports.payment_authorized",
+                        ExtensionPoint::Webhook(
+                            WebhookExtensionPoint::new(
+                                "commerce.payment-provider",
+                                "payment.authorized",
+                            )
+                            .unwrap(),
+                        ),
+                        HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                            queue: "jobs.work".to_string(),
+                        }]),
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "showcase-events",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("payment-authorized").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
                 )],
             )
             .unwrap(),
@@ -3872,6 +4275,229 @@ cdn_base_url = "https://cdn.example.com"
             }
             other => panic!("expected unknown extension slot, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn wasm_host_prepares_admin_widget_invocations_from_request_execution() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_installed_extension(installed_admin_widget_extension())
+            .build()
+            .unwrap();
+
+        let cookie_secret = b"01234567012345670123456701234567";
+        let csrf_secret = b"76543210765432107654321076543210";
+        let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+            .sign(cookie_secret, "session-operator-1")
+            .unwrap();
+        let execution = plan
+            .execute_request(
+                RequestInput::new(HttpMethod::Get, "www.example.com", "/admin")
+                    .unwrap()
+                    .with_session_cookie(session_cookie)
+                    .with_principal("operator-1")
+                    .grant_capability(Capability::AdminShellAccess),
+                cookie_secret,
+                csrf_secret,
+            )
+            .unwrap();
+
+        let mut sessions = plan
+            .wasm_host()
+            .begin_admin_widget_invocations("admin.dashboard.summary", &execution)
+            .unwrap();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].plan().context.customer_app.locale.as_deref(),
+            Some("en-GB")
+        );
+        assert_eq!(sessions[0].plan().context.principal.kind, PrincipalKind::User);
+        assert_eq!(
+            sessions[0].plan().context.principal.id.as_deref(),
+            Some("operator-1")
+        );
+        assert!(matches!(
+            sessions[0].plan().context.input,
+            InvocationInput::AdminWidget(_)
+        ));
+
+        sessions[0]
+            .record_host_call(HostCall::AuthCheck)
+            .unwrap();
+        sessions[0]
+            .record_host_call(HostCall::DataRead {
+                resource: "events.waitlist".to_string(),
+            })
+            .unwrap();
+
+        let receipt = sessions
+            .into_iter()
+            .next()
+            .unwrap()
+            .finish(Duration::from_millis(10), InvocationOutcome::AdminWidget)
+            .unwrap();
+
+        assert_eq!(receipt.point, ExtensionPointKind::AdminWidget);
+    }
+
+    #[test]
+    fn wasm_host_prepares_render_hook_invocations_from_request_execution() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CmsModule::new())
+            .with_installed_extension(installed_render_hook_extension())
+            .build()
+            .unwrap();
+
+        let cookie_secret = b"01234567012345670123456701234567";
+        let csrf_secret = b"76543210765432107654321076543210";
+        let execution = plan
+            .execute_request(
+                RequestInput::new(HttpMethod::Get, "www.example.com", "/en-GB/pages/home")
+                    .unwrap(),
+                cookie_secret,
+                csrf_secret,
+            )
+            .unwrap();
+
+        let mut sessions = plan
+            .wasm_host()
+            .begin_render_hook_invocations("cms.page.render", &execution)
+            .unwrap();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].plan().context.customer_app.locale.as_deref(),
+            Some("en-GB")
+        );
+        assert_eq!(
+            sessions[0].plan().context.principal.kind,
+            PrincipalKind::Anonymous
+        );
+        assert!(matches!(
+            sessions[0].plan().context.input,
+            InvocationInput::RenderHook(_)
+        ));
+
+        sessions[0]
+            .record_host_call(HostCall::RenderFragment {
+                slot: "cms.page.render".to_string(),
+            })
+            .unwrap();
+
+        let receipt = sessions
+            .into_iter()
+            .next()
+            .unwrap()
+            .finish(Duration::from_millis(8), InvocationOutcome::RenderHook)
+            .unwrap();
+
+        assert_eq!(receipt.point, ExtensionPointKind::RenderHook);
+    }
+
+    #[test]
+    fn wasm_host_prepares_job_and_webhook_invocations() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_module(CommerceModule::new())
+            .with_module(OpsModule::new())
+            .with_installed_extension(installed_job_extension())
+            .with_installed_extension(installed_webhook_extension())
+            .build()
+            .unwrap();
+
+        let mut job_session = plan
+            .wasm_host()
+            .begin_job_invocation(
+                "ops.search.adapter",
+                2,
+                "trace.jobs.search-adapter",
+                ExtensionPrincipal::service_account("ops.search-worker"),
+            )
+            .unwrap()
+            .expect("job extension is installed");
+
+        assert_eq!(job_session.plan().context.principal.kind, PrincipalKind::ServiceAccount);
+        assert_eq!(
+            job_session.plan().context.principal.id.as_deref(),
+            Some("ops.search-worker")
+        );
+        assert!(matches!(
+            job_session.plan().context.input,
+            InvocationInput::Job(_)
+        ));
+        job_session
+            .record_host_call(HostCall::EnqueueJob {
+                queue: "jobs.work".to_string(),
+            })
+            .unwrap();
+        let job_receipt = job_session
+            .finish(Duration::from_millis(25), InvocationOutcome::JobCompleted)
+            .unwrap();
+        assert_eq!(job_receipt.point, ExtensionPointKind::Job);
+
+        let mut webhook_session = plan
+            .wasm_host()
+            .begin_webhook_invocation(
+                "commerce.payment-provider",
+                "payment.authorized",
+                true,
+                true,
+                "trace.webhooks.payment-authorized",
+                ExtensionPrincipal::service_account("commerce.webhooks"),
+            )
+            .unwrap()
+            .expect("webhook extension is installed");
+
+        assert_eq!(
+            webhook_session.plan().context.principal.kind,
+            PrincipalKind::ServiceAccount
+        );
+        assert!(matches!(
+            webhook_session.plan().context.input,
+            InvocationInput::Webhook(_)
+        ));
+        webhook_session
+            .record_host_call(HostCall::EnqueueJob {
+                queue: "jobs.work".to_string(),
+            })
+            .unwrap();
+        let webhook_receipt = webhook_session
+            .finish(Duration::from_millis(15), InvocationOutcome::WebhookAccepted)
+            .unwrap();
+        assert_eq!(webhook_receipt.point, ExtensionPointKind::Webhook);
+    }
+
+    #[test]
+    fn wasm_host_rejects_unverified_webhook_execution() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CommerceModule::new())
+            .with_installed_extension(installed_webhook_extension())
+            .build()
+            .unwrap();
+
+        let error = plan
+            .wasm_host()
+            .prepare_webhook_invocation(
+                "commerce.payment-provider",
+                "payment.authorized",
+                false,
+                true,
+                "trace.webhooks.unverified",
+                ExtensionPrincipal::service_account("commerce.webhooks"),
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            WasmModelError::UnverifiedWebhook {
+                handler_id: "payment-authorized".to_string(),
+            }
+        );
     }
 
     #[test]

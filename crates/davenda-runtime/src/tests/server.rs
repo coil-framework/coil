@@ -307,7 +307,8 @@ async fn server_router_serves_live_auth_explain_when_enabled_and_authorized() {
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let package = DefaultAuthModelPackage::default();
     let capability = Capability::CmsPageRead;
-    let subject = davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1"));
+    let subject =
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1"));
     let resource = davenda_auth::Entity::page("homepage");
     let explanation = davenda_auth::CapabilityExplanation {
         manifest: package.manifest().clone(),
@@ -393,6 +394,81 @@ async fn server_router_serves_live_auth_explain_when_enabled_and_authorized() {
     assert_eq!(requests[0].capability, Capability::CmsPageRead);
     assert_eq!(requests[0].object, davenda_auth::Entity::page("homepage"));
     assert!(requests[0].options.cycle_protection);
+}
+
+#[tokio::test]
+async fn server_router_uses_live_auth_explainer_when_enabled() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.auth.explain_api = true;
+    config.database.url = None;
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let subject =
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1"));
+    let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
+        subject.clone(),
+        Capability::AdminAuditRead,
+        davenda_auth::Entity::admin_module("showcase-events"),
+    ));
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        authorizer,
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+
+    let response = server
+        .privileged_router()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/diagnostics/auth/explain")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "subject": "user:alice",
+                        "capability": "cms.page.read",
+                        "resource": "page:homepage",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("auth explain failed"));
+    assert!(body.contains("live auth backend"));
 }
 
 #[test]

@@ -1178,7 +1178,7 @@ fn browser_host_keeps_memory_sessions_local_to_each_clone() {
 }
 
 #[test]
-fn browser_host_keeps_distributed_sessions_local_without_explicit_client_reuse() {
+fn browser_host_shares_distributed_sessions_by_default_within_a_plan() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
@@ -1187,7 +1187,7 @@ fn browser_host_keeps_distributed_sessions_local_without_explicit_client_reuse()
     let mut left = plan.browser_host();
     let right = plan.browser_host();
     assert_eq!(left.session_store_kind(), SessionStoreBackendKind::Redis);
-    assert!(!left.session_store_is_shared());
+    assert!(left.session_store_is_shared());
 
     let issued = left
         .issue_session(
@@ -1203,64 +1203,43 @@ fn browser_host_keeps_distributed_sessions_local_without_explicit_client_reuse()
         right
             .session(&issued.record.session_id)
             .and_then(|record| record.principal_id),
-        None
+        Some("member-3".to_string())
     );
 }
 
 #[test]
-fn cache_runtime_keeps_distributed_state_local_without_explicit_backend_reuse() {
-    let topology = CacheTopology::with_redis();
-    let planner = CachePlanner::new(topology);
-    let mut left = planner.runtime();
-    let mut right = left.clone();
+fn cache_host_shares_distributed_state_by_default_within_a_plan() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .build()
+        .unwrap();
+    let mut left = plan.cache_host().unwrap();
+    let mut right = plan.cache_host().unwrap();
 
-    assert_eq!(left.backend_kind(), CacheBackendKind::Redis);
-    assert!(!left.backend_is_shared());
+    assert_eq!(left.metrics(), CacheMetrics::default());
 
-    let app_policy = ApplicationCachePolicy::new(
-        CacheScope::public()
-            .with_site("main")
-            .unwrap()
-            .with_locale("en-GB")
-            .unwrap(),
-        FreshnessPolicy::new(Duration::from_secs(300), Some(Duration::from_secs(30))).unwrap(),
-        InvalidationSet::from_tags([tag("page:42"), tag("nav:main")]),
-    )
-    .unwrap();
-    let http_policy = HttpCachePolicy::new(
-        CacheScope::public()
-            .with_site("main")
-            .unwrap()
-            .with_locale("en-GB")
-            .unwrap(),
-        Some(FreshnessPolicy::new(Duration::from_secs(60), Some(Duration::from_secs(15))).unwrap()),
-        ResponseValidators::default(),
-        InvalidationSet::from_tags([tag("page:42")]),
-    )
-    .unwrap();
-    let plan = planner
-        .plan(
-            CachePlanRequest::new(
-                CacheNamespace::new("cms.page").unwrap(),
-                "page:42",
-                http_policy,
-            )
-            .unwrap()
-            .with_application_policy(app_policy),
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/en-GB/pages/home").unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
         )
         .unwrap();
 
-    left.insert(
-        plan.application().unwrap(),
-        "<html>shared</html>",
-        CacheInstant::from_unix_seconds(100),
-    );
+    let stored_key = left
+        .store_execution(
+            &execution,
+            "<html>shared</html>",
+            CacheInstant::from_unix_seconds(100),
+        )
+        .expect("page execution is cacheable");
 
-    let lookup = right.lookup(
-        plan.application().unwrap().key(),
-        CacheInstant::from_unix_seconds(110),
-    );
-    assert_eq!(lookup.state, CacheLookupState::Miss);
+    let lookup = right
+        .lookup_execution(&execution, CacheInstant::from_unix_seconds(110))
+        .expect("page execution has an application cache plan");
+    assert_eq!(lookup.state, CacheLookupState::Fresh);
+    assert_eq!(lookup.entry.as_ref().map(|entry| entry.key.clone()), Some(stored_key));
 }
 
 #[test]

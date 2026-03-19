@@ -4,12 +4,13 @@ use davenda_jobs::JobsBackendAdapter;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeBackendMaterializer {
+    scope: String,
     plans: SharedBackendClients,
 }
 
 impl RuntimeBackendMaterializer {
-    pub(crate) fn new(plans: SharedBackendClients) -> Self {
-        Self { plans }
+    pub(crate) fn new(scope: String, plans: SharedBackendClients) -> Self {
+        Self { scope, plans }
     }
 
     pub(crate) fn browser_host(
@@ -21,10 +22,10 @@ impl RuntimeBackendMaterializer {
             Some(target) => BrowserHost::with_session_store_client(
                 customer_app.clone(),
                 services.clone(),
-                DistributedSessionStoreClient::shared(target.kind),
+                DistributedSessionStoreClient::shared(target.kind, self.scope.clone()),
             )
             .expect("materialized session store target must match browser services"),
-            None => BrowserHost::new(customer_app, services),
+            None => BrowserHost::new_with_scope(customer_app, services, self.scope.clone()),
         }
     }
 
@@ -34,16 +35,23 @@ impl RuntimeBackendMaterializer {
                 planner.topology(),
                 CacheBackendAdapter::distributed(
                     planner.topology(),
-                    DistributedCacheClient::shared(cache_backend_kind(target.backend)),
+                    DistributedCacheClient::scoped_shared(
+                        cache_backend_kind(target.backend),
+                        self.scope.clone(),
+                    ),
                 ),
             ),
             None => planner.runtime(),
         }
     }
 
-    pub(crate) fn jobs_coordinator(&self, runtime: &JobsRuntimeServices) -> JobsCoordinator {
+    pub(crate) fn jobs_coordinator(
+        &self,
+        customer_app: &str,
+        runtime: &JobsRuntimeServices,
+    ) -> JobsCoordinator {
         let backend = if self.plans.jobs.shared {
-            JobsBackendAdapter::shared(runtime)
+            JobsBackendAdapter::shared_scoped(runtime, format!("{}:{customer_app}", self.scope))
         } else {
             JobsBackendAdapter::in_memory(runtime)
         };

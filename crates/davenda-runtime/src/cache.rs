@@ -1,4 +1,5 @@
 use super::*;
+use davenda_cache::CacheBackendAdapter;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeCacheError {
@@ -17,13 +18,18 @@ pub struct CacheHost {
 impl CacheHost {
     pub(crate) fn new(
         customer_app: String,
+        backend_scope: String,
         namespace: CacheNamespace,
         planner: CachePlanner,
     ) -> Self {
-        #[cfg(test)]
-        let runtime = planner.runtime();
-        #[cfg(not(test))]
-        let runtime = planner.shared_runtime();
+        let runtime = if planner.topology().supports_shared_invalidation() {
+            CacheRuntime::with_backend(
+                planner.topology(),
+                CacheBackendAdapter::scoped_shared(planner.topology(), backend_scope),
+            )
+        } else {
+            planner.runtime()
+        };
         Self {
             customer_app,
             namespace,

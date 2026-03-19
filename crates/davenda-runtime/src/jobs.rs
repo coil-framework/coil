@@ -174,6 +174,7 @@ pub struct JobsHost {
 impl JobsHost {
     pub(crate) fn new(
         customer_app: String,
+        backend_scope: String,
         scheduler_node_id: String,
         runtime: JobsRuntimeServices,
         queue_topology: QueueTopology,
@@ -181,11 +182,9 @@ impl JobsHost {
         registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
         jobs_domain: JobsDomain,
     ) -> Self {
-        #[cfg(test)]
-        let coordinator = runtime.coordinator();
-        #[cfg(not(test))]
-        let coordinator =
-            runtime.coordinator_with_backend(davenda_jobs::JobsBackendAdapter::shared(&runtime));
+        let coordinator = runtime.coordinator_with_backend(
+            davenda_jobs::JobsBackendAdapter::shared_scoped(&runtime, backend_scope),
+        );
         Self {
             customer_app,
             scheduler_node_id,

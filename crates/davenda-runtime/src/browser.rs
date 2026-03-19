@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -213,11 +213,11 @@ impl DistributedSessionStoreClient {
     }
 
     pub fn in_memory(kind: SessionStoreBackendKind) -> Self {
-        Self::shared(kind)
+        Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
     }
 
-    pub fn shared(kind: SessionStoreBackendKind) -> Self {
-        Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
+    pub fn shared(kind: SessionStoreBackendKind, scope: impl Into<String>) -> Self {
+        Self::new(kind, shared_session_store_runtime(kind, scope.into()))
     }
 
     pub fn kind(&self) -> SessionStoreBackendKind {
@@ -263,6 +263,24 @@ impl std::fmt::Debug for DistributedSessionStoreClient {
     }
 }
 
+fn shared_session_store_runtime(
+    kind: SessionStoreBackendKind,
+    scope: String,
+) -> Arc<dyn DistributedSessionStoreRuntime> {
+    static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn DistributedSessionStoreRuntime>>>> =
+        OnceLock::new();
+
+    let key = format!("{kind:?}:{scope}");
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry
+        .lock()
+        .expect("shared session store registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| Arc::new(SharedDistributedSessionStoreRuntime::new()))
+        .clone()
+}
+
 #[derive(Debug, Clone)]
 enum SessionStoreBackend {
     Local(SessionStoreState),
@@ -271,7 +289,7 @@ enum SessionStoreBackend {
 
 impl SessionStoreBackend {
     fn new(
-        _customer_app: &str,
+        customer_app: &str,
         services: &davenda_core::SessionSecurityServices,
     ) -> (SessionStoreBackendKind, Self) {
         match services.store {
@@ -279,46 +297,25 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Local,
                 Self::Local(SessionStoreState::default()),
             ),
-            #[cfg(test)]
-            davenda_core::SessionStoreTopology::Database => (
-                SessionStoreBackendKind::Database,
-                Self::Distributed(DistributedSessionStoreClient::in_memory(
-                    SessionStoreBackendKind::Database,
-                )),
-            ),
-            #[cfg(not(test))]
             davenda_core::SessionStoreTopology::Database => (
                 SessionStoreBackendKind::Database,
                 Self::Distributed(DistributedSessionStoreClient::shared(
                     SessionStoreBackendKind::Database,
+                    customer_app.to_string(),
                 )),
             ),
-            #[cfg(test)]
-            davenda_core::SessionStoreTopology::Redis => (
-                SessionStoreBackendKind::Redis,
-                Self::Distributed(DistributedSessionStoreClient::in_memory(
-                    SessionStoreBackendKind::Redis,
-                )),
-            ),
-            #[cfg(not(test))]
             davenda_core::SessionStoreTopology::Redis => (
                 SessionStoreBackendKind::Redis,
                 Self::Distributed(DistributedSessionStoreClient::shared(
                     SessionStoreBackendKind::Redis,
+                    customer_app.to_string(),
                 )),
             ),
-            #[cfg(test)]
-            davenda_core::SessionStoreTopology::Valkey => (
-                SessionStoreBackendKind::Valkey,
-                Self::Distributed(DistributedSessionStoreClient::in_memory(
-                    SessionStoreBackendKind::Valkey,
-                )),
-            ),
-            #[cfg(not(test))]
             davenda_core::SessionStoreTopology::Valkey => (
                 SessionStoreBackendKind::Valkey,
                 Self::Distributed(DistributedSessionStoreClient::shared(
                     SessionStoreBackendKind::Valkey,
+                    customer_app.to_string(),
                 )),
             ),
         }
@@ -512,9 +509,14 @@ pub struct BrowserHost {
 }
 
 impl BrowserHost {
-    pub(crate) fn new(customer_app: String, services: BrowserSecurityServices) -> Self {
+    pub(crate) fn new_with_scope(
+        customer_app: String,
+        services: BrowserSecurityServices,
+        backend_scope: impl Into<String>,
+    ) -> Self {
+        let backend_scope = backend_scope.into();
         let (session_store_kind, sessions) =
-            SessionStoreBackend::new(&customer_app, &services.sessions);
+            SessionStoreBackend::new(&backend_scope, &services.sessions);
         Self {
             customer_app,
             services,
@@ -922,10 +924,18 @@ mod tests {
     }
 
     #[test]
-    fn database_session_hosts_do_not_share_backend_without_explicit_client_wiring() {
+    fn database_session_hosts_share_scoped_backend_by_default() {
         let services = services(SessionStoreTopology::Database);
-        let mut left = BrowserHost::new("browser-db-shared".to_string(), services.clone());
-        let right = BrowserHost::new("browser-db-shared".to_string(), services);
+        let mut left = BrowserHost::new_with_scope(
+            "browser-db-shared".to_string(),
+            services.clone(),
+            "browser-db-shared",
+        );
+        let right = BrowserHost::new_with_scope(
+            "browser-db-shared".to_string(),
+            services,
+            "browser-db-shared",
+        );
 
         let issued = left
             .issue_session(
@@ -938,8 +948,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(left.session_store_kind(), SessionStoreBackendKind::Database);
-        assert!(!left.session_store_is_shared());
-        assert_eq!(right.session(&issued.record.session_id), None);
+        assert!(left.session_store_is_shared());
+        assert_eq!(
+            right
+                .session(&issued.record.session_id)
+                .and_then(|record| record.principal_id),
+            Some("member-db".to_string())
+        );
     }
 
     #[test]

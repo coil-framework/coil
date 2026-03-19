@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use davenda_config::{JobBackend, JobsConfig};
@@ -1005,7 +1005,15 @@ impl JobsBackendAdapter {
     }
 
     pub fn shared(runtime: &JobsRuntime) -> Self {
-        Self::in_memory(runtime)
+        Self::shared_scoped(runtime, format!("{:p}", runtime))
+    }
+
+    pub fn shared_scoped(runtime: &JobsRuntime, scope: impl Into<String>) -> Self {
+        Self::new(
+            runtime.backend,
+            runtime.topology.clone(),
+            shared_jobs_runtime(runtime, scope.into()),
+        )
     }
 
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
@@ -1064,6 +1072,28 @@ impl JobsBackendAdapter {
         self.runtime
             .acknowledge_failed(lease, now, reason, error_message)
     }
+}
+
+fn shared_jobs_runtime(
+    runtime: &JobsRuntime,
+    scope: String,
+) -> Arc<dyn JobsCoordinationRuntime> {
+    static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn JobsCoordinationRuntime>>>> =
+        OnceLock::new();
+
+    let key = format!(
+        "{:?}:{}:{}:{}",
+        runtime.backend,
+        runtime.topology.work_queue,
+        runtime.topology.scheduled_queue,
+        scope
+    );
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry.lock().expect("shared jobs registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())))
+        .clone()
 }
 
 impl fmt::Debug for JobsBackendAdapter {
@@ -1968,9 +1998,9 @@ mod tests {
     }
 
     #[test]
-    fn distributed_coordinators_share_backend_when_reusing_an_explicit_adapter() {
+    fn distributed_coordinators_share_backend_when_using_a_shared_adapter() {
         let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-        let adapter = JobsBackendAdapter::in_memory(&runtime);
+        let adapter = JobsBackendAdapter::shared(&runtime);
         let mut left = runtime.coordinator_with_backend(adapter.clone());
         let mut right = runtime.coordinator_with_backend(adapter);
 

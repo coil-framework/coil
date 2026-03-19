@@ -4,6 +4,7 @@ use super::*;
 pub struct RuntimePlan {
     pub config: PlatformConfig,
     pub auth_package_name: String,
+    pub shared_backend_scope: String,
     pub cache_topology: CacheTopology,
     pub cache_planner: CachePlanner,
     pub i18n: I18nRuntimeServices,
@@ -51,6 +52,7 @@ impl RuntimePlan {
 
         Ok(JobsHost::new(
             self.config.app.name.clone(),
+            self.shared_backend_scope.clone(),
             scheduler_node_id,
             self.jobs.clone(),
             self.jobs.describe().clone(),
@@ -84,13 +86,18 @@ impl RuntimePlan {
         let namespace = self.cache_namespace()?;
         Ok(CacheHost::new(
             self.config.app.name.clone(),
+            self.shared_backend_scope.clone(),
             namespace,
             self.cache_planner,
         ))
     }
 
     pub fn browser_host(&self) -> BrowserHost {
-        BrowserHost::new(self.config.app.name.clone(), self.browser.clone())
+        BrowserHost::new_with_scope(
+            self.config.app.name.clone(),
+            self.browser.clone(),
+            self.shared_backend_scope.clone(),
+        )
     }
 
     pub fn tls_host(&self) -> TlsHost {

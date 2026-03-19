@@ -1,5 +1,8 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 use davenda_template::{TemplateDefinition, TemplateModelError, TemplateRuntime};
+
+static RUNTIME_PLAN_SCOPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
@@ -269,6 +272,7 @@ where
         Ok(RuntimePlan {
             config: self.config,
             auth_package_name: self.auth_package.manifest().name.clone(),
+            shared_backend_scope: next_runtime_plan_scope(),
             cache_topology: bootstrap.cache.topology,
             cache_planner: bootstrap.cache.planner,
             i18n: bootstrap.i18n,
@@ -302,6 +306,13 @@ where
             ops_catalog,
         })
     }
+}
+
+fn next_runtime_plan_scope() -> String {
+    format!(
+        "runtime-plan:{}",
+        RUNTIME_PLAN_SCOPE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn module_http_contributions(

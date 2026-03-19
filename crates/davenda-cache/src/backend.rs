@@ -1,5 +1,6 @@
+use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheLookupState, CacheMetrics,
@@ -177,11 +178,15 @@ impl DistributedCacheClient {
     }
 
     pub fn in_memory(kind: CacheBackendKind) -> Self {
-        Self::shared(kind)
+        Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
     }
 
     pub fn shared(kind: CacheBackendKind) -> Self {
-        Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
+        Self::scoped_shared(kind, "global")
+    }
+
+    pub fn scoped_shared(kind: CacheBackendKind, scope: impl Into<String>) -> Self {
+        Self::new(kind, shared_cache_runtime(kind, scope.into()))
     }
 
     pub fn kind(&self) -> CacheBackendKind {
@@ -228,6 +233,22 @@ impl fmt::Debug for DistributedCacheClient {
             .field("kind", &self.kind)
             .finish()
     }
+}
+
+fn shared_cache_runtime(
+    kind: CacheBackendKind,
+    scope: String,
+) -> Arc<dyn DistributedCacheRuntime> {
+    static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn DistributedCacheRuntime>>>> =
+        OnceLock::new();
+
+    let key = format!("{kind:?}:{scope}");
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry.lock().expect("shared cache registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| Arc::new(SharedDistributedCacheRuntime::new()))
+        .clone()
 }
 
 #[derive(Debug, Clone)]
@@ -299,13 +320,18 @@ impl CacheBackendAdapter {
     }
 
     pub fn shared(topology: CacheTopology) -> Self {
+        Self::scoped_shared(topology, "global")
+    }
+
+    pub fn scoped_shared(topology: CacheTopology, scope: impl Into<String>) -> Self {
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
             None => CacheBackendKind::Local,
         };
+        let scope = scope.into();
         let storage = if topology.supports_shared_invalidation() {
-            CacheBackendStorage::Distributed(DistributedCacheClient::shared(kind))
+            CacheBackendStorage::Distributed(DistributedCacheClient::scoped_shared(kind, scope))
         } else {
             CacheBackendStorage::Local(LocalCacheBackendAdapter::new())
         };

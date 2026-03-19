@@ -6,8 +6,8 @@ use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     BrowserSecurityServices, CapabilityValidationError, CookieSigner, JobsRuntimeServices,
     ModuleManifest, ObservabilityRuntimeServices, PlatformModule, RegistrationError,
-    ServiceDescriptor, TemplateRuntimeServices, WasmRuntimeServices, bootstrap_core_services,
-    validate_module_capabilities,
+    ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
+    bootstrap_core_services, validate_module_capabilities,
 };
 use thiserror::Error;
 
@@ -455,6 +455,7 @@ where
             observability: bootstrap.observability,
             http,
             template: bootstrap.template,
+            tls: bootstrap.tls,
             wasm: bootstrap.wasm,
             services: registry.services().cloned().collect(),
             modules: module_manifests,
@@ -472,6 +473,7 @@ pub struct RuntimePlan {
     pub observability: ObservabilityRuntimeServices,
     pub http: HttpRuntimePlan,
     pub template: TemplateRuntimeServices,
+    pub tls: TlsRuntimeServices,
     pub wasm: WasmRuntimeServices,
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
@@ -808,6 +810,11 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(
             plan.jobs.topology.scheduled_queue.as_str(),
             "jobs.scheduled"
+        );
+        assert_eq!(plan.tls.mode, davenda_config::TlsMode::Acme);
+        assert_eq!(
+            plan.tls.provider.map(|provider| provider.to_string()),
+            Some("cloudflare_dns".to_string())
         );
         assert!(plan.observability.telemetry.metrics_enabled);
         assert!(plan.observability.telemetry.trace.enabled);

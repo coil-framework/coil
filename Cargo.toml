@@ -20,6 +20,7 @@ members = [
     "crates/davenda-seo",
     "crates/davenda-storage",
     "crates/davenda-template",
+    "crates/davenda-tls",
     "crates/davenda-wasm",
     "crates/zanzibar",
 ]

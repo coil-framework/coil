@@ -21,6 +21,7 @@ use davenda_observability::{
 };
 use davenda_seo::HeadMetadata;
 use davenda_template::{TemplateNamespace, TemplateRegistry, TemplateRuntime};
+use davenda_tls::TlsRuntime;
 use davenda_wasm::{ExtensionPointKind, ResourceLimits};
 use hmac::{Hmac, Mac};
 use rand::{RngCore, rngs::OsRng};
@@ -371,6 +372,7 @@ pub struct A11yRuntimeServices {
 
 pub type JobsRuntimeServices = JobsRuntime;
 pub type ObservabilityRuntimeServices = ObservabilityRuntime;
+pub type TlsRuntimeServices = TlsRuntime;
 
 #[derive(Debug, Clone)]
 pub struct CoreBootstrap {
@@ -383,6 +385,7 @@ pub struct CoreBootstrap {
     pub seo: SeoRuntimeServices,
     pub a11y: A11yRuntimeServices,
     pub template: TemplateRuntimeServices,
+    pub tls: TlsRuntimeServices,
     pub wasm: WasmRuntimeServices,
 }
 
@@ -542,6 +545,7 @@ pub fn bootstrap_core_services(
     let seo = seo_runtime_from_config(config);
     let a11y = a11y_runtime_services();
     let template = template_runtime_services();
+    let tls = tls_runtime_from_config(config);
     let wasm = wasm_runtime_from_config(config);
 
     registry.register_core_service("core.config", "Typed platform configuration")?;
@@ -663,7 +667,7 @@ pub fn bootstrap_core_services(
         ),
     )?;
 
-    match config.tls.mode {
+    match tls.mode {
         TlsMode::External => {
             registry.register_core_service(
                 "core.tls.metadata",
@@ -674,6 +678,10 @@ pub fn bootstrap_core_services(
             registry.register_core_service(
                 "core.tls",
                 "Certificate lifecycle, TLS termination, and renewal orchestration",
+            )?;
+            registry.register_core_service(
+                "core.tls.reload",
+                "Hot-reloadable certificate bindings and SNI inventory",
             )?;
         }
     }
@@ -688,6 +696,7 @@ pub fn bootstrap_core_services(
         seo,
         a11y,
         template,
+        tls,
         wasm,
     })
 }
@@ -814,6 +823,7 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.config"));
         assert!(ids.contains(&"core.auth"));
         assert!(ids.contains(&"core.tls"));
+        assert!(ids.contains(&"core.tls.reload"));
         assert!(ids.contains(&"core.jobs"));
         assert!(ids.contains(&"core.health"));
         assert!(ids.contains(&"core.maintenance"));
@@ -857,6 +867,16 @@ cdn_base_url = "https://cdn.example.com"
             bootstrap.jobs.topology.domain_events_queue.as_str(),
             "jobs.domain-events"
         );
+        assert_eq!(bootstrap.tls.mode, TlsMode::Acme);
+        assert_eq!(
+            bootstrap.tls.provider,
+            Some(davenda_tls::CertificateProviderKind::CloudflareDns)
+        );
+        assert_eq!(
+            bootstrap.tls.challenge,
+            Some(davenda_tls::ChallengeStrategy::Dns01)
+        );
+        assert!(bootstrap.tls.hot_reload_supported);
         assert!(bootstrap.observability.telemetry.metrics_enabled);
         assert!(bootstrap.observability.telemetry.trace.enabled);
         assert!(
@@ -1090,6 +1110,10 @@ fn observability_runtime_from_config(config: &PlatformConfig) -> ObservabilityRu
 
 fn jobs_runtime_from_config(config: &PlatformConfig) -> JobsRuntimeServices {
     JobsRuntime::from_config(&config.jobs).expect("jobs runtime config must be valid")
+}
+
+fn tls_runtime_from_config(config: &PlatformConfig) -> TlsRuntimeServices {
+    TlsRuntime::from_config(&config.tls)
 }
 
 fn template_runtime_services() -> TemplateRuntimeServices {

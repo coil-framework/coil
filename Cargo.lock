@@ -438,6 +438,7 @@ dependencies = [
  "davenda-observability",
  "davenda-seo",
  "davenda-template",
+ "davenda-tls",
  "davenda-wasm",
  "hmac",
  "rand 0.8.5",
@@ -532,6 +533,14 @@ dependencies = [
 [[package]]
 name = "davenda-template"
 version = "0.1.0"
+
+[[package]]
+name = "davenda-tls"
+version = "0.1.0"
+dependencies = [
+ "davenda-config",
+ "thiserror",
+]
 
 [[package]]
 name = "davenda-wasm"

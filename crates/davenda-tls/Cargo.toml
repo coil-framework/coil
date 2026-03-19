@@ -1,0 +1,8 @@
+[package]
+name = "davenda-tls"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+davenda-config = { path = "../davenda-config" }
+thiserror = "1.0"

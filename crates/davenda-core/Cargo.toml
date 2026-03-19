@@ -14,6 +14,7 @@ davenda-jobs = { path = "../davenda-jobs" }
 davenda-observability = { path = "../davenda-observability" }
 davenda-seo = { path = "../davenda-seo" }
 davenda-template = { path = "../davenda-template" }
+davenda-tls = { path = "../davenda-tls" }
 davenda-wasm = { path = "../davenda-wasm" }
 hmac = "0.12"
 rand = "0.8"

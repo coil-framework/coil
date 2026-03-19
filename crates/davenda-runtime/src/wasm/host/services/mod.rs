@@ -130,4 +130,11 @@ impl RuntimeWasmHostServices {
     ) -> Result<Vec<MetadataAuditRecord>, String> {
         self.metadata.recent_records(limit)
     }
+
+    pub(crate) fn metadata_snapshot(
+        &self,
+        limit: usize,
+    ) -> Result<metadata::MetadataAuditSnapshot, String> {
+        self.metadata.snapshot(limit)
+    }
 }

@@ -67,12 +67,12 @@ impl SessionStoreState {
 
 #[cfg(test)]
 #[derive(Debug, Default)]
-struct TestOnlySharedDistributedSessionStoreRuntime {
+struct TestOnlySqliteSharedDistributedSessionStoreRuntime {
     state: Mutex<SessionStoreState>,
 }
 
 #[cfg(test)]
-impl TestOnlySharedDistributedSessionStoreRuntime {
+impl TestOnlySqliteSharedDistributedSessionStoreRuntime {
     fn new() -> Self {
         Self {
             state: Mutex::new(SessionStoreState::default()),
@@ -81,7 +81,7 @@ impl TestOnlySharedDistributedSessionStoreRuntime {
 }
 
 #[cfg(test)]
-impl DistributedSessionStoreRuntime for TestOnlySharedDistributedSessionStoreRuntime {
+impl DistributedSessionStoreRuntime for TestOnlySqliteSharedDistributedSessionStoreRuntime {
     fn issue(&self, record: BrowserSessionRecord) {
         let mut guard = self.state.lock().expect("session backend mutex poisoned");
         guard.issue(record);
@@ -122,7 +122,7 @@ impl DistributedSessionStoreRuntime for TestOnlySharedDistributedSessionStoreRun
 }
 
 #[cfg(test)]
-pub(crate) fn test_only_shared_runtime(
+pub(crate) fn test_only_sqlite_shared_runtime(
     kind: SessionStoreBackendKind,
     scope: String,
 ) -> Arc<dyn DistributedSessionStoreRuntime> {
@@ -136,7 +136,7 @@ pub(crate) fn test_only_shared_runtime(
         .expect("test session store registry mutex poisoned");
     guard
         .entry(key)
-        .or_insert_with(|| Arc::new(TestOnlySharedDistributedSessionStoreRuntime::new()))
+        .or_insert_with(|| Arc::new(TestOnlySqliteSharedDistributedSessionStoreRuntime::new()))
         .clone()
 }
 
@@ -153,7 +153,7 @@ impl DistributedSessionStoreClient {
     pub(crate) fn local_for_testing(kind: SessionStoreBackendKind) -> Self {
         Self::new(
             kind,
-            Arc::new(TestOnlySharedDistributedSessionStoreRuntime::new()),
+            Arc::new(TestOnlySqliteSharedDistributedSessionStoreRuntime::new()),
         )
     }
 }

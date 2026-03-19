@@ -70,7 +70,7 @@ pub(crate) fn test_scope_namespace() -> String {
         .to_string()
 }
 
-pub(crate) fn shared_test_runtime(
+pub(crate) fn test_only_sqlite_shared_runtime(
     kind: CacheBackendKind,
     namespace: String,
 ) -> Arc<dyn DistributedCacheRuntime> {

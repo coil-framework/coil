@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Test-only SQLite persistence for shared job backend coordination.
 
 use super::*;
@@ -17,28 +18,28 @@ fn job_backend_slug(backend: davenda_config::JobBackend) -> &'static str {
     }
 }
 
-fn test_only_shared_state_root() -> PathBuf {
+fn test_only_sqlite_shared_state_root() -> PathBuf {
     std::env::var_os(SHARED_STATE_DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
 }
 
-fn test_only_database_path(runtime: &JobsRuntime, namespace: &str) -> PathBuf {
-    test_only_shared_state_root()
+fn test_only_sqlite_database_path(runtime: &JobsRuntime, namespace: &str) -> PathBuf {
+    test_only_sqlite_shared_state_root()
         .join("jobs")
         .join(job_backend_slug(runtime.backend))
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
 #[derive(Debug)]
-pub(super) struct TestOnlySharedJobsStore {
+pub(super) struct TestOnlySqliteSharedJobsStore {
     connection: Mutex<Connection>,
     namespace: String,
 }
 
-impl TestOnlySharedJobsStore {
+impl TestOnlySqliteSharedJobsStore {
     pub(super) fn open(runtime: &JobsRuntime, namespace: String) -> Self {
-        let path = test_only_database_path(runtime, &namespace);
+        let path = test_only_sqlite_database_path(runtime, &namespace);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|error| {
                 panic!(

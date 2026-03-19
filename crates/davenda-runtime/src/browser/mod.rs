@@ -9,7 +9,7 @@ mod support;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]
-pub(crate) use testing::test_only_shared_runtime;
+pub(crate) use testing::test_only_sqlite_shared_runtime;
 
 pub use flash::{FlashLevel, FlashMessage};
 pub use host::{BrowserHost, BrowserHostBuildError, ResolvedBrowserRequest, RuntimeBrowserError};

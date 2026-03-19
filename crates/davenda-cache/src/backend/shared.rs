@@ -22,24 +22,24 @@ use std::sync::Mutex;
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
 
 #[cfg(test)]
-pub(crate) fn test_only_persistent_runtime(
+pub(crate) fn test_only_sqlite_shared_runtime(
     kind: CacheBackendKind,
     namespace: impl Into<String>,
 ) -> Arc<dyn DistributedCacheRuntime> {
-    Arc::new(TestOnlyPersistentDistributedCacheRuntime::new(
+    Arc::new(TestOnlySqliteSharedCacheRuntime::new(
         kind,
         namespace.into(),
     ))
 }
 
 #[cfg(not(test))]
-pub(crate) fn unconfigured_live_runtime(
+pub(crate) fn live_rejection_shared_runtime(
     kind: CacheBackendKind,
     namespace: impl Into<String>,
 ) -> Arc<dyn DistributedCacheRuntime> {
     // Live cache coordination must be configured explicitly; this is the
     // rejection backend for non-test builds.
-    Arc::new(UnconfiguredLiveDistributedCacheRuntime::new(
+    Arc::new(LiveRejectionDistributedCacheRuntime::new(
         kind,
         namespace.into(),
     ))
@@ -55,15 +55,15 @@ fn cache_kind_slug(kind: CacheBackendKind) -> &'static str {
 }
 
 #[cfg(test)]
-fn test_only_shared_state_root() -> PathBuf {
+fn test_only_sqlite_shared_state_root() -> PathBuf {
     std::env::var_os(SHARED_STATE_DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
 }
 
 #[cfg(test)]
-fn test_only_database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
-    test_only_shared_state_root()
+fn test_only_sqlite_database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
+    test_only_sqlite_shared_state_root()
         .join("cache")
         .join(cache_kind_slug(kind))
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
@@ -71,12 +71,12 @@ fn test_only_database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
 
 #[cfg(test)]
 #[derive(Debug)]
-struct TestOnlyPersistentDistributedCacheRuntime {
+struct TestOnlySqliteSharedCacheRuntime {
     store: SharedCacheStore,
 }
 
 #[cfg(test)]
-impl TestOnlyPersistentDistributedCacheRuntime {
+impl TestOnlySqliteSharedCacheRuntime {
     fn new(kind: CacheBackendKind, namespace: String) -> Self {
         Self {
             store: SharedCacheStore::open(kind, namespace),
@@ -85,7 +85,7 @@ impl TestOnlyPersistentDistributedCacheRuntime {
 }
 
 #[cfg(test)]
-impl DistributedCacheRuntime for TestOnlyPersistentDistributedCacheRuntime {
+impl DistributedCacheRuntime for TestOnlySqliteSharedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         self.store
             .with_state_mut(|state| {
@@ -140,13 +140,13 @@ impl DistributedCacheRuntime for TestOnlyPersistentDistributedCacheRuntime {
 
 #[cfg(not(test))]
 #[derive(Debug)]
-struct UnconfiguredLiveDistributedCacheRuntime {
+struct LiveRejectionDistributedCacheRuntime {
     kind: CacheBackendKind,
     namespace: String,
 }
 
 #[cfg(not(test))]
-impl UnconfiguredLiveDistributedCacheRuntime {
+impl LiveRejectionDistributedCacheRuntime {
     fn new(kind: CacheBackendKind, namespace: String) -> Self {
         Self { kind, namespace }
     }
@@ -161,7 +161,7 @@ impl UnconfiguredLiveDistributedCacheRuntime {
 }
 
 #[cfg(not(test))]
-impl DistributedCacheRuntime for UnconfiguredLiveDistributedCacheRuntime {
+impl DistributedCacheRuntime for LiveRejectionDistributedCacheRuntime {
     fn insert(&self, _entry: CacheEntry) {
         panic!("{}", self.unsupported_message());
     }
@@ -210,7 +210,7 @@ struct SharedCacheStore {
 #[cfg(test)]
 impl SharedCacheStore {
     fn open(kind: CacheBackendKind, namespace: String) -> Self {
-        let path = test_only_database_path(kind, &namespace);
+        let path = test_only_sqlite_database_path(kind, &namespace);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|error| {
                 panic!(

@@ -41,16 +41,15 @@ impl RuntimeBackendMaterializer {
         match self.plans.session_store.as_ref() {
             Some(target) => {
                 #[cfg(test)]
-                let session_runtime = crate::browser::test_only_shared_runtime(
+                let session_runtime = crate::browser::test_only_sqlite_shared_runtime(
                     target.kind,
                     format!("{}:{customer_app}", self.namespace),
                 );
                 #[cfg(not(test))]
-                let session_runtime =
-                    DistributedSessionStoreClient::unconfigured_live_shared_runtime(
-                        target.kind,
-                        format!("{}:{customer_app}", self.namespace),
-                    );
+                let session_runtime = DistributedSessionStoreClient::live_rejection_shared_runtime(
+                    target.kind,
+                    format!("{}:{customer_app}", self.namespace),
+                );
 
                 BrowserHost::with_session_store_client(
                     customer_app.clone(),

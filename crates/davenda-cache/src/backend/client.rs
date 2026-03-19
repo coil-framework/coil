@@ -58,23 +58,26 @@ impl DistributedCacheClient {
     #[doc(hidden)]
     pub fn emulated_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
         let _ = kind;
-        super::testing::shared_test_runtime(kind, super::testing::test_scope_namespace())
+        super::testing::test_only_sqlite_shared_runtime(
+            kind,
+            super::testing::test_scope_namespace(),
+        )
     }
 
     #[cfg(test)]
-    pub fn test_only_persistent_shared_runtime(
+    pub fn test_only_sqlite_shared_runtime(
         kind: CacheBackendKind,
         namespace: impl Into<String>,
     ) -> Arc<dyn DistributedCacheRuntime> {
-        shared::test_only_persistent_runtime(kind, namespace.into())
+        shared::test_only_sqlite_shared_runtime(kind, namespace.into())
     }
 
     #[cfg(not(test))]
-    pub fn unconfigured_live_shared_runtime(
+    pub fn live_rejection_shared_runtime(
         kind: CacheBackendKind,
         namespace: impl Into<String>,
     ) -> Arc<dyn DistributedCacheRuntime> {
-        shared::unconfigured_live_runtime(kind, namespace.into())
+        shared::live_rejection_shared_runtime(kind, namespace.into())
     }
 
     #[cfg(test)]

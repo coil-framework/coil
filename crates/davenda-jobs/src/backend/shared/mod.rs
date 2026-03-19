@@ -31,19 +31,19 @@ use harness::SharedJobsRuntimeHarness;
 static LOCAL_NAMESPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
-pub(crate) fn test_only_persistent_runtime(
+pub(crate) fn test_only_sqlite_shared_runtime(
     runtime: &JobsRuntime,
     namespace: impl Into<String>,
 ) -> Arc<dyn JobsCoordinationRuntime> {
-    shared_test_runtime(runtime, namespace.into())
+    test_only_sqlite_shared_runtime_impl(runtime, namespace.into())
 }
 
 #[cfg(not(test))]
-pub(crate) fn unconfigured_live_runtime(
+pub(crate) fn live_rejection_shared_runtime(
     runtime: &JobsRuntime,
     namespace: impl Into<String>,
 ) -> Arc<dyn JobsCoordinationRuntime> {
-    Arc::new(UnconfiguredJobsCoordinationRuntime::new(
+    Arc::new(LiveRejectionJobsCoordinationRuntime::new(
         runtime.clone(),
         namespace.into(),
     ))
@@ -53,11 +53,11 @@ pub(crate) fn unconfigured_live_runtime(
 pub(crate) fn local_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
     // Live jobs coordination must be configured explicitly; this path only
     // constructs the rejection backend for non-test builds.
-    unconfigured_live_runtime(runtime, default_namespace(runtime))
+    live_rejection_shared_runtime(runtime, default_namespace(runtime))
 }
 
 #[cfg(test)]
-fn shared_test_runtime(
+fn test_only_sqlite_shared_runtime_impl(
     runtime: &JobsRuntime,
     namespace: String,
 ) -> Arc<dyn JobsCoordinationRuntime> {
@@ -115,13 +115,13 @@ fn test_scope() -> String {
 
 #[cfg(not(test))]
 #[derive(Debug)]
-struct UnconfiguredJobsCoordinationRuntime {
+struct LiveRejectionJobsCoordinationRuntime {
     runtime: JobsRuntime,
     namespace: String,
 }
 
 #[cfg(not(test))]
-impl UnconfiguredJobsCoordinationRuntime {
+impl LiveRejectionJobsCoordinationRuntime {
     fn new(runtime: JobsRuntime, namespace: String) -> Self {
         Self { runtime, namespace }
     }
@@ -136,7 +136,7 @@ impl UnconfiguredJobsCoordinationRuntime {
 }
 
 #[cfg(not(test))]
-impl JobsCoordinationRuntime for UnconfiguredJobsCoordinationRuntime {
+impl JobsCoordinationRuntime for LiveRejectionJobsCoordinationRuntime {
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         panic!("{}", self.unsupported_message());
     }

@@ -156,19 +156,19 @@ impl JobsBackendAdapter {
     #[cfg(test)]
     #[allow(dead_code)]
     #[doc(hidden)]
-    pub fn test_only_persistent_shared_runtime(
+    pub fn test_only_sqlite_shared_runtime(
         runtime: &JobsRuntime,
         namespace: impl Into<String>,
     ) -> Arc<dyn JobsCoordinationRuntime> {
-        shared::test_only_persistent_runtime(runtime, namespace.into())
+        shared::test_only_sqlite_shared_runtime(runtime, namespace.into())
     }
 
     #[cfg(not(test))]
-    pub fn unconfigured_live_shared_runtime(
+    pub fn live_rejection_shared_runtime(
         runtime: &JobsRuntime,
         namespace: impl Into<String>,
     ) -> Arc<dyn JobsCoordinationRuntime> {
-        shared::unconfigured_live_runtime(runtime, namespace.into())
+        shared::live_rejection_shared_runtime(runtime, namespace.into())
     }
 
     #[doc(hidden)]

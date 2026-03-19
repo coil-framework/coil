@@ -24,7 +24,7 @@ pub(crate) struct LiveAuthExplainBackend {
 
 impl LiveAuthExplainBackend {
     pub(crate) fn from_config(config: &PlatformConfig) -> Result<Self, CliRunError> {
-        let package = resolve_auth_package(config);
+        let package = resolve_configured_auth_package(config);
         let explainer = LiveAuthExplainHost::from_config(config, package).map_err(|error| {
             CliRunError::execution(format!(
                 "failed to initialize the live auth explain backend: {error}"
@@ -59,9 +59,10 @@ impl AuthExplainBackend for LiveAuthExplainBackend {
     }
 }
 
-fn resolve_auth_package(config: &PlatformConfig) -> AuthModelPackageSelection {
-    // The CLI explain path is keyed by deployment package identity, but it intentionally
-    // reuses the shipped capability bindings until a deployment provides a different package.
+fn resolve_configured_auth_package(config: &PlatformConfig) -> AuthModelPackageSelection {
+    // The CLI explain path is keyed by the deployment-configured auth package identity.
+    // This keeps the live backend aligned with replacement packages instead of assuming
+    // the default package name is the only valid deployment configuration.
     AuthModelPackageSelection::new(configured_auth_model_package(config.auth.package.clone()))
 }
 
@@ -250,9 +251,13 @@ publish_manifest = false
         let mut config = config(true);
         config.auth.package = "platform-extended-auth".to_string();
 
-        let package = resolve_auth_package(&config);
+        let package = resolve_configured_auth_package(&config);
 
         assert_eq!(package.manifest().name, "platform-extended-auth");
+        assert_ne!(
+            package.manifest().name,
+            DefaultAuthModelPackage::default().manifest().name
+        );
         assert_eq!(
             package
                 .package()

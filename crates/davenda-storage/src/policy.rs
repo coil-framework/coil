@@ -168,6 +168,13 @@ impl StoragePolicy {
             SyncMode::LocalOnly => DurableStore::LocalDisk,
         }
     }
+
+    pub const fn is_public_delivery_eligible(&self) -> bool {
+        matches!(
+            (self.delivery_mode, self.sensitivity),
+            (DeliveryMode::PublicCdn, Sensitivity::Public)
+        )
+    }
 }
 
 impl From<StorageClass> for StoragePolicy {

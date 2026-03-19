@@ -14,7 +14,10 @@ pub use delivery::{
 };
 pub use error::AssetModelError;
 pub use identifiers::{AssetId, ReleaseId, RevisionId};
-pub use managed::{ManagedAsset, ManagedAssetRevision, PublicationState, PublicationStatus};
+pub use managed::{
+    ManagedAsset, ManagedAssetRevision, PublicationState, PublicationStatus,
+    PublicationTransition,
+};
 pub use release::{
     ActiveAssetManifest, DeploymentArtifact, DeploymentRelease, PublishedDeploymentArtifact,
 };

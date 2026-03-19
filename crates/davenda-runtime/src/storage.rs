@@ -1,4 +1,7 @@
 use super::*;
+use davenda_auth::{Capability, DavendaAuth, DefaultSubject};
+use davenda_assets::ManagedAsset;
+use zanzibar::RebacEngine;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeStorageError {
@@ -8,6 +11,53 @@ pub enum RuntimeStorageError {
     Asset(#[from] AssetModelError),
     #[error("assets.cdn_base_url must be configured for public asset publication")]
     MissingCdnBaseUrl,
+    #[error("asset publication authorization failed for `{asset_id}`: {reason}")]
+    PublicationAuthorizationDenied { asset_id: String, reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ManagedAssetPublicationGate {
+    pub can_publish: bool,
+    pub can_replace: bool,
+    pub can_manage_storage: bool,
+    pub public_delivery_enabled: bool,
+}
+
+impl ManagedAssetPublicationGate {
+    pub fn can_publish_publicly(&self) -> bool {
+        self.can_publish && self.can_replace && self.can_manage_storage && self.public_delivery_enabled
+    }
+
+    pub fn ensure_public_delivery_allowed(
+        &self,
+        asset_id: impl Into<String>,
+    ) -> Result<(), RuntimeStorageError> {
+        if self.can_publish_publicly() {
+            Ok(())
+        } else {
+            Err(RuntimeStorageError::PublicationAuthorizationDenied {
+                asset_id: asset_id.into(),
+                reason: self.denial_reason(),
+            })
+        }
+    }
+
+    fn denial_reason(&self) -> String {
+        let mut missing = Vec::new();
+        if !self.can_publish {
+            missing.push(Capability::AssetPublish.to_string());
+        }
+        if !self.can_replace {
+            missing.push(Capability::AssetReplace.to_string());
+        }
+        if !self.can_manage_storage {
+            missing.push(Capability::AssetManageStorage.to_string());
+        }
+        if !self.public_delivery_enabled {
+            missing.push("published public delivery state".to_string());
+        }
+        missing.join(", ")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,5 +135,80 @@ impl StorageHost {
         asset: &ManagedAsset,
     ) -> Result<AssetDeliveryPlan, RuntimeStorageError> {
         Ok(asset.plan_authorized_delivery(&DeliveryContext::default())?)
+    }
+
+    pub async fn managed_asset_publication_gate<E>(
+        &self,
+        auth: &DavendaAuth<E>,
+        subject: &DefaultSubject,
+        asset: &ManagedAsset,
+    ) -> Result<ManagedAssetPublicationGate, RuntimeStorageError>
+    where
+        E: RebacEngine,
+    {
+        let asset_entity = asset.auth_entity();
+        let can_publish = auth
+            .check_default_capability(subject, Capability::AssetPublish, &asset_entity)
+            .await
+            .map_err(|_| RuntimeStorageError::PublicationAuthorizationDenied {
+                asset_id: asset.id().to_string(),
+                reason: Capability::AssetPublish.to_string(),
+            })?;
+        let can_replace = auth
+            .check_default_capability(subject, Capability::AssetReplace, &asset_entity)
+            .await
+            .map_err(|_| RuntimeStorageError::PublicationAuthorizationDenied {
+                asset_id: asset.id().to_string(),
+                reason: Capability::AssetReplace.to_string(),
+            })?;
+        let can_manage_storage = auth
+            .check_default_capability(subject, Capability::AssetManageStorage, &asset_entity)
+            .await
+            .map_err(|_| RuntimeStorageError::PublicationAuthorizationDenied {
+                asset_id: asset.id().to_string(),
+                reason: Capability::AssetManageStorage.to_string(),
+            })?;
+
+        Ok(ManagedAssetPublicationGate {
+            can_publish,
+            can_replace,
+            can_manage_storage,
+            public_delivery_enabled: asset
+                .publication()
+                .is_published()
+                && asset.publication().live_revision().is_some_and(|revision| {
+                    revision
+                        .storage_plan()
+                        .policy
+                        .is_public_delivery_eligible()
+                }),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publication_gate_reports_missing_conditions() {
+        let gate = ManagedAssetPublicationGate {
+            can_publish: true,
+            can_replace: false,
+            can_manage_storage: true,
+            public_delivery_enabled: false,
+        };
+
+        assert!(!gate.can_publish_publicly());
+        let error = gate
+            .ensure_public_delivery_allowed("asset-hero")
+            .unwrap_err();
+        assert_eq!(
+            error,
+            RuntimeStorageError::PublicationAuthorizationDenied {
+                asset_id: "asset-hero".to_string(),
+                reason: "asset.replace, published public delivery state".to_string(),
+            }
+        );
     }
 }

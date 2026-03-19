@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use davenda_assets::{
     ActiveAssetManifest, AssetDeliveryPlan, AssetModelError, ContentFingerprint, DeliveryContext,
-    DeploymentRelease, ManagedAsset, ManagedAssetRevision, RevisionId,
+    DeploymentRelease, ManagedAssetRevision, RevisionId,
 };
 use davenda_auth::AuthModelPackage;
 use davenda_cache::{

@@ -569,6 +569,7 @@ dependencies = [
 name = "davenda-assets"
 version = "0.1.0"
 dependencies = [
+ "davenda-auth",
  "davenda-config",
  "davenda-storage",
  "thiserror 1.0.69",

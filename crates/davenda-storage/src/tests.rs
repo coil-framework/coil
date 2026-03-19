@@ -17,6 +17,13 @@ fn rejects_invalid_policy_combinations() {
 }
 
 #[test]
+fn public_asset_policies_are_public_delivery_eligible() {
+    assert!(StoragePolicy::public_asset().is_public_delivery_eligible());
+    assert!(!StoragePolicy::private_shared().is_public_delivery_eligible());
+    assert!(!StoragePolicy::local_only_sensitive().is_public_delivery_eligible());
+}
+
+#[test]
 fn resolves_most_specific_path_policy() {
     let policies = StoragePolicySet::default()
         .with_rule(

@@ -29,6 +29,8 @@ pub enum AssetModelError {
     },
     #[error("asset `{asset_id}` has no live published revision")]
     MissingLiveRevision { asset_id: String },
+    #[error("asset `{asset_id}` is not in a published state")]
+    NotPublished { asset_id: String },
     #[error("asset `{asset_id}` cannot be delivered publicly with mode `{delivery_mode}`")]
     PublicDeliveryRequiresPublicCdn {
         asset_id: String,

@@ -1,4 +1,5 @@
 use super::*;
+use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 use davenda_storage::{StoragePlan, StoragePlanRequest, StoragePlanner, StoragePolicyOverride};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +76,12 @@ pub enum PublicationStatus {
     Unpublished,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicationTransition {
+    PublishCurrent,
+    Unpublish,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicationState {
     status: PublicationStatus,
@@ -84,6 +91,10 @@ pub struct PublicationState {
 impl PublicationState {
     pub fn status(&self) -> PublicationStatus {
         self.status
+    }
+
+    pub fn is_published(&self) -> bool {
+        self.status == PublicationStatus::Published
     }
 
     pub fn live_revision(&self) -> Option<&ManagedAssetRevision> {
@@ -132,6 +143,10 @@ impl ManagedAsset {
         &self.publication
     }
 
+    pub fn auth_entity(&self) -> Entity {
+        Entity::asset(self.id.to_string())
+    }
+
     pub fn has_pending_changes(&self) -> bool {
         match self.publication.live_revision() {
             Some(live_revision) => live_revision.id() != self.current_revision.id(),
@@ -142,6 +157,19 @@ impl ManagedAsset {
     pub fn publish_current(&mut self) {
         self.publication.live_revision = Some(self.current_revision.clone());
         self.publication.status = PublicationStatus::Published;
+    }
+
+    pub fn apply_publication_transition(
+        &mut self,
+        transition: PublicationTransition,
+    ) -> Result<(), AssetModelError> {
+        match transition {
+            PublicationTransition::PublishCurrent => {
+                self.publish_current();
+                Ok(())
+            }
+            PublicationTransition::Unpublish => self.unpublish(),
+        }
     }
 
     pub fn replace_current_revision(&mut self, revision: ManagedAssetRevision) {
@@ -164,6 +192,12 @@ impl ManagedAsset {
         &self,
         context: &DeliveryContext<'_>,
     ) -> Result<AssetDeliveryPlan, AssetModelError> {
+        if !self.publication.is_published() {
+            return Err(AssetModelError::NotPublished {
+                asset_id: self.id.to_string(),
+            });
+        }
+
         let live_revision = self.publication.live_revision().ok_or_else(|| {
             AssetModelError::MissingLiveRevision {
                 asset_id: self.id.to_string(),
@@ -198,5 +232,24 @@ impl ManagedAsset {
             Some(self.current_revision.id().clone()),
             context,
         )
+    }
+
+    pub fn auth_updates(&self) -> Vec<DefaultTupleUpdate> {
+        let public_tuple = DefaultTuple::new(
+            self.auth_entity(),
+            Relation::ReadPublic,
+            DefaultSubject::entity(Entity::any_user()),
+        );
+
+        if self.publication.is_published()
+            && self
+                .publication
+                .live_revision()
+                .is_some_and(|revision| revision.storage_plan().policy.is_public_delivery_eligible())
+        {
+            vec![DefaultTupleUpdate::Write(public_tuple)]
+        } else {
+            vec![DefaultTupleUpdate::Delete(public_tuple)]
+        }
     }
 }

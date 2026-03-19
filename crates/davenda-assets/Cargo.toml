@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+davenda-auth = { path = "../davenda-auth" }
 davenda-storage = { path = "../davenda-storage" }
 thiserror = "1.0"
 

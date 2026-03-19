@@ -4127,6 +4127,17 @@ fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
         AssetDeliveryTarget::Cdn { public_url, .. }
             if public_url == "https://cdn.example.com/uploads/catalog/brochure.pdf"
     ));
+    assert!(
+        public_asset
+            .auth_updates()
+            .contains(&davenda_auth::DefaultTupleUpdate::Write(
+                davenda_auth::DefaultTuple::new(
+                    davenda_auth::Entity::asset("asset-brochure"),
+                    davenda_auth::Relation::ReadPublic,
+                    davenda_auth::DefaultSubject::entity(davenda_auth::Entity::any_user()),
+                ),
+            ))
+    );
 
     let restricted_revision = host
         .plan_managed_revision(

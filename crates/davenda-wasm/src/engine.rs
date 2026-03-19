@@ -224,6 +224,20 @@ fn read_typed_output(
         }
     })?;
 
+    let memory_size = memory.data_size(&mut *store);
+    let end = ptr
+        .checked_add(len)
+        .ok_or_else(|| WasmModelError::InvalidTypedReturn {
+            reason: "typed return payload length overflows host address space".to_string(),
+        })?;
+    if end > memory_size {
+        return Err(WasmModelError::InvalidTypedReturn {
+            reason: format!(
+                "typed return payload pointer/length `{ptr}..{end}` exceeds guest memory size `{memory_size}`"
+            ),
+        });
+    }
+
     let mut bytes = vec![0u8; len];
     memory.read(&mut *store, ptr, &mut bytes).map_err(|error| {
         WasmModelError::InvalidTypedReturn {

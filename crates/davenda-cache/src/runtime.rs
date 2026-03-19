@@ -2,6 +2,7 @@ use crate::{
     CacheKey, CacheLayerPlan, CacheModelError, CacheTopology, FreshnessPolicy, InvalidationSet,
     RequestCoalescingMode,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntry {
@@ -87,12 +88,10 @@ pub struct CacheRuntime {
 
 impl CacheRuntime {
     pub fn new(topology: CacheTopology) -> Self {
-        let backend = if topology.l2().is_some() {
-            crate::CacheBackendAdapter::shared(topology)
-        } else {
-            crate::CacheBackendAdapter::local_for_testing(topology)
-        };
-        Self::with_backend(topology, backend)
+        Self::with_backend(
+            topology,
+            crate::CacheBackendAdapter::local_for_testing(topology),
+        )
     }
 
     #[allow(dead_code)]
@@ -101,6 +100,16 @@ impl CacheRuntime {
         Self::with_backend(
             topology,
             crate::CacheBackendAdapter::local_for_testing(topology),
+        )
+    }
+
+    pub fn with_shared_runtime(
+        topology: CacheTopology,
+        runtime: Arc<dyn crate::DistributedCacheRuntime>,
+    ) -> Self {
+        Self::with_backend(
+            topology,
+            crate::CacheBackendAdapter::with_shared_runtime(topology, runtime),
         )
     }
 

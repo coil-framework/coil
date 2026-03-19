@@ -5,6 +5,7 @@ use crate::identifiers::{IdempotencyKey, JobId, JobName, JobQueueName};
 use crate::model::{JobInstant, QueueTopology, RetryPolicy};
 use crate::validation::require_non_empty;
 use davenda_config::{JobBackend, JobsConfig};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -85,10 +86,7 @@ impl JobsRuntime {
     }
 
     pub fn coordinator(&self) -> JobsCoordinator {
-        self.coordinator_with_backend(JobsBackendAdapter::shared_scoped(
-            self,
-            format!("{:p}", self),
-        ))
+        self.coordinator_with_backend(JobsBackendAdapter::local_for_testing(self))
     }
 
     #[allow(dead_code)]
@@ -99,6 +97,17 @@ impl JobsRuntime {
     #[doc(hidden)]
     pub fn coordinator_for_testing(&self) -> JobsCoordinator {
         self.coordinator_with_backend(JobsBackendAdapter::local_for_testing(self))
+    }
+
+    pub fn coordinator_with_shared_runtime(
+        &self,
+        runtime: Arc<dyn crate::JobsCoordinationRuntime>,
+    ) -> JobsCoordinator {
+        self.coordinator_with_backend(JobsBackendAdapter::with_runtime(
+            self.backend,
+            self.topology.clone(),
+            runtime,
+        ))
     }
 
     pub fn coordinator_with_backend(&self, backend: JobsBackendAdapter) -> JobsCoordinator {

@@ -155,11 +155,11 @@ fn distributed_topology_enables_cluster_coalescing_and_l2_cache() {
 }
 
 #[test]
-fn cache_runtime_new_uses_shared_backend_for_distributed_topologies() {
+fn cache_runtime_new_keeps_distributed_topologies_local_until_explicitly_shared() {
     let runtime = CacheRuntime::new(CacheTopology::with_redis());
 
     assert_eq!(runtime.backend_kind(), CacheBackendKind::Redis);
-    assert!(runtime.backend_is_shared());
+    assert!(!runtime.backend_is_shared());
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn local_cache_runtime_clones_do_not_share_state() {
 }
 
 #[test]
-fn distributed_planner_runtimes_do_not_share_backend_across_independent_handles() {
+fn planner_runtime_defaults_are_local_even_for_distributed_topologies() {
     let planner = CachePlanner::new(CacheTopology::with_valkey());
     let plan = planner
         .plan(
@@ -369,7 +369,7 @@ fn distributed_planner_runtimes_do_not_share_backend_across_independent_handles(
     let mut left = planner.runtime();
     let mut right = planner.runtime();
 
-    assert!(left.backend_is_shared());
+    assert!(!left.backend_is_shared());
     assert_eq!(left.backend_kind(), CacheBackendKind::Valkey);
 
     left.insert(
@@ -413,8 +413,9 @@ fn distributed_planner_runtimes_share_backend_when_reusing_an_explicit_handle() 
         )
         .unwrap();
 
-    let mut left = planner.runtime();
-    let mut right = left.clone();
+    let shared_runtime = DistributedCacheClient::emulated_shared_runtime(CacheBackendKind::Valkey);
+    let mut left = planner.runtime_with_shared_runtime(shared_runtime.clone());
+    let mut right = planner.runtime_with_shared_runtime(shared_runtime);
 
     left.insert(
         plan.application().unwrap(),

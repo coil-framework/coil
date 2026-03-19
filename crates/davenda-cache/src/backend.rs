@@ -116,11 +116,11 @@ pub trait DistributedCacheRuntime: Send + Sync + 'static {
 }
 
 #[derive(Debug)]
-struct SharedDistributedCacheRuntime {
+struct EmulatedDistributedCacheRuntime {
     state: Mutex<CacheBackendState>,
 }
 
-impl SharedDistributedCacheRuntime {
+impl EmulatedDistributedCacheRuntime {
     fn new() -> Self {
         Self {
             state: Mutex::new(CacheBackendState::new()),
@@ -128,7 +128,7 @@ impl SharedDistributedCacheRuntime {
     }
 }
 
-impl DistributedCacheRuntime for SharedDistributedCacheRuntime {
+impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         let mut guard = self.state.lock().expect("cache backend mutex poisoned");
         guard.insert(entry);
@@ -176,18 +176,30 @@ impl DistributedCacheClient {
         Self { kind, runtime }
     }
 
+    pub fn with_runtime(kind: CacheBackendKind, runtime: Arc<dyn DistributedCacheRuntime>) -> Self {
+        Self::new(kind, runtime)
+    }
+
+    pub fn emulated_shared_runtime(_kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
+        Arc::new(EmulatedDistributedCacheRuntime::new())
+    }
+
     #[allow(dead_code)]
     #[doc(hidden)]
     pub fn local_for_testing(kind: CacheBackendKind) -> Self {
-        Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
+        Self::with_runtime(kind, Self::emulated_shared_runtime(kind))
     }
 
+    #[allow(dead_code)]
+    #[deprecated(note = "use with_runtime(kind, runtime) or local_for_testing(kind)")]
     pub fn shared(kind: CacheBackendKind) -> Self {
-        Self::scoped_shared(kind, "global")
+        Self::local_for_testing(kind)
     }
 
+    #[allow(dead_code)]
+    #[deprecated(note = "use with_runtime(kind, runtime) or local_for_testing(kind)")]
     pub fn scoped_shared(kind: CacheBackendKind, _scope: impl Into<String>) -> Self {
-        Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
+        Self::local_for_testing(kind)
     }
 
     pub fn kind(&self) -> CacheBackendKind {
@@ -294,7 +306,7 @@ pub struct CacheBackendAdapter {
 
 impl CacheBackendAdapter {
     pub fn new(topology: CacheTopology) -> Self {
-        Self::shared(topology)
+        Self::local_for_testing(topology)
     }
 
     #[allow(dead_code)]
@@ -322,25 +334,35 @@ impl CacheBackendAdapter {
         }
     }
 
-    pub fn shared(topology: CacheTopology) -> Self {
-        Self::scoped_shared(topology, "global")
-    }
-
-    pub fn scoped_shared(topology: CacheTopology, _scope: impl Into<String>) -> Self {
+    pub fn with_shared_runtime(
+        topology: CacheTopology,
+        runtime: Arc<dyn DistributedCacheRuntime>,
+    ) -> Self {
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
             None => CacheBackendKind::Local,
         };
-        let storage =
-            CacheBackendStorage::Distributed(DistributedCacheClient::local_for_testing(kind));
-
         Self {
             kind,
             topology,
             shared: true,
-            storage,
+            storage: CacheBackendStorage::Distributed(DistributedCacheClient::with_runtime(
+                kind, runtime,
+            )),
         }
+    }
+
+    #[allow(dead_code)]
+    #[deprecated(note = "use with_shared_runtime(topology, runtime)")]
+    pub fn shared(topology: CacheTopology) -> Self {
+        Self::local_for_testing(topology)
+    }
+
+    #[allow(dead_code)]
+    #[deprecated(note = "use with_shared_runtime(topology, runtime)")]
+    pub fn scoped_shared(topology: CacheTopology, _scope: impl Into<String>) -> Self {
+        Self::local_for_testing(topology)
     }
 
     pub fn kind(&self) -> CacheBackendKind {

@@ -3,6 +3,7 @@ use crate::{
     DistributedCacheBackend, FreshnessPolicy, HttpCachePolicy, InvalidationSet,
     RequestCoalescingMode, ResponseValidators, VariationKey,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachePlanRequest {
@@ -155,17 +156,10 @@ impl CachePlanner {
     }
 
     pub fn runtime(&self) -> crate::CacheRuntime {
-        if self.topology.l2().is_some() {
-            crate::CacheRuntime::with_backend(
-                self.topology,
-                crate::CacheBackendAdapter::scoped_shared(self.topology, format!("{:p}", self)),
-            )
-        } else {
-            crate::CacheRuntime::with_backend(
-                self.topology,
-                crate::CacheBackendAdapter::local_for_testing(self.topology),
-            )
-        }
+        crate::CacheRuntime::with_backend(
+            self.topology,
+            crate::CacheBackendAdapter::local_for_testing(self.topology),
+        )
     }
 
     #[doc(hidden)]
@@ -178,11 +172,18 @@ impl CachePlanner {
         self.local_for_testing()
     }
 
+    pub fn runtime_with_shared_runtime(
+        &self,
+        shared_runtime: Arc<dyn crate::DistributedCacheRuntime>,
+    ) -> crate::CacheRuntime {
+        crate::CacheRuntime::with_shared_runtime(self.topology, shared_runtime)
+    }
+
+    #[allow(dead_code)]
+    #[doc(hidden)]
+    #[deprecated(note = "use runtime_with_shared_runtime(shared_runtime)")]
     pub fn shared_runtime(&self) -> crate::CacheRuntime {
-        crate::CacheRuntime::with_backend(
-            self.topology,
-            crate::CacheBackendAdapter::shared(self.topology),
-        )
+        self.runtime()
     }
 
     pub fn plan(&self, request: CachePlanRequest) -> Result<CachePlan, CacheModelError> {

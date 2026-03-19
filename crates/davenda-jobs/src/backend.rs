@@ -193,6 +193,18 @@ impl JobsBackendAdapter {
         }
     }
 
+    pub fn with_runtime(
+        backend: davenda_config::JobBackend,
+        queue_topology: QueueTopology,
+        runtime: Arc<dyn JobsCoordinationRuntime>,
+    ) -> Self {
+        Self::new(backend, queue_topology, runtime)
+    }
+
+    pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
+        Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
+    }
+
     #[doc(hidden)]
     pub fn in_memory(runtime: &JobsRuntime) -> Self {
         Self::local_for_testing(runtime)
@@ -203,20 +215,24 @@ impl JobsBackendAdapter {
         Self::new(
             runtime.backend,
             runtime.topology.clone(),
-            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())),
+            Self::emulated_shared_runtime(runtime),
         )
     }
 
+    #[allow(dead_code)]
+    #[deprecated(
+        note = "use with_runtime(backend, topology, runtime) or local_for_testing(runtime)"
+    )]
     pub fn shared(runtime: &JobsRuntime) -> Self {
-        Self::shared_scoped(runtime, format!("{:p}", runtime))
+        Self::local_for_testing(runtime)
     }
 
+    #[allow(dead_code)]
+    #[deprecated(
+        note = "use with_runtime(backend, topology, runtime) or local_for_testing(runtime)"
+    )]
     pub fn shared_scoped(runtime: &JobsRuntime, _scope: impl Into<String>) -> Self {
-        Self::new(
-            runtime.backend,
-            runtime.topology.clone(),
-            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())),
-        )
+        Self::local_for_testing(runtime)
     }
 
     pub(crate) fn snapshot(&self) -> JobsCoordinatorSnapshot {

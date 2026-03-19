@@ -5,6 +5,7 @@ use crate::events::DomainEventEnvelope;
 use crate::identifiers::{JobId, JobName, JobQueueName};
 use crate::model::{DeadLetterReason, JobInstant};
 use crate::runtime::{JobSpec, JobsRuntime};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -15,7 +16,7 @@ pub struct JobsCoordinator {
 
 impl JobsCoordinator {
     pub fn new(runtime: JobsRuntime) -> Self {
-        let backend = JobsBackendAdapter::shared_scoped(&runtime, format!("{:p}", &runtime));
+        let backend = JobsBackendAdapter::local_for_testing(&runtime);
         Self::with_backend(runtime, backend)
     }
 
@@ -26,6 +27,18 @@ impl JobsCoordinator {
 
     pub fn new_for_testing(runtime: JobsRuntime) -> Self {
         let backend = JobsBackendAdapter::local_for_testing(&runtime);
+        Self::with_backend(runtime, backend)
+    }
+
+    pub fn new_with_shared_runtime(
+        runtime: JobsRuntime,
+        shared_runtime: Arc<dyn crate::JobsCoordinationRuntime>,
+    ) -> Self {
+        let backend = JobsBackendAdapter::with_runtime(
+            runtime.backend,
+            runtime.topology.clone(),
+            shared_runtime,
+        );
         Self::with_backend(runtime, backend)
     }
 

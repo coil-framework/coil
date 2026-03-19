@@ -372,7 +372,7 @@ fn distributed_coordinators_do_not_share_backend_without_explicit_adapter_reuse(
 }
 
 #[test]
-fn default_coordinators_do_not_share_backend_across_independent_handles() {
+fn default_coordinators_are_local_even_for_distributed_topologies() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
     let mut left = runtime.coordinator();
     let mut right = runtime.coordinator();
@@ -395,11 +395,11 @@ fn default_coordinators_do_not_share_backend_across_independent_handles() {
 }
 
 #[test]
-fn distributed_coordinators_share_backend_when_using_a_shared_adapter() {
+fn distributed_coordinators_share_backend_when_using_an_explicit_shared_runtime() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-    let adapter = JobsBackendAdapter::shared(&runtime);
-    let mut left = runtime.coordinator_with_backend(adapter.clone());
-    let mut right = runtime.coordinator_with_backend(adapter);
+    let shared_runtime = JobsBackendAdapter::emulated_shared_runtime(&runtime);
+    let mut left = runtime.coordinator_with_shared_runtime(shared_runtime.clone());
+    let mut right = runtime.coordinator_with_shared_runtime(shared_runtime);
 
     left.enqueue(
         JobSpec::new(

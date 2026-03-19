@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use davenda_config::DatabaseDriver;
 use sqlx::postgres::{PgArguments, PgConnectOptions, PgPoolOptions};
-use sqlx::{Pool, Postgres};
+use sqlx::{Column, Pool, Postgres, Row};
 
 use crate::{
     CompiledMigrationBatch, CompiledStatement, CompiledTransaction, DataModelError, DataRuntime,
@@ -19,6 +19,12 @@ pub struct PostgresDataClient {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatementExecution {
     pub rows_affected: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryExecution {
+    pub rows_returned: usize,
+    pub projected_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +88,34 @@ impl PostgresDataClient {
 
         Ok(StatementExecution {
             rows_affected: result.rows_affected(),
+        })
+    }
+
+    pub async fn execute_query(
+        &self,
+        query: &crate::CompiledQuery,
+    ) -> Result<QueryExecution, DataModelError> {
+        self.apply_statement_timeout().await?;
+        let rows = bind_query(sqlx::query(&query.sql), &query.bind_values)?
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| DataModelError::Sqlx {
+                reason: error.to_string(),
+            })?;
+
+        let projected_columns = rows
+            .first()
+            .map(|row| {
+                row.columns()
+                    .iter()
+                    .map(|column| column.name().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(QueryExecution {
+            rows_returned: rows.len(),
+            projected_columns,
         })
     }
 

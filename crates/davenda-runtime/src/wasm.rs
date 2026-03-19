@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use crate::wasm_data::RuntimeDataBackend;
 use davenda_auth::{
     AuthModelPackage, Capability, DefaultAuthModelPackage, DefaultSubject, DefaultTuple,
     DefaultTupleUpdate, Entity, Namespace, Relation,
@@ -16,9 +17,9 @@ use davenda_template::{
 };
 use davenda_wasm::{
     AuthServiceDetails, AuthServiceExecution, AuthServiceRequest, CacheIntentExecution,
-    CacheIntentServiceRequest, DataServiceExecution, DataServiceRequest, HostServiceCall,
-    HostServiceExecution, HostServiceExecutor, HostServiceRequest, HostServiceResult, JobExecution,
-    MetadataExecution, ModuleDataContract, NetworkExecution, PrincipalKind, RenderServiceExecution,
+    CacheIntentServiceRequest, DataServiceRequest, HostServiceCall, HostServiceDomain,
+    HostServiceExecution, HostServiceExecutor, HostServiceRequest, HostServiceResult,
+    JobExecution, MetadataExecution, NetworkExecution, PrincipalKind, RenderServiceExecution,
     RenderServiceRequest, SecretExecution, StorageClassGrant, StorageServiceExecution,
     StorageServiceRequest,
 };
@@ -481,6 +482,7 @@ impl WasmHost {
 struct RuntimeHostServiceExecutor {
     plan: RuntimePlan,
     auth_backend: OnceLock<Result<RuntimeAuthBackend, String>>,
+    data_backend: OnceLock<Result<RuntimeDataBackend, String>>,
 }
 
 impl RuntimeHostServiceExecutor {
@@ -488,6 +490,7 @@ impl RuntimeHostServiceExecutor {
         Self {
             plan,
             auth_backend: OnceLock::new(),
+            data_backend: OnceLock::new(),
         }
     }
 
@@ -523,27 +526,22 @@ impl RuntimeHostServiceExecutor {
         context: &InvocationContext,
         request: &DataServiceRequest,
     ) -> Result<HostServiceExecution, WasmModelError> {
-        let result = match request {
-            DataServiceRequest::Read { contract } => {
-                HostServiceResult::Data(DataServiceExecution {
-                    request: request.clone(),
-                    summary: module_data_summary("read", contract, context),
-                    sequence: 1,
-                })
-            }
-            DataServiceRequest::Write { contract } => {
-                HostServiceResult::Data(DataServiceExecution {
-                    request: request.clone(),
-                    summary: module_data_summary("write", contract, context),
-                    sequence: 1,
-                })
-            }
-        };
+        let execution = self.data_backend(context)?.execute(request, context)?;
 
         Ok(HostServiceExecution {
             call: call.clone(),
-            result,
+            result: HostServiceResult::Data(execution),
         })
+    }
+
+    fn data_backend(&self, context: &InvocationContext) -> Result<&RuntimeDataBackend, WasmModelError> {
+        let result = self
+            .data_backend
+            .get_or_init(|| RuntimeDataBackend::new(&self.plan).map_err(|reason| reason.to_string()));
+
+        result
+            .as_ref()
+            .map_err(|reason| runtime_data_backend_error(context, reason.clone()))
     }
 
     fn execute_storage(
@@ -1031,26 +1029,6 @@ fn runtime_executor_error(context: &InvocationContext, error: impl ToString) -> 
     }
 }
 
-fn module_data_summary(
-    access: &str,
-    contract: &ModuleDataContract,
-    context: &InvocationContext,
-) -> String {
-    format!(
-        "module={} handler={} resource={} access={} app={} principal={}",
-        contract.owner_extension_id,
-        contract.owner_handler_id,
-        contract.resource,
-        access,
-        context.customer_app.app_id,
-        context
-            .principal
-            .id
-            .clone()
-            .unwrap_or_else(|| "anonymous".to_string())
-    )
-}
-
 fn trace_id(context: &InvocationContext) -> &str {
     context.trace.request_id.as_deref().unwrap_or("unknown")
 }
@@ -1078,6 +1056,14 @@ fn http_method_to_wasm(method: HttpMethod) -> WasmHttpMethod {
 fn runtime_auth_backend_error(tenant_id: i64, reason: impl ToString) -> WasmModelError {
     WasmModelError::EngineTrap {
         handler_id: format!("auth-tenant-{tenant_id}"),
+        reason: reason.to_string(),
+    }
+}
+
+fn runtime_data_backend_error(context: &InvocationContext, reason: impl ToString) -> WasmModelError {
+    WasmModelError::HostServiceUnavailable {
+        handler_id: trace_id(context).to_string(),
+        domain: HostServiceDomain::Data,
         reason: reason.to_string(),
     }
 }

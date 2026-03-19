@@ -73,6 +73,7 @@ mod server;
 mod storage;
 mod tls;
 mod wasm;
+mod wasm_data;
 
 pub use browser::*;
 pub use builder::*;

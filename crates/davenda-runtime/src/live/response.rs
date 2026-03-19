@@ -6,12 +6,11 @@ use axum::response::Response;
 
 use davenda_wasm::{CacheVisibility, ExecutionReceipt, TypedCacheHint, TypedMetadata};
 
-use super::{append_receipt_headers, insert_header, render_cache_control};
+use super::{FileDeliveryMode, append_receipt_headers, insert_header, render_cache_control};
 
 #[derive(Debug, Clone)]
 pub(crate) struct LiveResponseComposition {
     status: StatusCode,
-    headers: HeaderMap,
     cookies: Vec<String>,
     body: LiveResponseBody,
     annotations: LiveResponseAnnotations,
@@ -31,9 +30,9 @@ pub(crate) struct LiveResponseAnnotations {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveCacheHeaders {
-    passthrough: BTreeMap<String, String>,
-    cache_control: Option<String>,
-    surrogate_key: Option<String>,
+    passthrough: Vec<(HeaderName, HeaderValue)>,
+    cache_control: Option<HeaderValue>,
+    surrogate_key: Option<HeaderValue>,
 }
 
 impl LiveCacheHeaders {
@@ -41,10 +40,10 @@ impl LiveCacheHeaders {
         headers: BTreeMap<String, String>,
         cache_hint: Option<&TypedCacheHint>,
     ) -> Self {
-        let mut passthrough = headers;
+        let mut passthrough = Vec::new();
         let cache_control = match cache_hint {
-            Some(cache_hint) => Some(render_cache_control(cache_hint)),
-            None => passthrough.remove("Cache-Control"),
+            Some(cache_hint) => HeaderValue::from_str(&render_cache_control(cache_hint)).ok(),
+            None => None,
         };
         let surrogate_key = match cache_hint {
             Some(cache_hint) => {
@@ -57,13 +56,26 @@ impl LiveCacheHeaders {
                     .collect::<Vec<_>>()
                     .join(" ");
                 if rendered.is_empty() {
-                    passthrough.remove("Surrogate-Key")
+                    None
                 } else {
-                    Some(rendered)
+                    HeaderValue::from_str(&rendered).ok()
                 }
             }
-            None => passthrough.remove("Surrogate-Key"),
+            None => None,
         };
+
+        for (name, value) in headers {
+            if cache_hint.is_some() && matches!(name.as_str(), "Cache-Control" | "Surrogate-Key") {
+                continue;
+            }
+
+            if let (Ok(header_name), Ok(header_value)) = (
+                HeaderName::try_from(name.as_str()),
+                HeaderValue::from_str(&value),
+            ) {
+                passthrough.push((header_name, header_value));
+            }
+        }
 
         Self {
             passthrough,
@@ -72,15 +84,22 @@ impl LiveCacheHeaders {
         }
     }
 
-    fn render_headers(&self) -> BTreeMap<String, String> {
-        let mut rendered = self.passthrough.clone();
+    fn apply_to(&self, headers: &mut HeaderMap) {
+        for (name, value) in &self.passthrough {
+            headers.insert(name.clone(), value.clone());
+        }
         if let Some(cache_control) = &self.cache_control {
-            rendered.insert("Cache-Control".to_string(), cache_control.clone());
+            headers.insert(
+                HeaderName::from_static("cache-control"),
+                cache_control.clone(),
+            );
         }
         if let Some(surrogate_key) = &self.surrogate_key {
-            rendered.insert("Surrogate-Key".to_string(), surrogate_key.clone());
+            headers.insert(
+                HeaderName::from_static("surrogate-key"),
+                surrogate_key.clone(),
+            );
         }
-        rendered
     }
 }
 
@@ -88,19 +107,20 @@ impl LiveCacheHeaders {
 enum LiveResponseBody {
     Html(String),
     Json(BTreeMap<String, String>),
-    Empty,
+    Redirect {
+        location: String,
+    },
+    File {
+        logical_path: String,
+        content_type: String,
+        delivery_mode: FileDeliveryMode,
+    },
 }
 
 impl LiveResponseComposition {
     pub(crate) fn html(status: StatusCode, body: String) -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            HeaderName::from_static("content-type"),
-            HeaderValue::from_static("text/html; charset=utf-8"),
-        );
         Self {
             status,
-            headers,
             cookies: Vec::new(),
             body: LiveResponseBody::Html(body),
             annotations: LiveResponseAnnotations::default(),
@@ -108,42 +128,45 @@ impl LiveResponseComposition {
     }
 
     pub(crate) fn json(status: StatusCode, body: BTreeMap<String, String>) -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            HeaderName::from_static("content-type"),
-            HeaderValue::from_static("application/json"),
-        );
         Self {
             status,
-            headers,
             cookies: Vec::new(),
             body: LiveResponseBody::Json(body),
             annotations: LiveResponseAnnotations::default(),
         }
     }
 
-    pub(crate) fn empty(status: StatusCode) -> Self {
+    pub(crate) fn redirect(status: StatusCode, location: impl Into<String>) -> Self {
         Self {
             status,
-            headers: HeaderMap::new(),
             cookies: Vec::new(),
-            body: LiveResponseBody::Empty,
+            body: LiveResponseBody::Redirect {
+                location: location.into(),
+            },
+            annotations: LiveResponseAnnotations::default(),
+        }
+    }
+
+    pub(crate) fn file(
+        status: StatusCode,
+        logical_path: impl Into<String>,
+        content_type: impl Into<String>,
+        delivery_mode: FileDeliveryMode,
+    ) -> Self {
+        Self {
+            status,
+            cookies: Vec::new(),
+            body: LiveResponseBody::File {
+                logical_path: logical_path.into(),
+                content_type: content_type.into(),
+                delivery_mode,
+            },
             annotations: LiveResponseAnnotations::default(),
         }
     }
 
     pub(crate) fn with_annotation(mut self, annotations: LiveResponseAnnotations) -> Self {
         self.annotations = annotations;
-        self
-    }
-
-    pub(crate) fn with_header(mut self, name: impl AsRef<str>, value: impl Into<String>) -> Self {
-        if let (Ok(header_name), Ok(header_value)) = (
-            HeaderName::try_from(name.as_ref()),
-            HeaderValue::from_str(&value.into()),
-        ) {
-            self.headers.insert(header_name, header_value);
-        }
         self
     }
 
@@ -154,24 +177,49 @@ impl LiveResponseComposition {
 
     pub(crate) fn into_response(self) -> Response<Body> {
         let mut response = match self.body {
-            LiveResponseBody::Html(body) => body_response(self.status, body, true),
+            LiveResponseBody::Html(body) => {
+                body_response(self.status, body, Some("text/html; charset=utf-8"))
+            }
             LiveResponseBody::Json(payload) => {
                 let body = render_json_object(payload);
-                body_response(self.status, body, false)
+                body_response(self.status, body, Some("application/json"))
             }
-            LiveResponseBody::Empty => {
+            LiveResponseBody::Redirect { location } => {
                 let mut response = Response::new(Body::empty());
                 *response.status_mut() = self.status;
+                response.headers_mut().insert(
+                    HeaderName::from_static("location"),
+                    HeaderValue::from_str(&location)
+                        .expect("redirect location is a valid header value"),
+                );
+                response
+            }
+            LiveResponseBody::File {
+                logical_path,
+                content_type,
+                delivery_mode,
+            } => {
+                let mut response = Response::new(Body::empty());
+                *response.status_mut() = self.status;
+                response.headers_mut().insert(
+                    HeaderName::from_static("content-type"),
+                    HeaderValue::from_str(&content_type)
+                        .expect("file content type is a valid header value"),
+                );
+                response.headers_mut().insert(
+                    HeaderName::from_static("x-davenda-file-path"),
+                    HeaderValue::from_str(&logical_path)
+                        .expect("file logical path is a valid header value"),
+                );
+                response.headers_mut().insert(
+                    HeaderName::from_static("x-davenda-file-delivery"),
+                    HeaderValue::from_static(file_delivery_mode_name(delivery_mode)),
+                );
                 response
             }
         };
 
         render_annotations(response.headers_mut(), &self.annotations);
-        for (name, value) in self.headers {
-            if let Some(name) = name {
-                response.headers_mut().insert(name, value);
-            }
-        }
         for cookie in self.cookies {
             if let Ok(value) = HeaderValue::from_str(&cookie) {
                 response
@@ -226,13 +274,17 @@ impl LiveResponseAnnotations {
     }
 }
 
-fn body_response(status: StatusCode, body: String, html: bool) -> Response<Body> {
+fn body_response(
+    status: StatusCode,
+    body: String,
+    content_type: Option<&'static str>,
+) -> Response<Body> {
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
-    if html {
+    if let Some(content_type) = content_type {
         response.headers_mut().insert(
             HeaderName::from_static("content-type"),
-            HeaderValue::from_static("text/html; charset=utf-8"),
+            HeaderValue::from_static(content_type),
         );
     }
     response
@@ -402,13 +454,15 @@ fn render_annotations(headers: &mut HeaderMap, annotations: &LiveResponseAnnotat
         insert_header(headers, "x-davenda-locale", locale.clone());
     }
 
-    for (name, value) in annotations.cache_headers.render_headers() {
-        if let (Ok(header_name), Ok(header_value)) = (
-            HeaderName::try_from(name.as_str()),
-            HeaderValue::from_str(&value),
-        ) {
-            headers.insert(header_name, header_value);
-        }
+    annotations.cache_headers.apply_to(headers);
+}
+
+fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
+    match mode {
+        FileDeliveryMode::PublicCdn => "public_cdn",
+        FileDeliveryMode::SignedUrl => "signed_url",
+        FileDeliveryMode::AppProxy => "app_proxy",
+        FileDeliveryMode::LocalOnly => "local_only",
     }
 }
 
@@ -441,21 +495,18 @@ mod tests {
             Some(&cache_hint),
         );
 
+        let mut rendered = HeaderMap::new();
+        headers.apply_to(&mut rendered);
+
         assert_eq!(
-            headers.render_headers().get("Cache-Control"),
-            Some(
-                &"private,max-age=120,stale-while-revalidate=30,vary-by-locale,vary-by-session"
-                    .to_string()
-            )
+            rendered.get("cache-control").unwrap(),
+            "private,max-age=120,stale-while-revalidate=30,vary-by-locale,vary-by-session"
         );
         assert_eq!(
-            headers.render_headers().get("Surrogate-Key"),
-            Some(&"locale-cache route-cache".to_string())
+            rendered.get("surrogate-key").unwrap(),
+            "locale-cache route-cache"
         );
-        assert_eq!(
-            headers.render_headers().get("X-Trace"),
-            Some(&"preserve".to_string())
-        );
+        assert_eq!(rendered.get("X-Trace").unwrap(), "preserve");
     }
 
     #[test]

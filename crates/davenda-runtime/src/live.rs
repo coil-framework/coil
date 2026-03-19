@@ -148,8 +148,7 @@ impl LiveExecutionReceipts {
             }
             HandlerResponse::Redirect(redirect) => {
                 let status = StatusCode::from_u16(redirect.status).unwrap_or(StatusCode::SEE_OTHER);
-                LiveResponseComposition::empty(status)
-                    .with_header("location", redirect.location.clone())
+                LiveResponseComposition::redirect(status, redirect.location.clone())
             }
             HandlerResponse::Json(json) => {
                 let payload = self.compose_json_payload(json.payload.clone());
@@ -157,13 +156,12 @@ impl LiveExecutionReceipts {
                     .response_status(StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK));
                 LiveResponseComposition::json(status, payload)
             }
-            HandlerResponse::File(file) => LiveResponseComposition::empty(StatusCode::OK)
-                .with_header("content-type", file.content_type.clone())
-                .with_header("x-davenda-file-path", file.logical_path.clone())
-                .with_header(
-                    "x-davenda-file-delivery",
-                    file_delivery_mode_name(file.delivery_mode),
-                ),
+            HandlerResponse::File(file) => LiveResponseComposition::file(
+                StatusCode::OK,
+                file.logical_path.clone(),
+                file.content_type.clone(),
+                file.delivery_mode,
+            ),
         };
 
         response = response.with_annotation(annotations);
@@ -229,15 +227,6 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: String) {
         if let Ok(header_value) = HeaderValue::from_str(&value) {
             headers.insert(header_name, header_value);
         }
-    }
-}
-
-fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
-    match mode {
-        FileDeliveryMode::PublicCdn => "public_cdn",
-        FileDeliveryMode::SignedUrl => "signed_url",
-        FileDeliveryMode::AppProxy => "app_proxy",
-        FileDeliveryMode::LocalOnly => "local_only",
     }
 }
 

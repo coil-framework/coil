@@ -92,6 +92,7 @@ impl RuntimePlan {
         ))
     }
 
+    #[cfg(test)]
     pub fn browser_host(&self) -> Result<BrowserHost, BrowserHostBuildError> {
         BrowserHost::new_with_scope(
             self.config.app.name.clone(),

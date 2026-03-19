@@ -553,6 +553,7 @@ pub struct BrowserHost {
 }
 
 impl BrowserHost {
+    #[cfg(test)]
     pub(crate) fn new_with_scope(
         customer_app: String,
         services: BrowserSecurityServices,

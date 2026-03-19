@@ -25,7 +25,7 @@ impl RuntimeBackendMaterializer {
                 services.clone(),
                 DistributedSessionStoreClient::shared(target.kind, self.scope.clone()),
             ),
-            None => BrowserHost::new_with_scope(customer_app, services, self.scope.clone()),
+            None => Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost),
         }
     }
 

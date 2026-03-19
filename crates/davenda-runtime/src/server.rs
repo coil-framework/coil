@@ -552,7 +552,7 @@ impl HttpServerHost {
         ))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn new_with_authorizer(
         plan: RuntimePlan,
         backends: SharedBackendClients,

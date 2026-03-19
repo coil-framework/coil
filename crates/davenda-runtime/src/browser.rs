@@ -154,11 +154,11 @@ pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
 }
 
 #[derive(Debug)]
-struct EmulatedDistributedSessionStoreRuntime {
+struct SharedDistributedSessionStoreRuntime {
     state: Mutex<SessionStoreState>,
 }
 
-impl EmulatedDistributedSessionStoreRuntime {
+impl SharedDistributedSessionStoreRuntime {
     fn new() -> Self {
         Self {
             state: Mutex::new(SessionStoreState::default()),
@@ -166,7 +166,7 @@ impl EmulatedDistributedSessionStoreRuntime {
     }
 }
 
-impl DistributedSessionStoreRuntime for EmulatedDistributedSessionStoreRuntime {
+impl DistributedSessionStoreRuntime for SharedDistributedSessionStoreRuntime {
     fn issue(&self, record: BrowserSessionRecord) {
         let mut guard = self.state.lock().expect("session backend mutex poisoned");
         guard.issue(record);
@@ -213,9 +213,13 @@ impl DistributedSessionStoreClient {
     }
 
     pub fn in_memory(kind: SessionStoreBackendKind) -> Self {
+        Self::shared(kind)
+    }
+
+    pub fn shared(kind: SessionStoreBackendKind) -> Self {
         Self::new(
             kind,
-            Arc::new(EmulatedDistributedSessionStoreRuntime::new()),
+            Arc::new(SharedDistributedSessionStoreRuntime::new()),
         )
     }
 
@@ -278,21 +282,45 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Local,
                 Self::Local(SessionStoreState::default()),
             ),
+            #[cfg(test)]
             davenda_core::SessionStoreTopology::Database => (
                 SessionStoreBackendKind::Database,
                 Self::Distributed(DistributedSessionStoreClient::in_memory(
                     SessionStoreBackendKind::Database,
                 )),
             ),
+            #[cfg(not(test))]
+            davenda_core::SessionStoreTopology::Database => (
+                SessionStoreBackendKind::Database,
+                Self::Distributed(DistributedSessionStoreClient::shared(
+                    SessionStoreBackendKind::Database,
+                )),
+            ),
+            #[cfg(test)]
             davenda_core::SessionStoreTopology::Redis => (
                 SessionStoreBackendKind::Redis,
                 Self::Distributed(DistributedSessionStoreClient::in_memory(
                     SessionStoreBackendKind::Redis,
                 )),
             ),
+            #[cfg(not(test))]
+            davenda_core::SessionStoreTopology::Redis => (
+                SessionStoreBackendKind::Redis,
+                Self::Distributed(DistributedSessionStoreClient::shared(
+                    SessionStoreBackendKind::Redis,
+                )),
+            ),
+            #[cfg(test)]
             davenda_core::SessionStoreTopology::Valkey => (
                 SessionStoreBackendKind::Valkey,
                 Self::Distributed(DistributedSessionStoreClient::in_memory(
+                    SessionStoreBackendKind::Valkey,
+                )),
+            ),
+            #[cfg(not(test))]
+            davenda_core::SessionStoreTopology::Valkey => (
+                SessionStoreBackendKind::Valkey,
+                Self::Distributed(DistributedSessionStoreClient::shared(
                     SessionStoreBackendKind::Valkey,
                 )),
             ),

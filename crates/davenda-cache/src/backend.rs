@@ -116,11 +116,11 @@ pub trait DistributedCacheRuntime: Send + Sync + 'static {
 }
 
 #[derive(Debug)]
-struct EmulatedDistributedCacheRuntime {
+struct SharedDistributedCacheRuntime {
     state: Mutex<CacheBackendState>,
 }
 
-impl EmulatedDistributedCacheRuntime {
+impl SharedDistributedCacheRuntime {
     fn new() -> Self {
         Self {
             state: Mutex::new(CacheBackendState::new()),
@@ -128,7 +128,7 @@ impl EmulatedDistributedCacheRuntime {
     }
 }
 
-impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
+impl DistributedCacheRuntime for SharedDistributedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         let mut guard = self.state.lock().expect("cache backend mutex poisoned");
         guard.insert(entry);
@@ -177,7 +177,11 @@ impl DistributedCacheClient {
     }
 
     pub fn in_memory(kind: CacheBackendKind) -> Self {
-        Self::new(kind, Arc::new(EmulatedDistributedCacheRuntime::new()))
+        Self::shared(kind)
+    }
+
+    pub fn shared(kind: CacheBackendKind) -> Self {
+        Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
     }
 
     pub fn kind(&self) -> CacheBackendKind {
@@ -291,6 +295,25 @@ impl CacheBackendAdapter {
             kind: client.kind(),
             topology,
             storage: CacheBackendStorage::Distributed(client),
+        }
+    }
+
+    pub fn shared(topology: CacheTopology) -> Self {
+        let kind = match topology.l2() {
+            Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
+            Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
+            None => CacheBackendKind::Local,
+        };
+        let storage = if topology.supports_shared_invalidation() {
+            CacheBackendStorage::Distributed(DistributedCacheClient::shared(kind))
+        } else {
+            CacheBackendStorage::Local(LocalCacheBackendAdapter::new())
+        };
+
+        Self {
+            kind,
+            topology,
+            storage,
         }
     }
 

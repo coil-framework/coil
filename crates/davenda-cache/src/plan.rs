@@ -1,12 +1,8 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use crate::{
     ApplicationCachePolicy, CacheKey, CacheModelError, CacheNamespace, CacheScope, CacheTopology,
     DistributedCacheBackend, FreshnessPolicy, HttpCachePolicy, InvalidationSet,
     RequestCoalescingMode, ResponseValidators, VariationKey,
 };
-
-static CACHE_PLANNER_DEPLOYMENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachePlanRequest {
@@ -154,7 +150,7 @@ impl CachePlanner {
     pub fn new(topology: CacheTopology) -> Self {
         Self {
             topology,
-            deployment_id: CACHE_PLANNER_DEPLOYMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            deployment_id: 0,
         }
     }
 
@@ -164,6 +160,13 @@ impl CachePlanner {
 
     pub fn runtime(&self) -> crate::CacheRuntime {
         crate::CacheRuntime::for_deployment(self.topology, self.deployment_id)
+    }
+
+    pub fn shared_runtime(&self) -> crate::CacheRuntime {
+        crate::CacheRuntime::with_backend(
+            self.topology,
+            crate::CacheBackendAdapter::shared(self.topology),
+        )
     }
 
     pub fn plan(&self, request: CachePlanRequest) -> Result<CachePlan, CacheModelError> {

@@ -20,7 +20,10 @@ impl CacheHost {
         namespace: CacheNamespace,
         planner: CachePlanner,
     ) -> Self {
+        #[cfg(test)]
         let runtime = planner.runtime();
+        #[cfg(not(test))]
+        let runtime = planner.shared_runtime();
         Self {
             customer_app,
             namespace,

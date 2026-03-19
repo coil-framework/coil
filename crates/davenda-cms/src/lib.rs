@@ -7,17 +7,19 @@ use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     BulkOperationDefinition, BulkOperationKind, BulkOperationScope, CapabilityContract,
-    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
-    HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract,
-    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
-    PlatformModule, RegistrationError, RouteSurface, RouteSurfaceKind, SearchDocumentKind,
-    SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
-    SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
+    CoreServiceDependency, DataRepositoryContribution, DataRepositoryQueryProfile,
+    EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind, HttpSurfaceArea,
+    HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
+    RegistrationError, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
+    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
+    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
-    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
-    QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
+    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryField,
+    QueryFilter, QuerySort, QuerySpec, RepositorySpec, TableName, TransactionIsolation,
+    TransactionPlan,
 };
 use davenda_jobs::RetryPolicy;
 
@@ -991,6 +993,7 @@ impl PlatformModule for CmsModule {
                     true,
                 ),
             ])
+            .with_data_repositories(vec![cms_live_pages_repository()])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "cms.page",
@@ -1061,6 +1064,37 @@ impl PlatformModule for CmsModule {
     fn install_migration_plan(&self) -> Option<MigrationPlan> {
         Some(CmsModule::migration_plan(self).expect("cms migration plan is constant and valid"))
     }
+}
+
+fn cms_live_pages_repository() -> DataRepositoryContribution {
+    DataRepositoryContribution::new(
+        RepositorySpec::new(
+            "cms.pages.live",
+            TableName::new("davenda.cms_pages").expect("constant cms table is valid"),
+            vec![
+                QueryField::new("page_id").expect("constant cms field is valid"),
+                QueryField::new("title").expect("constant cms field is valid"),
+                QueryField::new("live_path").expect("constant cms field is valid"),
+                QueryField::new("updated_at").expect("constant cms field is valid"),
+            ],
+        )
+        .expect("constant cms repository is valid")
+        .with_locale_field("locale")
+        .expect("constant cms locale field is valid")
+        .with_publication_field("workflow_status", "published")
+        .expect("constant cms publication field is valid")
+        .with_filterable_field("slug")
+        .expect("constant cms filter field is valid")
+        .with_sortable_field("live_path")
+        .expect("constant cms sortable field is valid")
+        .with_default_sort(QuerySort::ascending("live_path").expect("constant cms sort is valid")),
+        DataRepositoryQueryProfile::new(
+            PageRequest::new(0, 24).expect("constant cms page size is valid"),
+            PublicationVisibility::PublishedOnly,
+            QueryCacheScope::Public,
+        )
+        .with_localized_cache_scope(QueryCacheScope::LocaleScoped),
+    )
 }
 
 fn validate_navigation_item(

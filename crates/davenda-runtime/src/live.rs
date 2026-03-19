@@ -84,7 +84,7 @@ impl LiveExecutionReceipts {
         merged
     }
 
-    pub(crate) fn merge_page_html(&self, html: String) -> String {
+    pub(crate) fn compose_page_html(&self, html: String) -> String {
         let mut html = html;
         let mut body_fragments = Vec::new();
 
@@ -106,11 +106,6 @@ impl LiveExecutionReceipts {
             }
         }
 
-        if let Some(metadata) = self.merged_metadata() {
-            let head_markup = render_typed_head_markup(&metadata);
-            html = inject_head_markup(html, &head_markup);
-        }
-
         if !body_fragments.is_empty() {
             html = inject_body_markup(html, &body_fragments.join(""));
         }
@@ -118,9 +113,15 @@ impl LiveExecutionReceipts {
         html
     }
 
-    pub(crate) fn merge_fragment_html(&self, html: String) -> String {
+    pub(crate) fn compose_fragment_html(&self, html: String) -> String {
         let mut html = html;
         let mut body_fragments = Vec::new();
+
+        if let Some(output) = self.request_surface_output()
+            && let Some(fragment) = typed_output_fragment(output)
+        {
+            body_fragments.push(fragment);
+        }
 
         for output in self.render_hook_outputs() {
             if let Some(fragment) = typed_output_fragment(output) {
@@ -141,7 +142,7 @@ impl LiveExecutionReceipts {
         html
     }
 
-    pub(crate) fn merge_json_payload(
+    pub(crate) fn compose_json_payload(
         &self,
         mut payload: BTreeMap<String, String>,
     ) -> BTreeMap<String, String> {
@@ -257,6 +258,7 @@ impl LiveExecutionReceipts {
         }
 
         if let Some(cache_hint) = self.merged_cache_hint() {
+            apply_typed_cache_policy(headers, &cache_hint);
             insert_header(
                 headers,
                 "x-davenda-wasm-cache-visibility",
@@ -356,6 +358,142 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: String) {
     }
 }
 
+fn apply_typed_cache_policy(headers: &mut HeaderMap, cache_hint: &TypedCacheHint) {
+    let merged_cache_control = headers
+        .get(axum::http::header::CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| merge_cache_control_value(value, cache_hint))
+        .unwrap_or_else(|| render_cache_control(cache_hint));
+    insert_header(
+        headers,
+        axum::http::header::CACHE_CONTROL.as_str(),
+        merged_cache_control,
+    );
+
+    if let Some(surrogate_key) = headers
+        .get(axum::http::header::HeaderName::from_static("surrogate-key"))
+        .and_then(|value| value.to_str().ok())
+    {
+        let merged = merge_surrogate_tags(surrogate_key, cache_hint);
+        if !merged.is_empty() {
+            insert_header(headers, "surrogate-key", merged);
+        }
+    } else if !cache_hint.tags.is_empty() {
+        insert_header(
+            headers,
+            "surrogate-key",
+            cache_hint
+                .tags
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CacheControlPolicy {
+    visibility: CacheVisibility,
+    max_age_seconds: u64,
+    stale_while_revalidate_seconds: Option<u64>,
+}
+
+impl CacheControlPolicy {
+    fn parse(value: &str) -> Option<Self> {
+        let mut visibility = None;
+        let mut max_age_seconds = None;
+        let mut stale_while_revalidate_seconds = None;
+
+        for directive in value.split(',') {
+            let directive = directive.trim();
+            if directive.is_empty() {
+                continue;
+            }
+            if directive == "no-store" {
+                return None;
+            }
+            if directive == "public" {
+                visibility = Some(CacheVisibility::Public);
+                continue;
+            }
+            if directive == "private" {
+                visibility = Some(CacheVisibility::Private);
+                continue;
+            }
+            if let Some(value) = directive.strip_prefix("max-age=") {
+                max_age_seconds = value.parse::<u64>().ok();
+                continue;
+            }
+            if let Some(value) = directive.strip_prefix("stale-while-revalidate=") {
+                stale_while_revalidate_seconds = value.parse::<u64>().ok();
+            }
+        }
+
+        Some(Self {
+            visibility: visibility?,
+            max_age_seconds: max_age_seconds?,
+            stale_while_revalidate_seconds,
+        })
+    }
+
+    fn merge_from_hint(&mut self, cache_hint: &TypedCacheHint) {
+        self.visibility = match (self.visibility, cache_hint.visibility) {
+            (CacheVisibility::Private, _) | (_, CacheVisibility::Private) => {
+                CacheVisibility::Private
+            }
+            _ => CacheVisibility::Public,
+        };
+        self.max_age_seconds = self.max_age_seconds.min(cache_hint.max_age_seconds);
+        self.stale_while_revalidate_seconds = match (
+            self.stale_while_revalidate_seconds,
+            cache_hint.stale_while_revalidate_seconds,
+        ) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        };
+    }
+
+    fn render(self) -> String {
+        let mut directives = Vec::new();
+        directives.push(match self.visibility {
+            CacheVisibility::Public => "public".to_string(),
+            CacheVisibility::Private => "private".to_string(),
+        });
+        directives.push(format!("max-age={}", self.max_age_seconds));
+        if let Some(value) = self.stale_while_revalidate_seconds {
+            directives.push(format!("stale-while-revalidate={value}"));
+        }
+        directives.join(", ")
+    }
+}
+
+fn merge_cache_control_value(existing: &str, cache_hint: &TypedCacheHint) -> String {
+    if existing.trim() == "no-store" {
+        return "no-store".to_string();
+    }
+
+    let Some(mut policy) = CacheControlPolicy::parse(existing) else {
+        return existing.to_string();
+    };
+    policy.merge_from_hint(cache_hint);
+    policy.render()
+}
+
+fn merge_surrogate_tags(existing: &str, cache_hint: &TypedCacheHint) -> String {
+    let mut tags = BTreeSet::new();
+    tags.extend(
+        existing
+            .split_whitespace()
+            .filter(|tag| !tag.is_empty())
+            .map(str::to_string),
+    );
+    tags.extend(cache_hint.tags.iter().cloned());
+    tags.into_iter().collect::<Vec<_>>().join(" ")
+}
+
 fn render_cache_control(cache_hint: &TypedCacheHint) -> String {
     let mut directives = Vec::new();
     directives.push(match cache_hint.visibility {
@@ -376,72 +514,6 @@ fn render_cache_control(cache_hint: &TypedCacheHint) -> String {
         directives.push("vary-by-session".to_string());
     }
     directives.join(",")
-}
-
-fn render_typed_head_markup(metadata: &TypedMetadata) -> String {
-    let mut markup = String::new();
-    if let Some(title) = &metadata.title {
-        markup.push_str(&format!("<title>{}</title>", escape_html_attribute(title)));
-    }
-    if let Some(description) = &metadata.description {
-        markup.push_str(&format!(
-            "<meta name=\"description\" content=\"{}\">",
-            escape_html_attribute(description)
-        ));
-    }
-    if let Some(canonical) = &metadata.canonical_url {
-        markup.push_str(&format!(
-            "<link rel=\"canonical\" href=\"{}\">",
-            escape_html_attribute(canonical)
-        ));
-    }
-    for (locale, url) in &metadata.alternate_urls {
-        markup.push_str(&format!(
-            "<link rel=\"alternate\" hreflang=\"{}\" href=\"{}\">",
-            escape_html_attribute(locale),
-            escape_html_attribute(url)
-        ));
-    }
-    if !metadata.robots.is_empty() {
-        markup.push_str(&format!(
-            "<meta name=\"robots\" content=\"{}\">",
-            escape_html_attribute(
-                &metadata
-                    .robots
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            )
-        ));
-    }
-    for node in &metadata.json_ld {
-        markup.push_str(&format!(
-            "<script type=\"application/ld+json\">{}</script>",
-            node.render()
-        ));
-    }
-    markup
-}
-
-fn inject_head_markup(document_html: String, head_markup: &str) -> String {
-    if head_markup.is_empty() {
-        return document_html;
-    }
-
-    if let Some(index) = document_html.find("</head>") {
-        let mut html = document_html;
-        html.insert_str(index, head_markup);
-        return html;
-    }
-
-    if let Some(index) = document_html.find("<body") {
-        let mut html = document_html;
-        html.insert_str(index, &format!("<head>{head_markup}</head>"));
-        return html;
-    }
-
-    format!("<head>{head_markup}</head>{document_html}")
 }
 
 fn inject_body_markup(document_html: String, body_markup: &str) -> String {
@@ -478,14 +550,6 @@ fn document_body_fragment(document_html: &str) -> String {
         return document_html.to_string();
     };
     document_html[content_start..content_start + body_close].to_string()
-}
-
-fn escape_html_attribute(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn render_hook_slots_for_execution(

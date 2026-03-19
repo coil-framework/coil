@@ -10,18 +10,20 @@ use davenda_commerce::OrderId;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     BulkOperationDefinition, BulkOperationKind, BulkOperationScope, CapabilityContract,
-    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
-    HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, IntegrationKind, IntegrationPoint,
-    JobContract, JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency,
-    ModuleManifest, PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode,
-    ReportFormat, ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind,
-    SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
-    SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
+    CoreServiceDependency, DataRepositoryContribution, DataRepositoryQueryProfile,
+    EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind, HttpSurfaceArea,
+    HttpSurfaceContribution, HttpSurfaceMethod, IntegrationKind, IntegrationPoint, JobContract,
+    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
+    PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode, ReportFormat,
+    ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
+    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
+    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
-    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
-    QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
+    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryField,
+    QueryFilter, QuerySort, QuerySpec, RepositorySpec, TableName, TransactionIsolation,
+    TransactionPlan,
 };
 use davenda_jobs::RetryPolicy;
 use davenda_memberships::MembershipTierId;
@@ -2221,6 +2223,7 @@ impl PlatformModule for EventsModule {
                 Some(1000),
                 true,
             )])
+            .with_data_repositories(vec![events_waitlist_repository()])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "events.list",
@@ -2354,6 +2357,40 @@ impl PlatformModule for EventsModule {
         .expect("event migration ids are unique");
         Some(plan)
     }
+}
+
+fn events_waitlist_repository() -> DataRepositoryContribution {
+    DataRepositoryContribution::new(
+        RepositorySpec::new(
+            "events.waitlist",
+            TableName::new("davenda.events_waitlist_entries")
+                .expect("constant events table is valid"),
+            vec![
+                QueryField::new("waitlist_entry_id").expect("constant events field is valid"),
+                QueryField::new("event_id").expect("constant events field is valid"),
+                QueryField::new("slot_id").expect("constant events field is valid"),
+                QueryField::new("status").expect("constant events field is valid"),
+                QueryField::new("position").expect("constant events field is valid"),
+                QueryField::new("created_at").expect("constant events field is valid"),
+            ],
+        )
+        .expect("constant events repository is valid")
+        .with_sortable_field("created_at")
+        .expect("constant events sortable field is valid")
+        .with_default_sort(
+            QuerySort::ascending("created_at").expect("constant events sort is valid"),
+        )
+        .with_filterable_field("event_id")
+        .expect("constant events filter field is valid")
+        .with_filterable_field("slot_id")
+        .expect("constant events filter field is valid"),
+        DataRepositoryQueryProfile::new(
+            PageRequest::new(0, 50).expect("constant events page size is valid"),
+            PublicationVisibility::IncludeDrafts,
+            QueryCacheScope::Uncacheable,
+        )
+        .bind_invocation_principal(),
+    )
 }
 
 fn validate_token(field: &'static str, value: String) -> Result<String, EventModelError> {

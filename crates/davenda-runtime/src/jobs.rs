@@ -19,6 +19,12 @@ pub struct RegisteredSearchContribution {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredDataRepository {
+    pub module: String,
+    pub contribution: DataRepositoryContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredReportDefinition {
     pub module: String,
     pub definition: ReportDefinition,

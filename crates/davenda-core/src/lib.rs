@@ -14,7 +14,9 @@ use davenda_config::{
     CsrfConfig as HttpCsrfConfig, DistributedCache, PlatformConfig, SameSitePolicy,
     SessionStore as ConfigSessionStore, TlsMode,
 };
-use davenda_data::{DataRuntime, MigrationPlan};
+use davenda_data::{
+    DataRuntime, MigrationPlan, PageRequest, PublicationVisibility, QueryCacheScope, RepositorySpec,
+};
 use davenda_i18n::{
     CurrencyCode, LocaleContext, LocaleRouter, LocaleTag, LocaleUrlConfig, TimeZoneId,
     TranslationCatalog, TranslationRuntime,
@@ -491,6 +493,64 @@ pub struct CoreBootstrap {
     pub wasm: WasmRuntimeServices,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataRepositoryPrincipalBinding {
+    Omit,
+    InvocationPrincipal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataRepositoryQueryProfile {
+    pub page: PageRequest,
+    pub publication_visibility: PublicationVisibility,
+    pub default_cache_scope: QueryCacheScope,
+    pub localized_cache_scope: QueryCacheScope,
+    pub principal_binding: DataRepositoryPrincipalBinding,
+}
+
+impl DataRepositoryQueryProfile {
+    pub fn new(
+        page: PageRequest,
+        publication_visibility: PublicationVisibility,
+        cache_scope: QueryCacheScope,
+    ) -> Self {
+        Self {
+            page,
+            publication_visibility,
+            default_cache_scope: cache_scope,
+            localized_cache_scope: cache_scope,
+            principal_binding: DataRepositoryPrincipalBinding::Omit,
+        }
+    }
+
+    pub fn with_localized_cache_scope(mut self, cache_scope: QueryCacheScope) -> Self {
+        self.localized_cache_scope = cache_scope;
+        self
+    }
+
+    pub fn bind_invocation_principal(mut self) -> Self {
+        self.principal_binding = DataRepositoryPrincipalBinding::InvocationPrincipal;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataRepositoryContribution {
+    pub id: String,
+    pub repository: RepositorySpec,
+    pub query_profile: DataRepositoryQueryProfile,
+}
+
+impl DataRepositoryContribution {
+    pub fn new(repository: RepositorySpec, query_profile: DataRepositoryQueryProfile) -> Self {
+        Self {
+            id: repository.id.clone(),
+            repository,
+            query_profile,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleManifest {
     pub name: String,
@@ -509,6 +569,7 @@ pub struct ModuleManifest {
     pub extension_slots: Vec<ExtensionSlotDescriptor>,
     pub admin_resources: Vec<AdminResourceContribution>,
     pub http_surfaces: Vec<HttpSurfaceContribution>,
+    pub data_repositories: Vec<DataRepositoryContribution>,
     pub search_contributions: Vec<SearchIndexContribution>,
     pub report_definitions: Vec<ReportDefinition>,
     pub bulk_operations: Vec<BulkOperationDefinition>,
@@ -533,6 +594,7 @@ impl ModuleManifest {
             extension_slots: Vec::new(),
             admin_resources: Vec::new(),
             http_surfaces: Vec::new(),
+            data_repositories: Vec::new(),
             search_contributions: Vec::new(),
             report_definitions: Vec::new(),
             bulk_operations: Vec::new(),
@@ -614,6 +676,14 @@ impl ModuleManifest {
 
     pub fn with_http_surfaces(mut self, http_surfaces: Vec<HttpSurfaceContribution>) -> Self {
         self.http_surfaces = http_surfaces;
+        self
+    }
+
+    pub fn with_data_repositories(
+        mut self,
+        data_repositories: Vec<DataRepositoryContribution>,
+    ) -> Self {
+        self.data_repositories = data_repositories;
         self
     }
 

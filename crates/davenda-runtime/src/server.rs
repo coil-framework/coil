@@ -785,12 +785,15 @@ fn execution_response(
             html_response(
                 receipts
                     .response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK)),
-                receipts.merge_page_html(html),
+                receipts.compose_page_html(html),
             )
         }
         HandlerResponse::Fragment(fragment) => {
             let html = plan.render_fragment_response(&execution, fragment)?;
-            html_response(StatusCode::OK, receipts.merge_fragment_html(html))
+            html_response(
+                receipts.response_status(StatusCode::OK),
+                receipts.compose_fragment_html(html),
+            )
         }
         HandlerResponse::Redirect(redirect) => {
             let mut response = Response::new(Body::empty());
@@ -806,7 +809,7 @@ fn execution_response(
             response
         }
         HandlerResponse::Json(json) => {
-            let payload = receipts.merge_json_payload(json.payload.clone());
+            let payload = receipts.compose_json_payload(json.payload.clone());
             let mut parts = Vec::new();
             for (key, value) in &payload {
                 parts.push(format!(
@@ -852,6 +855,13 @@ fn execution_response(
         }
     };
 
+    for (name, value) in execution.cache_plan.headers {
+        if let Ok(header_name) = axum::http::HeaderName::try_from(name.as_str()) {
+            if let Ok(header_value) = value.parse() {
+                response.headers_mut().insert(header_name, header_value);
+            }
+        }
+    }
     receipts.decorate_response_headers(response.headers_mut());
 
     response.headers_mut().insert(
@@ -869,13 +879,6 @@ fn execution_response(
             .parse()
             .expect("validated locale is a header value"),
     );
-    for (name, value) in execution.cache_plan.headers {
-        if let Ok(header_name) = axum::http::HeaderName::try_from(name.as_str()) {
-            if let Ok(header_value) = value.parse() {
-                response.headers_mut().insert(header_name, header_value);
-            }
-        }
-    }
     for cookie in execution.response_cookies {
         if let Ok(value) = cookie.parse() {
             response.headers_mut().append("set-cookie", value);

@@ -906,6 +906,15 @@ fn runtime_builder_creates_a_runtime_plan() {
     assert!(plan.module_event_subscriptions.iter().any(|registered| {
         registered.subscription.event == "commerce.order.paid" && registered.module == "memberships"
     }));
+    assert!(plan.module_data_repositories.iter().any(|registered| {
+        registered.module == "cms" && registered.contribution.id == "cms.pages.live"
+    }));
+    assert!(plan.module_data_repositories.iter().any(|registered| {
+        registered.module == "commerce" && registered.contribution.id == "commerce.catalog.products"
+    }));
+    assert!(plan.module_data_repositories.iter().any(|registered| {
+        registered.module == "events" && registered.contribution.id == "events.waitlist"
+    }));
     assert!(plan.registered_runtime_jobs.iter().any(|registered| {
         registered.contract.name == "events.reminders"
             && registered.queue == plan.jobs.topology.scheduled_queue
@@ -967,6 +976,48 @@ fn rejects_duplicate_route_names_for_the_same_method() {
         }
         other => panic!("expected duplicate route error, got {other:?}"),
     }
+}
+
+#[test]
+fn runtime_builder_rejects_duplicate_runtime_data_repositories() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let repository = davenda_core::DataRepositoryContribution::new(
+        davenda_data::RepositorySpec::new(
+            "shared.runtime.repo",
+            davenda_data::TableName::new("davenda.shared_runtime_repo").unwrap(),
+            vec![davenda_data::QueryField::new("id").unwrap()],
+        )
+        .unwrap(),
+        davenda_core::DataRepositoryQueryProfile::new(
+            davenda_data::PageRequest::new(0, 10).unwrap(),
+            davenda_data::PublicationVisibility::PublishedOnly,
+            davenda_data::QueryCacheScope::Public,
+        ),
+    );
+
+    let first = StaticManifestModule::new(
+        ModuleManifest::new("first").with_data_repositories(vec![repository.clone()]),
+    );
+    let second = StaticManifestModule::new(
+        ModuleManifest::new("second").with_data_repositories(vec![repository]),
+    );
+
+    let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(first)
+        .with_module(second)
+        .build()
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeBuildError::DuplicateDataRepository {
+            repository,
+            first_module,
+            second_module,
+        } if repository == "shared.runtime.repo"
+            && first_module == "first"
+            && second_module == "second"
+    ));
 }
 
 #[test]
@@ -2315,9 +2366,98 @@ async fn server_host_executes_page_extensions_during_live_requests() {
         headers.get("x-davenda-wasm-cache-tags").unwrap(),
         "account-runtime"
     );
+    assert_eq!(
+        headers.get("cache-control").unwrap(),
+        "private, max-age=60, stale-while-revalidate=30"
+    );
+    assert!(
+        headers
+            .get("surrogate-key")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("account-runtime")
+    );
     assert!(body.contains("Account runtime extension"));
     assert!(body.contains("data-route=\"account.dashboard\""));
     assert!(body.contains("Account Runtime Extension"));
+
+    fs::remove_dir_all(&extension_dir).unwrap();
+}
+
+#[tokio::test]
+async fn server_host_applies_typed_cache_policy_to_public_page_responses() {
+    let app_name = "showcase-events-public-page-wasm";
+    let extension_dir = unique_temp_extension_dir("public-page-wasm");
+    fs::create_dir_all(&extension_dir).unwrap();
+    let config = config_with_app_name_and_extension_directory(&extension_dir, app_name);
+    let page_slots = StaticManifestModule::new(
+        ModuleManifest::new("events.runtime.slot").with_extension_slots(vec![
+            ExtensionSlotDescriptor::new(
+                ExtensionSlotKind::Page,
+                "/events",
+                "Allows public page extensions to participate in the live request path",
+            ),
+        ]),
+    );
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(page_slots)
+        .with_route(RouteDefinition::new("events.public", HttpMethod::Get, "/events").unwrap())
+        .with_handler(HandlerDefinition::page("events.public", "events/list").unwrap())
+        .with_installed_extension(installed_page_extension_for_app_with_artifact(
+            &extension_dir,
+            "/events",
+            app_name,
+        ))
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let server = plan
+        .server_host(&resolver, cookie_secret, csrf_secret)
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/events")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        headers.get("cache-control").unwrap(),
+        "public, max-age=60, stale-while-revalidate=30"
+    );
+    assert!(
+        headers
+            .get("surrogate-key")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("account-runtime")
+    );
+    assert!(body.contains("Account runtime extension"));
 
     fs::remove_dir_all(&extension_dir).unwrap();
 }
@@ -3236,6 +3376,7 @@ fn wasm_host_prepares_admin_widget_invocations_from_request_execution() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(AdminModule::new())
+        .with_module(EventsModule::new())
         .with_installed_extension(installed_admin_widget_extension())
         .build()
         .unwrap();
@@ -3297,6 +3438,14 @@ fn wasm_host_prepares_admin_widget_invocations_from_request_execution() {
             resource: "events.waitlist".to_string(),
         })
         .unwrap();
+    assert!(matches!(
+        &sessions[0].host_service_executions()[1].result,
+        davenda_wasm::HostServiceResult::Data(davenda_wasm::DataServiceExecution {
+            summary,
+            ..
+        }) if summary.contains("repository=events.waitlist")
+            && summary.contains("synthetic=true")
+    ));
 
     let receipt = sessions
         .into_iter()
@@ -3317,6 +3466,7 @@ fn wasm_host_executes_admin_widget_handlers_inside_the_engine() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(AdminModule::new())
+        .with_module(EventsModule::new())
         .with_installed_extension(installed_admin_widget_extension())
         .build()
         .unwrap();

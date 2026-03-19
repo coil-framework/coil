@@ -6,18 +6,20 @@ use std::time::Duration;
 use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution, CapabilityContract,
-    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
-    HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract,
-    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
-    PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode, ReportFormat,
-    ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
-    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
+    CoreServiceDependency, DataRepositoryContribution, DataRepositoryQueryProfile,
+    EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind, HttpSurfaceArea,
+    HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
+    RegistrationError, ReportDefinition, ReportDeliveryMode, ReportFormat, ReportSensitivity,
+    RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution, SearchFieldRole,
+    SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
     SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
-    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
-    QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
+    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryField,
+    QueryFilter, QuerySort, QuerySpec, RepositorySpec, TableName, TransactionIsolation,
+    TransactionPlan,
 };
 use davenda_jobs::RetryPolicy;
 
@@ -1652,6 +1654,7 @@ impl PlatformModule for CommerceModule {
                 "reports/orders",
                 default_retry_policy(),
             )])
+            .with_data_repositories(vec![commerce_catalog_products_repository()])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "commerce.catalog",
@@ -1723,6 +1726,39 @@ impl PlatformModule for CommerceModule {
                 .expect("commerce migration plan is constant and valid"),
         )
     }
+}
+
+fn commerce_catalog_products_repository() -> DataRepositoryContribution {
+    DataRepositoryContribution::new(
+        RepositorySpec::new(
+            "commerce.catalog.products",
+            TableName::new("davenda.catalog_products").expect("constant commerce table is valid"),
+            vec![
+                QueryField::new("product_id").expect("constant commerce field is valid"),
+                QueryField::new("product_title").expect("constant commerce field is valid"),
+                QueryField::new("product_slug").expect("constant commerce field is valid"),
+                QueryField::new("updated_at").expect("constant commerce field is valid"),
+            ],
+        )
+        .expect("constant commerce repository is valid")
+        .with_locale_field("locale")
+        .expect("constant commerce locale field is valid")
+        .with_publication_field("catalog_status", "active")
+        .expect("constant commerce publication field is valid")
+        .with_filterable_field("collection_handle")
+        .expect("constant commerce filter field is valid")
+        .with_sortable_field("product_title")
+        .expect("constant commerce sortable field is valid")
+        .with_default_sort(
+            QuerySort::ascending("product_title").expect("constant commerce sort is valid"),
+        ),
+        DataRepositoryQueryProfile::new(
+            PageRequest::new(0, 24).expect("constant commerce page size is valid"),
+            PublicationVisibility::PublishedOnly,
+            QueryCacheScope::Public,
+        )
+        .with_localized_cache_scope(QueryCacheScope::LocaleScoped),
+    )
 }
 
 fn ensure_same_currency(

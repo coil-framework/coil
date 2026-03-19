@@ -27,6 +27,7 @@ pub struct RuntimePlan {
     pub installed_extensions: Vec<InstalledExtensionSummary>,
     pub module_jobs: Vec<RegisteredModuleJob>,
     pub module_event_subscriptions: Vec<RegisteredEventSubscription>,
+    pub module_data_repositories: Vec<RegisteredDataRepository>,
     pub module_search_contributions: Vec<RegisteredSearchContribution>,
     pub module_report_definitions: Vec<RegisteredReportDefinition>,
     pub module_bulk_operations: Vec<RegisteredBulkOperation>,

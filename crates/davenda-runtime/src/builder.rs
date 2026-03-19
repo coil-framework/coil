@@ -196,6 +196,7 @@ where
                     })
             })
             .collect::<Vec<_>>();
+        let module_data_repositories = collect_data_repositories(&module_manifests)?;
         let module_search_contributions = module_manifests
             .iter()
             .flat_map(|manifest| {
@@ -291,6 +292,7 @@ where
             installed_extensions,
             module_jobs,
             module_event_subscriptions,
+            module_data_repositories,
             module_search_contributions,
             module_report_definitions,
             module_bulk_operations,
@@ -479,6 +481,14 @@ pub enum RuntimeBuildError {
         first_module: String,
         second_module: String,
     },
+    #[error(
+        "runtime data repository `{repository}` is declared by both `{first_module}` and `{second_module}`"
+    )]
+    DuplicateDataRepository {
+        repository: String,
+        first_module: String,
+        second_module: String,
+    },
     #[error("event subscription `{event}` in module `{module}` must target a declared job")]
     EventSubscriptionMissingJob { module: String, event: String },
     #[error("event subscription `{event}` in module `{module}` targets unknown job `{job}`")]
@@ -527,6 +537,34 @@ fn collect_extension_slots(
     }
 
     Ok(slots)
+}
+
+fn collect_data_repositories(
+    manifests: &[ModuleManifest],
+) -> Result<Vec<RegisteredDataRepository>, RuntimeBuildError> {
+    let mut repositories = Vec::new();
+    let mut seen = BTreeMap::<String, String>::new();
+
+    for manifest in manifests {
+        for contribution in &manifest.data_repositories {
+            if let Some(existing_module) =
+                seen.insert(contribution.id.clone(), manifest.name.clone())
+            {
+                return Err(RuntimeBuildError::DuplicateDataRepository {
+                    repository: contribution.id.clone(),
+                    first_module: existing_module,
+                    second_module: manifest.name.clone(),
+                });
+            }
+
+            repositories.push(RegisteredDataRepository {
+                module: manifest.name.clone(),
+                contribution: contribution.clone(),
+            });
+        }
+    }
+
+    Ok(repositories)
 }
 
 fn validate_extension_handler_slot(

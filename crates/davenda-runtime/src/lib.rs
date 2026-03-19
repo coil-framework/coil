@@ -15,13 +15,13 @@ use davenda_cache::{
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     BrowserSecurityServices, BulkOperationDefinition, CapabilityValidationError,
-    CliRuntimeServices, DataRuntimeServices, EventSubscription, HttpFileDeliveryMode,
-    HttpResponseContract, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod,
-    I18nRuntimeServices, JobContract, JobTriggerKind, JobsRuntimeServices, ModuleInstallationError,
-    ModuleManifest, ObservabilityRuntimeServices, PlatformModule, RegistrationError,
-    ReportDefinition, SearchIndexContribution, SeoRuntimeServices, ServiceDescriptor,
-    TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices, bootstrap_core_services,
-    validate_module_capabilities, validate_module_installation,
+    CliRuntimeServices, DataRepositoryContribution, DataRuntimeServices, EventSubscription,
+    HttpFileDeliveryMode, HttpResponseContract, HttpSurfaceArea, HttpSurfaceContribution,
+    HttpSurfaceMethod, I18nRuntimeServices, JobContract, JobTriggerKind, JobsRuntimeServices,
+    ModuleInstallationError, ModuleManifest, ObservabilityRuntimeServices, PlatformModule,
+    RegistrationError, ReportDefinition, SearchIndexContribution, SeoRuntimeServices,
+    ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
+    bootstrap_core_services, validate_module_capabilities, validate_module_installation,
 };
 use davenda_data::{DataModelError, MigrationPlan};
 use davenda_jobs::{

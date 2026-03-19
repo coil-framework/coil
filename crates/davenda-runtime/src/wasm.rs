@@ -18,8 +18,8 @@ use davenda_template::{
 use davenda_wasm::{
     AuthServiceDetails, AuthServiceExecution, AuthServiceRequest, CacheIntentExecution,
     CacheIntentServiceRequest, DataServiceRequest, HostServiceCall, HostServiceDomain,
-    HostServiceExecution, HostServiceExecutor, HostServiceRequest, HostServiceResult,
-    JobExecution, MetadataExecution, NetworkExecution, PrincipalKind, RenderServiceExecution,
+    HostServiceExecution, HostServiceExecutor, HostServiceRequest, HostServiceResult, JobExecution,
+    MetadataExecution, NetworkExecution, PrincipalKind, RenderServiceExecution,
     RenderServiceRequest, SecretExecution, StorageClassGrant, StorageServiceExecution,
     StorageServiceRequest,
 };
@@ -534,10 +534,13 @@ impl RuntimeHostServiceExecutor {
         })
     }
 
-    fn data_backend(&self, context: &InvocationContext) -> Result<&RuntimeDataBackend, WasmModelError> {
-        let result = self
-            .data_backend
-            .get_or_init(|| RuntimeDataBackend::new(&self.plan).map_err(|reason| reason.to_string()));
+    fn data_backend(
+        &self,
+        context: &InvocationContext,
+    ) -> Result<&RuntimeDataBackend, WasmModelError> {
+        let result = self.data_backend.get_or_init(|| {
+            RuntimeDataBackend::new(&self.plan).map_err(|reason| reason.to_string())
+        });
 
         result
             .as_ref()
@@ -1060,7 +1063,10 @@ fn runtime_auth_backend_error(tenant_id: i64, reason: impl ToString) -> WasmMode
     }
 }
 
-fn runtime_data_backend_error(context: &InvocationContext, reason: impl ToString) -> WasmModelError {
+fn runtime_data_backend_error(
+    context: &InvocationContext,
+    reason: impl ToString,
+) -> WasmModelError {
     WasmModelError::HostServiceUnavailable {
         handler_id: trace_id(context).to_string(),
         domain: HostServiceDomain::Data,

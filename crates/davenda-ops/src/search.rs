@@ -3,18 +3,19 @@ use crate::identifiers::{SearchFieldId, SearchIndexId};
 use crate::validation::require_non_empty;
 use davenda_auth::Capability;
 use davenda_core::{
-    ModuleManifest, SearchDocumentKind as ManifestSearchDocumentKind,
     SearchFieldContribution as ManifestSearchFieldContribution,
     SearchFieldRole as ManifestSearchFieldRole,
-    SearchIndexContribution as ManifestSearchIndexContribution,
     SearchInvalidationRule as ManifestSearchInvalidationRule,
     SearchInvalidationTrigger as ManifestSearchInvalidationTrigger,
-    SearchRebuildStrategy as ManifestSearchRebuildStrategy,
-    SearchVisibility as ManifestSearchVisibility,
 };
 use std::collections::HashSet;
 use std::fmt;
 use std::time::Duration;
+
+mod catalog;
+mod mapping;
+
+pub use catalog::SearchCatalog;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchDocumentKind {
@@ -113,18 +114,6 @@ impl SearchFieldContribution {
             searchable,
         })
     }
-
-    pub(crate) fn from_manifest_contribution(
-        contribution: &ManifestSearchFieldContribution,
-    ) -> Result<Self, OpsModelError> {
-        Self::new(
-            SearchFieldId::new(contribution.id.clone())?,
-            contribution.source_path.clone(),
-            map_search_field_role(contribution.role),
-            contribution.stored,
-            contribution.searchable,
-        )
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,13 +131,6 @@ impl SearchInvalidationRule {
             trigger,
             reason: require_non_empty("search_invalidation_reason", reason.into())?,
         })
-    }
-
-    fn from_manifest_rule(rule: &ManifestSearchInvalidationRule) -> Result<Self, OpsModelError> {
-        Self::new(
-            map_search_invalidation_trigger(rule.trigger),
-            rule.reason.clone(),
-        )
     }
 }
 
@@ -215,168 +197,5 @@ impl SearchIndexContribution {
 
     pub fn visible_to(&self, capabilities: &[Capability]) -> bool {
         self.visibility.allows(capabilities)
-    }
-
-    fn from_manifest_contribution(
-        source_module: &str,
-        contribution: &ManifestSearchIndexContribution,
-    ) -> Result<Self, OpsModelError> {
-        let fields = contribution
-            .fields
-            .iter()
-            .map(SearchFieldContribution::from_manifest_contribution)
-            .collect::<Result<Vec<_>, _>>()?;
-        let invalidation_rules = contribution
-            .invalidation_rules
-            .iter()
-            .map(SearchInvalidationRule::from_manifest_rule)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Self::new(
-            SearchIndexId::new(contribution.id.clone())?,
-            source_module,
-            map_search_document_kind(contribution.document_kind),
-            map_search_visibility(contribution.visibility),
-            contribution.publication_required,
-            fields,
-            invalidation_rules,
-            map_search_rebuild_strategy(contribution.rebuild_strategy),
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SearchCatalog {
-    pub contributions: Vec<SearchIndexContribution>,
-}
-
-impl SearchCatalog {
-    pub fn new(contributions: Vec<SearchIndexContribution>) -> Self {
-        Self { contributions }
-    }
-
-    pub fn standard() -> Self {
-        Self {
-            contributions: Vec::new(),
-        }
-    }
-
-    pub fn from_manifests(manifests: &[ModuleManifest]) -> Result<Self, OpsModelError> {
-        let mut contributions = Vec::new();
-        for manifest in manifests {
-            for contribution in &manifest.search_contributions {
-                contributions.push(SearchIndexContribution::from_manifest_contribution(
-                    &manifest.name,
-                    contribution,
-                )?);
-            }
-        }
-        let catalog = Self::new(contributions);
-        catalog.validate()?;
-        Ok(catalog)
-    }
-
-    pub fn validate(&self) -> Result<(), OpsModelError> {
-        let mut seen = HashSet::new();
-        for contribution in &self.contributions {
-            if !seen.insert(contribution.id.as_str().to_string()) {
-                return Err(OpsModelError::DuplicateIdentifier {
-                    kind: "search index",
-                    id: contribution.id.to_string(),
-                });
-            }
-            SearchIndexContribution::new(
-                contribution.id.clone(),
-                contribution.source_module.clone(),
-                contribution.document_kind,
-                contribution.visibility,
-                contribution.publication_required,
-                contribution.fields.clone(),
-                contribution.invalidation_rules.clone(),
-                contribution.rebuild_strategy,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    pub fn contribution(&self, id: &SearchIndexId) -> Option<&SearchIndexContribution> {
-        self.contributions
-            .iter()
-            .find(|contribution| &contribution.id == id)
-    }
-
-    pub fn visible_to(&self, capabilities: &[Capability]) -> Vec<&SearchIndexContribution> {
-        self.contributions
-            .iter()
-            .filter(|contribution| contribution.visible_to(capabilities))
-            .collect()
-    }
-}
-
-impl Default for SearchCatalog {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
-
-fn map_search_document_kind(kind: ManifestSearchDocumentKind) -> SearchDocumentKind {
-    match kind {
-        ManifestSearchDocumentKind::Page => SearchDocumentKind::Page,
-        ManifestSearchDocumentKind::Product => SearchDocumentKind::Product,
-        ManifestSearchDocumentKind::Collection => SearchDocumentKind::Collection,
-        ManifestSearchDocumentKind::Event => SearchDocumentKind::Event,
-        ManifestSearchDocumentKind::EventSlot => SearchDocumentKind::EventSlot,
-        ManifestSearchDocumentKind::Booking => SearchDocumentKind::Booking,
-        ManifestSearchDocumentKind::Media => SearchDocumentKind::Media,
-        ManifestSearchDocumentKind::MembershipSubscription => {
-            SearchDocumentKind::MembershipSubscription
-        }
-        ManifestSearchDocumentKind::Custom => SearchDocumentKind::Custom,
-    }
-}
-
-fn map_search_field_role(role: ManifestSearchFieldRole) -> SearchFieldRole {
-    match role {
-        ManifestSearchFieldRole::Title => SearchFieldRole::Title,
-        ManifestSearchFieldRole::Summary => SearchFieldRole::Summary,
-        ManifestSearchFieldRole::Body => SearchFieldRole::Body,
-        ManifestSearchFieldRole::Keyword => SearchFieldRole::Keyword,
-        ManifestSearchFieldRole::Facet => SearchFieldRole::Facet,
-        ManifestSearchFieldRole::Metadata => SearchFieldRole::Metadata,
-    }
-}
-
-fn map_search_visibility(visibility: ManifestSearchVisibility) -> SearchVisibility {
-    match visibility {
-        ManifestSearchVisibility::Public => SearchVisibility::Public,
-        ManifestSearchVisibility::Authenticated => SearchVisibility::Authenticated,
-        ManifestSearchVisibility::Capability(capability) => {
-            SearchVisibility::Capability(capability)
-        }
-    }
-}
-
-fn map_search_invalidation_trigger(
-    trigger: ManifestSearchInvalidationTrigger,
-) -> SearchInvalidationTrigger {
-    match trigger {
-        ManifestSearchInvalidationTrigger::Published => SearchInvalidationTrigger::Published,
-        ManifestSearchInvalidationTrigger::Updated => SearchInvalidationTrigger::Updated,
-        ManifestSearchInvalidationTrigger::Unpublished => SearchInvalidationTrigger::Unpublished,
-        ManifestSearchInvalidationTrigger::Deleted => SearchInvalidationTrigger::Deleted,
-        ManifestSearchInvalidationTrigger::ManualRebuild => {
-            SearchInvalidationTrigger::ManualRebuild
-        }
-    }
-}
-
-fn map_search_rebuild_strategy(strategy: ManifestSearchRebuildStrategy) -> SearchRebuildStrategy {
-    match strategy {
-        ManifestSearchRebuildStrategy::OnInvalidate => SearchRebuildStrategy::OnInvalidate,
-        ManifestSearchRebuildStrategy::Scheduled { interval } => {
-            SearchRebuildStrategy::Scheduled { interval }
-        }
-        ManifestSearchRebuildStrategy::ManualOnly => SearchRebuildStrategy::ManualOnly,
     }
 }

@@ -388,6 +388,7 @@ dependencies = [
  "davenda-auth",
  "davenda-config",
  "davenda-core",
+ "davenda-data",
  "davenda-i18n",
  "davenda-jobs",
  "davenda-runtime",

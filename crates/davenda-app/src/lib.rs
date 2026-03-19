@@ -6,9 +6,10 @@ use davenda_config::PlatformConfig;
 use davenda_core::{
     validate_module_capabilities, AdminResourceContribution, BulkOperationDefinition,
     CapabilityValidationError, CoreServiceDependency, EventSubscription, JobContract,
-    MigrationContract, ModuleDependencyKind, ModuleManifest, PlatformModule, ReportDefinition,
-    RouteSurface, SearchIndexContribution,
+    MigrationContract, ModuleDependency, ModuleDependencyKind, ModuleManifest, PlatformModule,
+    ReportDefinition, RouteSurface, SearchIndexContribution,
 };
+use davenda_data::{MigrationOwner, MigrationPlan};
 use davenda_i18n::LocaleTag;
 use davenda_runtime::{RuntimeBuildError, RuntimeBuilder, RuntimePlan};
 use davenda_template::TemplateNamespace;
@@ -55,6 +56,46 @@ pub enum AppModelError {
     ConfigAppMismatch {
         manifest: String,
         configured: String,
+    },
+    #[error(
+        "customer app manifest auth package `{manifest}` does not match runtime config auth package `{configured}`"
+    )]
+    ConfigAuthPackageMismatch {
+        manifest: String,
+        configured: String,
+    },
+    #[error(
+        "customer app manifest default locale `{manifest}` does not match runtime config default locale `{configured}`"
+    )]
+    ConfigDefaultLocaleMismatch {
+        manifest: String,
+        configured: String,
+    },
+    #[error(
+        "customer app manifest supported locales `{manifest:?}` do not match runtime config supported locales `{configured:?}`"
+    )]
+    ConfigSupportedLocalesMismatch {
+        manifest: Vec<String>,
+        configured: Vec<String>,
+    },
+    #[error(
+        "customer app canonical host `{manifest}` does not match runtime config canonical host `{configured}`"
+    )]
+    ConfigCanonicalHostMismatch {
+        manifest: String,
+        configured: String,
+    },
+    #[error(
+        "customer app manifest modules differ from runtime config modules; manifest-only={manifest_only:?}, config-only={configured_only:?}"
+    )]
+    ConfigModulesMismatch {
+        manifest_only: Vec<String>,
+        configured_only: Vec<String>,
+    },
+    #[error("runtime provided modules not installed by customer app `{app_id}`: {modules:?}")]
+    UnexpectedRuntimeModules {
+        app_id: String,
+        modules: Vec<String>,
     },
     #[error(
         "extension `{extension_id}` is installed for customer app `{extension_customer_app}` but manifest is `{app_id}`"
@@ -479,6 +520,7 @@ impl CustomerAppManifest {
             }
         }
 
+        let mut module_inventory = Vec::new();
         let mut required_core_services = Vec::new();
         let mut migrations = self.customer_migrations.clone();
         let mut route_surfaces = Vec::new();
@@ -504,14 +546,36 @@ impl CustomerAppManifest {
             search_contributions.extend(manifest.search_contributions.clone());
             report_definitions.extend(manifest.report_definitions.clone());
             bulk_operations.extend(manifest.bulk_operations.clone());
+
+            let installed_spec = self
+                .modules
+                .iter()
+                .find(|spec| spec.id.as_str() == manifest.name)
+                .expect("selected manifests always correspond to installed modules");
+            module_inventory.push(InstalledModuleSummary {
+                id: installed_spec.id.clone(),
+                version_req: installed_spec.version_req.clone(),
+                module_dependencies: manifest.module_dependencies.clone(),
+                core_service_dependencies: manifest.core_service_dependencies.clone(),
+                migrations: manifest.migrations.clone(),
+                route_surfaces: manifest.route_surfaces.clone(),
+                jobs: manifest.jobs.clone(),
+                event_subscriptions: manifest.event_subscriptions.clone(),
+                admin_resources: manifest.admin_resources.clone(),
+                search_contributions: manifest.search_contributions.clone(),
+                report_definitions: manifest.report_definitions.clone(),
+                bulk_operations: manifest.bulk_operations.clone(),
+            });
         }
 
         Ok(CustomerAppComposition {
             app_id: self.id.clone(),
             display_name: self.display_name.clone(),
+            domains: self.domains.clone(),
             default_locale: self.default_locale.clone(),
             supported_locales: self.supported_locales.clone(),
             installed_modules: self.modules.clone(),
+            module_inventory,
             required_core_services,
             migrations,
             route_surfaces,
@@ -544,11 +608,86 @@ impl CustomerAppManifest {
             });
         }
 
+        if config.auth.package != self.auth.package_name {
+            return Err(AppModelError::ConfigAuthPackageMismatch {
+                manifest: self.auth.package_name.clone(),
+                configured: config.auth.package,
+            });
+        }
+
+        if config.i18n.default_locale != self.default_locale.as_str() {
+            return Err(AppModelError::ConfigDefaultLocaleMismatch {
+                manifest: self.default_locale.to_string(),
+                configured: config.i18n.default_locale,
+            });
+        }
+
+        let manifest_locales = sorted_locale_strings(&self.supported_locales);
+        let configured_locales = sorted_strings(config.i18n.supported_locales.clone());
+        if manifest_locales != configured_locales {
+            return Err(AppModelError::ConfigSupportedLocalesMismatch {
+                manifest: manifest_locales,
+                configured: configured_locales,
+            });
+        }
+
+        let canonical_domain = self
+            .domains
+            .iter()
+            .find(|domain| domain.canonical)
+            .expect("validated manifests always declare a canonical domain")
+            .hostname
+            .clone();
+        if config.seo.canonical_host != canonical_domain {
+            return Err(AppModelError::ConfigCanonicalHostMismatch {
+                manifest: canonical_domain,
+                configured: config.seo.canonical_host,
+            });
+        }
+
+        let manifest_modules = sorted_strings(
+            self.modules
+                .iter()
+                .map(|module| module.id.to_string())
+                .collect::<Vec<_>>(),
+        );
+        let configured_modules = sorted_strings(config.modules.enabled.clone());
+        let manifest_only = difference(&manifest_modules, &configured_modules);
+        let configured_only = difference(&configured_modules, &manifest_modules);
+        if !manifest_only.is_empty() || !configured_only.is_empty() {
+            return Err(AppModelError::ConfigModulesMismatch {
+                manifest_only,
+                configured_only,
+            });
+        }
+
         let manifests = modules
             .iter()
             .map(|module| module.manifest())
             .collect::<Vec<_>>();
+        let unexpected_modules = sorted_strings(
+            manifests
+                .iter()
+                .filter(|manifest| {
+                    !self
+                        .modules
+                        .iter()
+                        .any(|installed| installed.id.as_str() == manifest.name)
+                })
+                .map(|manifest| manifest.name.clone())
+                .collect::<Vec<_>>(),
+        );
+        if !unexpected_modules.is_empty() {
+            return Err(AppModelError::UnexpectedRuntimeModules {
+                app_id: self.id.to_string(),
+                modules: unexpected_modules,
+            });
+        }
+
         let composition = self.compose(&auth_package, &manifests)?;
+        let migration_summary =
+            build_migration_summary(self, auth_package.manifest().name.clone(), &modules);
+        let release_doctor = composition.release_doctor(Some(&config));
 
         let mut builder = RuntimeBuilder::new(config, auth_package);
         for module in modules {
@@ -558,6 +697,8 @@ impl CustomerAppManifest {
         Ok(CustomerAppRuntimePlan {
             composition,
             runtime: builder.build()?,
+            migration_summary,
+            release_doctor,
         })
     }
 }
@@ -566,9 +707,11 @@ impl CustomerAppManifest {
 pub struct CustomerAppComposition {
     pub app_id: CustomerAppId,
     pub display_name: String,
+    pub domains: Vec<AppDomain>,
     pub default_locale: LocaleTag,
     pub supported_locales: Vec<LocaleTag>,
     pub installed_modules: Vec<InstalledModuleSpec>,
+    pub module_inventory: Vec<InstalledModuleSummary>,
     pub required_core_services: Vec<CoreServiceDependency>,
     pub migrations: Vec<MigrationContract>,
     pub route_surfaces: Vec<RouteSurface>,
@@ -588,6 +731,201 @@ pub struct CustomerAppComposition {
 pub struct CustomerAppRuntimePlan {
     pub composition: CustomerAppComposition,
     pub runtime: RuntimePlan,
+    pub migration_summary: MigrationPlanSummary,
+    pub release_doctor: ReleaseDoctorReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledModuleSummary {
+    pub id: ModuleId,
+    pub version_req: Option<String>,
+    pub module_dependencies: Vec<ModuleDependency>,
+    pub core_service_dependencies: Vec<CoreServiceDependency>,
+    pub migrations: Vec<MigrationContract>,
+    pub route_surfaces: Vec<RouteSurface>,
+    pub jobs: Vec<JobContract>,
+    pub event_subscriptions: Vec<EventSubscription>,
+    pub admin_resources: Vec<AdminResourceContribution>,
+    pub search_contributions: Vec<SearchIndexContribution>,
+    pub report_definitions: Vec<ReportDefinition>,
+    pub bulk_operations: Vec<BulkOperationDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MigrationPlanOwner {
+    Module(String),
+    AuthPackage(String),
+    CustomerApp(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationPlanEntry {
+    pub owner: MigrationPlanOwner,
+    pub step_id: Option<String>,
+    pub order: u32,
+    pub description: String,
+    pub online_safe: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MigrationPlanSummary {
+    entries: Vec<MigrationPlanEntry>,
+}
+
+impl MigrationPlanSummary {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, entry: MigrationPlanEntry) {
+        self.entries.push(entry);
+        self.entries.sort_by(|left, right| {
+            migration_owner_rank(&left.owner)
+                .cmp(&migration_owner_rank(&right.owner))
+                .then(left.order.cmp(&right.order))
+                .then(
+                    left.step_id
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(right.step_id.as_deref().unwrap_or("")),
+                )
+        });
+    }
+
+    pub fn entries(&self) -> &[MigrationPlanEntry] {
+        &self.entries
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseDoctorSeverity {
+    Info,
+    Warning,
+    Blocking,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseDoctorFinding {
+    pub severity: ReleaseDoctorSeverity,
+    pub code: String,
+    pub message: String,
+}
+
+impl ReleaseDoctorFinding {
+    pub fn new(
+        severity: ReleaseDoctorSeverity,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseDoctorReport {
+    pub app_id: CustomerAppId,
+    pub findings: Vec<ReleaseDoctorFinding>,
+}
+
+impl ReleaseDoctorReport {
+    pub fn is_compatible(&self) -> bool {
+        !self
+            .findings
+            .iter()
+            .any(|finding| finding.severity == ReleaseDoctorSeverity::Blocking)
+    }
+
+    pub fn blocking_findings(&self) -> impl Iterator<Item = &ReleaseDoctorFinding> {
+        self.findings
+            .iter()
+            .filter(|finding| finding.severity == ReleaseDoctorSeverity::Blocking)
+    }
+}
+
+impl CustomerAppComposition {
+    pub fn module_list(&self) -> &[InstalledModuleSummary] {
+        &self.module_inventory
+    }
+
+    pub fn canonical_domain(&self) -> Option<&str> {
+        self.domains
+            .iter()
+            .find(|domain| domain.canonical)
+            .map(|domain| domain.hostname.as_str())
+    }
+
+    pub fn release_doctor(&self, config: Option<&PlatformConfig>) -> ReleaseDoctorReport {
+        let mut findings = Vec::new();
+        let installed_modules = self
+            .installed_modules
+            .iter()
+            .map(|module| module.id.to_string())
+            .collect::<Vec<_>>();
+
+        for module in &self.module_inventory {
+            if module.version_req.is_none() {
+                findings.push(ReleaseDoctorFinding::new(
+                    ReleaseDoctorSeverity::Warning,
+                    "module.version.unpinned",
+                    format!(
+                        "official module `{}` is not version pinned in the customer app manifest",
+                        module.id
+                    ),
+                ));
+            }
+        }
+
+        if self.theme.asset_roots.is_empty() {
+            findings.push(ReleaseDoctorFinding::new(
+                ReleaseDoctorSeverity::Warning,
+                "theme.assets.missing",
+                "the active theme declares no asset roots, so asset publication will be a no-op",
+            ));
+        }
+
+        if !self.admin_resources.is_empty()
+            && !installed_modules.iter().any(|module| module == "admin")
+        {
+            findings.push(ReleaseDoctorFinding::new(
+                ReleaseDoctorSeverity::Blocking,
+                "module.admin.missing",
+                "admin resources are composed into the customer app but the `admin` module is not installed",
+            ));
+        }
+
+        if (!self.search_contributions.is_empty()
+            || !self.report_definitions.is_empty()
+            || !self.bulk_operations.is_empty())
+            && !installed_modules.iter().any(|module| module == "ops")
+        {
+            findings.push(ReleaseDoctorFinding::new(
+                ReleaseDoctorSeverity::Blocking,
+                "module.ops.missing",
+                "search, reporting, or bulk-operation contracts are present but the `ops` module is not installed",
+            ));
+        }
+
+        if let Some(config) = config {
+            findings.extend(config_alignment_findings(self, config));
+
+            if !config.assets.publish_manifest && !self.theme.asset_roots.is_empty() {
+                findings.push(ReleaseDoctorFinding::new(
+                    ReleaseDoctorSeverity::Warning,
+                    "assets.publish.disabled",
+                    "theme assets are declared but `assets.publish_manifest` is disabled in config",
+                ));
+            }
+        }
+
+        ReleaseDoctorReport {
+            app_id: self.app_id.clone(),
+            findings,
+        }
+    }
 }
 
 impl From<RuntimeBuildError> for AppModelError {
@@ -642,6 +980,186 @@ fn require_non_empty(field: &'static str, value: String) -> Result<String, AppMo
     }
 }
 
+fn build_migration_summary(
+    manifest: &CustomerAppManifest,
+    auth_package_name: String,
+    modules: &[Box<dyn PlatformModule>],
+) -> MigrationPlanSummary {
+    let mut summary = MigrationPlanSummary::new();
+    let installed_modules = manifest
+        .modules
+        .iter()
+        .map(|module| module.id.to_string())
+        .collect::<BTreeSet<_>>();
+
+    for module in modules {
+        let module_manifest = module.manifest();
+        if !installed_modules.contains(&module_manifest.name) {
+            continue;
+        }
+
+        if let Some(plan) = module.install_migration_plan() {
+            append_migration_plan(&mut summary, &plan);
+        }
+    }
+
+    summary.push(MigrationPlanEntry {
+        owner: MigrationPlanOwner::AuthPackage(auth_package_name.clone()),
+        step_id: None,
+        order: 0,
+        description: format!(
+            "validate auth package `{auth_package_name}` schema, model, and capability bindings before release"
+        ),
+        online_safe: true,
+    });
+
+    for migration in &manifest.customer_migrations {
+        summary.push(MigrationPlanEntry {
+            owner: MigrationPlanOwner::CustomerApp(manifest.id.to_string()),
+            step_id: None,
+            order: migration.order,
+            description: migration.description.clone(),
+            online_safe: true,
+        });
+    }
+
+    summary
+}
+
+fn append_migration_plan(summary: &mut MigrationPlanSummary, plan: &MigrationPlan) {
+    for step in plan.ordered_steps() {
+        let owner = match &step.owner {
+            MigrationOwner::Module(module) => MigrationPlanOwner::Module(module.clone()),
+            MigrationOwner::AuthPackage(package) => {
+                MigrationPlanOwner::AuthPackage(package.clone())
+            }
+            MigrationOwner::CustomerApp(app_id) => MigrationPlanOwner::CustomerApp(app_id.clone()),
+            MigrationOwner::Core => continue,
+        };
+
+        summary.push(MigrationPlanEntry {
+            owner,
+            step_id: Some(step.id.to_string()),
+            order: step.order,
+            description: step.description.clone(),
+            online_safe: step.online_safe,
+        });
+    }
+}
+
+fn config_alignment_findings(
+    composition: &CustomerAppComposition,
+    config: &PlatformConfig,
+) -> Vec<ReleaseDoctorFinding> {
+    let mut findings = Vec::new();
+
+    if config.app.name != composition.app_id.as_str() {
+        findings.push(ReleaseDoctorFinding::new(
+            ReleaseDoctorSeverity::Blocking,
+            "config.app.mismatch",
+            format!(
+                "runtime config app `{}` does not match customer app manifest `{}`",
+                config.app.name, composition.app_id
+            ),
+        ));
+    }
+
+    if config.auth.package != composition.auth.package_name {
+        findings.push(ReleaseDoctorFinding::new(
+            ReleaseDoctorSeverity::Blocking,
+            "config.auth_package.mismatch",
+            format!(
+                "runtime config auth package `{}` does not match customer app auth package `{}`",
+                config.auth.package, composition.auth.package_name
+            ),
+        ));
+    }
+
+    if config.i18n.default_locale != composition.default_locale.as_str() {
+        findings.push(ReleaseDoctorFinding::new(
+            ReleaseDoctorSeverity::Blocking,
+            "config.i18n.default_locale",
+            format!(
+                "runtime config default locale `{}` does not match customer app default locale `{}`",
+                config.i18n.default_locale, composition.default_locale
+            ),
+        ));
+    }
+
+    let manifest_locales = sorted_locale_strings(&composition.supported_locales);
+    let configured_locales = sorted_strings(config.i18n.supported_locales.clone());
+    if manifest_locales != configured_locales {
+        findings.push(ReleaseDoctorFinding::new(
+            ReleaseDoctorSeverity::Blocking,
+            "config.i18n.supported_locales",
+            format!(
+                "runtime config supported locales {:?} do not match customer app locales {:?}",
+                configured_locales, manifest_locales
+            ),
+        ));
+    }
+
+    if let Some(canonical_domain) = composition.canonical_domain() {
+        if config.seo.canonical_host != canonical_domain {
+            findings.push(ReleaseDoctorFinding::new(
+                ReleaseDoctorSeverity::Blocking,
+                "config.seo.canonical_host",
+                format!(
+                    "runtime config canonical host `{}` does not match customer app canonical domain `{}`",
+                    config.seo.canonical_host, canonical_domain
+                ),
+            ));
+        }
+    }
+
+    let manifest_modules = sorted_strings(
+        composition
+            .installed_modules
+            .iter()
+            .map(|module| module.id.to_string())
+            .collect::<Vec<_>>(),
+    );
+    let configured_modules = sorted_strings(config.modules.enabled.clone());
+    let manifest_only = difference(&manifest_modules, &configured_modules);
+    let configured_only = difference(&configured_modules, &manifest_modules);
+    if !manifest_only.is_empty() || !configured_only.is_empty() {
+        findings.push(ReleaseDoctorFinding::new(
+            ReleaseDoctorSeverity::Blocking,
+            "config.modules.enabled",
+            format!(
+                "runtime config modules drift from the customer app manifest; manifest-only={manifest_only:?}, config-only={configured_only:?}"
+            ),
+        ));
+    }
+
+    findings
+}
+
+fn migration_owner_rank(owner: &MigrationPlanOwner) -> u8 {
+    match owner {
+        MigrationPlanOwner::Module(_) => 1,
+        MigrationPlanOwner::AuthPackage(_) => 2,
+        MigrationPlanOwner::CustomerApp(_) => 3,
+    }
+}
+
+fn sorted_strings(mut values: Vec<String>) -> Vec<String> {
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn sorted_locale_strings(locales: &[LocaleTag]) -> Vec<String> {
+    sorted_strings(locales.iter().map(ToString::to_string).collect())
+}
+
+fn difference(left: &[String], right: &[String]) -> Vec<String> {
+    left.iter()
+        .filter(|value| !right.contains(value))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -653,6 +1171,9 @@ mod tests {
         CapabilityContract, ReportDeliveryMode, ReportFormat, ReportSensitivity,
         SearchDocumentKind, SearchFieldContribution, SearchFieldRole, SearchIndexContribution,
         SearchInvalidationRule, SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility,
+    };
+    use davenda_data::{
+        MigrationId, MigrationOwner as DataMigrationOwner, MigrationPlan, MigrationStep,
     };
     use davenda_wasm::{HandlerId, HandlerInstallation, HostCapabilityGrant, HostGrantSet};
 
@@ -837,11 +1358,21 @@ mod tests {
     #[derive(Debug)]
     struct StaticModule {
         manifest: ModuleManifest,
+        migration_plan: Option<MigrationPlan>,
     }
 
     impl StaticModule {
         fn new(manifest: ModuleManifest) -> Self {
-            Self { manifest }
+            let migration_plan = match manifest.name.as_str() {
+                "cms" => Some(static_migration_plan("cms", "001_pages")),
+                "commerce" => Some(static_migration_plan("commerce", "001_catalog")),
+                _ => None,
+            };
+
+            Self {
+                manifest,
+                migration_plan,
+            }
         }
     }
 
@@ -856,6 +1387,27 @@ mod tests {
         ) -> Result<(), davenda_core::RegistrationError> {
             Ok(())
         }
+
+        fn install_migration_plan(&self) -> Option<MigrationPlan> {
+            self.migration_plan.clone()
+        }
+    }
+
+    fn static_migration_plan(module: &str, step_id: &str) -> MigrationPlan {
+        let mut plan = MigrationPlan::new();
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new(step_id).unwrap(),
+                DataMigrationOwner::Module(module.to_string()),
+                10,
+                format!("install {module} tables"),
+            )
+            .unwrap()
+            .with_statement("SELECT 1")
+            .unwrap(),
+        )
+        .unwrap();
+        plan
     }
 
     fn runtime_config(app_id: &str) -> PlatformConfig {
@@ -1009,6 +1561,7 @@ cdn_base_url = "https://cdn.example.com"
             .unwrap();
 
         assert_eq!(composition.installed_modules.len(), 2);
+        assert_eq!(composition.module_list().len(), 2);
         assert_eq!(composition.route_surfaces.len(), 1);
         assert_eq!(composition.jobs.len(), 1);
         assert_eq!(composition.event_subscriptions.len(), 1);
@@ -1017,12 +1570,21 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(composition.report_definitions.len(), 1);
         assert_eq!(composition.bulk_operations.len(), 1);
         assert_eq!(composition.migrations.len(), 2);
+        assert_eq!(composition.canonical_domain(), Some("shop.example.com"));
         assert!(composition
             .required_core_services
             .contains(&CoreServiceDependency::Seo));
         assert!(composition
             .required_core_services
             .contains(&CoreServiceDependency::Jobs));
+        assert_eq!(
+            composition.module_list()[0].id,
+            ModuleId::new("cms").unwrap()
+        );
+        assert_eq!(
+            composition.module_list()[1].module_dependencies[0].module,
+            "cms".to_string()
+        );
     }
 
     #[test]
@@ -1092,5 +1654,98 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert_eq!(runtime.runtime.config.app.name, "harbor-shop");
         assert_eq!(runtime.runtime.modules.len(), 2);
+        assert_eq!(runtime.migration_summary.entries().len(), 4);
+        assert!(runtime
+            .migration_summary
+            .entries()
+            .iter()
+            .any(|entry| matches!(
+                entry.owner,
+                MigrationPlanOwner::AuthPackage(ref package) if package == "platform-default-auth"
+            )));
+        assert!(runtime
+            .migration_summary
+            .entries()
+            .iter()
+            .any(|entry| matches!(
+                entry.owner,
+                MigrationPlanOwner::CustomerApp(ref app_id) if app_id == "harbor-shop"
+            )));
+        assert!(!runtime.release_doctor.is_compatible());
+        assert!(runtime
+            .release_doctor
+            .findings
+            .iter()
+            .any(|finding| finding.code == "module.ops.missing"));
+    }
+
+    #[test]
+    fn runtime_build_rejects_config_module_drift_and_unexpected_runtime_modules() {
+        let mut drifted = runtime_config("harbor-shop");
+        drifted.modules.enabled.push("events".to_string());
+
+        assert_eq!(
+            app()
+                .build_runtime_plan(
+                    drifted,
+                    DefaultAuthModelPackage::default(),
+                    module_manifests()
+                        .into_iter()
+                        .map(StaticModule::new)
+                        .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+                        .collect(),
+                )
+                .unwrap_err(),
+            AppModelError::ConfigModulesMismatch {
+                manifest_only: Vec::new(),
+                configured_only: vec!["events".to_string()],
+            }
+        );
+
+        let mut modules = module_manifests()
+            .into_iter()
+            .map(StaticModule::new)
+            .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+            .collect::<Vec<_>>();
+        modules.push(Box::new(StaticModule::new(ModuleManifest::new("media"))));
+
+        assert_eq!(
+            app()
+                .build_runtime_plan(
+                    runtime_config("harbor-shop"),
+                    DefaultAuthModelPackage::default(),
+                    modules,
+                )
+                .unwrap_err(),
+            AppModelError::UnexpectedRuntimeModules {
+                app_id: "harbor-shop".to_string(),
+                modules: vec!["media".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn release_doctor_reports_config_drift_and_unpinned_modules() {
+        let composition = app()
+            .compose(&DefaultAuthModelPackage::default(), &module_manifests())
+            .unwrap();
+        let report = composition.release_doctor(Some(&runtime_config("harbor-shop")));
+
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "module.version.unpinned"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "module.ops.missing"));
+
+        let mut drifted = runtime_config("harbor-shop");
+        drifted.seo.canonical_host = "preview.example.com".to_string();
+        let report = composition.release_doctor(Some(&drifted));
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "config.seo.canonical_host"));
     }
 }

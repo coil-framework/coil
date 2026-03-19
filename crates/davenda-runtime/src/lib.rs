@@ -2,6 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::time::Duration;
 
 use davenda_auth::AuthModelPackage;
+use davenda_assets::{
+    ActiveAssetManifest, AssetDeliveryPlan, AssetModelError, ContentFingerprint,
+    DeliveryContext, DeploymentRelease, ManagedAsset, ManagedAssetRevision, RevisionId,
+};
 use davenda_cache::{
     ApplicationCachePolicy, CacheInstant, CacheKey, CacheLookup, CacheMetrics, CacheModelError,
     CacheNamespace, CachePlan, CachePlanRequest, CachePlanner, CacheRuntime, CacheScope,
@@ -33,6 +37,10 @@ use davenda_observability::{
 use davenda_ops::{
     BulkOperationPlan, BulkOperationRequest, OpsCatalog, OpsModelError, OpsPlanner,
     ReportExportPlan, ReportExportRequest,
+};
+use davenda_storage::{
+    PathPolicyRule, StoragePlan, StoragePlanRequest, StoragePlanner, StoragePlanningError,
+    StoragePolicyOverride, StoragePolicySet, StorageTopology,
 };
 use davenda_tls::{
     CertificateId, CertificateInventory, CertificateProviderKind, CertificateRecord,
@@ -656,6 +664,7 @@ pub struct RuntimeBuilder<P> {
     auth_package: P,
     modules: Vec<Box<dyn PlatformModule>>,
     extensions: Vec<InstalledExtension>,
+    storage_policies: StoragePolicySet,
     routes: Vec<RouteDefinition>,
     handlers: Vec<HandlerDefinition>,
     feature_flags: Vec<FeatureFlag>,
@@ -672,6 +681,7 @@ where
             auth_package,
             modules: Vec::new(),
             extensions: Vec::new(),
+            storage_policies: StoragePolicySet::default(),
             routes: Vec::new(),
             handlers: Vec::new(),
             feature_flags: Vec::new(),
@@ -694,6 +704,16 @@ where
 
     pub fn with_installed_extension(mut self, extension: InstalledExtension) -> Self {
         self.extensions.push(extension);
+        self
+    }
+
+    pub fn with_storage_policy_rule(mut self, rule: PathPolicyRule) -> Self {
+        self.storage_policies = self.storage_policies.with_rule(rule);
+        self
+    }
+
+    pub fn with_storage_policies(mut self, policies: StoragePolicySet) -> Self {
+        self.storage_policies = policies;
         self
     }
 
@@ -728,6 +748,10 @@ where
         }
 
         let bootstrap = bootstrap_core_services(&self.config)?;
+        let storage_planner = StoragePlanner::new(
+            StorageTopology::from_config(&self.config),
+            self.storage_policies.clone(),
+        );
         let mut registry = bootstrap.registry;
         let mut observability = bootstrap.observability;
         let mut module_manifests = Vec::new();
@@ -888,6 +912,7 @@ where
             observability,
             http,
             handlers,
+            storage_planner,
             template: bootstrap.template,
             tls: bootstrap.tls,
             wasm: bootstrap.wasm,
@@ -923,6 +948,7 @@ pub struct RuntimePlan {
     pub observability: ObservabilityRuntimeServices,
     pub http: HttpRuntimePlan,
     pub handlers: BTreeMap<String, HandlerDefinition>,
+    pub storage_planner: StoragePlanner,
     pub template: TemplateRuntimeServices,
     pub tls: TlsRuntimeServices,
     pub wasm: WasmRuntimeServices,
@@ -1558,6 +1584,82 @@ impl CacheHost {
     }
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeStorageError {
+    #[error(transparent)]
+    Storage(#[from] StoragePlanningError),
+    #[error(transparent)]
+    Asset(#[from] AssetModelError),
+    #[error("assets.cdn_base_url must be configured for public asset publication")]
+    MissingCdnBaseUrl,
+}
+
+#[derive(Debug, Clone)]
+pub struct StorageHost {
+    pub customer_app: String,
+    pub planner: StoragePlanner,
+    cdn_base_url: Option<String>,
+}
+
+impl StorageHost {
+    pub fn plan_write(
+        &self,
+        request: StoragePlanRequest,
+    ) -> Result<StoragePlan, RuntimeStorageError> {
+        Ok(self.planner.plan_write(request)?)
+    }
+
+    pub fn publish_deployment_release(
+        &self,
+        release: &DeploymentRelease,
+    ) -> Result<ActiveAssetManifest, RuntimeStorageError> {
+        let cdn_base_url = self
+            .cdn_base_url
+            .as_deref()
+            .ok_or(RuntimeStorageError::MissingCdnBaseUrl)?;
+        Ok(release.publish(&self.planner, cdn_base_url)?)
+    }
+
+    pub fn plan_managed_revision(
+        &self,
+        revision_id: RevisionId,
+        logical_path: impl Into<String>,
+        override_policy: Option<StoragePolicyOverride>,
+        content_type: impl Into<String>,
+        byte_length: u64,
+        fingerprint: ContentFingerprint,
+    ) -> Result<ManagedAssetRevision, RuntimeStorageError> {
+        Ok(ManagedAssetRevision::plan(
+            revision_id,
+            &self.planner,
+            logical_path,
+            override_policy,
+            content_type,
+            byte_length,
+            fingerprint,
+        )?)
+    }
+
+    pub fn plan_public_asset_delivery(
+        &self,
+        asset: &ManagedAsset,
+    ) -> Result<AssetDeliveryPlan, RuntimeStorageError> {
+        let cdn_base_url = self
+            .cdn_base_url
+            .as_deref()
+            .ok_or(RuntimeStorageError::MissingCdnBaseUrl)?;
+        let context = DeliveryContext::default().with_cdn_base_url(cdn_base_url);
+        Ok(asset.plan_public_delivery(&context)?)
+    }
+
+    pub fn plan_authorized_asset_delivery(
+        &self,
+        asset: &ManagedAsset,
+    ) -> Result<AssetDeliveryPlan, RuntimeStorageError> {
+        Ok(asset.plan_authorized_delivery(&DeliveryContext::default())?)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExtensionPrincipal {
     Anonymous,
@@ -1860,6 +1962,14 @@ impl RuntimePlan {
             customer_app: self.config.app.name.clone(),
             runtime: self.tls.clone(),
             automation: self.tls.automation(),
+        }
+    }
+
+    pub fn storage_host(&self) -> StorageHost {
+        StorageHost {
+            customer_app: self.config.app.name.clone(),
+            planner: self.storage_planner.clone(),
+            cdn_base_url: self.config.assets.cdn_base_url.clone(),
         }
     }
 
@@ -2862,11 +2972,16 @@ fn build_handler_registry(
 mod tests {
     use super::*;
     use davenda_admin::AdminModule;
+    use davenda_assets::{
+        AssetDeliveryTarget, AssetId, ContentFingerprint, DeliveryAudience, DeploymentArtifact,
+        DeploymentRelease, FingerprintAlgorithm, ManagedAsset, ReleaseId, RevisionId,
+    };
     use davenda_auth::{Capability, DefaultAuthModelPackage};
     use davenda_cache::CacheLookupState;
     use davenda_cache::DistributedCacheBackend;
     use davenda_cms::CmsModule;
     use davenda_commerce::CommerceModule;
+    use davenda_config::{PlatformConfig, StorageClass};
     use davenda_core::CookieSigner;
     use davenda_events::EventsModule;
     use davenda_media::MediaModule;
@@ -2877,6 +2992,9 @@ mod tests {
     use davenda_ops::{
         BulkExecutionId, BulkOperationId, BulkOperationRequest, OpsModule, ReportExportId,
         ReportExportRequest, ReportId,
+    };
+    use davenda_storage::{
+        DeliveryMode, PathPolicyRule, StoragePlanRequest, StoragePlanWarning, StoragePolicy,
     };
     use davenda_template::TemplateNamespace;
     use davenda_tls::{
@@ -3185,6 +3303,14 @@ cdn_base_url = "https://cdn.example.com"
             Hostname::new(hostname).unwrap(),
             CustomerAppId::new("showcase-events").unwrap(),
         ))
+    }
+
+    fn content_fingerprint(fill: char) -> ContentFingerprint {
+        ContentFingerprint::new(
+            FingerprintAlgorithm::Sha256,
+            fill.to_string().repeat(64),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -4498,6 +4624,155 @@ cdn_base_url = "https://cdn.example.com"
                 handler_id: "payment-authorized".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn storage_host_applies_path_rules_for_sensitive_files() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_storage_policy_rule(
+                PathPolicyRule::new(
+                    "secure/reports",
+                    Some(StorageClass::LocalOnlySensitive),
+                    StoragePolicy::local_only_sensitive(),
+                )
+                .unwrap()
+                .with_local_subdir("sensitive")
+                .unwrap(),
+            )
+            .build()
+            .unwrap();
+
+        let storage_plan = plan
+            .storage_host()
+            .plan_write(StoragePlanRequest::new("secure/reports/march.csv"))
+            .unwrap();
+
+        assert_eq!(storage_plan.storage_class, StorageClass::LocalOnlySensitive);
+        assert_eq!(
+            storage_plan.matched_rule_prefix.as_deref(),
+            Some("secure/reports")
+        );
+        assert_eq!(
+            storage_plan.local_path.as_deref(),
+            Some("/var/lib/platform/sensitive/secure/reports/march.csv")
+        );
+        assert_eq!(
+            storage_plan.warnings,
+            vec![StoragePlanWarning::LocalOnlyBreaksMultiNode]
+        );
+    }
+
+    #[test]
+    fn storage_host_publishes_deployment_releases_to_the_cdn_manifest() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let digest = "a".repeat(64);
+        let artifact = DeploymentArtifact::new(
+            "theme/site.css",
+            format!("theme/site.{digest}.css"),
+            content_fingerprint('a'),
+            "text/css",
+            512,
+        )
+        .unwrap();
+        let release = DeploymentRelease::new(
+            ReleaseId::new("release-20260319").unwrap(),
+            [artifact],
+        )
+        .unwrap();
+
+        let manifest = plan
+            .storage_host()
+            .publish_deployment_release(&release)
+            .unwrap();
+        let published = manifest.resolve("theme/site.css").unwrap();
+
+        assert_eq!(manifest.release_id().as_str(), "release-20260319");
+        assert_eq!(published.delivery().audience(), DeliveryAudience::Public);
+        assert!(published.delivery().immutable());
+        assert!(matches!(
+            published.delivery().target(),
+            AssetDeliveryTarget::Cdn { public_url, object_key }
+                if public_url == &format!("https://cdn.example.com/theme/site.{digest}.css")
+                    && object_key == &format!("theme/site.{digest}.css")
+        ));
+    }
+
+    #[test]
+    fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_storage_policy_rule(
+                PathPolicyRule::new(
+                    "secure/docs",
+                    Some(StorageClass::LocalOnlySensitive),
+                    StoragePolicy::local_only_sensitive(),
+                )
+                .unwrap()
+                .with_local_subdir("vault")
+                .unwrap(),
+            )
+            .build()
+            .unwrap();
+        let host = plan.storage_host();
+
+        let public_revision = host
+            .plan_managed_revision(
+                RevisionId::new("rev-public-1").unwrap(),
+                "uploads/catalog/brochure.pdf",
+                None,
+                "application/pdf",
+                2_048,
+                content_fingerprint('b'),
+            )
+            .unwrap();
+        let mut public_asset = ManagedAsset::new(
+            AssetId::new("asset-brochure").unwrap(),
+            "Brochure",
+            public_revision,
+        )
+        .unwrap();
+        public_asset.publish_current();
+
+        let public_delivery = host.plan_public_asset_delivery(&public_asset).unwrap();
+        assert_eq!(public_delivery.delivery_mode(), DeliveryMode::PublicCdn);
+        assert_eq!(public_delivery.audience(), DeliveryAudience::Public);
+        assert!(matches!(
+            public_delivery.target(),
+            AssetDeliveryTarget::Cdn { public_url, .. }
+                if public_url == "https://cdn.example.com/uploads/catalog/brochure.pdf"
+        ));
+
+        let restricted_revision = host
+            .plan_managed_revision(
+                RevisionId::new("rev-secret-1").unwrap(),
+                "secure/docs/orders.csv",
+                None,
+                "text/csv",
+                256,
+                content_fingerprint('c'),
+            )
+            .unwrap();
+        let restricted_asset = ManagedAsset::new(
+            AssetId::new("asset-orders").unwrap(),
+            "Orders Export",
+            restricted_revision,
+        )
+        .unwrap();
+
+        let authorized_delivery = host
+            .plan_authorized_asset_delivery(&restricted_asset)
+            .unwrap();
+        assert_eq!(authorized_delivery.delivery_mode(), DeliveryMode::LocalOnly);
+        assert_eq!(authorized_delivery.audience(), DeliveryAudience::Authorized);
+        assert!(matches!(
+            authorized_delivery.target(),
+            AssetDeliveryTarget::LocalPath { path }
+                if path == "/var/lib/platform/vault/secure/docs/orders.csv"
+        ));
     }
 
     #[test]

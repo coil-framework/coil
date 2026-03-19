@@ -566,6 +566,7 @@ name = "davenda-runtime"
 version = "0.1.0"
 dependencies = [
  "davenda-admin",
+ "davenda-assets",
  "davenda-auth",
  "davenda-cache",
  "davenda-cms",
@@ -579,6 +580,7 @@ dependencies = [
  "davenda-memberships",
  "davenda-observability",
  "davenda-ops",
+ "davenda-storage",
  "davenda-template",
  "davenda-tls",
  "davenda-wasm",

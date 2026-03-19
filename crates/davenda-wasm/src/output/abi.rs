@@ -257,18 +257,21 @@ fn write_body(bytes: &mut Vec<u8>, body: &TypedResponseBody) -> Result<(), WasmM
     match body {
         TypedResponseBody::HtmlDocument(html) => {
             write_u8(bytes, 0);
-            write_string(bytes, html);
+            write_string(bytes, html)?;
         }
         TypedResponseBody::HtmlFragment(html) => {
             write_u8(bytes, 1);
-            write_string(bytes, html);
+            write_string(bytes, html)?;
         }
         TypedResponseBody::JsonObject(payload) => {
             write_u8(bytes, 2);
-            write_u32(bytes, payload.len() as u32);
+            write_u32(
+                bytes,
+                write_len_u32("json_object_entry_count", payload.len())?,
+            );
             for (key, value) in payload {
-                write_string(bytes, key);
-                write_string(bytes, value);
+                write_string(bytes, key)?;
+                write_string(bytes, value)?;
             }
         }
     }
@@ -302,24 +305,33 @@ fn read_body(cursor: &mut ByteCursor<'_>) -> Result<TypedResponseBody, WasmModel
 }
 
 fn write_metadata(bytes: &mut Vec<u8>, metadata: &TypedMetadata) -> Result<(), WasmModelError> {
-    write_option_string(bytes, metadata.title.as_ref());
-    write_option_string(bytes, metadata.description.as_ref());
-    write_option_string(bytes, metadata.canonical_url.as_ref());
-    write_u32(bytes, metadata.alternate_urls.len() as u32);
+    write_option_string(bytes, metadata.title.as_ref())?;
+    write_option_string(bytes, metadata.description.as_ref())?;
+    write_option_string(bytes, metadata.canonical_url.as_ref())?;
+    write_u32(
+        bytes,
+        write_len_u32("alternate_url_count", metadata.alternate_urls.len())?,
+    );
     for (locale, url) in &metadata.alternate_urls {
-        write_string(bytes, locale);
-        write_string(bytes, url);
+        write_string(bytes, locale)?;
+        write_string(bytes, url)?;
     }
-    write_u32(bytes, metadata.robots.len() as u32);
+    write_u32(bytes, write_len_u32("robots_count", metadata.robots.len())?);
     for directive in &metadata.robots {
         write_u8(bytes, robot_tag(*directive));
     }
-    write_u32(bytes, metadata.json_ld.len() as u32);
+    write_u32(
+        bytes,
+        write_len_u32("json_ld_node_count", metadata.json_ld.len())?,
+    );
     for node in &metadata.json_ld {
-        write_string(bytes, node.schema_type());
-        write_u32(bytes, node.properties().len() as u32);
+        write_string(bytes, node.schema_type())?;
+        write_u32(
+            bytes,
+            write_len_u32("json_ld_property_count", node.properties().len())?,
+        );
         for (property, value) in node.properties() {
-            write_string(bytes, property);
+            write_string(bytes, property)?;
             write_json_ld_value(bytes, value)?;
         }
     }
@@ -403,9 +415,9 @@ fn write_cache_hint(
                 flags |= 0b100;
             }
             write_u8(bytes, flags);
-            write_u32(bytes, cache.tags.len() as u32);
+            write_u32(bytes, write_len_u32("cache_tag_count", cache.tags.len())?);
             for tag in &cache.tags {
-                write_string(bytes, tag);
+                write_string(bytes, tag)?;
             }
         }
         None => write_u8(bytes, 0),
@@ -460,11 +472,11 @@ fn write_json_ld_value(bytes: &mut Vec<u8>, value: &JsonLdValue) -> Result<(), W
     match value {
         JsonLdValue::String(value) => {
             write_u8(bytes, 0);
-            write_string(bytes, value);
+            write_string(bytes, value)?;
         }
         JsonLdValue::Number(value) => {
             write_u8(bytes, 1);
-            write_string(bytes, value);
+            write_string(bytes, value)?;
         }
         JsonLdValue::Bool(value) => {
             write_u8(bytes, 2);
@@ -472,16 +484,22 @@ fn write_json_ld_value(bytes: &mut Vec<u8>, value: &JsonLdValue) -> Result<(), W
         }
         JsonLdValue::Node(node) => {
             write_u8(bytes, 3);
-            write_string(bytes, node.schema_type());
-            write_u32(bytes, node.properties().len() as u32);
+            write_string(bytes, node.schema_type())?;
+            write_u32(
+                bytes,
+                write_len_u32("json_ld_property_count", node.properties().len())?,
+            );
             for (property, property_value) in node.properties() {
-                write_string(bytes, property);
+                write_string(bytes, property)?;
                 write_json_ld_value(bytes, property_value)?;
             }
         }
         JsonLdValue::List(values) => {
             write_u8(bytes, 4);
-            write_u32(bytes, values.len() as u32);
+            write_u32(
+                bytes,
+                write_len_u32("json_ld_list_item_count", values.len())?,
+            );
             for item in values {
                 write_json_ld_value(bytes, item)?;
             }
@@ -617,19 +635,29 @@ fn write_u64(bytes: &mut Vec<u8>, value: u64) {
     bytes.extend(value.to_le_bytes());
 }
 
-fn write_string(bytes: &mut Vec<u8>, value: &str) {
-    write_u32(bytes, value.len() as u32);
+fn write_string(bytes: &mut Vec<u8>, value: &str) -> Result<(), WasmModelError> {
+    write_u32(bytes, write_len_u32("string_length", value.len())?);
     bytes.extend(value.as_bytes());
+    Ok(())
 }
 
-fn write_option_string(bytes: &mut Vec<u8>, value: Option<&String>) {
+fn write_option_string(bytes: &mut Vec<u8>, value: Option<&String>) -> Result<(), WasmModelError> {
     match value {
         Some(value) => {
             write_u8(bytes, 1);
-            write_string(bytes, value);
+            write_string(bytes, value)?;
         }
         None => write_u8(bytes, 0),
     }
+    Ok(())
+}
+
+fn write_len_u32(field: &'static str, len: usize) -> Result<u32, WasmModelError> {
+    <u32 as std::convert::TryFrom<usize>>::try_from(len).map_err(|_| {
+        WasmModelError::InvalidTypedReturn {
+            reason: format!("`{field}` exceeds the maximum typed ABI length"),
+        }
+    })
 }
 
 fn read_option_string(cursor: &mut ByteCursor<'_>) -> Result<Option<String>, WasmModelError> {
@@ -671,14 +699,19 @@ impl<'a> ByteCursor<'a> {
     }
 
     fn read_array<const N: usize>(&mut self) -> Result<[u8; N], WasmModelError> {
-        if self.offset + N > self.bytes.len() {
+        let Some(end) = self.offset.checked_add(N) else {
+            return Err(WasmModelError::InvalidTypedReturn {
+                reason: "unexpected end of typed return payload".to_string(),
+            });
+        };
+        if end > self.bytes.len() {
             return Err(WasmModelError::InvalidTypedReturn {
                 reason: "unexpected end of typed return payload".to_string(),
             });
         }
         let mut out = [0u8; N];
-        out.copy_from_slice(&self.bytes[self.offset..self.offset + N]);
-        self.offset += N;
+        out.copy_from_slice(&self.bytes[self.offset..end]);
+        self.offset = end;
         Ok(out)
     }
 
@@ -696,17 +729,55 @@ impl<'a> ByteCursor<'a> {
 
     fn read_string(&mut self) -> Result<String, WasmModelError> {
         let len = self.read_u32()? as usize;
-        if self.offset + len > self.bytes.len() {
+        let Some(end) = self.offset.checked_add(len) else {
+            return Err(WasmModelError::InvalidTypedReturn {
+                reason: "typed return payload string extends past buffer".to_string(),
+            });
+        };
+        if end > self.bytes.len() {
             return Err(WasmModelError::InvalidTypedReturn {
                 reason: "typed return payload string extends past buffer".to_string(),
             });
         }
-        let bytes = &self.bytes[self.offset..self.offset + len];
-        self.offset += len;
+        let bytes = &self.bytes[self.offset..end];
+        self.offset = end;
         let value =
             std::str::from_utf8(bytes).map_err(|error| WasmModelError::InvalidTypedReturn {
                 reason: error.to_string(),
             })?;
         Ok(value.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_len_u32_rejects_lengths_that_do_not_fit_in_the_abi() {
+        let error = write_len_u32("json_object_entry_count", (u32::MAX as usize) + 1).unwrap_err();
+        assert_eq!(
+            error,
+            WasmModelError::InvalidTypedReturn {
+                reason: "`json_object_entry_count` exceeds the maximum typed ABI length"
+                    .to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn byte_cursor_rejects_offset_overflow_when_reading_arrays() {
+        let mut cursor = ByteCursor {
+            bytes: &[],
+            offset: usize::MAX,
+        };
+
+        let error = cursor.read_array::<1>().unwrap_err();
+        assert_eq!(
+            error,
+            WasmModelError::InvalidTypedReturn {
+                reason: "unexpected end of typed return payload".to_string(),
+            }
+        );
     }
 }

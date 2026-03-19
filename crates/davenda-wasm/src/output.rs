@@ -458,6 +458,15 @@ impl TypedExecutionOutput {
         Ok(output)
     }
 
+    pub fn decode_for_point(
+        bytes: &[u8],
+        point: ExtensionPointKind,
+    ) -> Result<Self, WasmModelError> {
+        let output = Self::decode(bytes)?;
+        output.validate_for_point(point)?;
+        Ok(output)
+    }
+
     pub fn validate_for_point(&self, point: ExtensionPointKind) -> Result<(), WasmModelError> {
         if self.surface != point {
             return Err(WasmModelError::TypedReturnPointMismatch {
@@ -466,21 +475,14 @@ impl TypedExecutionOutput {
             });
         }
 
-        let body_matches = matches!(
-            (&self.body, point),
-            (TypedResponseBody::HtmlDocument(_), ExtensionPointKind::Page)
-                | (TypedResponseBody::JsonObject(_), ExtensionPointKind::Api)
-                | (
-                    TypedResponseBody::HtmlFragment(_),
-                    ExtensionPointKind::AdminWidget
-                )
-                | (
-                    TypedResponseBody::HtmlFragment(_),
-                    ExtensionPointKind::RenderHook
-                )
-        );
-
-        if !body_matches {
+        if let Some(expected_body_kind) = expected_body_kind_for_point(point) {
+            if self.body_kind() != expected_body_kind {
+                return Err(WasmModelError::TypedReturnBodyMismatch {
+                    point,
+                    body: self.body_kind(),
+                });
+            }
+        } else {
             return Err(WasmModelError::TypedReturnBodyMismatch {
                 point,
                 body: self.body_kind(),
@@ -541,6 +543,7 @@ impl TypedExecutionOutput {
     }
 
     fn validate(&self) -> Result<(), WasmModelError> {
+        validate_http_status(self.status)?;
         match &self.body {
             TypedResponseBody::HtmlDocument(html) | TypedResponseBody::HtmlFragment(html) => {
                 let _ = require_non_empty("typed_response_body", html.clone())?;
@@ -980,6 +983,27 @@ fn validate_absolute_url(field: &'static str, value: String) -> Result<String, W
         Err(WasmModelError::InvalidTypedReturn {
             reason: format!("`{field}` must be an absolute URL"),
         })
+    }
+}
+
+fn expected_body_kind_for_point(point: ExtensionPointKind) -> Option<TypedResponseBodyKind> {
+    match point {
+        ExtensionPointKind::Page => Some(TypedResponseBodyKind::HtmlDocument),
+        ExtensionPointKind::Api => Some(TypedResponseBodyKind::JsonObject),
+        ExtensionPointKind::AdminWidget | ExtensionPointKind::RenderHook => {
+            Some(TypedResponseBodyKind::HtmlFragment)
+        }
+        ExtensionPointKind::Job
+        | ExtensionPointKind::ScheduledJob
+        | ExtensionPointKind::Webhook => None,
+    }
+}
+
+fn validate_http_status(status: u16) -> Result<(), WasmModelError> {
+    if (100..=599).contains(&status) {
+        Ok(())
+    } else {
+        Err(WasmModelError::InvalidTypedStatus { status })
     }
 }
 

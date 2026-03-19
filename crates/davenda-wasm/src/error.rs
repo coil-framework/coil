@@ -179,6 +179,9 @@ pub enum WasmModelError {
         handler_id: String,
         code: i32,
     },
+    InvalidTypedStatus {
+        status: u16,
+    },
     InvalidTypedReturn {
         reason: String,
     },
@@ -406,6 +409,9 @@ impl fmt::Display for WasmModelError {
                 f,
                 "handler `{handler_id}` returned unknown wasm outcome code `{code}`"
             ),
+            Self::InvalidTypedStatus { status } => {
+                write!(f, "typed HTTP status `{status}` is invalid")
+            }
             Self::InvalidTypedReturn { reason } => {
                 write!(f, "typed return payload is invalid: {reason}")
             }

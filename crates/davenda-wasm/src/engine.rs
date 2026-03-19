@@ -4,6 +4,7 @@ use wasmtime::{Caller, Config, Engine, Linker, Module, Store, StoreLimits, Store
 
 use crate::error::WasmModelError;
 use crate::grants::HostCapabilityGrant;
+use crate::ids::ExtensionPointKind;
 use crate::invocation::{ExecutionReceipt, HostCall, InvocationOutcome, WasmExecutionSession};
 use crate::output::TypedExecutionOutput;
 
@@ -170,7 +171,8 @@ impl CompiledWasmModule {
             }
         })?;
         let runtime = start.elapsed();
-        let typed_output = read_typed_output(&mut store, &instance, &handler_id)?;
+        let point = store.data().session.plan().point;
+        let typed_output = read_typed_output(&mut store, &instance, &handler_id, point)?;
 
         let state = store.into_data();
         if let Some(host_error) = state.last_error {
@@ -189,6 +191,7 @@ fn read_typed_output(
     store: &mut Store<EngineHostState>,
     instance: &wasmtime::Instance,
     handler_id: &str,
+    point: ExtensionPointKind,
 ) -> Result<Option<TypedExecutionOutput>, WasmModelError> {
     let Some(export) = instance.get_func(&mut *store, TypedExecutionOutput::ABI_EXPORT) else {
         return Ok(None);
@@ -228,7 +231,7 @@ fn read_typed_output(
         }
     })?;
 
-    TypedExecutionOutput::decode(&bytes).map(Some)
+    TypedExecutionOutput::decode_for_point(&bytes, point).map(Some)
 }
 
 fn host_call_for_grant(

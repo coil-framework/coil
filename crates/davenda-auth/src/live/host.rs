@@ -1,27 +1,35 @@
 use super::*;
-use davenda_auth::CapabilityExplanation;
 use std::fmt;
 use std::sync::OnceLock;
 
 pub struct LiveAuthExplainHost {
-    data: DataRuntimeServices,
+    data: DataRuntime,
     tenant_id: i64,
     database_url: Option<String>,
-    auth_package: davenda_auth::AuthModelPackageSelection,
+    auth_package: AuthModelPackageSelection,
     explainer: OnceLock<Result<PostgresAuthExplainer, String>>,
+}
+
+impl fmt::Debug for LiveAuthExplainHost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LiveAuthExplainHost")
+            .field("tenant_id", &self.tenant_id)
+            .field("auth_package", &self.auth_package.manifest().name)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LiveAuthExplainHost {
     pub fn from_config(
         config: &PlatformConfig,
-        auth_package: davenda_auth::AuthModelPackageSelection,
-    ) -> Result<Self, RuntimeAuthError> {
+        auth_package: AuthModelPackageSelection,
+    ) -> Result<Self, LiveAuthError> {
         if !config.auth.explain_api {
-            return Err(RuntimeAuthError::ExplainApiDisabled);
+            return Err(LiveAuthError::ExplainApiDisabled);
         }
 
-        let data = DataRuntimeServices::from_config(&config.database).map_err(|error| {
-            RuntimeAuthError::BackendInitialization {
+        let data = DataRuntime::from_config(&config.database).map_err(|error| {
+            LiveAuthError::BackendInitialization {
                 reason: error.to_string(),
             }
         })?;
@@ -30,10 +38,10 @@ impl LiveAuthExplainHost {
     }
 
     pub fn new(
-        data: DataRuntimeServices,
+        data: DataRuntime,
         tenant_id: i64,
         database_url: Option<String>,
-        auth_package: davenda_auth::AuthModelPackageSelection,
+        auth_package: AuthModelPackageSelection,
     ) -> Self {
         Self {
             data,
@@ -44,10 +52,10 @@ impl LiveAuthExplainHost {
         }
     }
 
-    fn explainer(&self) -> Result<&PostgresAuthExplainer, RuntimeAuthError> {
+    fn explainer(&self) -> Result<&PostgresAuthExplainer, LiveAuthError> {
         match self.explainer.get_or_init(|| self.build_explainer()) {
             Ok(explainer) => Ok(explainer),
-            Err(reason) => Err(RuntimeAuthError::BackendInitialization {
+            Err(reason) => Err(LiveAuthError::BackendInitialization {
                 reason: reason.clone(),
             }),
         }
@@ -65,7 +73,7 @@ impl LiveAuthExplainHost {
         let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
 
         Ok(PostgresAuthExplainer {
-            auth: davenda_auth::DavendaAuth::new(engine, self.tenant_id),
+            auth: DavendaAuth::new(engine, self.tenant_id),
             package: self.auth_package.clone(),
         })
     }
@@ -73,38 +81,22 @@ impl LiveAuthExplainHost {
     pub async fn explain_capability(
         &self,
         request: &LiveAuthExplainRequest,
-    ) -> Result<CapabilityExplanation, RuntimeAuthError> {
+    ) -> Result<CapabilityExplanation, LiveAuthError> {
         self.explainer()?.explain_capability(request).await
     }
 }
 
-impl fmt::Debug for LiveAuthExplainHost {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LiveAuthExplainHost")
-            .field("tenant_id", &self.tenant_id)
-            .field("auth_package", &self.auth_package.manifest().name)
-            .finish_non_exhaustive()
-    }
-}
-
+#[derive(Clone)]
 struct PostgresAuthExplainer {
-    auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
-    package: davenda_auth::AuthModelPackageSelection,
-}
-
-impl fmt::Debug for PostgresAuthExplainer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PostgresAuthExplainer")
-            .field("auth_package", &self.package.manifest().name)
-            .finish_non_exhaustive()
-    }
+    auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+    package: AuthModelPackageSelection,
 }
 
 impl PostgresAuthExplainer {
     async fn explain_capability(
         &self,
         request: &LiveAuthExplainRequest,
-    ) -> Result<CapabilityExplanation, RuntimeAuthError> {
+    ) -> Result<CapabilityExplanation, LiveAuthError> {
         self.auth
             .explain_capability_with_options(
                 self.package.package(),
@@ -114,7 +106,7 @@ impl PostgresAuthExplainer {
                 request.options,
             )
             .await
-            .map_err(|error| RuntimeAuthError::Explain {
+            .map_err(|error| LiveAuthError::Explain {
                 reason: error.to_string(),
             })
     }

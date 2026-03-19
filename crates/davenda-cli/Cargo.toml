@@ -8,11 +8,9 @@ default-run = "platform"
 async-trait = "0.1"
 davenda-auth = { path = "../davenda-auth" }
 davenda-config = { path = "../davenda-config" }
-davenda-data = { path = "../davenda-data" }
 serde_json = "1.0"
 thiserror = "1.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
-zanzibar = { workspace = true }
 
 [[bin]]
 name = "platform"

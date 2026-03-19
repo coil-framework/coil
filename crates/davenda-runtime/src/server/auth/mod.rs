@@ -10,7 +10,7 @@ mod request;
 mod testing;
 
 pub(crate) use authorizer::DeferredPostgresRouteCapabilityAuthorizer;
-pub(crate) use crate::LiveAuthExplainRequest;
+pub(crate) use davenda_auth::LiveAuthExplainRequest;
 pub(crate) use explain::auth_explain_router;
 pub(crate) use request::authorize_live_request;
 #[cfg(test)]
@@ -46,13 +46,13 @@ pub(crate) trait LiveAuthExplainer: Send + Sync {
     ) -> AuthExplainFuture<'a>;
 }
 
-impl LiveAuthExplainer for crate::LiveAuthExplainHost {
+impl LiveAuthExplainer for davenda_auth::LiveAuthExplainHost {
     fn explain_capability<'a>(
         &'a self,
         request: &'a LiveAuthExplainRequest,
     ) -> AuthExplainFuture<'a> {
         Box::pin(async move {
-            crate::LiveAuthExplainHost::explain_capability(self, request)
+            davenda_auth::LiveAuthExplainHost::explain_capability(self, request)
                 .await
                 .map_err(|error| RuntimeServerError::Explain {
                     reason: error.to_string(),

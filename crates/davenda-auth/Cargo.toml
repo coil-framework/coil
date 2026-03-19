@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+davenda-config = { path = "../davenda-config" }
+davenda-data = { path = "../davenda-data" }
 zanzibar = { workspace = true }

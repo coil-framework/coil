@@ -4,7 +4,7 @@ use davenda_auth::{
 };
 use serde_json::{Value, json};
 
-use crate::LiveAuthExplainRequest;
+use davenda_auth::LiveAuthExplainRequest;
 
 pub(crate) fn render_explanation_json(
     tenant_id: i64,

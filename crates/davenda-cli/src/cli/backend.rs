@@ -1,7 +1,10 @@
 use async_trait::async_trait;
-use davenda_auth::{AuthModelPackage, CapabilityExplanation, DavendaAuth, DefaultAuthModelPackage};
+use davenda_auth::{
+    AuthModelPackage, AuthModelPackageSelection, CapabilityExplanation, DefaultAuthModelPackage,
+    LiveAuthExplainHost, LiveAuthExplainRequest,
+};
 use davenda_config::PlatformConfig;
-use davenda_data::DataRuntime;
+use std::sync::Arc;
 
 use crate::cli::args::AuthExplainInvocation;
 use crate::cli::error::CliRunError;
@@ -16,38 +19,20 @@ pub(crate) trait AuthExplainBackend: Send + Sync {
 
 #[derive(Debug, Clone)]
 pub(crate) struct LiveAuthExplainBackend {
-    tenant_id: i64,
-    data: DataRuntime,
-    package: DefaultAuthModelPackage,
+    explainer: Arc<LiveAuthExplainHost>,
 }
 
 impl LiveAuthExplainBackend {
     pub(crate) fn from_config(config: &PlatformConfig) -> Result<Self, CliRunError> {
-        if !config.auth.explain_api {
-            return Err(CliRunError::execution(
-                "auth explain API is disabled by deployment config",
-            ));
-        }
-
-        let package = DefaultAuthModelPackage::default();
-        if config.auth.package != package.manifest().name {
-            return Err(CliRunError::execution(format!(
-                "configured auth package `{}` is not supported by the CLI explain command; expected `{}`",
-                config.auth.package,
-                package.manifest().name
-            )));
-        }
-
-        let data = DataRuntime::from_config(&config.database).map_err(|error| {
+        let package = resolve_auth_package(config)?;
+        let explainer = LiveAuthExplainHost::from_config(config, package).map_err(|error| {
             CliRunError::execution(format!(
-                "failed to initialize the database runtime for auth explain: {error}"
+                "failed to initialize the live auth explain backend: {error}"
             ))
         })?;
 
         Ok(Self {
-            tenant_id: config.auth.tenant_id,
-            data,
-            package,
+            explainer: Arc::new(explainer),
         })
     }
 }
@@ -58,30 +43,38 @@ impl AuthExplainBackend for LiveAuthExplainBackend {
         &self,
         invocation: &AuthExplainInvocation,
     ) -> Result<CapabilityExplanation, CliRunError> {
-        let client = self.data.connect_lazy_postgres().map_err(|error| {
-            CliRunError::execution(format!(
-                "failed to prepare the PostgreSQL auth backend for explain: {error}"
-            ))
-        })?;
-        let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
-        let auth = DavendaAuth::new(engine, self.tenant_id);
+        let request = LiveAuthExplainRequest {
+            subject: invocation.subject.clone(),
+            capability: invocation.capability,
+            object: invocation.resource.clone(),
+            options: invocation.options,
+        };
 
-        auth.explain_capability_with_options(
-            &self.package,
-            &invocation.subject,
-            invocation.capability,
-            &invocation.resource,
-            invocation.options,
-        )
-        .await
-        .map_err(|error| {
-            CliRunError::execution(format!("failed to build the auth explanation: {error}"))
-        })
+        self.explainer
+            .explain_capability(&request)
+            .await
+            .map_err(|error| {
+                CliRunError::execution(format!("failed to build the auth explanation: {error}"))
+            })
+    }
+}
+
+fn resolve_auth_package(
+    config: &PlatformConfig,
+) -> Result<AuthModelPackageSelection, CliRunError> {
+    let package = DefaultAuthModelPackage::default();
+    if config.auth.package == package.manifest().name {
+        Ok(AuthModelPackageSelection::new(package))
+    } else {
+        Err(CliRunError::execution(format!(
+            "configured auth package `{}` is not registered with the CLI auth explain backend",
+            config.auth.package
+        )))
     }
 }
 
 #[cfg(test)]
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 #[cfg(test)]
 #[derive(Debug, Clone)]

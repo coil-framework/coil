@@ -110,7 +110,7 @@ impl HttpServerHost {
                 plan.auth_package.clone(),
             ));
         let auth_explainer = if plan.config.auth.explain_api {
-            Some(Arc::new(LiveAuthExplainHost::new(
+            Some(Arc::new(davenda_auth::LiveAuthExplainHost::new(
                 plan.data.clone(),
                 plan.tenant_id(),
                 backends.database.url.clone(),
@@ -157,7 +157,7 @@ impl HttpServerHost {
                 plan.auth_package.clone(),
             ));
         let auth_explainer = if plan.config.auth.explain_api {
-            Some(Arc::new(LiveAuthExplainHost::new(
+            Some(Arc::new(davenda_auth::LiveAuthExplainHost::new(
                 plan.data.clone(),
                 plan.tenant_id(),
                 backends.database.url.clone(),
@@ -190,7 +190,7 @@ impl HttpServerHost {
         let browser = plan.browser_host()?;
         let wasm_host = plan.wasm_host();
         let auth_explainer = if plan.config.auth.explain_api {
-            Some(Arc::new(LiveAuthExplainHost::new(
+            Some(Arc::new(davenda_auth::LiveAuthExplainHost::new(
                 plan.data.clone(),
                 plan.tenant_id(),
                 backends.database.url.clone(),

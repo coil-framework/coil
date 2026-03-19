@@ -9,12 +9,14 @@ use zanzibar::{
 
 mod capability;
 mod explain;
+mod live;
 mod schema;
 mod service;
 mod types;
 
 pub use capability::*;
 pub use explain::*;
+pub use live::*;
 pub use schema::*;
 pub use service::*;
 pub use types::*;

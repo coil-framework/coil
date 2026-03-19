@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use super::super::observability::observability_response;
 
-use crate::LiveAuthExplainRequest;
+use davenda_auth::LiveAuthExplainRequest;
 
 pub(crate) fn auth_explain_router(
     state: Arc<RuntimeServerState>,

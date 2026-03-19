@@ -77,9 +77,13 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
 
     match positionals.as_slice() {
         [command, subcommand] if command == "auth" && subcommand == "explain" => {
-            let config_path = config_path.ok_or_else(|| {
-                CliRunError::usage("`auth explain` requires `--config <path>` or `DAVENDA_CONFIG`")
-            })?;
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`auth explain` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
             let subject = subject.ok_or_else(|| {
                 CliRunError::usage("`auth explain` requires `--subject <subject>`")
             })?;
@@ -125,10 +129,21 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
 
 fn next_value(
     iter: &mut impl Iterator<Item = String>,
-    flag: &'static str,
+    flag: &str,
 ) -> Result<String, CliRunError> {
     iter.next()
         .ok_or_else(|| CliRunError::usage(format!("`{flag}` expects a value")))
+}
+
+fn discover_default_config_path() -> Option<PathBuf> {
+    [
+        PathBuf::from("davenda.toml"),
+        PathBuf::from("config/davenda.toml"),
+        PathBuf::from("platform.toml"),
+        PathBuf::from("config/platform.toml"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
 }
 
 fn parse_subject(input: &str) -> Result<DefaultSubject, CliRunError> {

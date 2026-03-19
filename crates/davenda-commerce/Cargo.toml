@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 davenda-auth = { path = "../davenda-auth" }
 davenda-core = { path = "../davenda-core" }
+davenda-data = { path = "../davenda-data" }

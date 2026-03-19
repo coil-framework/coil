@@ -4,12 +4,18 @@ use std::fmt;
 
 use davenda_auth::Capability;
 use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_data::{
+    DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
+    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
+    QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CmsModelError {
     EmptyField { field: &'static str },
     InvalidToken { field: &'static str, value: String },
     InvalidPath { field: &'static str, value: String },
+    DataPlan { error: DataModelError },
     MissingLiveRevision { page_id: String },
     CannotScheduleInThePast { publish_at: u64, now: u64 },
     NavigationCycle { item_id: String },
@@ -26,6 +32,7 @@ impl fmt::Display for CmsModelError {
             Self::InvalidPath { field, value } => {
                 write!(f, "`{field}` must start with `/`, got `{value}`")
             }
+            Self::DataPlan { error } => write!(f, "{error}"),
             Self::MissingLiveRevision { page_id } => {
                 write!(f, "page `{page_id}` has no live revision")
             }
@@ -44,6 +51,12 @@ impl fmt::Display for CmsModelError {
 }
 
 impl Error for CmsModelError {}
+
+impl From<DataModelError> for CmsModelError {
+    fn from(error: DataModelError) -> Self {
+        Self::DataPlan { error }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PageId(String);
@@ -364,6 +377,49 @@ impl CmsPage {
     pub fn preview_path(&self) -> String {
         format!("/{}/{}", self.locale, self.current_revision.slug.as_str())
     }
+
+    pub fn save_draft_transaction_plan(&self) -> Result<TransactionPlan, CmsModelError> {
+        TransactionPlan::new("cms.page.save_draft", TransactionIsolation::ReadCommitted)?
+            .with_write(DomainWrite::new("cms_page", "upsert")?)
+            .with_write(DomainWrite::new("cms_revision", "insert")?)
+            .with_after_commit_event(format!("cms.page.draft_saved:{}", self.id))
+            .map_err(Into::into)
+    }
+
+    pub fn publish_transaction_plan(&self) -> Result<TransactionPlan, CmsModelError> {
+        TransactionPlan::new("cms.page.publish", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("cms_page", "update")?)
+            .with_write(DomainWrite::new("route_projection", "upsert")?)
+            .with_write(DomainWrite::new("sitemap_entry", "upsert")?)
+            .with_after_commit_job(format!("cms.jobs.cache_invalidate:{}", self.id))
+            .and_then(|plan| {
+                plan.with_after_commit_event(format!("cms.page.published:{}", self.id))
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn schedule_transaction_plan(&self) -> Result<TransactionPlan, CmsModelError> {
+        TransactionPlan::new("cms.page.schedule", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("cms_page", "update")?)
+            .with_write(DomainWrite::new("publication_schedule", "upsert")?)
+            .with_after_commit_job(format!("cms.jobs.publication_schedule.enqueue:{}", self.id))
+            .and_then(|plan| {
+                plan.with_after_commit_event(format!("cms.page.scheduled:{}", self.id))
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn unpublish_transaction_plan(&self) -> Result<TransactionPlan, CmsModelError> {
+        TransactionPlan::new("cms.page.unpublish", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("cms_page", "update")?)
+            .with_write(DomainWrite::new("route_projection", "delete")?)
+            .with_write(DomainWrite::new("sitemap_entry", "delete")?)
+            .with_after_commit_job(format!("cms.jobs.cache_invalidate:{}", self.id))
+            .and_then(|plan| {
+                plan.with_after_commit_event(format!("cms.page.unpublished:{}", self.id))
+            })
+            .map_err(Into::into)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -472,6 +528,16 @@ pub struct RedirectRule {
     pub permanent: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsPageQuery {
+    pub query: QuerySpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedirectLookupQuery {
+    pub query: QuerySpec,
+}
+
 impl RedirectRule {
     pub fn new(
         from_path: impl Into<String>,
@@ -536,6 +602,116 @@ impl CmsModule {
 
     pub fn admin_resources(&self) -> &[AdminResourceDescriptor] {
         &self.admin_resources
+    }
+
+    pub fn live_pages_query(&self, locale: Option<&str>) -> Result<CmsPageQuery, CmsModelError> {
+        let query = QuerySpec::new(
+            PageRequest::new(0, 50)?,
+            QueryContext {
+                locale: locale.map(str::to_owned),
+                principal_id: None,
+                publication_visibility: PublicationVisibility::PublishedOnly,
+                cache_scope: if locale.is_some() {
+                    QueryCacheScope::LocaleScoped
+                } else {
+                    QueryCacheScope::Public
+                },
+            },
+        )
+        .with_filter(QueryFilter::new(
+            "workflow_status",
+            FilterOperator::Eq,
+            vec![PageWorkflowStatus::Published.to_string()],
+        )?)
+        .with_sort(QuerySort::ascending("live_path")?);
+
+        Ok(CmsPageQuery { query })
+    }
+
+    pub fn editorial_queue_query(
+        &self,
+        principal_id: &str,
+        locale: Option<&str>,
+    ) -> Result<CmsPageQuery, CmsModelError> {
+        let query = QuerySpec::new(
+            PageRequest::new(0, 100)?,
+            QueryContext {
+                locale: locale.map(str::to_owned),
+                principal_id: Some(require_non_empty("principal_id", principal_id.to_string())?),
+                publication_visibility: PublicationVisibility::IncludeDrafts,
+                cache_scope: QueryCacheScope::UserScoped,
+            },
+        )
+        .with_filter(QueryFilter::new(
+            "workflow_status",
+            FilterOperator::In,
+            vec![
+                PageWorkflowStatus::DraftOnly.to_string(),
+                PageWorkflowStatus::Scheduled.to_string(),
+                PageWorkflowStatus::PublishedWithDraft.to_string(),
+                PageWorkflowStatus::PublishedWithScheduledDraft.to_string(),
+            ],
+        )?)
+        .with_sort(QuerySort::ascending("updated_at")?);
+
+        Ok(CmsPageQuery { query })
+    }
+
+    pub fn redirect_lookup_query(
+        &self,
+        path: &str,
+        locale: Option<&str>,
+    ) -> Result<RedirectLookupQuery, CmsModelError> {
+        let query = QuerySpec::new(
+            PageRequest::new(0, 1)?,
+            QueryContext {
+                locale: locale.map(str::to_owned),
+                principal_id: None,
+                publication_visibility: PublicationVisibility::PublishedOnly,
+                cache_scope: if locale.is_some() {
+                    QueryCacheScope::LocaleScoped
+                } else {
+                    QueryCacheScope::Public
+                },
+            },
+        )
+        .with_filter(QueryFilter::new(
+            "redirect_from",
+            FilterOperator::Eq,
+            vec![validate_path("redirect_lookup_path", path.to_string())?],
+        )?);
+
+        Ok(RedirectLookupQuery { query })
+    }
+
+    pub fn migration_plan(&self) -> Result<MigrationPlan, CmsModelError> {
+        let owner = MigrationOwner::Module(self.name.clone());
+        let mut plan = MigrationPlan::new();
+        plan.insert(MigrationStep::new(
+            MigrationId::new("001_pages_revisions")?,
+            owner.clone(),
+            10,
+            "create cms pages, localized revisions, and seo metadata tables",
+        )?)?;
+        plan.insert(MigrationStep::new(
+            MigrationId::new("002_navigation")?,
+            owner.clone(),
+            20,
+            "create navigation trees and navigation item adjacency tables",
+        )?)?;
+        plan.insert(MigrationStep::new(
+            MigrationId::new("003_redirects")?,
+            owner.clone(),
+            30,
+            "create redirect rules and route handoff tables",
+        )?)?;
+        plan.insert(MigrationStep::new(
+            MigrationId::new("004_publication_queue")?,
+            owner,
+            40,
+            "create scheduled publication queue and preview token tables",
+        )?)?;
+        Ok(plan)
     }
 }
 
@@ -678,6 +854,19 @@ fn validate_path(field: &'static str, value: String) -> Result<String, CmsModelE
         Ok(path)
     } else {
         Err(CmsModelError::InvalidPath { field, value: path })
+    }
+}
+
+impl fmt::Display for PageWorkflowStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DraftOnly => f.write_str("draft_only"),
+            Self::Scheduled => f.write_str("scheduled"),
+            Self::Published => f.write_str("published"),
+            Self::PublishedWithDraft => f.write_str("published_with_draft"),
+            Self::PublishedWithScheduledDraft => f.write_str("published_with_scheduled_draft"),
+            Self::Unpublished => f.write_str("unpublished"),
+        }
     }
 }
 
@@ -887,6 +1076,91 @@ mod tests {
             CmsModelError::DuplicateNavigationItem {
                 item_id: "dup".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn cms_module_exposes_queries_migrations_and_transaction_plans() {
+        let mut page = CmsPage::new(
+            PageId::new("page-home").unwrap(),
+            LocaleCode::new("en-GB").unwrap(),
+            revision("rev-home", "home"),
+        );
+        page.publish_current();
+        page.schedule_current(200, 100).unwrap();
+
+        let save_draft = page.save_draft_transaction_plan().unwrap();
+        assert_eq!(save_draft.writes.len(), 2);
+        assert_eq!(
+            save_draft.after_commit_events,
+            vec!["cms.page.draft_saved:page-home".to_string()]
+        );
+
+        let publish = page.publish_transaction_plan().unwrap();
+        assert_eq!(publish.isolation, TransactionIsolation::Serializable);
+        assert!(
+            publish
+                .writes
+                .iter()
+                .any(|write| write.resource == "sitemap_entry")
+        );
+
+        let schedule = page.schedule_transaction_plan().unwrap();
+        assert!(
+            schedule
+                .after_commit_jobs
+                .iter()
+                .any(|job| job == "cms.jobs.publication_schedule.enqueue:page-home")
+        );
+
+        let unpublish = page.unpublish_transaction_plan().unwrap();
+        assert!(
+            unpublish
+                .writes
+                .iter()
+                .any(|write| write.action == "delete")
+        );
+
+        let module = CmsModule::new();
+        let live_query = module.live_pages_query(Some("en-GB")).unwrap();
+        assert_eq!(
+            live_query.query.context.cache_scope,
+            QueryCacheScope::LocaleScoped
+        );
+        assert_eq!(
+            live_query.query.context.publication_visibility,
+            PublicationVisibility::PublishedOnly
+        );
+        assert_eq!(
+            live_query.query.filters[0].values,
+            vec!["published".to_string()]
+        );
+
+        let editorial = module
+            .editorial_queue_query("editor-7", Some("en-GB"))
+            .unwrap();
+        assert_eq!(
+            editorial.query.context.principal_id.as_deref(),
+            Some("editor-7")
+        );
+        assert_eq!(
+            editorial.query.context.cache_scope,
+            QueryCacheScope::UserScoped
+        );
+
+        let redirect = module
+            .redirect_lookup_query("/legacy/home", Some("en-GB"))
+            .unwrap();
+        assert_eq!(
+            redirect.query.filters[0].values,
+            vec!["/legacy/home".to_string()]
+        );
+
+        let migrations = module.migration_plan().unwrap();
+        assert_eq!(migrations.ordered_steps().len(), 4);
+        assert_eq!(
+            migrations.ordered_steps()[0].owner,
+            MigrationOwner::Module("cms".to_string())
         );
     }
 }

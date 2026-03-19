@@ -4,6 +4,11 @@ use std::fmt;
 
 use davenda_auth::Capability;
 use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_data::{
+    DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
+    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
+    QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommerceModelError {
@@ -17,6 +22,9 @@ pub enum CommerceModelError {
     InvalidRoute {
         field: &'static str,
         value: String,
+    },
+    DataPlan {
+        error: DataModelError,
     },
     NegativeAmount {
         field: &'static str,
@@ -94,6 +102,7 @@ impl fmt::Display for CommerceModelError {
             Self::InvalidRoute { field, value } => {
                 write!(f, "`{field}` must start with `/`, got `{value}`")
             }
+            Self::DataPlan { error } => write!(f, "{error}"),
             Self::NegativeAmount {
                 field,
                 amount_minor,
@@ -162,6 +171,12 @@ impl fmt::Display for CommerceModelError {
 }
 
 impl Error for CommerceModelError {}
+
+impl From<DataModelError> for CommerceModelError {
+    fn from(error: DataModelError) -> Self {
+        Self::DataPlan { error }
+    }
+}
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {
@@ -545,6 +560,66 @@ impl Catalog {
             .map(|product_id| self.product(product_id))
             .collect()
     }
+
+    pub fn storefront_listing_query(
+        &self,
+        locale: Option<&str>,
+        collection_handle: Option<&CollectionHandle>,
+    ) -> Result<CatalogListingQuery, CommerceModelError> {
+        let mut query = QuerySpec::new(
+            PageRequest::new(0, 24)?,
+            QueryContext {
+                locale: locale.map(str::to_owned),
+                principal_id: None,
+                publication_visibility: PublicationVisibility::PublishedOnly,
+                cache_scope: if locale.is_some() {
+                    QueryCacheScope::LocaleScoped
+                } else {
+                    QueryCacheScope::Public
+                },
+            },
+        )
+        .with_filter(QueryFilter::new(
+            "catalog_status",
+            FilterOperator::Eq,
+            vec![ProductStatus::Active.to_string()],
+        )?)
+        .with_sort(QuerySort::ascending("product_title")?);
+
+        if let Some(collection_handle) = collection_handle {
+            query = query.with_filter(QueryFilter::new(
+                "collection_handle",
+                FilterOperator::Eq,
+                vec![collection_handle.as_str().to_string()],
+            )?);
+        }
+
+        Ok(CatalogListingQuery { query })
+    }
+
+    pub fn admin_catalog_query(
+        &self,
+        principal_id: &str,
+        locale: Option<&str>,
+    ) -> Result<CatalogListingQuery, CommerceModelError> {
+        let query = QuerySpec::new(
+            PageRequest::new(0, 50)?,
+            QueryContext {
+                locale: locale.map(str::to_owned),
+                principal_id: Some(require_non_empty("principal_id", principal_id.to_string())?),
+                publication_visibility: PublicationVisibility::IncludeDrafts,
+                cache_scope: QueryCacheScope::UserScoped,
+            },
+        )
+        .with_sort(QuerySort::ascending("product_title")?);
+
+        Ok(CatalogListingQuery { query })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogListingQuery {
+    pub query: QuerySpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -961,6 +1036,25 @@ impl CheckoutSession {
         })
     }
 
+    pub fn completion_transaction_plan(
+        &self,
+        order: &Order,
+    ) -> Result<TransactionPlan, CommerceModelError> {
+        TransactionPlan::new(
+            "commerce.checkout.complete",
+            TransactionIsolation::Serializable,
+        )?
+        .with_write(DomainWrite::new("checkout_session", "update")?)
+        .with_write(DomainWrite::new("checkout_line", "replace")?)
+        .with_write(DomainWrite::new("order", "insert")?)
+        .with_write(DomainWrite::new("inventory_reservation", "insert")?)
+        .with_after_commit_job(format!("commerce.jobs.fulfillment.prepare:{}", order.id))
+        .and_then(|plan| {
+            plan.with_after_commit_event(format!("commerce.order.created:{}", order.id))
+        })
+        .map_err(Into::into)
+    }
+
     fn transition_to(&mut self, next: CheckoutStatus) -> Result<(), CommerceModelError> {
         let valid = matches!(
             (self.status, next),
@@ -1123,6 +1217,52 @@ impl Order {
         };
         Ok(())
     }
+
+    pub fn fulfillment_transaction_plan(&self) -> Result<TransactionPlan, CommerceModelError> {
+        if self.status != OrderStatus::Paid {
+            return Err(CommerceModelError::OrderNotRefundable {
+                order_id: self.id.to_string(),
+                status: self.status,
+            });
+        }
+
+        TransactionPlan::new("commerce.order.fulfill", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("order", "update")?)
+            .with_write(DomainWrite::new("fulfillment_job", "enqueue")?)
+            .with_after_commit_job(format!("commerce.jobs.fulfillment.dispatch:{}", self.id))
+            .and_then(|plan| {
+                plan.with_after_commit_event(format!(
+                    "commerce.order.fulfillment_requested:{}",
+                    self.id
+                ))
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn refund_transaction_plan(
+        &self,
+        refund: &Refund,
+    ) -> Result<TransactionPlan, CommerceModelError> {
+        if !matches!(
+            self.status,
+            OrderStatus::Paid | OrderStatus::Fulfilled | OrderStatus::PartiallyRefunded
+        ) {
+            return Err(CommerceModelError::OrderNotRefundable {
+                order_id: self.id.to_string(),
+                status: self.status,
+            });
+        }
+
+        TransactionPlan::new("commerce.order.refund", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("order_refund", "insert")?)
+            .with_write(DomainWrite::new("order", "update")?)
+            .with_write(DomainWrite::new("payment_refund", "request")?)
+            .with_after_commit_job(format!("commerce.jobs.refund.reconcile:{}", refund.id))
+            .and_then(|plan| {
+                plan.with_after_commit_event(format!("commerce.order.refund_issued:{}", refund.id))
+            })
+            .map_err(Into::into)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1189,6 +1329,36 @@ impl CommerceModule {
 
     pub fn admin_resources(&self) -> &[AdminResourceDescriptor] {
         &self.admin_resources
+    }
+
+    pub fn migration_plan(&self) -> Result<MigrationPlan, CommerceModelError> {
+        let owner = MigrationOwner::Module(self.name.clone());
+        let mut plan = MigrationPlan::new();
+        plan.insert(MigrationStep::new(
+            MigrationId::new("001_catalog_products")?,
+            owner.clone(),
+            10,
+            "create catalog products and variants tables",
+        )?)?;
+        plan.insert(MigrationStep::new(
+            MigrationId::new("002_collections")?,
+            owner.clone(),
+            20,
+            "create collections and product membership tables",
+        )?)?;
+        plan.insert(MigrationStep::new(
+            MigrationId::new("003_checkouts_orders")?,
+            owner.clone(),
+            30,
+            "create checkout, order, and pricing snapshot tables",
+        )?)?;
+        plan.insert(MigrationStep::new(
+            MigrationId::new("004_refunds")?,
+            owner,
+            40,
+            "create refund ledger and payment reconciliation tables",
+        )?)?;
+        Ok(plan)
     }
 }
 
@@ -1591,5 +1761,107 @@ mod tests {
             )
             .unwrap();
         assert_eq!(order.status, OrderStatus::Refunded);
+    }
+
+    #[test]
+    fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
+        let membership = membership_product();
+        let shirt = tshirt_product();
+        let mut catalog = Catalog::new();
+        catalog.insert_product(membership.clone()).unwrap();
+        catalog.insert_product(shirt.clone()).unwrap();
+
+        let collection = CatalogCollection::new(
+            CollectionId::new("featured").unwrap(),
+            CollectionHandle::new("featured").unwrap(),
+            "Featured",
+        )
+        .unwrap()
+        .include_product(membership.id.clone())
+        .include_product(shirt.id.clone());
+        catalog.insert_collection(collection).unwrap();
+
+        let listing = catalog
+            .storefront_listing_query(
+                Some("en-GB"),
+                Some(&CollectionHandle::new("featured").unwrap()),
+            )
+            .unwrap();
+        assert_eq!(
+            listing.query.context.publication_visibility,
+            PublicationVisibility::PublishedOnly
+        );
+        assert_eq!(
+            listing.query.context.cache_scope,
+            QueryCacheScope::LocaleScoped
+        );
+        assert_eq!(
+            listing.query.filters[1].values,
+            vec!["featured".to_string()]
+        );
+
+        let admin_listing = catalog
+            .admin_catalog_query("user-42", Some("en-GB"))
+            .unwrap();
+        assert_eq!(
+            admin_listing.query.context.publication_visibility,
+            PublicationVisibility::IncludeDrafts
+        );
+        assert_eq!(
+            admin_listing.query.context.principal_id.as_deref(),
+            Some("user-42")
+        );
+
+        let pricing = PricingPolicy::new(CurrencyCode::new("GBP").unwrap());
+        let mut checkout = CheckoutSession::new(
+            CheckoutId::new("chk-ops").unwrap(),
+            CurrencyCode::new("GBP").unwrap(),
+        );
+        checkout
+            .add_line(
+                membership
+                    .checkout_line(&Sku::new("membership-gold").unwrap(), 1)
+                    .unwrap(),
+            )
+            .unwrap();
+        checkout.ready_for_payment().unwrap();
+        checkout.awaiting_payment().unwrap();
+        checkout.mark_paid().unwrap();
+        checkout.complete().unwrap();
+
+        let order = checkout
+            .to_order(OrderId::new("ord-ops").unwrap(), &pricing)
+            .unwrap();
+        let completion = checkout.completion_transaction_plan(&order).unwrap();
+        assert_eq!(completion.isolation, TransactionIsolation::Serializable);
+        assert_eq!(completion.writes.len(), 4);
+        assert!(
+            completion
+                .after_commit_events
+                .iter()
+                .any(|event| event == "commerce.order.created:ord-ops")
+        );
+
+        let fulfillment = order.fulfillment_transaction_plan().unwrap();
+        assert_eq!(fulfillment.writes[0].resource, "order");
+
+        let refund =
+            Refund::new(RefundId::new("refund-ops").unwrap(), gbp(500), "partial").unwrap();
+        let refund_plan = order.refund_transaction_plan(&refund).unwrap();
+        assert_eq!(refund_plan.writes[0].resource, "order_refund");
+        assert!(
+            refund_plan
+                .after_commit_jobs
+                .iter()
+                .any(|job| job == "commerce.jobs.refund.reconcile:refund-ops")
+        );
+
+        let module = CommerceModule::new();
+        let migrations = module.migration_plan().unwrap();
+        assert_eq!(migrations.ordered_steps().len(), 4);
+        assert_eq!(
+            migrations.ordered_steps()[0].owner,
+            MigrationOwner::Module("commerce".to_string())
+        );
     }
 }

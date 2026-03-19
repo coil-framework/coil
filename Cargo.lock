@@ -412,6 +412,7 @@ version = "0.1.0"
 dependencies = [
  "davenda-auth",
  "davenda-core",
+ "davenda-data",
 ]
 
 [[package]]
@@ -420,6 +421,7 @@ version = "0.1.0"
 dependencies = [
  "davenda-auth",
  "davenda-core",
+ "davenda-data",
 ]
 
 [[package]]

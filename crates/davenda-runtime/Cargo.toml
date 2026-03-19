@@ -19,3 +19,4 @@ davenda-cms = { path = "../davenda-cms" }
 davenda-events = { path = "../davenda-events" }
 davenda-media = { path = "../davenda-media" }
 davenda-memberships = { path = "../davenda-memberships" }
+davenda-observability = { path = "../davenda-observability" }

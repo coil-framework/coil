@@ -10,6 +10,8 @@ davenda-auth = { path = "../davenda-auth" }
 davenda-cache = { path = "../davenda-cache" }
 davenda-config = { path = "../davenda-config" }
 davenda-i18n = { path = "../davenda-i18n" }
+davenda-jobs = { path = "../davenda-jobs" }
+davenda-observability = { path = "../davenda-observability" }
 davenda-seo = { path = "../davenda-seo" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }

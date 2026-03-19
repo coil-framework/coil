@@ -14,6 +14,11 @@ use davenda_i18n::{
     CurrencyCode, LocaleContext, LocaleRouter, LocaleTag, LocaleUrlConfig, TimeZoneId,
     TranslationCatalog, TranslationRuntime,
 };
+use davenda_jobs::JobsRuntime;
+use davenda_observability::{
+    DependencyKind, DependencyStatus, HealthProbeKind, HealthReport, MaintenanceMode,
+    ObservabilityRuntime,
+};
 use davenda_seo::HeadMetadata;
 use davenda_template::{TemplateNamespace, TemplateRegistry, TemplateRuntime};
 use davenda_wasm::{ExtensionPointKind, ResourceLimits};
@@ -364,11 +369,16 @@ pub struct A11yRuntimeServices {
     pub theme_baseline: ThemeAccessibilityContract,
 }
 
+pub type JobsRuntimeServices = JobsRuntime;
+pub type ObservabilityRuntimeServices = ObservabilityRuntime;
+
 #[derive(Debug, Clone)]
 pub struct CoreBootstrap {
     pub registry: ServiceRegistry,
     pub cache: CacheRuntimeServices,
     pub browser: BrowserSecurityServices,
+    pub jobs: JobsRuntimeServices,
+    pub observability: ObservabilityRuntimeServices,
     pub i18n: I18nRuntimeServices,
     pub seo: SeoRuntimeServices,
     pub a11y: A11yRuntimeServices,
@@ -526,6 +536,8 @@ pub fn bootstrap_core_services(
         planner: CachePlanner::new(cache_topology),
     };
     let browser = browser_security_from_config(config);
+    let jobs = jobs_runtime_from_config(config);
+    let observability = observability_runtime_from_config(config);
     let i18n = i18n_runtime_from_config(config);
     let seo = seo_runtime_from_config(config);
     let a11y = a11y_runtime_services();
@@ -534,6 +546,25 @@ pub fn bootstrap_core_services(
 
     registry.register_core_service("core.config", "Typed platform configuration")?;
     registry.register_core_service("core.logging", "Structured logging service")?;
+    registry.register_core_service(
+        "core.health",
+        "Liveness, readiness, and operator-facing dependency health checks",
+    )?;
+    registry.register_core_service(
+        "core.maintenance",
+        "Maintenance-mode control for deployment-wide and customer-app-scoped traffic shaping",
+    )?;
+    registry.register_core_service(
+        "core.flags",
+        "Scoped feature-flag control plane for staged rollout and customer targeting",
+    )?;
+
+    if config.observability.metrics {
+        registry.register_core_service(
+            "core.metrics",
+            "Structured metric catalog for HTTP, auth, cache, queue, TLS, storage, and extensions",
+        )?;
+    }
 
     if config.observability.tracing {
         registry.register_core_service("core.tracing", "Distributed tracing pipeline")?;
@@ -624,7 +655,13 @@ pub fn bootstrap_core_services(
         "core.wasm.limits",
         "Per-surface WASM resource limits for pages, APIs, jobs, webhooks, and widgets",
     )?;
-    registry.register_core_service("core.jobs", "Background jobs and scheduler")?;
+    registry.register_core_service(
+        "core.jobs",
+        format!(
+            "Background jobs, scheduler, and domain-event queues over {:?}",
+            jobs.backend
+        ),
+    )?;
 
     match config.tls.mode {
         TlsMode::External => {
@@ -645,6 +682,8 @@ pub fn bootstrap_core_services(
         registry,
         cache,
         browser,
+        jobs,
+        observability,
         i18n,
         seo,
         a11y,
@@ -775,6 +814,11 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.config"));
         assert!(ids.contains(&"core.auth"));
         assert!(ids.contains(&"core.tls"));
+        assert!(ids.contains(&"core.jobs"));
+        assert!(ids.contains(&"core.health"));
+        assert!(ids.contains(&"core.maintenance"));
+        assert!(ids.contains(&"core.flags"));
+        assert!(ids.contains(&"core.metrics"));
         assert!(ids.contains(&"core.cache.l1"));
         assert!(ids.contains(&"core.cache.l2"));
         assert!(ids.contains(&"core.cache.invalidation"));
@@ -807,6 +851,54 @@ cdn_base_url = "https://cdn.example.com"
             "davenda_session"
         );
         assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
+        assert_eq!(bootstrap.jobs.backend, davenda_config::JobBackend::Redis);
+        assert_eq!(bootstrap.jobs.topology.work_queue.as_str(), "jobs.work");
+        assert_eq!(
+            bootstrap.jobs.topology.domain_events_queue.as_str(),
+            "jobs.domain-events"
+        );
+        assert!(bootstrap.observability.telemetry.metrics_enabled);
+        assert!(bootstrap.observability.telemetry.trace.enabled);
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::DistributedCache)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Queue)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::ObjectStore)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Secrets)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Tls)
+        );
         let locale_context = bootstrap.i18n.request_context(Some("fr-FR"));
         assert_eq!(locale_context.locale.as_str(), "fr-FR");
         assert_eq!(locale_context.currency.as_str(), "EUR");
@@ -937,6 +1029,67 @@ fn browser_security_from_config(config: &PlatformConfig) -> BrowserSecurityServi
         },
         csrf: CsrfProtection::from_config(&config.http.csrf),
     }
+}
+
+fn observability_runtime_from_config(config: &PlatformConfig) -> ObservabilityRuntimeServices {
+    let mut runtime = ObservabilityRuntime::baseline(&config.observability, config.app.environment)
+        .expect("baseline observability runtime must be valid");
+
+    runtime.liveness = HealthReport::new(HealthProbeKind::Liveness);
+
+    let mut readiness = HealthReport::new(HealthProbeKind::Readiness)
+        .with_dependency(
+            DependencyKind::ExtensionRegistry,
+            true,
+            DependencyStatus::Healthy,
+        )
+        .expect("extension registry dependency must be unique")
+        .with_dependency(DependencyKind::Queue, true, DependencyStatus::Healthy)
+        .expect("queue dependency must be unique");
+
+    if config.cache.l2.is_some()
+        || matches!(
+            config.http.session.store,
+            ConfigSessionStore::Redis | ConfigSessionStore::Valkey
+        )
+    {
+        readiness = readiness
+            .with_dependency(
+                DependencyKind::DistributedCache,
+                true,
+                DependencyStatus::Healthy,
+            )
+            .expect("distributed cache dependency must be unique");
+    }
+
+    if config.storage.object_store.is_some() {
+        readiness = readiness
+            .with_dependency(DependencyKind::ObjectStore, true, DependencyStatus::Healthy)
+            .expect("object store dependency must be unique");
+    }
+
+    if config.storage.object_store_secret.is_some()
+        || config.auth.tuple_store_secret.is_some()
+        || config.tls.provider.is_some()
+    {
+        readiness = readiness
+            .with_dependency(DependencyKind::Secrets, true, DependencyStatus::Healthy)
+            .expect("secrets dependency must be unique");
+    }
+
+    if config.tls.mode != TlsMode::External {
+        readiness = readiness
+            .with_dependency(DependencyKind::Tls, true, DependencyStatus::Healthy)
+            .expect("tls dependency must be unique");
+    }
+
+    runtime.readiness = readiness;
+    runtime.maintenance = MaintenanceMode::disabled();
+    runtime
+}
+
+fn jobs_runtime_from_config(config: &PlatformConfig) -> JobsRuntimeServices {
+    JobsRuntime::from_config(&config.jobs).expect("jobs runtime config must be valid")
 }
 
 fn template_runtime_services() -> TemplateRuntimeServices {

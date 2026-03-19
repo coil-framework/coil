@@ -434,6 +434,8 @@ dependencies = [
  "davenda-cache",
  "davenda-config",
  "davenda-i18n",
+ "davenda-jobs",
+ "davenda-observability",
  "davenda-seo",
  "davenda-template",
  "davenda-wasm",
@@ -459,6 +461,13 @@ name = "davenda-i18n"
 version = "0.1.0"
 
 [[package]]
+name = "davenda-jobs"
+version = "0.1.0"
+dependencies = [
+ "davenda-config",
+]
+
+[[package]]
 name = "davenda-media"
 version = "0.1.0"
 dependencies = [
@@ -478,6 +487,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "davenda-observability"
+version = "0.1.0"
+dependencies = [
+ "davenda-config",
+ "thiserror",
+]
+
+[[package]]
 name = "davenda-runtime"
 version = "0.1.0"
 dependencies = [
@@ -491,6 +508,7 @@ dependencies = [
  "davenda-events",
  "davenda-media",
  "davenda-memberships",
+ "davenda-observability",
  "davenda-template",
  "davenda-wasm",
  "thiserror",

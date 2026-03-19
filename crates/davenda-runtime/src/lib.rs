@@ -4,9 +4,10 @@ use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    BrowserSecurityServices, CapabilityValidationError, CookieSigner, ModuleManifest,
-    PlatformModule, RegistrationError, ServiceDescriptor, TemplateRuntimeServices,
-    WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
+    BrowserSecurityServices, CapabilityValidationError, CookieSigner, JobsRuntimeServices,
+    ModuleManifest, ObservabilityRuntimeServices, PlatformModule, RegistrationError,
+    ServiceDescriptor, TemplateRuntimeServices, WasmRuntimeServices, bootstrap_core_services,
+    validate_module_capabilities,
 };
 use thiserror::Error;
 
@@ -450,6 +451,8 @@ where
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
             browser: bootstrap.browser,
+            jobs: bootstrap.jobs,
+            observability: bootstrap.observability,
             http,
             template: bootstrap.template,
             wasm: bootstrap.wasm,
@@ -465,6 +468,8 @@ pub struct RuntimePlan {
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
     pub browser: BrowserSecurityServices,
+    pub jobs: JobsRuntimeServices,
+    pub observability: ObservabilityRuntimeServices,
     pub http: HttpRuntimePlan,
     pub template: TemplateRuntimeServices,
     pub wasm: WasmRuntimeServices,
@@ -799,6 +804,17 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
         assert_eq!(plan.browser.csrf.field_name, "_csrf");
+        assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);
+        assert_eq!(
+            plan.jobs.topology.scheduled_queue.as_str(),
+            "jobs.scheduled"
+        );
+        assert!(plan.observability.telemetry.metrics_enabled);
+        assert!(plan.observability.telemetry.trace.enabled);
+        assert_eq!(
+            plan.observability.readiness.overall_status(),
+            davenda_observability::DependencyStatus::Healthy
+        );
         assert_eq!(
             plan.http.middleware,
             vec![

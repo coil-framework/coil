@@ -1,6 +1,11 @@
+mod execution;
 mod planner;
 mod policy;
 
+pub use execution::{
+    LocalFilesystemObjectStoreClient, ObjectStoreClient, StorageDeliveryLocation,
+    StorageExecutionError, StorageExecutor, StorageReadReceipt, StorageWriteReceipt,
+};
 pub use planner::{
     SingleNodeEscapeHatchPlanner, StorageDeploymentScope, StoragePlan, StoragePlanRequest,
     StoragePlanner, StoragePlanningError, WriteTarget, WriteTargetKind,

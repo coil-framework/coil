@@ -41,8 +41,10 @@ use davenda_ops::{
     SearchRebuildStrategy,
 };
 use davenda_storage::{
-    PathPolicyRule, SingleNodeEscapeHatchPlanner, StoragePlan, StoragePlanRequest, StoragePlanner,
-    StoragePlanningError, StoragePolicyOverride, StoragePolicySet, StorageTopology,
+    PathPolicyRule, SingleNodeEscapeHatchPlanner, StorageDeliveryLocation, StorageExecutionError,
+    StorageExecutor, StoragePlan, StoragePlanRequest, StoragePlanner, StoragePlanningError,
+    StoragePolicyOverride, StoragePolicySet, StorageReadReceipt, StorageTopology,
+    StorageWriteReceipt,
 };
 use davenda_tls::{
     CertificateId, CertificateInventory, CertificateProviderKind, CertificateRecord,

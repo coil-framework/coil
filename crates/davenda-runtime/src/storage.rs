@@ -8,6 +8,8 @@ pub enum RuntimeStorageError {
     #[error(transparent)]
     Storage(#[from] StoragePlanningError),
     #[error(transparent)]
+    Execution(#[from] StorageExecutionError),
+    #[error(transparent)]
     Asset(#[from] AssetModelError),
     #[error("assets.cdn_base_url must be configured for public asset publication")]
     MissingCdnBaseUrl,
@@ -67,6 +69,7 @@ impl ManagedAssetPublicationGate {
 pub struct StorageHost {
     pub customer_app: String,
     pub planner: StoragePlanner,
+    executor: StorageExecutor,
     single_node_escape_hatch: SingleNodeEscapeHatchPlanner,
     cdn_base_url: Option<String>,
 }
@@ -77,10 +80,12 @@ impl StorageHost {
         planner: StoragePlanner,
         cdn_base_url: Option<String>,
     ) -> Self {
+        let executor = StorageExecutor::from_topology(planner.topology());
         Self {
             customer_app,
             single_node_escape_hatch: planner.single_node_escape_hatch(),
             planner,
+            executor,
             cdn_base_url,
         }
     }
@@ -97,6 +102,30 @@ impl StorageHost {
         request: StoragePlanRequest,
     ) -> Result<StoragePlan, RuntimeStorageError> {
         Ok(self.single_node_escape_hatch.plan_write(request)?)
+    }
+
+    pub fn execute_write(
+        &self,
+        plan: &StoragePlan,
+        bytes: impl AsRef<[u8]>,
+    ) -> Result<StorageWriteReceipt, RuntimeStorageError> {
+        Ok(self.executor.execute_write(plan, bytes)?)
+    }
+
+    pub fn execute_read(
+        &self,
+        plan: &StoragePlan,
+    ) -> Result<StorageReadReceipt, RuntimeStorageError> {
+        Ok(self.executor.execute_read(plan)?)
+    }
+
+    pub fn delivery_location(
+        &self,
+        plan: &StoragePlan,
+    ) -> Result<StorageDeliveryLocation, RuntimeStorageError> {
+        Ok(self
+            .executor
+            .delivery_location(plan, self.cdn_base_url.as_deref())?)
     }
 
     pub fn publish_deployment_release(
@@ -195,7 +224,12 @@ impl StorageHost {
                 reason: Capability::AssetReplace.to_string(),
             })?;
         let can_manage_storage = auth
-            .check_capability(package, subject, Capability::AssetManageStorage, &asset_entity)
+            .check_capability(
+                package,
+                subject,
+                Capability::AssetManageStorage,
+                &asset_entity,
+            )
             .await
             .map_err(|_| RuntimeStorageError::PublicationAuthorizationDenied {
                 asset_id: asset.id().to_string(),
@@ -218,6 +252,10 @@ impl StorageHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use davenda_auth::DefaultAuthModelPackage;
+    use davenda_config::{PlatformConfig, StorageClass};
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn publication_gate_reports_missing_conditions() {
@@ -239,5 +277,149 @@ mod tests {
                 reason: "asset.replace, published public delivery state".to_string(),
             }
         );
+    }
+
+    fn test_config() -> PlatformConfig {
+        PlatformConfig::from_toml_str(
+            r#"
+[app]
+name = "davenda-runtime-storage-tests"
+environment = "development"
+
+[server]
+bind = "127.0.0.1:3000"
+trusted_proxies = []
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "external"
+
+[storage]
+default_class = "public_upload"
+single_node_escape_hatch = "explicit_single_node"
+object_store = "s3"
+local_root = "/tmp/davenda-runtime-storage-tests"
+deployment = "single_node"
+
+[cache]
+l1 = "moka"
+
+[i18n]
+default_locale = "en"
+supported_locales = ["en"]
+fallback_locale = "en"
+localized_routes = false
+
+[seo]
+canonical_host = "example.test"
+emit_json_ld = false
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 1
+
+[modules]
+enabled = []
+
+[wasm]
+directory = "/tmp/davenda-runtime-storage-tests"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = false
+tracing = false
+
+[assets]
+publish_manifest = false
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn storage_host_executes_object_store_and_local_storage_plans() {
+        let root = PathBuf::from("/tmp/davenda-runtime-storage-tests");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let plan = RuntimeBuilder::new(test_config(), DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let host = plan.storage_host();
+
+        let object_plan = host
+            .plan_write(
+                StoragePlanRequest::new("uploads/catalog/item.jpg")
+                    .with_storage_class(StorageClass::PublicUpload),
+            )
+            .unwrap();
+        let object_write = host.execute_write(&object_plan, b"object-bytes").unwrap();
+        assert_eq!(object_write.bytes_written, "object-bytes".len() as u64);
+        assert!(
+            object_write
+                .path
+                .ends_with("object-store/uploads/catalog/item.jpg")
+        );
+        assert_eq!(
+            host.execute_read(&object_plan).unwrap().bytes,
+            b"object-bytes"
+        );
+        assert!(matches!(
+            host.delivery_location(&object_plan).unwrap(),
+            StorageDeliveryLocation::PublicCdn { .. }
+        ));
+
+        let local_plan = host
+            .plan_single_node_escape_hatch_write(
+                StoragePlanRequest::new("secure/reports/march.csv")
+                    .with_storage_class(StorageClass::PrivateShared)
+                    .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),
+            )
+            .unwrap();
+        let local_write = host.execute_write(&local_plan, b"local-bytes").unwrap();
+        assert_eq!(
+            local_write.path,
+            PathBuf::from("/tmp/davenda-runtime-storage-tests/secure/reports/march.csv")
+        );
+        assert_eq!(
+            host.execute_read(&local_plan).unwrap().bytes,
+            b"local-bytes"
+        );
+        assert_eq!(
+            host.delivery_location(&local_plan).unwrap(),
+            StorageDeliveryLocation::LocalPath {
+                path: PathBuf::from("/tmp/davenda-runtime-storage-tests/secure/reports/march.csv"),
+            }
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 }

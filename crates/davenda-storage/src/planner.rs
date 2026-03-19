@@ -47,8 +47,15 @@ pub struct WriteTarget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StoragePlanWarning {
-    LocalOnlyRequiresSingleNodeDeployment,
+pub enum StorageDeploymentScope {
+    Scalable,
+    SingleNodeOnly,
+}
+
+impl StorageDeploymentScope {
+    pub const fn requires_single_node(self) -> bool {
+        matches!(self, Self::SingleNodeOnly)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +68,7 @@ pub struct StoragePlan {
     pub local_path: Option<String>,
     pub matched_rule_prefix: Option<String>,
     pub write_targets: Vec<WriteTarget>,
-    pub warnings: Vec<StoragePlanWarning>,
+    pub deployment_scope: StorageDeploymentScope,
 }
 
 impl StoragePlan {
@@ -84,6 +91,10 @@ impl StoragePlan {
 
     pub const fn public_delivery_eligible(&self) -> bool {
         self.policy.is_public_delivery_eligible()
+    }
+
+    pub const fn requires_single_node(&self) -> bool {
+        self.deployment_scope.requires_single_node()
     }
 }
 
@@ -125,7 +136,6 @@ impl StoragePlanner {
             request.override_policy.as_ref(),
         )?;
 
-        let mut warnings = Vec::new();
         let policy = resolved.policy;
         let durable_store = policy.durable_store();
 
@@ -157,7 +167,6 @@ impl StoragePlanner {
                     });
                 }
 
-                warnings.push(StoragePlanWarning::LocalOnlyRequiresSingleNodeDeployment);
                 Some(join_local_path(
                     &self.topology.local_root,
                     resolved.local_subdir.as_deref(),
@@ -197,7 +206,10 @@ impl StoragePlanner {
             local_path,
             matched_rule_prefix: resolved.matched_rule_prefix,
             write_targets,
-            warnings,
+            deployment_scope: match policy.sync_mode {
+                SyncMode::ObjectStore => StorageDeploymentScope::Scalable,
+                SyncMode::LocalOnly => StorageDeploymentScope::SingleNodeOnly,
+            },
         })
     }
 }

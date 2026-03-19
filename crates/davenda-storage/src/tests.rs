@@ -120,12 +120,12 @@ fn object_store_policies_plan_write_through_storage() {
         .expect("public uploads should plan against object storage");
 
     assert_eq!(plan.durable_store, DurableStore::ObjectStore);
+    assert_eq!(plan.deployment_scope, StorageDeploymentScope::Scalable);
     assert_eq!(
         plan.object_key.as_deref(),
         Some("public/uploads/marketing/hero.webp")
     );
     assert_eq!(plan.local_path, None);
-    assert!(plan.warnings.is_empty());
     assert_eq!(
         plan.primary_write_target()
             .expect("primary write target")
@@ -149,14 +149,15 @@ fn local_only_override_keeps_sensitive_files_on_server() {
     assert_eq!(plan.policy, StoragePolicy::local_only_sensitive());
     assert_eq!(plan.durable_store, DurableStore::LocalDisk);
     assert_eq!(
+        plan.deployment_scope,
+        StorageDeploymentScope::SingleNodeOnly
+    );
+    assert!(plan.requires_single_node());
+    assert_eq!(
         plan.local_path.as_deref(),
         Some("var/davenda/storage/secure/reports/march.csv")
     );
     assert_eq!(plan.object_key, None);
-    assert_eq!(
-        plan.warnings,
-        vec![StoragePlanWarning::LocalOnlyRequiresSingleNodeDeployment]
-    );
 }
 
 #[test]

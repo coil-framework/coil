@@ -2,7 +2,7 @@ mod planner;
 mod policy;
 
 pub use planner::{
-    StoragePlan, StoragePlanRequest, StoragePlanWarning, StoragePlanner, StoragePlanningError,
+    StorageDeploymentScope, StoragePlan, StoragePlanRequest, StoragePlanner, StoragePlanningError,
     WriteTarget, WriteTargetKind,
 };
 pub use policy::{

@@ -27,7 +27,7 @@ use davenda_ops::{
     ReportExportRequest, ReportId,
 };
 use davenda_storage::{
-    DeliveryMode, PathPolicyRule, StoragePlanRequest, StoragePlanWarning, StoragePolicy,
+    DeliveryMode, PathPolicyRule, StorageDeploymentScope, StoragePlanRequest, StoragePolicy,
 };
 use davenda_template::{
     AttributeNode, ElementNode, Node, TemplateDefinition, TemplateName, TemplateNamespace,
@@ -4052,9 +4052,10 @@ fn storage_host_applies_path_rules_for_sensitive_files() {
         Some("/var/lib/platform/sensitive/secure/reports/march.csv")
     );
     assert_eq!(
-        storage_plan.warnings,
-        vec![StoragePlanWarning::LocalOnlyRequiresSingleNodeDeployment]
+        storage_plan.deployment_scope,
+        StorageDeploymentScope::SingleNodeOnly
     );
+    assert!(storage_plan.requires_single_node());
 }
 
 #[test]

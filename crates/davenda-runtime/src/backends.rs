@@ -1,7 +1,9 @@
 use super::*;
-use davenda_cache::CacheBackendKind;
 use std::fmt;
 use std::sync::{Arc, Mutex};
+
+#[cfg(test)]
+use davenda_cache::CacheBackendKind;
 
 #[derive(Clone)]
 pub(crate) struct RuntimeBackendMaterializer {

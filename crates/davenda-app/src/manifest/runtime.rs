@@ -8,7 +8,7 @@ impl CustomerAppManifest {
         modules: Vec<Box<dyn PlatformModule>>,
     ) -> Result<CustomerAppRuntimePlan, AppModelError>
     where
-        P: AuthModelPackage,
+        P: AuthModelPackage + 'static,
     {
         self.build_runtime_plan_with_extensions(config, auth_package, modules, Vec::new())
     }
@@ -21,7 +21,7 @@ impl CustomerAppManifest {
         extension_packages: Vec<ExtensionPackage>,
     ) -> Result<CustomerAppRuntimePlan, AppModelError>
     where
-        P: AuthModelPackage,
+        P: AuthModelPackage + 'static,
     {
         if config.app.name != self.id.as_str() {
             return Err(AppModelError::ConfigAppMismatch {

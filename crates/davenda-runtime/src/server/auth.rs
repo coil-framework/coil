@@ -2,7 +2,10 @@ use super::*;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::OnceLock;
+
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
 
 pub(super) type RouteAuthorizationFuture<'a> =
     Pin<Box<dyn Future<Output = Result<bool, RuntimeServerError>> + Send + 'a>>;

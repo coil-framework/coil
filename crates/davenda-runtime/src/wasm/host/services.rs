@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -7,7 +8,7 @@ use davenda_jobs::{JobId, JobInstant, JobName, JobQueueName, JobSpec};
 use davenda_wasm::{
     JobExecution, MetadataExecution, MetadataGrant, NetworkExecution, SecretExecution,
 };
-use reqwest::blocking::Client;
+use ureq::{Agent, AgentBuilder};
 
 use super::super::*;
 
@@ -86,7 +87,7 @@ impl RuntimeWasmHostServices {
 struct RuntimeOutboundHttpBackend {
     allow_network: bool,
     targets: Arc<BTreeMap<String, String>>,
-    client: Client,
+    client: Agent,
 }
 
 impl RuntimeOutboundHttpBackend {
@@ -95,10 +96,7 @@ impl RuntimeOutboundHttpBackend {
     }
 
     fn with_targets(allow_network: bool, targets: BTreeMap<String, String>) -> Self {
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(4))
-            .build()
-            .expect("static reqwest client configuration must be valid");
+        let client = AgentBuilder::new().redirects(4).build();
 
         Self {
             allow_network,
@@ -121,11 +119,13 @@ impl RuntimeOutboundHttpBackend {
         let response = self
             .client
             .get(&endpoint)
-            .send()
+            .call()
             .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?;
-        let status = response.status().as_u16();
-        let response_bytes = response
-            .bytes()
+        let status = response.status();
+        let mut reader = response.into_reader();
+        let mut response_bytes = Vec::new();
+        reader
+            .read_to_end(&mut response_bytes)
             .map_err(|error| format!("failed to read `{endpoint}` response body: {error}"))?;
 
         Ok(NetworkExecution {

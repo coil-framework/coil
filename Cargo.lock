@@ -516,6 +516,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "davenda-ops"
+version = "0.1.0"
+dependencies = [
+ "davenda-auth",
+ "davenda-config",
+ "davenda-core",
+ "davenda-jobs",
+ "thiserror",
+]
+
+[[package]]
 name = "davenda-runtime"
 version = "0.1.0"
 dependencies = [

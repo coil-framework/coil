@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use davenda_auth::{
-    AuthModelPackageSelection, CapabilityExplanation, LiveAuthExplainHost, LiveAuthExplainRequest,
-    configured_auth_model_package,
+    CapabilityExplanation, LiveAuthExplainHost, LiveAuthExplainRequest,
+    deployment_auth_model_package_selection,
 };
 use davenda_config::PlatformConfig;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ pub(crate) struct LiveAuthExplainBackend {
 
 impl LiveAuthExplainBackend {
     pub(crate) fn from_config(config: &PlatformConfig) -> Result<Self, CliRunError> {
-        let package = resolve_configured_auth_package(config);
+        let package = resolve_deployment_auth_package_selection(config);
         let explainer = LiveAuthExplainHost::from_config(config, package).map_err(|error| {
             CliRunError::execution(format!(
                 "failed to initialize the live auth explain backend: {error}"
@@ -59,11 +59,13 @@ impl AuthExplainBackend for LiveAuthExplainBackend {
     }
 }
 
-fn resolve_configured_auth_package(config: &PlatformConfig) -> AuthModelPackageSelection {
+fn resolve_deployment_auth_package_selection(
+    config: &PlatformConfig,
+) -> davenda_auth::AuthModelPackageSelection {
     // The CLI explain path is keyed by the deployment-configured auth package identity.
     // This keeps the live backend aligned with replacement packages instead of assuming
     // the default package name is the only valid deployment configuration.
-    AuthModelPackageSelection::new(configured_auth_model_package(config.auth.package.clone()))
+    deployment_auth_model_package_selection(config.auth.package.clone())
 }
 
 #[cfg(test)]
@@ -247,11 +249,11 @@ publish_manifest = false
     }
 
     #[test]
-    fn from_config_accepts_replacement_package_identity() {
+    fn from_config_accepts_deployment_package_identity() {
         let mut config = config(true);
         config.auth.package = "platform-extended-auth".to_string();
 
-        let package = resolve_configured_auth_package(&config);
+        let package = resolve_deployment_auth_package_selection(&config);
 
         assert_eq!(package.manifest().name, "platform-extended-auth");
         assert_ne!(

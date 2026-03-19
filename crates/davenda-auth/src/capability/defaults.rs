@@ -86,14 +86,24 @@ pub fn configured_auth_model_package(name: impl Into<String>) -> ConfiguredAuthM
     ConfiguredAuthModelPackage::new(name)
 }
 
+pub fn deployment_auth_model_package(name: impl Into<String>) -> ConfiguredAuthModelPackage {
+    ConfiguredAuthModelPackage::new(name)
+}
+
+pub fn deployment_auth_model_package_selection(
+    name: impl Into<String>,
+) -> AuthModelPackageSelection {
+    AuthModelPackageSelection::new(deployment_auth_model_package(name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{AuthModelPackage, Capability};
 
     #[test]
-    fn configured_package_preserves_identity_while_reusing_default_bindings() {
-        let package = configured_auth_model_package("platform-extended-auth");
+    fn deployment_package_preserves_identity_while_reusing_default_bindings() {
+        let package = deployment_auth_model_package("platform-extended-auth");
 
         assert_eq!(package.manifest().name, "platform-extended-auth");
         assert_eq!(

@@ -1,4 +1,7 @@
 use super::*;
+use std::time::Duration;
+
+use davenda_jobs::RetryPolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CmsModule {
@@ -530,4 +533,9 @@ fn cms_live_pages_repository() -> DataRepositoryContribution {
         )
         .with_localized_cache_scope(QueryCacheScope::LocaleScoped),
     )
+}
+
+fn default_retry_policy() -> RetryPolicy {
+    RetryPolicy::new(3, Duration::from_secs(15), Duration::from_secs(300))
+        .expect("constant retry policy is valid")
 }

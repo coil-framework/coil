@@ -1,4 +1,17 @@
-use super::*;
+use davenda_auth::Capability;
+use davenda_core::{
+    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint,
+    JobContract, JobTriggerKind, MigrationContract, ModuleBehavior, ModuleManifest, PlatformModule,
+    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+};
+use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
+
+use crate::{
+    AccessibilityContract, AdminResourceDescriptor, AdminResourceId, AdminResourceKind, AdminShell,
+    AdminWidgetDescriptor, AdminWidgetId, BulkActionKind, NavigationSection, WidgetSlot,
+    WorkflowAction, WorkflowId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminModule {
@@ -64,16 +77,14 @@ impl AdminModule {
                     )
                     .expect("constant widget is valid"),
                 ],
-                vec![
-                    WorkflowAction::new(
-                        WorkflowId::new("system.modules.apply").expect("valid id"),
-                        "Apply module changes",
-                        BulkActionKind::Custom,
-                        Capability::SystemModuleManage,
-                        "Module changes scheduled",
-                    )
-                    .expect("constant workflow is valid"),
-                ],
+                vec![WorkflowAction::new(
+                    WorkflowId::new("system.modules.apply").expect("valid id"),
+                    "Apply module changes",
+                    BulkActionKind::Custom,
+                    Capability::SystemModuleManage,
+                    "Module changes scheduled",
+                )
+                .expect("constant workflow is valid")],
             )
             .expect("constant shell is valid"),
         }

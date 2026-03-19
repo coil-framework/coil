@@ -1,8 +1,16 @@
 use super::*;
+use davenda_auth::Capability;
+use davenda_core::{
+    AdminContributionKind as CoreAdminContributionKind,
+    AdminNavigationSection as CoreAdminNavigationSection, AdminResourceContribution,
+    BulkOperationDefinition as CoreBulkOperationDefinition,
+    BulkOperationKind as CoreBulkOperationKind, CoreServiceDependency, ExtensionSlotKind,
+    ModuleManifest, PlatformModule, ServiceRegistry,
+};
 use davenda_wasm::{
     AdminWidgetExtensionPoint, ContractVersion, ExtensionInstallation, ExtensionManifest,
-    ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest,
-    HostCapabilityGrant, HostGrantSet, InstalledExtension, ResourceLimits,
+    ExtensionPoint, ExtensionPointKind, ExtensionRegistry, HandlerId, HandlerInstallation,
+    HandlerManifest, HostCapabilityGrant, HostGrantSet, InstalledExtension, ResourceLimits,
 };
 
 fn installed_admin_extension() -> InstalledExtension {
@@ -13,17 +21,15 @@ fn installed_admin_extension() -> InstalledExtension {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
-            vec![
-                HandlerManifest::new(
-                    HandlerId::new("waitlist-summary").unwrap(),
-                    "exports.waitlist_summary",
-                    ExtensionPoint::AdminWidget(
-                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
-                    ),
-                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
-                )
-                .unwrap(),
-            ],
+            vec![HandlerManifest::new(
+                HandlerId::new("waitlist-summary").unwrap(),
+                "exports.waitlist_summary",
+                ExtensionPoint::AdminWidget(
+                    AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                ),
+                HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+            )
+            .unwrap()],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -79,9 +85,9 @@ fn admin_shell_groups_navigation_and_plans_bulk_actions() {
         )
         .unwrap();
     let shell = AdminShell::new(
-        base.accessibility.clone(),
-        base.resources.clone(),
-        base.widgets.clone(),
+        base.accessibility().clone(),
+        base.resources().to_vec(),
+        base.widgets().to_vec(),
         workflows,
     )
     .unwrap();
@@ -135,11 +141,9 @@ fn admin_module_manifest_and_accessibility_contract_are_stable() {
         manifest.required_capabilities,
         vec![Capability::AdminShellAccess, Capability::AdminAuditRead]
     );
-    assert!(
-        manifest
-            .optional_capabilities
-            .contains(&Capability::SystemModuleManage)
-    );
+    assert!(manifest
+        .optional_capabilities
+        .contains(&Capability::SystemModuleManage));
     assert_eq!(
         manifest.core_service_dependencies,
         vec![
@@ -155,12 +159,10 @@ fn admin_module_manifest_and_accessibility_contract_are_stable() {
     assert_eq!(manifest.http_surfaces.len(), 2);
     assert_eq!(manifest.jobs.len(), 1);
     assert_eq!(manifest.event_subscriptions.len(), 1);
-    assert!(
-        manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget)
-    );
+    assert!(manifest
+        .extension_slots
+        .iter()
+        .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
     assert_eq!(
         module
             .install_migration_plan()
@@ -182,16 +184,12 @@ fn module_registration_exposes_admin_services() {
     let mut registry = ServiceRegistry::new();
     module.register(&mut registry).unwrap();
 
-    assert!(
-        registry
-            .services()
-            .any(|service| service.id == "module.admin.shell")
-    );
-    assert!(
-        registry
-            .services()
-            .any(|service| service.id == "module.admin.accessibility")
-    );
+    assert!(registry
+        .services()
+        .any(|service| service.id == "module.admin.shell"));
+    assert!(registry
+        .services()
+        .any(|service| service.id == "module.admin.accessibility"));
 }
 
 #[test]

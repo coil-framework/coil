@@ -5,6 +5,12 @@ use std::sync::Arc;
 pub enum RuntimeCacheError {
     #[error(transparent)]
     Cache(#[from] CacheModelError),
+    #[error(
+        "live shared cache backend `{kind:?}` requires an explicit distributed runtime; file-backed shared state is test-only"
+    )]
+    LiveSharedRuntimeRequiresExplicitBackend {
+        kind: davenda_cache::CacheBackendKind,
+    },
 }
 
 #[derive(Debug, Clone)]

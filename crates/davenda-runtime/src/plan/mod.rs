@@ -104,10 +104,11 @@ impl RuntimePlan {
             namespace.clone(),
         );
         #[cfg(not(test))]
-        assert!(
-            shared_runtime.supports_live_shared_state(),
-            "live shared jobs runtime requires an explicit distributed backend; file-backed shared state is test-only"
-        );
+        if !shared_runtime.supports_live_shared_state() {
+            return Err(RuntimeJobsError::LiveSharedRuntimeRequiresExplicitBackend {
+                backend: self.jobs.backend,
+            });
+        }
 
         Ok(JobsHost::new(
             self.config.app.name.clone(),
@@ -168,10 +169,11 @@ impl RuntimePlan {
                 shared_namespace.clone(),
             );
             #[cfg(not(test))]
-            assert!(
-                runtime.supports_live_shared_state(),
-                "live shared cache runtime requires an explicit distributed backend; file-backed shared state is test-only"
-            );
+            if !runtime.supports_live_shared_state() {
+                return Err(
+                    RuntimeCacheError::LiveSharedRuntimeRequiresExplicitBackend { kind: backend },
+                );
+            }
             Some(runtime)
         } else {
             None

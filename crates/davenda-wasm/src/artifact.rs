@@ -34,6 +34,10 @@ impl InstalledArtifact {
         self.source.resolve_path(base_dir, extension_id)
     }
 
+    pub fn compiled_module_cache_key(&self) -> &str {
+        &self.sha256
+    }
+
     pub fn load_bytes(
         &self,
         base_dir: impl AsRef<Path>,
@@ -82,5 +86,27 @@ fn verify_checksum(expected: &str, path: &Path, bytes: &[u8]) -> Result<(), Wasm
             expected: expected.to_string(),
             actual,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compiled_module_cache_key_tracks_the_artifact_checksum() {
+        let artifact = InstalledArtifact::new(
+            "publisher",
+            ExtensionArtifactSource::FirstPartyCatalog {
+                package: "example".to_string(),
+            },
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .expect("artifact is valid");
+
+        assert_eq!(
+            artifact.compiled_module_cache_key(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
     }
 }

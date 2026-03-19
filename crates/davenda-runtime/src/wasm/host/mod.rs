@@ -5,8 +5,10 @@ use std::sync::Arc;
 use super::executor::RuntimeHostServiceExecutor;
 use super::support::{http_method_to_wasm, invocation_surface_path};
 use super::*;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod cache;
 mod context;
 mod prepare;
 mod principal;
@@ -53,6 +55,7 @@ pub struct WasmHost {
     default_locale: String,
     registered_jobs: Vec<RuntimeJobDefinition>,
     host_service_executor: Arc<dyn HostServiceExecutor>,
+    compiled_modules: Arc<cache::CompiledModuleCache<String, CompiledWasmModule>>,
 }
 
 impl WasmHost {
@@ -74,6 +77,7 @@ impl WasmHost {
             default_locale,
             registered_jobs,
             host_service_executor,
+            compiled_modules: Arc::new(cache::CompiledModuleCache::default()),
         }
     }
 
@@ -142,16 +146,21 @@ impl WasmHost {
         session: WasmExecutionSession,
     ) -> Result<ExecutionReceipt, LiveWasmExecutionError> {
         let module = self.load_installed_module(&session.plan().extension_id)?;
-        self.execute_session(&module, session).map_err(Into::into)
+        self.execute_session(module.as_ref(), session)
+            .map_err(Into::into)
     }
 
     fn load_installed_module(
         &self,
         extension_id: &davenda_wasm::ExtensionId,
-    ) -> Result<CompiledWasmModule, LiveWasmExecutionError> {
+    ) -> Result<Arc<CompiledWasmModule>, LiveWasmExecutionError> {
         let bytes = if let Some(installed) = self.registry.extension(extension_id) {
             if let Some(artifact) = installed.artifact() {
-                artifact.load_bytes(&self.runtime.extension_directory, extension_id)?
+                let cache_key = artifact.compiled_module_cache_key().to_string();
+                let bytes = artifact.load_bytes(&self.runtime.extension_directory, extension_id)?;
+                return self.compiled_modules.get_or_insert_with(cache_key, || {
+                    self.compile_module(&bytes).map_err(Into::into)
+                });
             } else {
                 let path = self.installed_module_path(extension_id);
                 fs::read(&path).map_err(|error| LiveWasmExecutionError::ArtifactRead {
@@ -169,7 +178,10 @@ impl WasmHost {
             })?
         };
 
-        self.compile_module(&bytes).map_err(Into::into)
+        let cache_key = format!("{:x}", Sha256::digest(&bytes));
+        self.compiled_modules.get_or_insert_with(cache_key, || {
+            self.compile_module(&bytes).map_err(Into::into)
+        })
     }
 
     fn installed_module_path(&self, extension_id: &davenda_wasm::ExtensionId) -> PathBuf {

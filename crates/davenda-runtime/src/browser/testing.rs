@@ -1,3 +1,4 @@
+use super::session::SessionStoreBackend;
 use super::*;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};

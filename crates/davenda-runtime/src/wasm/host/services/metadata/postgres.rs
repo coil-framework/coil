@@ -25,7 +25,7 @@ impl PostgresMetadataAuditStore {
     }
 
     pub(super) fn location_label(&self) -> String {
-        format!("{}.metadata_audit_entries", self.schema)
+        format!("postgres:{}.metadata_audit_entries", self.schema)
     }
 
     pub(super) fn insert(&self, record: &MetadataAuditRecord) -> Result<(), String> {
@@ -220,6 +220,6 @@ mod tests {
         };
         let backend = PostgresMetadataAuditStore::open(runtime);
 
-        assert_eq!(backend.location_label(), "public.metadata_audit_entries");
+        assert_eq!(backend.location_label(), "postgres:public.metadata_audit_entries");
     }
 }

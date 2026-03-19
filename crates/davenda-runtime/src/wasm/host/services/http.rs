@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
 use davenda_wasm::NetworkExecution;
-use reqwest::blocking::Client;
+use ureq::{Agent, AgentBuilder};
 use url::Url;
 
 use super::super::*;
@@ -17,7 +18,7 @@ const MAX_RESPONSE_BYTES_FROM_HINT: u64 = 4 * 1024 * 1024;
 pub(super) struct RuntimeOutboundHttpBackend {
     allow_network: bool,
     targets: Arc<BTreeMap<String, Url>>,
-    client: Client,
+    client: Agent,
     request_timeout: Duration,
     max_response_bytes: u64,
 }
@@ -41,12 +42,10 @@ impl RuntimeOutboundHttpBackend {
         Self {
             allow_network,
             targets: Arc::new(targets),
-            client: Client::builder()
-                .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-                .timeout(request_timeout)
-                .redirect(reqwest::redirect::Policy::limited(4))
-                .build()
-                .expect("static reqwest client configuration must be valid"),
+            client: AgentBuilder::new()
+                .timeout_connect(DEFAULT_CONNECT_TIMEOUT)
+                .timeout_read(request_timeout)
+                .build(),
             request_timeout,
             max_response_bytes: max_response_bytes.max(1),
         }
@@ -67,11 +66,14 @@ impl RuntimeOutboundHttpBackend {
         let response = self
             .client
             .get(endpoint.as_str())
-            .send()
+            .timeout(self.request_timeout)
+            .call()
             .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?;
-        let status = response.status().as_u16();
-        let response_bytes = response
-            .bytes()
+        let status = response.status();
+        let mut reader = response.into_reader().take(byte_limit.saturating_add(1));
+        let mut response_bytes = Vec::new();
+        reader
+            .read_to_end(&mut response_bytes)
             .map_err(|error| format!("failed to read `{endpoint}` response body: {error}"))?;
 
         if response_bytes.len() as u64 > byte_limit {

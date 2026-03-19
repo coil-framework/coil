@@ -76,11 +76,6 @@ impl RuntimeMetadataBackend {
         })
     }
 
-    #[cfg(test)]
-    pub(super) fn recent_records(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
-        self.store.recent(limit)
-    }
-
     pub(super) fn backend_kind(&self) -> MetadataAuditBackendKind {
         self.store.kind()
     }

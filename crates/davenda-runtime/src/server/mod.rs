@@ -191,7 +191,7 @@ impl HttpServerHost {
         });
         let router = Router::new()
             .merge(observability_router())
-            .merge(diagnostics_router())
+            .merge(diagnostics_router(state.clone()))
             .route("/", any(serve_runtime_request))
             .fallback(any(serve_runtime_request))
             .with_state(state.clone());

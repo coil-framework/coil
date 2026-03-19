@@ -1,14 +1,14 @@
 use crate::cli::error::CliRunError;
 use crate::command::OutputMode;
-use davenda_auth::{Capability, DefaultSubject, DefaultTuple, Entity, ExplainOptions, Relation};
+use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Relation};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthExplainInvocation {
-    pub tenant_id: i64,
+    pub config_path: PathBuf,
     pub subject: DefaultSubject,
     pub capability: Capability,
     pub resource: Entity,
-    pub tuples: Vec<DefaultTuple>,
     pub options: ExplainOptions,
 }
 
@@ -16,23 +16,20 @@ pub struct AuthExplainInvocation {
 pub(crate) enum CliInput {
     Help,
     AuthExplain {
-        customer_app: String,
         output_mode: OutputMode,
         invocation: AuthExplainInvocation,
     },
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, CliRunError> {
-    let mut customer_app = std::env::var("DAVENDA_APP_NAME")
+    let mut config_path = std::env::var("DAVENDA_CONFIG")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "platform".to_string());
+        .map(PathBuf::from);
     let mut output_mode = OutputMode::Human;
-    let mut tenant_id = 1_i64;
     let mut subject: Option<DefaultSubject> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
-    let mut tuples = Vec::new();
     let mut max_depth: Option<usize> = None;
     let mut cycle_protection = true;
     let mut positionals = Vec::new();
@@ -42,13 +39,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
         match token.as_str() {
             "--help" | "-h" => return Ok(CliInput::Help),
             "--json" => output_mode = OutputMode::Json,
-            "--customer-app" => {
-                customer_app = next_value(&mut iter, "--customer-app")?;
-            }
-            "--tenant-id" => {
-                tenant_id = next_value(&mut iter, "--tenant-id")?
-                    .parse::<i64>()
-                    .map_err(|_| CliRunError::usage("`--tenant-id` must be a valid integer"))?;
+            "--config" => {
+                config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
             }
             "--subject" => {
                 subject = Some(parse_subject(&next_value(&mut iter, "--subject")?)?);
@@ -61,9 +53,6 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             }
             "--object" => {
                 resource = Some(parse_entity(&next_value(&mut iter, "--object")?)?);
-            }
-            "--tuple" => {
-                tuples.push(parse_tuple(&next_value(&mut iter, "--tuple")?)?);
             }
             "--max-depth" => {
                 max_depth = Some(
@@ -88,6 +77,9 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
 
     match positionals.as_slice() {
         [command, subcommand] if command == "auth" && subcommand == "explain" => {
+            let config_path = config_path.ok_or_else(|| {
+                CliRunError::usage("`auth explain` requires `--config <path>` or `DAVENDA_CONFIG`")
+            })?;
             let subject = subject.ok_or_else(|| {
                 CliRunError::usage("`auth explain` requires `--subject <subject>`")
             })?;
@@ -106,14 +98,12 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             .normalized();
 
             Ok(CliInput::AuthExplain {
-                customer_app,
                 output_mode,
                 invocation: AuthExplainInvocation {
-                    tenant_id,
+                    config_path,
                     subject,
                     capability,
                     resource,
-                    tuples,
                     options,
                 },
             })
@@ -155,25 +145,6 @@ fn parse_subject(input: &str) -> Result<DefaultSubject, CliRunError> {
         }
         None => Ok(DefaultSubject::entity(entity)),
     }
-}
-
-fn parse_tuple(input: &str) -> Result<DefaultTuple, CliRunError> {
-    let (object, subject) = input.split_once('=').ok_or_else(|| {
-        CliRunError::usage(format!(
-            "invalid tuple `{input}`; expected object#relation=subject"
-        ))
-    })?;
-    let (object, relation) = object.split_once('#').ok_or_else(|| {
-        CliRunError::usage(format!(
-            "invalid tuple `{input}`; expected object#relation=subject"
-        ))
-    })?;
-
-    Ok(DefaultTuple::new(
-        parse_entity(object)?,
-        parse_relation(relation)?,
-        parse_subject(subject)?,
-    ))
 }
 
 fn parse_entity(input: &str) -> Result<Entity, CliRunError> {
@@ -269,39 +240,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_auth_explain_flags_and_positionals() {
+    fn parse_auth_explain_requires_config_and_live_subjects() {
         let input = parse([
             "auth".to_string(),
             "explain".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
             "--subject".to_string(),
             "user:alice".to_string(),
             "--capability".to_string(),
-            "cms.page.publish".to_string(),
+            "admin.audit.read".to_string(),
             "--resource".to_string(),
-            "page:homepage".to_string(),
-            "--tuple".to_string(),
-            "page:homepage#site=site:main".to_string(),
-            "--json".to_string(),
+            "admin_module:app".to_string(),
         ])
         .unwrap();
 
-        let CliInput::AuthExplain {
-            customer_app,
-            output_mode,
-            invocation,
-        } = input
-        else {
+        let CliInput::AuthExplain { invocation, .. } = input else {
             panic!("expected auth explain input");
         };
-        assert_eq!(customer_app, "platform");
-        assert_eq!(output_mode, OutputMode::Json);
-        assert_eq!(invocation.tenant_id, 1);
-        assert_eq!(invocation.tuples.len(), 1);
-        assert_eq!(invocation.resource, Entity::page("homepage"));
-    }
-
-    #[test]
-    fn parse_help_without_positionals() {
-        assert_eq!(parse(Vec::<String>::new()).unwrap(), CliInput::Help);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+        assert_eq!(invocation.resource, Entity::admin_module("app"));
+        assert!(invocation.options.cycle_protection);
     }
 }

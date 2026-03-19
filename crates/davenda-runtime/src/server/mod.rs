@@ -19,6 +19,7 @@ mod observability;
 mod request;
 
 use auth::DeferredPostgresRouteCapabilityAuthorizer;
+use auth::auth_explain_router;
 pub(crate) use auth::LiveRouteCapabilityAuthorizer;
 pub use backend::{
     DatabaseClientTarget, DistributedCacheClientTarget, JobsClientTarget, ObjectStoreClientTarget,
@@ -31,7 +32,10 @@ pub use request::LiveHttpRequest;
 use request::{error_response, execute_live_request, serve_runtime_request};
 
 #[cfg(test)]
-pub(crate) use auth::{LiveAuthorizationCheck, StaticLiveRouteCapabilityAuthorizer};
+#[allow(unused_imports)]
+pub(crate) use auth::{
+    LiveAuthorizationCheck, StaticLiveAuthExplainer, StaticLiveRouteCapabilityAuthorizer,
+};
 
 #[derive(Debug, Error)]
 pub enum RuntimeServerError {
@@ -57,6 +61,8 @@ pub enum RuntimeServerError {
     RequestBodyTooLarge { limit: usize },
     #[error("live request authorization failed: {reason}")]
     Authorization { reason: String },
+    #[error("auth explain failed: {reason}")]
+    Explain { reason: String },
 }
 
 pub(crate) struct RuntimeServerState {
@@ -67,6 +73,7 @@ pub(crate) struct RuntimeServerState {
     csrf_secret: Vec<u8>,
     backends: SharedBackendClients,
     route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
+    auth_explainer: Option<Arc<dyn auth::LiveAuthExplainer>>,
 }
 
 impl fmt::Debug for RuntimeServerState {
@@ -102,6 +109,16 @@ impl HttpServerHost {
                 backends.database.url.clone(),
                 plan.auth_package.clone(),
             ));
+        let auth_explainer = if plan.config.auth.explain_api {
+            Some(Arc::new(LiveAuthExplainHost::new(
+                plan.data.clone(),
+                plan.tenant_id(),
+                backends.database.url.clone(),
+                plan.auth_package.clone(),
+            )) as Arc<dyn auth::LiveAuthExplainer>)
+        } else {
+            None
+        };
         let browser =
             materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
         let wasm_host = WasmHost::with_host_services(
@@ -121,6 +138,7 @@ impl HttpServerHost {
             cookie_secret,
             csrf_secret,
             route_authorizer,
+            auth_explainer,
         ))
     }
 
@@ -138,6 +156,16 @@ impl HttpServerHost {
                 backends.database.url.clone(),
                 plan.auth_package.clone(),
             ));
+        let auth_explainer = if plan.config.auth.explain_api {
+            Some(Arc::new(LiveAuthExplainHost::new(
+                plan.data.clone(),
+                plan.tenant_id(),
+                backends.database.url.clone(),
+                plan.auth_package.clone(),
+            )) as Arc<dyn auth::LiveAuthExplainer>)
+        } else {
+            None
+        };
         let wasm_host = plan.wasm_host();
         Ok(Self::new_with_browser_and_authorizer(
             plan,
@@ -147,6 +175,7 @@ impl HttpServerHost {
             cookie_secret,
             csrf_secret,
             route_authorizer,
+            auth_explainer,
         ))
     }
 
@@ -160,6 +189,16 @@ impl HttpServerHost {
     ) -> Result<Self, RuntimeServerError> {
         let browser = plan.browser_host()?;
         let wasm_host = plan.wasm_host();
+        let auth_explainer = if plan.config.auth.explain_api {
+            Some(Arc::new(LiveAuthExplainHost::new(
+                plan.data.clone(),
+                plan.tenant_id(),
+                backends.database.url.clone(),
+                plan.auth_package.clone(),
+            )) as Arc<dyn auth::LiveAuthExplainer>)
+        } else {
+            None
+        };
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
@@ -168,6 +207,30 @@ impl HttpServerHost {
             cookie_secret,
             csrf_secret,
             route_authorizer,
+            auth_explainer,
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_authorizer_and_explainer(
+        plan: RuntimePlan,
+        backends: SharedBackendClients,
+        cookie_secret: Vec<u8>,
+        csrf_secret: Vec<u8>,
+        route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
+        auth_explainer: Arc<dyn auth::LiveAuthExplainer>,
+    ) -> Result<Self, RuntimeServerError> {
+        let browser = plan.browser_host()?;
+        let wasm_host = plan.wasm_host();
+        Ok(Self::new_with_browser_and_authorizer(
+            plan,
+            browser,
+            wasm_host,
+            backends,
+            cookie_secret,
+            csrf_secret,
+            route_authorizer,
+            Some(auth_explainer),
         ))
     }
 
@@ -179,6 +242,7 @@ impl HttpServerHost {
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
         route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
+        auth_explainer: Option<Arc<dyn auth::LiveAuthExplainer>>,
     ) -> Self {
         let state = Arc::new(RuntimeServerState {
             browser: Mutex::new(browser),
@@ -188,9 +252,11 @@ impl HttpServerHost {
             csrf_secret,
             backends,
             route_authorizer,
+            auth_explainer,
         });
         let public_router = observability_router();
-        let privileged_router = diagnostics_router(state.clone());
+        let privileged_router = diagnostics_router(state.clone())
+            .merge(auth_explain_router(state.clone()));
         let router = Router::new()
             .merge(public_router)
             .merge(privileged_router)
@@ -216,7 +282,9 @@ impl HttpServerHost {
 
     #[cfg(test)]
     pub(crate) fn privileged_router(&self) -> Router {
-        diagnostics_router(self.state.clone()).with_state(self.state.clone())
+        diagnostics_router(self.state.clone())
+            .merge(auth_explain_router(self.state.clone()))
+            .with_state(self.state.clone())
     }
 
     pub fn issue_session(

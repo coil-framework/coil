@@ -24,6 +24,11 @@ fn render_human(result: &AuthExplainResult) -> String {
     let _ = writeln!(out, "auth explain");
     let _ = writeln!(
         out,
+        "  config: {}",
+        result.invocation.config_path.display()
+    );
+    let _ = writeln!(
+        out,
         "  subject: {}",
         render_subject(&result.invocation.subject)
     );
@@ -49,16 +54,6 @@ fn render_human(result: &AuthExplainResult) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     );
-    let _ = writeln!(out, "  tenant id: {}", result.invocation.tenant_id);
-    let _ = writeln!(out, "  tuple count: {}", result.invocation.tuples.len());
-
-    if !result.invocation.tuples.is_empty() {
-        let _ = writeln!(out, "  tuples:");
-        for tuple in &result.invocation.tuples {
-            let _ = writeln!(out, "    - {}", render_tuple(tuple));
-        }
-    }
-
     let _ = writeln!(out, "  trace:");
     render_trace_human(&mut out, &explanation.trace, 2);
     out
@@ -193,7 +188,7 @@ fn render_json(result: &AuthExplainResult) -> Result<String, CliRunError> {
     let explanation = &result.explanation;
     let value = json!({
         "command": ["auth", "explain"],
-        "tenant_id": result.invocation.tenant_id,
+        "config": result.invocation.config_path.display().to_string(),
         "subject": render_subject(&result.invocation.subject),
         "capability": result.invocation.capability.as_str(),
         "resource": result.invocation.resource.to_string(),
@@ -206,7 +201,6 @@ fn render_json(result: &AuthExplainResult) -> Result<String, CliRunError> {
             "relation": explanation.binding.relation.as_str(),
             "resource_namespaces": explanation.binding.resource_namespaces.iter().map(ToString::to_string).collect::<Vec<_>>(),
         },
-        "tuples": result.invocation.tuples.iter().map(render_tuple).collect::<Vec<_>>(),
         "trace": trace_to_json(&explanation.trace),
     });
 
@@ -259,21 +253,13 @@ fn step_to_json(step: &ExplainStep) -> Value {
             "tuple": render_tuple(tuple),
             "to": render_node(to),
         }),
-        ExplainStep::Computed {
-            from,
-            via_tuple,
-            to,
-        } => json!({
+        ExplainStep::Computed { from, via_tuple, to } => json!({
             "kind": "computed",
             "from": render_node(from),
             "via_tuple": render_tuple(via_tuple),
             "to": render_node(to),
         }),
-        ExplainStep::TupleToUserset {
-            from,
-            via_tuple,
-            to,
-        } => json!({
+        ExplainStep::TupleToUserset { from, via_tuple, to } => json!({
             "kind": "tuple_to_userset",
             "from": render_node(from),
             "via_tuple": render_tuple(via_tuple),
@@ -304,55 +290,5 @@ fn attempt_to_json(attempt: &DeniedAttempt) -> Value {
             "step": step_to_json(step),
             "result": trace_to_json(&ExplainTrace::Denied((**result).clone())),
         }),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cli::args::AuthExplainInvocation;
-    use crate::cli::auth::execute_auth_explain;
-    use davenda_auth::{
-        Capability, DefaultSubject, DefaultTuple, Entity, ExplainOptions, Relation,
-    };
-
-    fn allow_result() -> crate::cli::auth::AuthExplainResult {
-        execute_auth_explain(AuthExplainInvocation {
-            tenant_id: 1,
-            subject: DefaultSubject::entity(Entity::user("alice")),
-            capability: Capability::CmsPageRead,
-            resource: Entity::page("homepage"),
-            tuples: vec![
-                DefaultTuple::new(
-                    Entity::page("homepage"),
-                    Relation::Site,
-                    DefaultSubject::entity(Entity::site("main")),
-                ),
-                DefaultTuple::new(
-                    Entity::site("main"),
-                    Relation::Viewer,
-                    DefaultSubject::entity(Entity::user("alice")),
-                ),
-            ],
-            options: ExplainOptions::default(),
-        })
-        .unwrap()
-    }
-
-    #[test]
-    fn render_auth_explain_in_human_mode_is_readable() {
-        let rendered = render_auth_explain(&allow_result(), OutputMode::Human).unwrap();
-        assert!(rendered.contains("auth explain"));
-        assert!(rendered.contains("decision: allow"));
-        assert!(rendered.contains("page:homepage"));
-    }
-
-    #[test]
-    fn render_auth_explain_in_json_mode_contains_decision() {
-        let rendered = render_auth_explain(&allow_result(), OutputMode::Json).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
-
-        assert_eq!(parsed["decision"], "allow");
-        assert_eq!(parsed["command"], serde_json::json!(["auth", "explain"]));
     }
 }

@@ -1,174 +1,123 @@
-use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex};
-
 use async_trait::async_trait;
-use zanzibar::{
-    CheckRequest, Object, RebacEngine, RebacError, Schema, Subject, Tuple, TupleUpdate,
-};
+use davenda_auth::{AuthModelPackage, CapabilityExplanation, DavendaAuth, DefaultAuthModelPackage};
+use davenda_config::PlatformConfig;
+use davenda_data::DataRuntime;
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct MemoryRebacEngine {
-    schema: Arc<Mutex<Option<Schema>>>,
-    tuples: Arc<Mutex<Vec<Tuple>>>,
+use crate::cli::args::AuthExplainInvocation;
+use crate::cli::error::CliRunError;
+
+#[async_trait]
+pub(crate) trait AuthExplainBackend: Send + Sync {
+    async fn explain(
+        &self,
+        invocation: &AuthExplainInvocation,
+    ) -> Result<CapabilityExplanation, CliRunError>;
 }
 
-impl MemoryRebacEngine {
-    pub(crate) fn new() -> Self {
-        Self::default()
+#[derive(Debug, Clone)]
+pub(crate) struct LiveAuthExplainBackend {
+    tenant_id: i64,
+    data: DataRuntime,
+    package: DefaultAuthModelPackage,
+}
+
+impl LiveAuthExplainBackend {
+    pub(crate) fn from_config(config: &PlatformConfig) -> Result<Self, CliRunError> {
+        if !config.auth.explain_api {
+            return Err(CliRunError::execution(
+                "auth explain API is disabled by deployment config",
+            ));
+        }
+
+        let package = DefaultAuthModelPackage::default();
+        if config.auth.package != package.manifest().name {
+            return Err(CliRunError::execution(format!(
+                "configured auth package `{}` is not supported by the CLI explain command; expected `{}`",
+                config.auth.package,
+                package.manifest().name
+            )));
+        }
+
+        let data = DataRuntime::from_config(&config.database).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to initialize the database runtime for auth explain: {error}"
+            ))
+        })?;
+
+        Ok(Self {
+            tenant_id: config.auth.tenant_id,
+            data,
+            package,
+        })
     }
 }
 
 #[async_trait]
-impl RebacEngine for MemoryRebacEngine {
-    async fn apply_schema(&self, _tenant_id: i64, schema: Schema) -> Result<(), RebacError> {
-        let mut slot = self
-            .schema
-            .lock()
-            .map_err(|_| RebacError::Internal("memory rebac engine mutex poisoned".into()))?;
-        *slot = Some(schema);
-        Ok(())
-    }
-
-    async fn write_tuples(
+impl AuthExplainBackend for LiveAuthExplainBackend {
+    async fn explain(
         &self,
-        _tenant_id: i64,
-        updates: Vec<TupleUpdate>,
-    ) -> Result<(), RebacError> {
-        let mut tuples = self
-            .tuples
-            .lock()
-            .map_err(|_| RebacError::Internal("memory rebac engine mutex poisoned".into()))?;
+        invocation: &AuthExplainInvocation,
+    ) -> Result<CapabilityExplanation, CliRunError> {
+        let client = self.data.connect_lazy_postgres().map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to prepare the PostgreSQL auth backend for explain: {error}"
+            ))
+        })?;
+        let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
+        let auth = DavendaAuth::new(engine, self.tenant_id);
 
-        for update in updates {
-            match update {
-                TupleUpdate::Write(tuple) => {
-                    if !tuples.contains(&tuple) {
-                        tuples.push(tuple);
-                    }
-                }
-                TupleUpdate::Delete(tuple) => {
-                    tuples.retain(|existing| existing != &tuple);
-                }
-            }
+        auth.explain_capability_with_options(
+            &self.package,
+            &invocation.subject,
+            invocation.capability,
+            &invocation.resource,
+            invocation.options,
+        )
+        .await
+        .map_err(|error| {
+            CliRunError::execution(format!("failed to build the auth explanation: {error}"))
+        })
+    }
+}
+
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(crate) struct StaticAuthExplainBackend {
+    response: CapabilityExplanation,
+    requests: Arc<Mutex<Vec<AuthExplainInvocation>>>,
+}
+
+#[cfg(test)]
+impl StaticAuthExplainBackend {
+    pub(crate) fn new(response: CapabilityExplanation) -> Self {
+        Self {
+            response,
+            requests: Arc::new(Mutex::new(Vec::new())),
         }
-
-        Ok(())
     }
 
-    async fn read_tuples(
-        &self,
-        _tenant_id: i64,
-        object: Option<Object>,
-        relation: Option<String>,
-        subject: Option<Subject>,
-    ) -> Result<Vec<Tuple>, RebacError> {
-        let tuples = self
-            .tuples
+    pub(crate) fn requests(&self) -> Vec<AuthExplainInvocation> {
+        self.requests
             .lock()
-            .map_err(|_| RebacError::Internal("memory rebac engine mutex poisoned".into()))?;
-
-        Ok(tuples
-            .iter()
-            .filter(|tuple| {
-                object
-                    .as_ref()
-                    .is_none_or(|candidate| &tuple.object == candidate)
-                    && relation
-                        .as_ref()
-                        .is_none_or(|candidate| tuple.relation == *candidate)
-                    && subject
-                        .as_ref()
-                        .is_none_or(|candidate| &tuple.subject == candidate)
-            })
-            .cloned()
-            .collect())
+            .expect("static auth explain backend mutex poisoned")
+            .clone()
     }
+}
 
-    async fn check(
+#[cfg(test)]
+#[async_trait]
+impl AuthExplainBackend for StaticAuthExplainBackend {
+    async fn explain(
         &self,
-        tenant_id: i64,
-        subject: &Subject,
-        relation: &str,
-        object: &Object,
-    ) -> Result<bool, RebacError> {
-        Ok(!self
-            .read_tuples(
-                tenant_id,
-                Some(object.clone()),
-                Some(relation.to_string()),
-                Some(subject.clone()),
-            )
-            .await?
-            .is_empty())
-    }
-
-    async fn check_many(
-        &self,
-        tenant_id: i64,
-        requests: Vec<CheckRequest>,
-    ) -> Result<Vec<bool>, RebacError> {
-        let mut results = Vec::with_capacity(requests.len());
-        for request in requests {
-            results.push(
-                self.check(
-                    tenant_id,
-                    &request.subject,
-                    &request.relation,
-                    &request.object,
-                )
-                .await?,
-            );
-        }
-        Ok(results)
-    }
-
-    async fn list_objects(
-        &self,
-        _tenant_id: i64,
-        subject: &Subject,
-        relation: &str,
-        object_namespace: &str,
-    ) -> Result<Vec<String>, RebacError> {
-        let tuples = self
-            .tuples
+        invocation: &AuthExplainInvocation,
+    ) -> Result<CapabilityExplanation, CliRunError> {
+        self.requests
             .lock()
-            .map_err(|_| RebacError::Internal("memory rebac engine mutex poisoned".into()))?;
-        let mut values = BTreeSet::new();
-
-        for tuple in tuples.iter() {
-            if tuple.object.namespace == object_namespace
-                && tuple.relation == relation
-                && &tuple.subject == subject
-            {
-                values.insert(tuple.object.id.clone());
-            }
-        }
-
-        Ok(values.into_iter().collect())
-    }
-
-    async fn list_subjects(
-        &self,
-        _tenant_id: i64,
-        object: &Object,
-        relation: &str,
-        subject_namespace: &str,
-    ) -> Result<Vec<String>, RebacError> {
-        let tuples = self
-            .tuples
-            .lock()
-            .map_err(|_| RebacError::Internal("memory rebac engine mutex poisoned".into()))?;
-        let mut values = BTreeSet::new();
-
-        for tuple in tuples.iter() {
-            if &tuple.object == object
-                && tuple.relation == relation
-                && tuple.subject.namespace() == subject_namespace
-            {
-                values.insert(tuple.subject.id().to_string());
-            }
-        }
-
-        Ok(values.into_iter().collect())
+            .expect("static auth explain backend mutex poisoned")
+            .push(invocation.clone());
+        Ok(self.response.clone())
     }
 }

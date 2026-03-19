@@ -41,6 +41,44 @@ impl StaticLiveRouteCapabilityAuthorizer {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StaticLiveAuthExplainer {
+    response: Option<davenda_auth::CapabilityExplanation>,
+    requests: Arc<Mutex<Vec<LiveAuthExplainRequest>>>,
+}
+
+impl StaticLiveAuthExplainer {
+    pub(crate) fn new(response: davenda_auth::CapabilityExplanation) -> Self {
+        Self {
+            response: Some(response),
+            requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub(crate) fn requests(&self) -> Vec<LiveAuthExplainRequest> {
+        self.requests
+            .lock()
+            .expect("static live explainer mutex poisoned")
+            .clone()
+    }
+}
+
+impl LiveAuthExplainer for StaticLiveAuthExplainer {
+    fn explain_capability<'a>(
+        &'a self,
+        request: &'a LiveAuthExplainRequest,
+    ) -> AuthExplainFuture<'a> {
+        let response = self.response.clone().expect("static response must be set");
+        Box::pin(async move {
+            self.requests
+                .lock()
+                .expect("static live explainer mutex poisoned")
+                .push(request.clone());
+            Ok(response)
+        })
+    }
+}
+
 impl LiveRouteCapabilityAuthorizer for StaticLiveRouteCapabilityAuthorizer {
     fn check_capability<'a>(
         &'a self,

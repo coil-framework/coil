@@ -247,6 +247,154 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
     assert!(diagnostics_body.contains("\"path\""));
 }
 
+#[tokio::test]
+async fn server_router_hides_auth_explain_when_deployment_disables_it() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.auth.explain_api = false;
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(StaticLiveRouteCapabilityAuthorizer::new()),
+    )
+    .unwrap();
+
+    let response = server
+        .privileged_router()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/diagnostics/auth/explain")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn server_router_serves_live_auth_explain_when_enabled_and_authorized() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.auth.explain_api = true;
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let package = DefaultAuthModelPackage::default();
+    let capability = Capability::CmsPageRead;
+    let subject = davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1"));
+    let resource = davenda_auth::Entity::page("homepage");
+    let explanation = davenda_auth::CapabilityExplanation {
+        manifest: package.manifest().clone(),
+        subject: subject.clone(),
+        capability,
+        object: resource.clone(),
+        binding: package.binding_for(capability).unwrap().clone(),
+        decision: davenda_auth::ExplainDecision::Allow,
+        options: davenda_auth::ExplainOptions::default(),
+        trace: davenda_auth::ExplainTrace::Allowed(davenda_auth::AllowedExplanation {
+            steps: vec![davenda_auth::ExplainStep::Start {
+                node: davenda_auth::ExplainedNode {
+                    object: resource.clone(),
+                    relation: None,
+                },
+            }],
+        }),
+    };
+    let explainer = StaticLiveAuthExplainer::new(explanation.clone());
+    let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
+        subject.clone(),
+        Capability::AdminAuditRead,
+        davenda_auth::Entity::admin_module("showcase-events"),
+    ));
+    let server = HttpServerHost::new_with_authorizer_and_explainer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        authorizer,
+        Arc::new(explainer.clone()),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let response = server
+        .privileged_router()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/diagnostics/auth/explain")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "subject": "user:alice",
+                        "capability": "cms.page.read",
+                        "resource": "page:homepage",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["tenant_id"], serde_json::json!(101));
+    assert_eq!(payload["subject"], serde_json::json!("user:alice"));
+    assert_eq!(payload["decision"], serde_json::json!("allow"));
+    let requests = explainer.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].subject,
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("alice"))
+    );
+    assert_eq!(requests[0].capability, Capability::CmsPageRead);
+    assert_eq!(requests[0].object, davenda_auth::Entity::page("homepage"));
+    assert!(requests[0].options.cycle_protection);
+}
+
 #[test]
 fn runtime_plan_selects_local_sqlite_metadata_audit_backend_in_single_node_mode() {
     let plan = RuntimeBuilder::new(

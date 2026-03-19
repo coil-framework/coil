@@ -541,12 +541,33 @@ fn execution_session_wraps_data_access_in_a_module_owned_contract() {
     assert!(matches!(
         execution.result,
         HostServiceResult::Data(DataServiceExecution {
+            request: DataServiceRequest::Read { contract },
             summary,
             ..
-        }) if summary.contains("module=events.waitlist")
-            && summary.contains("handler=waitlist-page")
-            && summary.contains("resource=events.waitlist")
+        }) if contract.owner_extension_id == "events.waitlist"
+            && contract.owner_handler_id == "waitlist-page"
+            && contract.repository.id == "events.waitlist"
+            && matches!(contract.repository.kind, ModuleDataRepositoryKind::Owned)
+            && summary.contains("repository=events.waitlist")
+            && summary.contains("repository_kind=owned")
+            && summary.contains("access=read")
     ));
+}
+
+#[test]
+fn module_data_contract_carries_a_typed_repository_binding() {
+    let repository = ModuleDataRepository::shared("cms.pages").unwrap();
+    let contract = ModuleDataContract::with_repository(
+        "cms.pages",
+        "page-reader",
+        repository.clone(),
+    )
+    .unwrap();
+
+    assert_eq!(contract.repository_id(), "cms.pages");
+    assert_eq!(contract.resource, "cms.pages");
+    assert_eq!(contract.repository, repository);
+    assert!(contract.summary("read", 7).contains("repository_kind=shared"));
 }
 
 #[test]

@@ -300,14 +300,8 @@ fn data_summary_for_request(
     sequence: u64,
 ) -> String {
     match request {
-        DataServiceRequest::Read { contract } => format!(
-            "module={} handler={} resource={} access=read sequence={sequence}",
-            contract.owner_extension_id, contract.owner_handler_id, contract.resource,
-        ),
-        DataServiceRequest::Write { contract } => format!(
-            "module={} handler={} resource={} access=write sequence={sequence}",
-            contract.owner_extension_id, contract.owner_handler_id, contract.resource,
-        ),
+        DataServiceRequest::Read { contract } => contract.summary("read", sequence),
+        DataServiceRequest::Write { contract } => contract.summary("write", sequence),
     }
 }
 

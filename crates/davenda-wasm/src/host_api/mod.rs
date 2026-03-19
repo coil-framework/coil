@@ -1,32 +1,8 @@
+mod data_contract;
+
+pub use data_contract::*;
+
 use crate::grants::{HostCapabilityGrant, MetadataGrant, StorageClassGrant};
-use crate::validation::validate_token;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleDataContract {
-    pub owner_extension_id: String,
-    pub owner_handler_id: String,
-    pub resource: String,
-}
-
-impl ModuleDataContract {
-    pub fn new(
-        owner_extension_id: impl Into<String>,
-        owner_handler_id: impl Into<String>,
-        resource: impl Into<String>,
-    ) -> Result<Self, crate::error::WasmModelError> {
-        Ok(Self {
-            owner_extension_id: validate_token(
-                "data_contract_owner_extension_id",
-                owner_extension_id.into(),
-            )?,
-            owner_handler_id: validate_token(
-                "data_contract_owner_handler_id",
-                owner_handler_id.into(),
-            )?,
-            resource: validate_token("data_contract_resource", resource.into())?,
-        })
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostServiceDomain {

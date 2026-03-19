@@ -207,17 +207,10 @@ impl DistributedCacheClient {
         }
     }
 
+    #[cfg(test)]
     pub fn emulated_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
-        #[cfg(test)]
-        {
-            let _ = kind;
-            Arc::new(EmulatedDistributedCacheRuntime::new())
-        }
-
-        #[cfg(not(test))]
-        {
-            shared::persistent_runtime(kind, shared::default_namespace("cache", kind))
-        }
+        let _ = kind;
+        Arc::new(EmulatedDistributedCacheRuntime::new())
     }
 
     #[allow(dead_code)]

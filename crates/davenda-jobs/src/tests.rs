@@ -558,6 +558,49 @@ fn persistent_shared_runtime_shares_state_across_independent_coordinators() {
 }
 
 #[test]
+fn persistent_shared_runtime_isolated_across_namespaces() {
+    let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+    let left_runtime =
+        JobsBackendAdapter::persistent_shared_runtime(&runtime, persistent_namespace("jobs-left"));
+    let right_runtime =
+        JobsBackendAdapter::persistent_shared_runtime(&runtime, persistent_namespace("jobs-right"));
+    let left_adapter = JobsBackendAdapter::with_shared_runtime(
+        runtime.backend,
+        runtime.topology.clone(),
+        left_runtime,
+    );
+    let right_adapter = JobsBackendAdapter::with_shared_runtime(
+        runtime.backend,
+        runtime.topology.clone(),
+        right_runtime,
+    );
+    assert!(left_adapter.is_shared());
+    assert!(right_adapter.is_shared());
+    let mut left = JobsCoordinator::with_backend(runtime.clone(), left_adapter);
+    let mut right = JobsCoordinator::with_backend(runtime.clone(), right_adapter);
+
+    left.enqueue(
+        JobSpec::new(
+            JobId::new("job-isolated").unwrap(),
+            JobName::new("isolated-work").unwrap(),
+            runtime.describe().work_queue.clone(),
+            "isolated shared backend work item",
+        )
+        .unwrap()
+        .with_idempotency_key(IdempotencyKey::new("isolated-work:v1").unwrap()),
+        JobInstant::from_unix_seconds(10),
+    )
+    .unwrap();
+
+    right.refresh();
+    assert_eq!(right.ready_jobs().len(), 0);
+
+    left.refresh();
+    assert_eq!(left.ready_jobs().len(), 1);
+    assert_eq!(left.ready_jobs()[0].spec.job_id.as_str(), "job-isolated");
+}
+
+#[test]
 fn distributed_coordinators_share_backend_when_using_an_explicit_shared_runtime() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
     let shared_runtime = Arc::new(SharedJobsRuntimeHarness::new(

@@ -582,6 +582,77 @@ fn persistent_shared_cache_runtime_shares_state_across_independent_clients() {
 }
 
 #[test]
+fn persistent_shared_cache_runtime_isolated_across_namespaces() {
+    let topology = CacheTopology::with_redis();
+    let planner = CachePlanner::new(topology);
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:isolated",
+                HttpCachePolicy::new(
+                    CacheScope::public()
+                        .with_site("main")
+                        .unwrap()
+                        .with_locale("en-GB")
+                        .unwrap(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public()
+                        .with_site("main")
+                        .unwrap()
+                        .with_locale("en-GB")
+                        .unwrap(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    let left_runtime = DistributedCacheClient::persistent_shared_runtime(
+        CacheBackendKind::Redis,
+        persistent_namespace("cache-left"),
+    );
+    let right_runtime = DistributedCacheClient::persistent_shared_runtime(
+        CacheBackendKind::Redis,
+        persistent_namespace("cache-right"),
+    );
+    let left_adapter = CacheBackendAdapter::with_shared_runtime(topology, left_runtime);
+    let right_adapter = CacheBackendAdapter::with_shared_runtime(topology, right_runtime);
+    let mut left = CacheRuntime::with_backend(topology, left_adapter);
+    let mut right = CacheRuntime::with_backend(topology, right_adapter);
+
+    left.insert(
+        plan.application().unwrap(),
+        "<html>left</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let left_lookup = left.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+    let right_lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+
+    assert_eq!(left_lookup.state, CacheLookupState::Fresh);
+    assert_eq!(right_lookup.state, CacheLookupState::Miss);
+    assert!(left.backend_is_shared());
+    assert!(right.backend_is_shared());
+}
+
+#[test]
 fn distributed_planner_local_runtimes_do_not_share_state_without_explicit_client_wiring() {
     let planner = CachePlanner::new(CacheTopology::with_valkey());
     let mut left = planner.local_for_testing();

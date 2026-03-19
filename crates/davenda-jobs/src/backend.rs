@@ -226,16 +226,9 @@ impl JobsBackendAdapter {
         Self::new(backend, queue_topology, runtime)
     }
 
+    #[cfg(test)]
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-        #[cfg(test)]
-        {
-            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
-        }
-
-        #[cfg(not(test))]
-        {
-            shared::persistent_runtime(runtime, shared::default_namespace(runtime))
-        }
+        Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
     }
 
     #[allow(dead_code)]
@@ -363,6 +356,7 @@ struct JobsBackendState {
 }
 
 impl JobsBackendState {
+    #[cfg(test)]
     fn new(runtime: JobsRuntime) -> Self {
         Self {
             runtime,
@@ -370,6 +364,7 @@ impl JobsBackendState {
         }
     }
 
+    #[cfg(test)]
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         self.snapshot.clone()
     }

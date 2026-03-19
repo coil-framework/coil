@@ -24,6 +24,36 @@ fn public_asset_policies_are_public_delivery_eligible() {
 }
 
 #[test]
+fn public_delivery_invariant_is_centralized_on_storage_plans() {
+    let planner = StoragePlanner::from_config(&test_config());
+    let plan = planner
+        .plan_write(
+            StoragePlanRequest::new("uploads/catalog/item.jpg")
+                .with_storage_class(davenda_config::StorageClass::PublicUpload),
+        )
+        .expect("public upload plan");
+
+    assert!(plan.public_delivery_eligible());
+    assert_eq!(plan.ensure_public_delivery_allowed(), Ok(()));
+
+    let private_plan = planner
+        .plan_write(
+            StoragePlanRequest::new("secure/reports/march.csv")
+                .with_storage_class(davenda_config::StorageClass::PrivateShared),
+        )
+        .expect("private upload plan");
+
+    assert!(!private_plan.public_delivery_eligible());
+    assert_eq!(
+        private_plan.ensure_public_delivery_allowed(),
+        Err(StoragePlanningError::PublicDeliveryNotEligible {
+            logical_path: "secure/reports/march.csv".to_string(),
+            policy: StoragePolicy::private_shared(),
+        })
+    );
+}
+
+#[test]
 fn resolves_most_specific_path_policy() {
     let policies = StoragePolicySet::default()
         .with_rule(

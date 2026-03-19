@@ -159,15 +159,18 @@ pub fn public_delivery_plan(
     context: &DeliveryContext<'_>,
     immutable: bool,
 ) -> Result<AssetDeliveryPlan, AssetModelError> {
-    if storage_plan.policy.delivery_mode != DeliveryMode::PublicCdn {
-        return Err(AssetModelError::PublicDeliveryRequiresPublicCdn {
-            asset_id: revision_id
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| storage_plan.logical_path.clone()),
-            delivery_mode: storage_plan.policy.delivery_mode,
-        });
-    }
+    storage_plan.ensure_public_delivery_allowed().map_err(|error| match error {
+        davenda_storage::StoragePlanningError::PublicDeliveryNotEligible { policy, .. } => {
+            AssetModelError::PublicDeliveryRequiresPublicCdn {
+                asset_id: revision_id
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| storage_plan.logical_path.clone()),
+                delivery_mode: policy.delivery_mode,
+            }
+        }
+        other => AssetModelError::Storage(other),
+    })?;
 
     Ok(AssetDeliveryPlan {
         asset_kind,

@@ -245,7 +245,7 @@ impl ManagedAsset {
             && self
                 .publication
                 .live_revision()
-                .is_some_and(|revision| revision.storage_plan().policy.is_public_delivery_eligible())
+                .is_some_and(|revision| revision.storage_plan().public_delivery_eligible())
         {
             vec![DefaultTupleUpdate::Write(public_tuple)]
         } else {

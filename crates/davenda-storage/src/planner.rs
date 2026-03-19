@@ -70,6 +70,21 @@ impl StoragePlan {
             .iter()
             .find(|target| target.kind == WriteTargetKind::Primary)
     }
+
+    pub fn ensure_public_delivery_allowed(&self) -> Result<(), StoragePlanningError> {
+        if self.policy.is_public_delivery_eligible() {
+            Ok(())
+        } else {
+            Err(StoragePlanningError::PublicDeliveryNotEligible {
+                logical_path: self.logical_path.clone(),
+                policy: self.policy,
+            })
+        }
+    }
+
+    pub const fn public_delivery_eligible(&self) -> bool {
+        self.policy.is_public_delivery_eligible()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +198,13 @@ impl StoragePlanner {
 pub enum StoragePlanningError {
     #[error(transparent)]
     Policy(#[from] StoragePolicyError),
+    #[error(
+        "storage plan for `{logical_path}` is not eligible for public delivery with policy {policy:?}"
+    )]
+    PublicDeliveryNotEligible {
+        logical_path: String,
+        policy: StoragePolicy,
+    },
     #[error(
         "storage plan for `{logical_path}` requires object storage but no object-store backend is configured for policy {policy:?}"
     )]

@@ -48,7 +48,7 @@ pub struct WriteTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoragePlanWarning {
-    LocalOnlyBreaksMultiNode,
+    LocalOnlyRequiresSingleNodeDeployment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +149,15 @@ impl StoragePlanner {
         let local_path = match policy.sync_mode {
             SyncMode::ObjectStore => None,
             SyncMode::LocalOnly => {
-                warnings.push(StoragePlanWarning::LocalOnlyBreaksMultiNode);
+                if !self.topology.allows_local_only() {
+                    return Err(StoragePlanningError::LocalOnlyNotAllowedForDeployment {
+                        logical_path,
+                        policy,
+                        deployment: self.topology.deployment,
+                    });
+                }
+
+                warnings.push(StoragePlanWarning::LocalOnlyRequiresSingleNodeDeployment);
                 Some(join_local_path(
                     &self.topology.local_root,
                     resolved.local_subdir.as_deref(),
@@ -211,5 +219,13 @@ pub enum StoragePlanningError {
     ObjectStoreRequired {
         logical_path: String,
         policy: StoragePolicy,
+    },
+    #[error(
+        "storage plan for `{logical_path}` with policy {policy:?} is not allowed for deployment {deployment:?}"
+    )]
+    LocalOnlyNotAllowedForDeployment {
+        logical_path: String,
+        policy: StoragePolicy,
+        deployment: davenda_config::StorageDeployment,
     },
 }

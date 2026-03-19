@@ -73,6 +73,10 @@ pub enum ConfigValidationError {
     InvalidWasmTimeLimit,
     #[error("storage.local_root must not be empty")]
     EmptyLocalStorageRoot,
+    #[error(
+        "storage.default_class={storage_class:?} requires storage.deployment=single_node because local-only storage is not permitted in distributed deployments"
+    )]
+    LocalOnlyStorageRequiresSingleNodeDeployment { storage_class: StorageClass },
     #[error("database.schema must not be empty")]
     EmptyDatabaseSchema,
     #[error("database.migrations_table must not be empty")]
@@ -233,6 +237,16 @@ impl PlatformConfig {
 
         if self.storage.local_root.trim().is_empty() {
             errors.push(ConfigValidationError::EmptyLocalStorageRoot);
+        }
+
+        if matches!(self.storage.default_class, StorageClass::LocalOnlySensitive)
+            && self.storage.deployment != StorageDeployment::SingleNode
+        {
+            errors.push(
+                ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment {
+                    storage_class: self.storage.default_class,
+                },
+            );
         }
 
         if self.database.schema.trim().is_empty() {

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use davenda_config::{ObjectStoreKind, PlatformConfig, StorageClass};
+use davenda_config::{ObjectStoreKind, PlatformConfig, StorageClass, StorageDeployment};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -230,6 +230,7 @@ impl ObjectStoreTarget {
 pub struct StorageTopology {
     pub local_root: String,
     pub default_class: StorageClass,
+    pub deployment: StorageDeployment,
     pub object_store: Option<ObjectStoreTarget>,
 }
 
@@ -238,6 +239,7 @@ impl StorageTopology {
         Self {
             local_root: trim_trailing_separator(&config.storage.local_root),
             default_class: config.storage.default_class,
+            deployment: config.storage.deployment,
             object_store: config
                 .storage
                 .object_store
@@ -247,6 +249,10 @@ impl StorageTopology {
 
     pub fn supports_object_store(&self) -> bool {
         self.object_store.is_some()
+    }
+
+    pub const fn allows_local_only(&self) -> bool {
+        matches!(self.deployment, StorageDeployment::SingleNode)
     }
 }
 

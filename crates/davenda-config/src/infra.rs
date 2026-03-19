@@ -81,11 +81,20 @@ pub enum TlsProvider {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StorageConfig {
     pub default_class: StorageClass,
+    #[serde(default = "default_storage_deployment")]
+    pub deployment: StorageDeployment,
     #[serde(default)]
     pub object_store: Option<ObjectStoreKind>,
     pub local_root: String,
     #[serde(default)]
     pub object_store_secret: Option<SecretRef>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageDeployment {
+    Distributed,
+    SingleNode,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -182,4 +191,8 @@ fn default_max_database_connections() -> u16 {
 
 fn default_statement_timeout_secs() -> u64 {
     30
+}
+
+fn default_storage_deployment() -> StorageDeployment {
+    StorageDeployment::Distributed
 }

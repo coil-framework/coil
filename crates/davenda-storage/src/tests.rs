@@ -155,7 +155,31 @@ fn local_only_override_keeps_sensitive_files_on_server() {
     assert_eq!(plan.object_key, None);
     assert_eq!(
         plan.warnings,
-        vec![StoragePlanWarning::LocalOnlyBreaksMultiNode]
+        vec![StoragePlanWarning::LocalOnlyRequiresSingleNodeDeployment]
+    );
+}
+
+#[test]
+fn local_only_override_is_rejected_for_distributed_deployments() {
+    let mut config = test_config();
+    config.storage.deployment = davenda_config::StorageDeployment::Distributed;
+    let planner = StoragePlanner::from_config(&config);
+
+    let error = planner
+        .plan_write(
+            StoragePlanRequest::new("secure/reports/march.csv")
+                .with_storage_class(davenda_config::StorageClass::PrivateShared)
+                .with_override(StoragePolicyOverride::force_local_only()),
+        )
+        .expect_err("local-only override should be rejected on distributed deployments");
+
+    assert_eq!(
+        error,
+        StoragePlanningError::LocalOnlyNotAllowedForDeployment {
+            logical_path: "secure/reports/march.csv".to_string(),
+            policy: StoragePolicy::local_only_sensitive(),
+            deployment: davenda_config::StorageDeployment::Distributed,
+        }
     );
 }
 
@@ -236,6 +260,7 @@ mode = "external"
 
 [storage]
 default_class = "private_shared"
+deployment = "single_node"
 object_store = "s3"
 local_root = "var/davenda/storage"
 

@@ -15,7 +15,7 @@ pub use http::{
 pub use infra::{
     AcmeChallenge, AssetsConfig, CacheConfig, CacheL1, DatabaseConfig, DatabaseDriver,
     DistributedCache, JobBackend, JobsConfig, ObjectStoreKind, ObservabilityConfig, StorageClass,
-    StorageConfig, TlsConfig, TlsMode, TlsProvider,
+    StorageConfig, StorageDeployment, TlsConfig, TlsMode, TlsProvider,
 };
 pub use platform::{
     AuthConfig, ConfigError, I18nConfig, ModulesConfig, PlatformConfig, SeoConfig, WasmConfig,

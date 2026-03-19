@@ -3,57 +3,13 @@ use std::time::Duration;
 use davenda_commerce::{EntitlementKey, OrderId};
 use davenda_jobs::RetryPolicy;
 
-use crate::error::MembershipModelError;
-use crate::model::{
-    BillingInterval, MemberAccountId, MembershipInstant, MembershipTier, MembershipTierId,
-    SubscriptionEvent, SubscriptionEventKind, SubscriptionId, SubscriptionStatus, TierChangeKind,
+use crate::{
+    BillingInterval, EntitlementStatus, MemberAccountId, MembershipInstant, MembershipModelError,
+    MembershipTier, MembershipTierId, SubscriptionEvent, SubscriptionEventKind, SubscriptionId,
+    SubscriptionStatus, TierChangeKind,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntitlementStatus {
-    Active,
-    Revoked,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntitlementGrant {
-    pub key: EntitlementKey,
-    pub subscription_id: SubscriptionId,
-    pub active_from: MembershipInstant,
-    pub active_until: MembershipInstant,
-    pub status: EntitlementStatus,
-    pub revoked_at: Option<MembershipInstant>,
-}
-
-impl EntitlementGrant {
-    fn active(
-        key: EntitlementKey,
-        subscription_id: SubscriptionId,
-        active_from: MembershipInstant,
-        active_until: MembershipInstant,
-    ) -> Self {
-        Self {
-            key,
-            subscription_id,
-            active_from,
-            active_until,
-            status: EntitlementStatus::Active,
-            revoked_at: None,
-        }
-    }
-
-    fn revoke(&mut self, revoked_at: MembershipInstant) {
-        self.status = EntitlementStatus::Revoked;
-        self.active_until = revoked_at;
-        self.revoked_at = Some(revoked_at);
-    }
-
-    pub fn is_active_at(&self, now: MembershipInstant) -> bool {
-        self.status == EntitlementStatus::Active
-            && now >= self.active_from
-            && now < self.active_until
-    }
-}
+use super::EntitlementGrant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subscription {

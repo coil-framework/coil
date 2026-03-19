@@ -1,18 +1,21 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use davenda_wasm::{MetadataExecution, MetadataGrant};
 
 use super::super::*;
 
 mod local;
+mod sequence;
 mod shared;
 
 #[derive(Debug, Clone)]
 pub(super) struct RuntimeMetadataBackend {
     backend: MetadataAuditBackend,
-    write_sequence: Arc<AtomicU64>,
+    /// Monotonic local write sequence for request-path observability.
+    ///
+    /// This is intentionally separate from the persisted audit table count so
+    /// metadata writes never need a read-after-write count query.
+    write_sequence: sequence::MetadataWriteSequence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +46,7 @@ impl RuntimeMetadataBackend {
 
         Self {
             backend,
-            write_sequence: Arc::new(AtomicU64::new(0)),
+            write_sequence: sequence::MetadataWriteSequence::new(),
         }
     }
 
@@ -54,7 +57,7 @@ impl RuntimeMetadataBackend {
                 root.into(),
                 namespace.into(),
             )),
-            write_sequence: Arc::new(AtomicU64::new(0)),
+            write_sequence: sequence::MetadataWriteSequence::new(),
         }
     }
 
@@ -63,14 +66,17 @@ impl RuntimeMetadataBackend {
         kind: MetadataGrant,
         context: &InvocationContext,
     ) -> Result<MetadataExecution, String> {
+        // Append the audit row first, then derive a local write sequence for
+        // the execution result. The persisted table is only counted in
+        // snapshot() for observability and reporting.
         let record = MetadataAuditRecord::from_context(kind, context);
         self.backend.insert(&record)?;
-        let journal_entries = self.write_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        let journal_entries = self.write_sequence.next();
 
         Ok(MetadataExecution {
             kind,
             recorded: true,
-            journal_entries: journal_entries as usize,
+            journal_entries,
         })
     }
 
@@ -79,7 +85,7 @@ impl RuntimeMetadataBackend {
             backend: self.backend.kind(),
             location: self.backend.location_label(),
             path: self.backend.path().map(Path::to_path_buf),
-            entry_count: self.backend.count()?,
+            entry_count: self.backend.entry_count()?,
             recent_records: self.backend.recent(limit)?,
         })
     }
@@ -172,7 +178,7 @@ impl MetadataAuditBackend {
         }
     }
 
-    fn count(&self) -> Result<usize, String> {
+    fn entry_count(&self) -> Result<usize, String> {
         match self {
             Self::Local(store) => store.count(),
             Self::Shared(store) => store.count(),

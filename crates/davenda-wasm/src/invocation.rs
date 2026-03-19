@@ -363,6 +363,13 @@ impl InvocationPlan {
         WasmExecutionSession::new(self)
     }
 
+    pub fn begin_synthetic_execution(self) -> WasmExecutionSession {
+        WasmExecutionSession::with_executor(
+            self,
+            Arc::new(crate::host_services::SyntheticHostServiceExecutor::default()),
+        )
+    }
+
     pub fn begin_execution_with_executor(
         self,
         executor: Arc<dyn HostServiceExecutor>,

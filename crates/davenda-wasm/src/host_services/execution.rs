@@ -32,12 +32,42 @@ pub struct AuthServiceExecution {
     pub allowed: bool,
     pub checks_seen: u32,
     pub principal_id: Option<String>,
+    pub details: AuthServiceDetails,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthServiceDetails {
+    Check {
+        capability: String,
+        object: String,
+        decision: bool,
+    },
+    List {
+        capability: String,
+        namespace: String,
+        object_ids: Vec<String>,
+    },
+    Lookup {
+        capability: String,
+        object: String,
+        relation: String,
+        subject_namespace: String,
+        subject_ids: Vec<String>,
+    },
+    TupleWrite {
+        capability: String,
+        object: String,
+        relation: String,
+        subject: String,
+        updates: Vec<String>,
+        written: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataServiceExecution {
     pub request: DataServiceRequest,
-    pub statement: String,
+    pub summary: String,
     pub sequence: u64,
 }
 
@@ -91,6 +121,23 @@ pub trait HostServiceExecutor: std::fmt::Debug + Send + Sync {
     ) -> Result<HostServiceExecution, crate::error::WasmModelError>;
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct DeniedHostServiceExecutor;
+
+impl HostServiceExecutor for DeniedHostServiceExecutor {
+    fn execute(
+        &self,
+        call: &HostServiceCall,
+        _context: &InvocationContext,
+    ) -> Result<HostServiceExecution, crate::error::WasmModelError> {
+        Err(crate::error::WasmModelError::HostServiceUnavailable {
+            handler_id: "unknown".to_string(),
+            domain: call.domain(),
+            reason: "no host service executor configured for this session".to_string(),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SyntheticHostServiceExecutor {
     state: Arc<Mutex<SyntheticHostServiceState>>,
@@ -136,18 +183,21 @@ impl SyntheticHostServiceState {
         let result = match &call.request {
             HostServiceRequest::Auth(request) => {
                 self.auth_checks = self.auth_checks.saturating_add(1);
+                let principal_id = context.principal.id.clone();
+                let details = synthetic_auth_details(request, context, self.auth_checks);
                 HostServiceResult::Auth(AuthServiceExecution {
                     request: request.clone(),
                     allowed: true,
                     checks_seen: self.auth_checks,
-                    principal_id: context.principal.id.clone(),
+                    principal_id,
+                    details,
                 })
             }
             HostServiceRequest::Data(request) => {
                 self.data_sequences = self.data_sequences.saturating_add(1);
                 HostServiceResult::Data(DataServiceExecution {
                     request: request.clone(),
-                    statement: data_statement_for_request(request, context, self.data_sequences),
+                    summary: data_summary_for_request(request, context, self.data_sequences),
                     sequence: self.data_sequences,
                 })
             }
@@ -213,7 +263,7 @@ pub struct HostServiceJournal {
 
 impl HostServiceJournal {
     pub fn new() -> Self {
-        Self::with_executor(Arc::new(SyntheticHostServiceExecutor::default()))
+        Self::with_executor(Arc::new(DeniedHostServiceExecutor::default()))
     }
 
     pub fn with_executor(executor: Arc<dyn HostServiceExecutor>) -> Self {
@@ -244,19 +294,23 @@ impl Default for HostServiceJournal {
     }
 }
 
-fn data_statement_for_request(
+fn data_summary_for_request(
     request: &DataServiceRequest,
-    context: &InvocationContext,
+    _context: &InvocationContext,
     sequence: u64,
 ) -> String {
     match request {
-        DataServiceRequest::Read { resource } => format!(
-            "SELECT * FROM {resource} WHERE tenant = '{}' AND sequence = {sequence}",
-            context.customer_app.app_id
+        DataServiceRequest::Read { contract } => format!(
+            "module={} handler={} resource={} access=read sequence={sequence}",
+            contract.owner_extension_id,
+            contract.owner_handler_id,
+            contract.resource,
         ),
-        DataServiceRequest::Write { resource } => format!(
-            "UPSERT INTO {resource} (tenant, sequence) VALUES ('{}', {sequence})",
-            context.customer_app.app_id
+        DataServiceRequest::Write { contract } => format!(
+            "module={} handler={} resource={} access=write sequence={sequence}",
+            contract.owner_extension_id,
+            contract.owner_handler_id,
+            contract.resource,
         ),
     }
 }
@@ -325,4 +379,49 @@ fn cache_key_for_request(
         "cache-intent:{}:{}:{}",
         context.customer_app.app_id, context.trace.trace_id, cache_intent_count
     )
+}
+
+fn synthetic_auth_details(
+    request: &AuthServiceRequest,
+    context: &InvocationContext,
+    sequence: u32,
+) -> AuthServiceDetails {
+    let principal = context
+        .principal
+        .id
+        .clone()
+        .unwrap_or_else(|| "anonymous".to_string());
+    let tenant = context
+        .customer_app
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| context.customer_app.app_id.clone());
+
+    match request {
+        AuthServiceRequest::Check => AuthServiceDetails::Check {
+            capability: "system.config.read".to_string(),
+            object: format!("tenant:{tenant}"),
+            decision: true,
+        },
+        AuthServiceRequest::List => AuthServiceDetails::List {
+            capability: "cms.page.read".to_string(),
+            namespace: "page".to_string(),
+            object_ids: vec![format!("synthetic-page-{sequence}")],
+        },
+        AuthServiceRequest::Lookup => AuthServiceDetails::Lookup {
+            capability: "system.module.manage".to_string(),
+            object: format!("tenant:{tenant}"),
+            relation: "manage".to_string(),
+            subject_namespace: "user".to_string(),
+            subject_ids: vec![principal],
+        },
+        AuthServiceRequest::TupleWrite => AuthServiceDetails::TupleWrite {
+            capability: "system.config.write".to_string(),
+            object: format!("tenant:{tenant}"),
+            relation: "manage".to_string(),
+            subject: principal,
+            updates: vec![format!("tenant:{tenant}#manage")],
+            written: 1,
+        },
+    }
 }

@@ -388,7 +388,7 @@ fn execution_session_enforces_host_grants_and_resource_limits() {
     )
     .unwrap();
 
-    let mut session = plan.begin_execution();
+    let mut session = plan.begin_synthetic_execution();
     session.record_host_call(HostCall::AuthCheck).unwrap();
     session
         .record_host_call(HostCall::OutboundHttp {
@@ -444,6 +444,96 @@ fn execution_session_enforces_host_grants_and_resource_limits() {
 }
 
 #[test]
+fn execution_session_defaults_to_a_denied_host_executor() {
+    let manifest = page_manifest();
+    let plan = InstalledExtension::install(
+        manifest,
+        ExtensionInstallation::new(
+            "customer-app",
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .prepare_invocation(
+        &HandlerId::new("waitlist-page").unwrap(),
+        InvocationContext::new(
+            CustomerAppContext::new("customer-app").unwrap(),
+            PrincipalRef::user("user-42").unwrap(),
+            TraceContext::new("trace-default-deny").unwrap(),
+            InvocationInput::Page(
+                PageInvocation::new("/events/waitlist", HttpMethod::Get).unwrap(),
+            ),
+        ),
+    )
+    .unwrap();
+
+    let error = plan
+        .begin_execution()
+        .record_host_call(HostCall::AuthCheck)
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        WasmModelError::HostServiceUnavailable {
+            domain: HostServiceDomain::Auth,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn execution_session_wraps_data_access_in_a_module_owned_contract() {
+    let manifest = page_manifest();
+    let plan = InstalledExtension::install(
+        manifest,
+        ExtensionInstallation::new(
+            "customer-app",
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::DataRead {
+                    resource: "events.waitlist".to_string(),
+                }]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .prepare_invocation(
+        &HandlerId::new("waitlist-page").unwrap(),
+        InvocationContext::new(
+            CustomerAppContext::new("customer-app").unwrap(),
+            PrincipalRef::user("user-42").unwrap(),
+            TraceContext::new("trace-data-contract").unwrap(),
+            InvocationInput::Page(
+                PageInvocation::new("/events/waitlist", HttpMethod::Get).unwrap(),
+            ),
+        ),
+    )
+    .unwrap();
+
+    let mut session = plan.begin_synthetic_execution();
+    let execution = session
+        .execute_host_call(HostCall::DataRead {
+            resource: "events.waitlist".to_string(),
+        })
+        .unwrap();
+
+    assert!(matches!(
+        execution.result,
+        HostServiceResult::Data(DataServiceExecution {
+            summary,
+            ..
+        }) if summary.contains("module=events.waitlist")
+            && summary.contains("handler=waitlist-page")
+            && summary.contains("resource=events.waitlist")
+    ));
+}
+
+#[test]
 fn execution_session_rejects_invalid_outcomes_and_runtime_overruns() {
     let manifest = ExtensionManifest::new(
         ExtensionId::new("jobs.reconcile").unwrap(),
@@ -489,7 +579,7 @@ fn execution_session_rejects_invalid_outcomes_and_runtime_overruns() {
 
     let invalid = plan
         .clone()
-        .begin_execution()
+        .begin_synthetic_execution()
         .finish(Duration::from_secs(1), InvocationOutcome::ApiJson, None)
         .unwrap_err();
     assert_eq!(
@@ -502,7 +592,7 @@ fn execution_session_rejects_invalid_outcomes_and_runtime_overruns() {
     );
 
     let over_budget = plan
-        .begin_execution()
+        .begin_synthetic_execution()
         .finish(
             Duration::from_secs(31),
             InvocationOutcome::JobCompleted,
@@ -575,7 +665,7 @@ fn wasm_engine_executes_guest_handlers_against_granted_slots() {
         .unwrap();
 
     let receipt = engine
-        .execute_session(&module, plan.begin_execution(), "exports.page_waitlist")
+        .execute_session(&module, plan.begin_synthetic_execution(), "exports.page_waitlist")
         .unwrap();
     assert_eq!(receipt.outcome, InvocationOutcome::Page);
     assert_eq!(receipt.point, ExtensionPointKind::Page);
@@ -624,7 +714,7 @@ fn wasm_engine_collects_typed_return_payloads_from_guest_memory() {
         .unwrap();
 
     let receipt = engine
-        .execute_session(&module, plan.begin_execution(), "exports.page_waitlist")
+        .execute_session(&module, plan.begin_synthetic_execution(), "exports.page_waitlist")
         .unwrap();
 
     assert_eq!(receipt.outcome, InvocationOutcome::Page);
@@ -685,7 +775,7 @@ fn wasm_engine_rejects_invalid_capability_slots() {
         .unwrap();
 
     let error = engine
-        .execute_session(&module, plan.begin_execution(), "exports.page_waitlist")
+        .execute_session(&module, plan.begin_synthetic_execution(), "exports.page_waitlist")
         .unwrap_err();
     assert_eq!(
         error,
@@ -738,7 +828,7 @@ fn execution_session_tracks_peak_concurrency() {
     )
     .unwrap();
 
-    let mut session = plan.begin_execution();
+    let mut session = plan.begin_synthetic_execution();
     session.reserve_concurrency(1).unwrap();
     session.reserve_concurrency(1).unwrap();
     let err = session.reserve_concurrency(1).unwrap_err();

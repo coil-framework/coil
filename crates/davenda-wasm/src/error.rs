@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::host_api::HostServiceDomain;
 use crate::grants::HostCapabilityGrant;
 use crate::ids::{ContractVersion, ExtensionPointKind, HttpMethod};
 use crate::invocation::PrincipalKind;
@@ -128,6 +129,11 @@ pub enum WasmModelError {
     HostGrantDenied {
         handler_id: String,
         grant: HostCapabilityGrant,
+    },
+    HostServiceUnavailable {
+        handler_id: String,
+        domain: HostServiceDomain,
+        reason: String,
     },
     ResourceLimitExceeded {
         handler_id: String,
@@ -340,6 +346,14 @@ impl fmt::Display for WasmModelError {
             Self::HostGrantDenied { handler_id, grant } => write!(
                 f,
                 "handler `{handler_id}` attempted host call `{grant}` without a granted capability"
+            ),
+            Self::HostServiceUnavailable {
+                handler_id,
+                domain,
+                reason,
+            } => write!(
+                f,
+                "handler `{handler_id}` cannot use `{domain:?}` host service: {reason}"
             ),
             Self::ResourceLimitExceeded { handler_id, field } => write!(
                 f,

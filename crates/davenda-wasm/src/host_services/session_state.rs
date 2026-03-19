@@ -5,7 +5,7 @@ use crate::error::WasmModelError;
 use crate::grants::HostCapabilityGrant;
 use crate::host_api::{
     AuthServiceRequest, CacheIntentServiceRequest, DataServiceRequest, HostServiceCall,
-    HostServiceRequest, RenderServiceRequest, StorageServiceRequest,
+    HostServiceRequest, ModuleDataContract, RenderServiceRequest, StorageServiceRequest,
 };
 use crate::host_services::{HostServiceExecution, HostServiceExecutor, HostServiceJournal};
 use crate::invocation::{
@@ -26,7 +26,7 @@ impl HostServiceSessionState {
     pub fn new(plan: InvocationPlan) -> Self {
         Self::with_executor(
             plan,
-            Arc::new(crate::host_services::SyntheticHostServiceExecutor::default()),
+            Arc::new(crate::host_services::DeniedHostServiceExecutor::default()),
         )
     }
 
@@ -78,7 +78,7 @@ impl HostServiceSessionState {
         }
 
         self.record_usage_for_call(&call)?;
-        let service_call = host_service_call_for_host_call(&call)?;
+        let service_call = host_service_call_for_host_call(&self.plan, &call)?;
         let execution = self
             .host_service_journal
             .execute(service_call, &self.plan.context)?;
@@ -212,13 +212,24 @@ impl HostServiceSessionState {
     }
 }
 
-fn host_service_call_for_host_call(call: &HostCall) -> Result<HostServiceCall, WasmModelError> {
+fn host_service_call_for_host_call(
+    plan: &InvocationPlan,
+    call: &HostCall,
+) -> Result<HostServiceCall, WasmModelError> {
     let request = match call {
         HostCall::DataRead { resource } => HostServiceRequest::Data(DataServiceRequest::Read {
-            resource: resource.clone(),
+            contract: ModuleDataContract::new(
+                plan.extension_id.to_string(),
+                plan.handler_id.to_string(),
+                resource.clone(),
+            )?,
         }),
         HostCall::DataWrite { resource } => HostServiceRequest::Data(DataServiceRequest::Write {
-            resource: resource.clone(),
+            contract: ModuleDataContract::new(
+                plan.extension_id.to_string(),
+                plan.handler_id.to_string(),
+                resource.clone(),
+            )?,
         }),
         HostCall::AuthCheck => HostServiceRequest::Auth(AuthServiceRequest::Check),
         HostCall::AuthList => HostServiceRequest::Auth(AuthServiceRequest::List),

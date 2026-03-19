@@ -5,11 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use davenda_config::StorageClass;
-use davenda_data::{
-    CompiledQuery, CompiledTransaction, DomainWrite, MutationAction, MutationSpec, PageRequest,
-    PublicationVisibility, QueryCacheScope, QueryContext, QueryField, QuerySpec, RepositorySpec,
-    TableName, TransactionIsolation, TransactionPlan,
-};
 use davenda_template::{
     AttributeNode, ElementNode, FragmentRenderRequest, Node, RenderModel, RenderValue,
     TemplateDefinition, TemplateName, TemplateRuntime, TemplateSelector,
@@ -18,8 +13,8 @@ use davenda_wasm::{
     AuthServiceExecution, AuthServiceRequest, CacheIntentExecution, CacheIntentServiceRequest,
     DataServiceExecution, DataServiceRequest, HostServiceCall, HostServiceExecution,
     HostServiceExecutor, HostServiceRequest, HostServiceResult, JobExecution, MetadataExecution,
-    NetworkExecution, RenderServiceExecution, RenderServiceRequest, SecretExecution,
-    StorageClassGrant, StorageServiceExecution, StorageServiceRequest,
+    ModuleDataContract, NetworkExecution, RenderServiceExecution, RenderServiceRequest,
+    SecretExecution, StorageClassGrant, StorageServiceExecution, StorageServiceRequest,
 };
 use thiserror::Error;
 
@@ -488,13 +483,13 @@ impl RuntimeHostServiceExecutor {
         context: &InvocationContext,
         request: &AuthServiceRequest,
     ) -> Result<HostServiceExecution, WasmModelError> {
-        let allowed = context.principal.validate().is_ok();
+        let allowed = false;
         Ok(HostServiceExecution {
             call: call.clone(),
             result: HostServiceResult::Auth(AuthServiceExecution {
                 request: request.clone(),
                 allowed,
-                checks_seen: 1,
+                checks_seen: 0,
                 principal_id: context.principal.id.clone(),
             }),
         })
@@ -507,27 +502,20 @@ impl RuntimeHostServiceExecutor {
         request: &DataServiceRequest,
     ) -> Result<HostServiceExecution, WasmModelError> {
         let result = match request {
-            DataServiceRequest::Read { resource } => {
-                let compiled = self.compile_data_read(resource, context)?;
-                HostServiceResult::Data(DataServiceExecution {
+            DataServiceRequest::Read { contract } => HostServiceResult::Data(
+                DataServiceExecution {
                     request: request.clone(),
-                    statement: compiled.sql,
-                    sequence: compiled.bind_values.len() as u64,
-                })
-            }
-            DataServiceRequest::Write { resource } => {
-                let compiled = self.compile_data_write(resource, context)?;
-                let statement = compiled
-                    .statements
-                    .first()
-                    .map(|statement| statement.sql.clone())
-                    .unwrap_or(compiled.commit_sql.clone());
-                HostServiceResult::Data(DataServiceExecution {
+                    summary: module_data_summary("read", contract, context),
+                    sequence: 1,
+                },
+            ),
+            DataServiceRequest::Write { contract } => HostServiceResult::Data(
+                DataServiceExecution {
                     request: request.clone(),
-                    statement,
-                    sequence: compiled.statements.len() as u64,
-                })
-            }
+                    summary: module_data_summary("write", contract, context),
+                    sequence: 1,
+                },
+            ),
         };
 
         Ok(HostServiceExecution {
@@ -664,69 +652,6 @@ impl RuntimeHostServiceExecutor {
         })
     }
 
-    fn compile_data_read(
-        &self,
-        resource: &str,
-        context: &InvocationContext,
-    ) -> Result<CompiledQuery, WasmModelError> {
-        let repository = runtime_repository_spec(resource, context)?;
-        let query = QuerySpec::new(
-            PageRequest::new(0, 1).map_err(|error| runtime_executor_error(context, error))?,
-            QueryContext {
-                locale: context.customer_app.locale.clone(),
-                principal_id: context.principal.id.clone(),
-                publication_visibility: PublicationVisibility::IncludeDrafts,
-                cache_scope: if context.principal.id.is_some() {
-                    QueryCacheScope::UserScoped
-                } else {
-                    QueryCacheScope::Public
-                },
-            },
-        );
-        self.plan
-            .data
-            .compile_query(&repository, &query)
-            .map_err(|error| runtime_executor_error(context, error))
-    }
-
-    fn compile_data_write(
-        &self,
-        resource: &str,
-        context: &InvocationContext,
-    ) -> Result<CompiledTransaction, WasmModelError> {
-        let transaction = TransactionPlan::new(
-            format!("wasm.{resource}.write"),
-            TransactionIsolation::ReadCommitted,
-        )
-        .map_err(|error| runtime_executor_error(context, error))?
-        .with_write(
-            DomainWrite::new(resource, "write")
-                .map_err(|error| runtime_executor_error(context, error))?,
-        );
-        let mutation = MutationSpec::new(
-            format!("wasm_{}", resource.replace(['.', ':', '/'], "_")),
-            MutationAction::Insert,
-        )
-        .map_err(|error| runtime_executor_error(context, error))?
-        .with_assignment("resource", resource.to_string())
-        .map_err(|error| runtime_executor_error(context, error))?
-        .with_assignment("customer_app", context.customer_app.app_id.clone())
-        .map_err(|error| runtime_executor_error(context, error))?
-        .with_assignment(
-            "principal",
-            context
-                .principal
-                .id
-                .clone()
-                .unwrap_or_else(|| "anonymous".to_string()),
-        )
-        .map_err(|error| runtime_executor_error(context, error))?;
-        self.plan
-            .data
-            .compile_transaction(&transaction, &[mutation])
-            .map_err(|error| runtime_executor_error(context, error))
-    }
-
     fn render_fragment(
         &self,
         request: &RenderServiceRequest,
@@ -853,36 +778,31 @@ impl HostServiceExecutor for RuntimeHostServiceExecutor {
     }
 }
 
-fn runtime_repository_spec(
-    resource: &str,
-    context: &InvocationContext,
-) -> Result<RepositorySpec, WasmModelError> {
-    let repository = RepositorySpec::new(
-        format!("wasm.{resource}"),
-        TableName::new(format!("wasm_{}", resource.replace(['.', ':', '/'], "_")))
-            .map_err(|error| runtime_executor_error(context, error))?,
-        vec![
-            QueryField::new("id").map_err(|error| runtime_executor_error(context, error))?,
-            QueryField::new("resource").map_err(|error| runtime_executor_error(context, error))?,
-            QueryField::new("locale").map_err(|error| runtime_executor_error(context, error))?,
-        ],
-    )
-    .map_err(|error| runtime_executor_error(context, error))?
-    .with_locale_field("locale")
-    .map_err(|error| runtime_executor_error(context, error))?
-    .with_filterable_field("resource")
-    .map_err(|error| runtime_executor_error(context, error))?
-    .with_sortable_field("resource")
-    .map_err(|error| runtime_executor_error(context, error))?;
-
-    Ok(repository)
-}
-
 fn runtime_executor_error(context: &InvocationContext, error: impl ToString) -> WasmModelError {
     WasmModelError::EngineTrap {
         handler_id: trace_id(context).to_string(),
         reason: error.to_string(),
     }
+}
+
+fn module_data_summary(
+    access: &str,
+    contract: &ModuleDataContract,
+    context: &InvocationContext,
+) -> String {
+    format!(
+        "module={} handler={} resource={} access={} app={} principal={}",
+        contract.owner_extension_id,
+        contract.owner_handler_id,
+        contract.resource,
+        access,
+        context.customer_app.app_id,
+        context
+            .principal
+            .id
+            .clone()
+            .unwrap_or_else(|| "anonymous".to_string())
+    )
 }
 
 fn trace_id(context: &InvocationContext) -> &str {

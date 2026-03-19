@@ -10,7 +10,7 @@ pub struct AuthExplainResult {
     pub explanation: CapabilityExplanation,
 }
 
-pub(crate) fn execute_auth_explain(
+pub(crate) fn execute_live_auth_explain(
     invocation: AuthExplainInvocation,
 ) -> Result<AuthExplainResult, CliRunError> {
     let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
@@ -19,11 +19,18 @@ pub(crate) fn execute_auth_explain(
             invocation.config_path.display()
         ))
     })?;
-    let backend = LiveAuthExplainBackend::from_config(&config)?;
-    execute_auth_explain_with_backend(&backend, invocation)
+    let backend = load_live_auth_explain_backend(&config)?;
+    execute_live_auth_explain_with_backend(&backend, invocation)
 }
 
-pub(crate) fn execute_auth_explain_with_backend<B: AuthExplainBackend>(
+fn load_live_auth_explain_backend(
+    config: &PlatformConfig,
+) -> Result<LiveAuthExplainBackend, CliRunError> {
+    LiveAuthExplainBackend::from_config(config)
+}
+
+#[cfg(test)]
+pub(crate) fn execute_live_auth_explain_with_backend<B: AuthExplainBackend>(
     backend: &B,
     invocation: AuthExplainInvocation,
 ) -> Result<AuthExplainResult, CliRunError> {
@@ -54,7 +61,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn execute_auth_explain_with_static_backend_returns_the_provided_explanation() {
+    fn execute_live_auth_explain_with_static_backend_returns_the_provided_explanation() {
         let package = DefaultAuthModelPackage::default();
         let subject = DefaultSubject::entity(Entity::user("alice"));
         let capability = Capability::CmsPageRead;
@@ -85,7 +92,7 @@ mod tests {
             options: ExplainOptions::default(),
         };
 
-        let result = execute_auth_explain_with_backend(&backend, invocation.clone()).unwrap();
+        let result = execute_live_auth_explain_with_backend(&backend, invocation.clone()).unwrap();
 
         assert_eq!(result.invocation, invocation);
         assert_eq!(result.explanation, explanation);

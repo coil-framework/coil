@@ -1,6 +1,6 @@
 use crate::CliModelError;
 use crate::cli::args::{CliInput, parse};
-use crate::cli::auth::execute_auth_explain;
+use crate::cli::auth::execute_live_auth_explain;
 use crate::cli::error::CliRunError;
 use crate::cli::render::render_auth_explain;
 use crate::registry::CliRuntime;
@@ -30,7 +30,8 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             output_mode,
             invocation,
         } => {
-            let result = execute_auth_explain(invocation)?;
+            // Auth explain is resolved from deployment config and must hit the live backend.
+            let result = execute_live_auth_explain(invocation)?;
             render_auth_explain(&result, output_mode)
         }
     }

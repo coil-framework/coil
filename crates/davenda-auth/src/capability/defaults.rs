@@ -126,7 +126,11 @@ pub fn default_capability_bindings() -> HashMap<Capability, CapabilityBinding> {
             vec![Namespace::Storefront],
             Relation::Checkout,
         ),
-        binding(Capability::OrderRead, vec![Namespace::Order], Relation::View),
+        binding(
+            Capability::OrderRead,
+            vec![Namespace::Order],
+            Relation::View,
+        ),
         binding(
             Capability::OrderRefundIssue,
             vec![Namespace::Order],
@@ -162,7 +166,11 @@ pub fn default_capability_bindings() -> HashMap<Capability, CapabilityBinding> {
             vec![Namespace::Booking],
             Relation::CheckIn,
         ),
-        binding(Capability::AssetRead, vec![Namespace::Asset], Relation::Read),
+        binding(
+            Capability::AssetRead,
+            vec![Namespace::Asset],
+            Relation::Read,
+        ),
         binding(
             Capability::AssetReadPublic,
             vec![Namespace::Asset],

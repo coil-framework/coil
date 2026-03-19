@@ -8,8 +8,8 @@ use super::*;
 use thiserror::Error;
 
 mod context;
-mod principal;
 mod prepare;
+mod principal;
 
 pub use principal::ExtensionPrincipal;
 

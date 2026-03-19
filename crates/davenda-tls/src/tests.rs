@@ -141,7 +141,7 @@ fn wildcard_bindings_are_rejected_without_dns_validation() {
 #[test]
 fn inventory_rejects_duplicate_active_hostname_bindings() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = TlsAutomationRuntime::ephemeral(runtime);
+    let automation = TlsAutomationRuntime::in_memory_for_tests(runtime);
     let binding = HostnameBinding::new(
         Hostname::new("www.example.com").unwrap(),
         CustomerAppId::new("storefront").unwrap(),
@@ -191,7 +191,7 @@ fn inventory_rejects_duplicate_active_hostname_bindings() {
 #[test]
 fn renewal_failure_keeps_current_certificate_bound() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = TlsAutomationRuntime::ephemeral(runtime);
+    let automation = TlsAutomationRuntime::in_memory_for_tests(runtime);
     let certificate_id = CertificateId::new("cert-active").unwrap();
     let binding = HostnameBinding::new(
         Hostname::new("www.example.com").unwrap(),
@@ -245,7 +245,7 @@ fn renewal_failure_keeps_current_certificate_bound() {
 #[test]
 fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = TlsAutomationRuntime::ephemeral(runtime);
+    let automation = TlsAutomationRuntime::in_memory_for_tests(runtime);
     let certificate_id = CertificateId::new("cert-live").unwrap();
     let binding = HostnameBinding::new(
         Hostname::new("shop.example.com").unwrap(),

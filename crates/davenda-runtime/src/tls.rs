@@ -33,16 +33,12 @@ impl TlsHost {
         _shared_backend_scope: String,
     ) -> Result<Self, RuntimeTlsError> {
         #[cfg(test)]
-        let automation = TlsAutomationRuntime::ephemeral(runtime.clone());
+        let automation = TlsAutomationRuntime::in_memory_for_tests(runtime.clone());
         #[cfg(not(test))]
         let automation = TlsAutomationRuntime::with_shared_backend(
             runtime.clone(),
             &_data,
-            format!(
-                "customer-app:{}:{}",
-                customer_app,
-                runtime.control_plane_scope()
-            ),
+            format!("customer-app:{}:{}", customer_app, _shared_backend_scope),
         )?;
         Ok(Self {
             customer_app,

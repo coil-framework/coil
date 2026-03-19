@@ -107,8 +107,10 @@ provider = "cloudflare-dns"
 
 [storage]
 default_class = "public_upload"
+local_only = "explicit_single_node"
 object_store = "s3"
 local_root = "/var/lib/platform"
+deployment = "single_node"
 
 [cache]
 l1 = "moka"
@@ -150,11 +152,7 @@ cdn_base_url = "https://cdn.example.com"
 "#;
 
 fn single_node_valid_config() -> PlatformConfig {
-    PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
-        "local_root = \"/var/lib/platform\"\n",
-        "local_root = \"/var/lib/platform\"\ndeployment = \"single_node\"\n",
-    ))
-    .unwrap()
+    PlatformConfig::from_toml_str(VALID_CONFIG).unwrap()
 }
 
 fn installed_admin_widget_extension() -> InstalledExtension {

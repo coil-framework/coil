@@ -18,10 +18,10 @@ pub struct TlsAutomationRuntime {
 impl TlsAutomationRuntime {
     #[cfg(test)]
     pub fn new(runtime: TlsRuntime) -> Self {
-        Self::ephemeral(runtime)
+        Self::in_memory_for_tests(runtime)
     }
 
-    pub fn ephemeral(runtime: TlsRuntime) -> Self {
+    pub fn in_memory_for_tests(runtime: TlsRuntime) -> Self {
         Self::with_backend(
             runtime,
             Arc::new(super::backend::MemoryTlsAutomationBackend::new()),

@@ -123,12 +123,16 @@ impl StoragePolicy {
         )
     }
 
-    pub const fn local_only_sensitive() -> Self {
+    pub const fn single_node_sensitive() -> Self {
         Self::new(
             DeliveryMode::LocalOnly,
             SyncMode::LocalOnly,
             Sensitivity::Secret,
         )
+    }
+
+    pub const fn local_only_sensitive() -> Self {
+        Self::single_node_sensitive()
     }
 
     pub fn validate(&self) -> Result<(), StoragePolicyError> {
@@ -185,7 +189,7 @@ impl From<StorageClass> for StoragePolicy {
             StorageClass::PublicAsset => Self::public_asset(),
             StorageClass::PublicUpload => Self::public_upload(),
             StorageClass::PrivateShared => Self::private_shared(),
-            StorageClass::LocalOnlySensitive => Self::local_only_sensitive(),
+            StorageClass::LocalOnlySensitive => Self::single_node_sensitive(),
         }
     }
 }
@@ -207,6 +211,10 @@ impl StoragePolicyOverride {
     }
 
     pub fn force_local_only() -> Self {
+        Self::force_single_node_escape_hatch()
+    }
+
+    pub fn force_single_node_escape_hatch() -> Self {
         Self {
             delivery_mode: Some(DeliveryMode::LocalOnly),
             sync_mode: Some(SyncMode::LocalOnly),
@@ -233,7 +241,7 @@ pub struct StorageTopology {
     pub local_root: String,
     pub default_class: StorageClass,
     pub deployment: StorageDeployment,
-    pub local_only_mode: LocalOnlyStorageMode,
+    pub single_node_escape_hatch: LocalOnlyStorageMode,
     pub object_store: Option<ObjectStoreTarget>,
 }
 
@@ -243,7 +251,7 @@ impl StorageTopology {
             local_root: trim_trailing_separator(&config.storage.local_root),
             default_class: config.storage.default_class,
             deployment: config.storage.deployment,
-            local_only_mode: config.storage.local_only,
+            single_node_escape_hatch: config.storage.single_node_escape_hatch,
             object_store: config
                 .storage
                 .object_store
@@ -257,7 +265,10 @@ impl StorageTopology {
 
     pub const fn allows_explicit_local_only(&self) -> bool {
         matches!(self.deployment, StorageDeployment::SingleNode)
-            && matches!(self.local_only_mode, LocalOnlyStorageMode::ExplicitSingleNode)
+            && matches!(
+                self.single_node_escape_hatch,
+                LocalOnlyStorageMode::ExplicitSingleNode
+            )
     }
 }
 

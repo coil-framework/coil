@@ -183,7 +183,7 @@ fn rejects_local_only_defaults_without_explicit_escape_hatch() {
 fn rejects_explicit_local_only_on_distributed_deployments() {
     let invalid = VALID_CONFIG.replace(
         "deployment = \"distributed\"",
-        "deployment = \"distributed\"\nlocal_only = \"explicit_single_node\"",
+        "deployment = \"distributed\"\nsingle_node_escape_hatch = \"explicit_single_node\"",
     );
 
     let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
@@ -196,6 +196,21 @@ fn rejects_explicit_local_only_on_distributed_deployments() {
         }
         other => panic!("expected validation error, got {other:?}"),
     }
+}
+
+#[test]
+fn accepts_legacy_local_only_alias_for_single_node_escape_hatch() {
+    let config = VALID_CONFIG.replace(
+        "deployment = \"distributed\"",
+        "deployment = \"single_node\"\nlocal_only = \"explicit_single_node\"",
+    );
+
+    let parsed = PlatformConfig::from_toml_str(&config).unwrap();
+
+    assert_eq!(
+        parsed.storage.single_node_escape_hatch,
+        LocalOnlyStorageMode::ExplicitSingleNode
+    );
 }
 
 #[test]

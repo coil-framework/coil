@@ -83,8 +83,11 @@ pub struct StorageConfig {
     pub default_class: StorageClass,
     #[serde(default = "default_storage_deployment")]
     pub deployment: StorageDeployment,
-    #[serde(default = "default_local_only_storage_mode")]
-    pub local_only: LocalOnlyStorageMode,
+    #[serde(
+        default = "default_single_node_escape_hatch",
+        alias = "local_only"
+    )]
+    pub single_node_escape_hatch: SingleNodeStorageMode,
     #[serde(default)]
     pub object_store: Option<ObjectStoreKind>,
     pub local_root: String,
@@ -101,10 +104,12 @@ pub enum StorageDeployment {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum LocalOnlyStorageMode {
+pub enum SingleNodeStorageMode {
     Disabled,
     ExplicitSingleNode,
 }
+
+pub type LocalOnlyStorageMode = SingleNodeStorageMode;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -206,6 +211,6 @@ fn default_storage_deployment() -> StorageDeployment {
     StorageDeployment::Distributed
 }
 
-fn default_local_only_storage_mode() -> LocalOnlyStorageMode {
-    LocalOnlyStorageMode::Disabled
+fn default_single_node_escape_hatch() -> SingleNodeStorageMode {
+    SingleNodeStorageMode::Disabled
 }

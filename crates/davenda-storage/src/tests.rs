@@ -20,7 +20,7 @@ fn rejects_invalid_policy_combinations() {
 fn public_asset_policies_are_public_delivery_eligible() {
     assert!(StoragePolicy::public_asset().is_public_delivery_eligible());
     assert!(!StoragePolicy::private_shared().is_public_delivery_eligible());
-    assert!(!StoragePolicy::local_only_sensitive().is_public_delivery_eligible());
+    assert!(!StoragePolicy::single_node_sensitive().is_public_delivery_eligible());
 }
 
 #[test]
@@ -142,11 +142,11 @@ fn local_only_override_keeps_sensitive_files_on_server() {
         .plan_write(
             StoragePlanRequest::new("secure/reports/march.csv")
                 .with_storage_class(davenda_config::StorageClass::PrivateShared)
-                .with_override(StoragePolicyOverride::force_local_only()),
+                .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),
         )
         .expect("local-only override should succeed");
 
-    assert_eq!(plan.policy, StoragePolicy::local_only_sensitive());
+    assert_eq!(plan.policy, StoragePolicy::single_node_sensitive());
     assert_eq!(plan.durable_store, DurableStore::LocalDisk);
     assert_eq!(
         plan.deployment_scope,
@@ -170,17 +170,17 @@ fn local_only_override_is_rejected_for_distributed_deployments() {
         .plan_write(
             StoragePlanRequest::new("secure/reports/march.csv")
                 .with_storage_class(davenda_config::StorageClass::PrivateShared)
-                .with_override(StoragePolicyOverride::force_local_only()),
+                .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),
         )
         .expect_err("local-only override should be rejected on distributed deployments");
 
     assert_eq!(
         error,
-        StoragePlanningError::LocalOnlyNotAllowedForDeployment {
+        StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
             logical_path: "secure/reports/march.csv".to_string(),
-            policy: StoragePolicy::local_only_sensitive(),
+            policy: StoragePolicy::single_node_sensitive(),
             deployment: davenda_config::StorageDeployment::Distributed,
-            local_only_mode: davenda_config::LocalOnlyStorageMode::ExplicitSingleNode,
+            single_node_escape_hatch: davenda_config::LocalOnlyStorageMode::ExplicitSingleNode,
         }
     );
 }
@@ -263,7 +263,7 @@ mode = "external"
 [storage]
 default_class = "private_shared"
 deployment = "single_node"
-local_only = "explicit_single_node"
+single_node_escape_hatch = "explicit_single_node"
 object_store = "s3"
 local_root = "var/davenda/storage"
 

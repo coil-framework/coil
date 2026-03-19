@@ -160,11 +160,11 @@ impl StoragePlanner {
             SyncMode::ObjectStore => None,
             SyncMode::LocalOnly => {
                 if !self.topology.allows_explicit_local_only() {
-                    return Err(StoragePlanningError::LocalOnlyNotAllowedForDeployment {
+                    return Err(StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
                         logical_path,
                         policy,
                         deployment: self.topology.deployment,
-                        local_only_mode: self.topology.local_only_mode,
+                        single_node_escape_hatch: self.topology.single_node_escape_hatch,
                     });
                 }
 
@@ -234,12 +234,12 @@ pub enum StoragePlanningError {
         policy: StoragePolicy,
     },
     #[error(
-        "storage plan for `{logical_path}` with policy {policy:?} is not allowed for deployment {deployment:?} because local-only mode is {local_only_mode:?}"
+        "storage plan for `{logical_path}` with policy {policy:?} is not allowed for deployment {deployment:?} because the single-node escape hatch is {single_node_escape_hatch:?}"
     )]
-    LocalOnlyNotAllowedForDeployment {
+    SingleNodeEscapeHatchNotAllowedForDeployment {
         logical_path: String,
         policy: StoragePolicy,
         deployment: davenda_config::StorageDeployment,
-        local_only_mode: davenda_config::LocalOnlyStorageMode,
+        single_node_escape_hatch: davenda_config::LocalOnlyStorageMode,
     },
 }

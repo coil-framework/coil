@@ -107,7 +107,7 @@ provider = "cloudflare-dns"
 
 [storage]
 default_class = "public_upload"
-local_only = "explicit_single_node"
+single_node_escape_hatch = "explicit_single_node"
 object_store = "s3"
 local_root = "/var/lib/platform"
 deployment = "single_node"
@@ -4026,7 +4026,7 @@ fn storage_host_applies_path_rules_for_sensitive_files() {
             PathPolicyRule::new(
                 "secure/reports",
                 Some(StorageClass::LocalOnlySensitive),
-                StoragePolicy::local_only_sensitive(),
+                StoragePolicy::single_node_sensitive(),
             )
             .unwrap()
             .with_local_subdir("sensitive")
@@ -4099,7 +4099,7 @@ fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
             PathPolicyRule::new(
                 "secure/docs",
                 Some(StorageClass::LocalOnlySensitive),
-                StoragePolicy::local_only_sensitive(),
+                StoragePolicy::single_node_sensitive(),
             )
             .unwrap()
             .with_local_subdir("vault")

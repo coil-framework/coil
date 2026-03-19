@@ -74,11 +74,11 @@ pub enum ConfigValidationError {
     #[error("storage.local_root must not be empty")]
     EmptyLocalStorageRoot,
     #[error(
-        "storage.default_class={storage_class:?} requires storage.local_only=explicit_single_node because local-only storage must be explicitly enabled"
+        "storage.default_class={storage_class:?} requires storage.single_node_escape_hatch=explicit_single_node because local-only storage must be explicitly enabled"
     )]
     LocalOnlyStorageRequiresExplicitOptIn { storage_class: StorageClass },
     #[error(
-        "storage.local_only=explicit_single_node requires storage.deployment=single_node because local-only storage is not permitted in distributed deployments"
+        "storage.single_node_escape_hatch=explicit_single_node requires storage.deployment=single_node because local-only storage is not permitted in distributed deployments"
     )]
     LocalOnlyStorageRequiresSingleNodeDeployment,
     #[error("database.schema must not be empty")]
@@ -244,14 +244,14 @@ impl PlatformConfig {
         }
 
         if matches!(self.storage.default_class, StorageClass::LocalOnlySensitive)
-            && self.storage.local_only != LocalOnlyStorageMode::ExplicitSingleNode
+            && self.storage.single_node_escape_hatch != LocalOnlyStorageMode::ExplicitSingleNode
         {
             errors.push(ConfigValidationError::LocalOnlyStorageRequiresExplicitOptIn {
                 storage_class: self.storage.default_class,
             });
         }
 
-        if self.storage.local_only == LocalOnlyStorageMode::ExplicitSingleNode
+        if self.storage.single_node_escape_hatch == LocalOnlyStorageMode::ExplicitSingleNode
             && self.storage.deployment != StorageDeployment::SingleNode
         {
             errors.push(ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment);

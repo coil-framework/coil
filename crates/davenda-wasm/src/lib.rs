@@ -12,6 +12,28 @@ pub enum WasmModelError {
         field: &'static str,
         value: String,
     },
+    InvalidChecksum {
+        field: &'static str,
+        value: String,
+    },
+    DuplicateConfigField {
+        key: String,
+    },
+    UnknownConfigField {
+        key: String,
+    },
+    MissingRequiredConfigField {
+        key: String,
+    },
+    ConfigTypeMismatch {
+        key: String,
+        expected: ExtensionConfigValueType,
+        actual: ExtensionConfigValueType,
+    },
+    InvalidConfigValue {
+        key: String,
+        reason: String,
+    },
     InvalidRoute {
         field: &'static str,
         route: String,
@@ -89,6 +111,9 @@ pub enum WasmModelError {
         handler_id: String,
         field: &'static str,
     },
+    ZeroSchemaVersion {
+        field: &'static str,
+    },
     InvalidOutcomeForPoint {
         handler_id: String,
         point: ExtensionPointKind,
@@ -107,6 +132,29 @@ impl fmt::Display for WasmModelError {
             Self::EmptyField { field } => write!(f, "`{field}` cannot be empty"),
             Self::InvalidToken { field, value } => {
                 write!(f, "`{field}` contains an invalid token `{value}`")
+            }
+            Self::InvalidChecksum { field, value } => {
+                write!(f, "`{field}` must be a 64-character lowercase hex digest, got `{value}`")
+            }
+            Self::DuplicateConfigField { key } => {
+                write!(f, "extension config schema declares duplicate key `{key}`")
+            }
+            Self::UnknownConfigField { key } => {
+                write!(f, "extension config field `{key}` is not declared in the package schema")
+            }
+            Self::MissingRequiredConfigField { key } => {
+                write!(f, "extension config field `{key}` is required but was not provided")
+            }
+            Self::ConfigTypeMismatch {
+                key,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "extension config field `{key}` expects `{expected}` but received `{actual}`"
+            ),
+            Self::InvalidConfigValue { key, reason } => {
+                write!(f, "extension config field `{key}` is invalid: {reason}")
             }
             Self::InvalidRoute { field, route } => {
                 write!(f, "`{field}` must start with `/`, got `{route}`")
@@ -207,6 +255,9 @@ impl fmt::Display for WasmModelError {
                 f,
                 "handler `{handler_id}` exceeded its `{field}` resource limit"
             ),
+            Self::ZeroSchemaVersion { field } => {
+                write!(f, "`{field}` must be greater than zero")
+            }
             Self::InvalidOutcomeForPoint {
                 handler_id,
                 point,
@@ -894,6 +945,261 @@ impl ExtensionManifest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtensionArtifactSource {
+    LocalPath(String),
+    RegistryPackage { registry: String, package: String },
+    FirstPartyCatalog { package: String },
+}
+
+impl ExtensionArtifactSource {
+    pub fn local_path(path: impl Into<String>) -> Result<Self, WasmModelError> {
+        Ok(Self::LocalPath(require_non_empty(
+            "extension_artifact_path",
+            path.into(),
+        )?))
+    }
+
+    pub fn registry_package(
+        registry: impl Into<String>,
+        package: impl Into<String>,
+    ) -> Result<Self, WasmModelError> {
+        Ok(Self::RegistryPackage {
+            registry: require_non_empty("extension_registry", registry.into())?,
+            package: validate_token("extension_registry_package", package.into())?,
+        })
+    }
+
+    pub fn first_party_catalog(package: impl Into<String>) -> Result<Self, WasmModelError> {
+        Ok(Self::FirstPartyCatalog {
+            package: validate_token("extension_catalog_package", package.into())?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionConfigValueType {
+    String,
+    Integer,
+    Boolean,
+}
+
+impl fmt::Display for ExtensionConfigValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::String => f.write_str("string"),
+            Self::Integer => f.write_str("integer"),
+            Self::Boolean => f.write_str("boolean"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtensionConfigValue {
+    String(String),
+    Integer(i64),
+    Boolean(bool),
+}
+
+impl ExtensionConfigValue {
+    pub fn value_type(&self) -> ExtensionConfigValueType {
+        match self {
+            Self::String(_) => ExtensionConfigValueType::String,
+            Self::Integer(_) => ExtensionConfigValueType::Integer,
+            Self::Boolean(_) => ExtensionConfigValueType::Boolean,
+        }
+    }
+
+    fn validate_for_key(&self, key: &str) -> Result<(), WasmModelError> {
+        if let Self::String(value) = self {
+            if value.trim().is_empty() {
+                return Err(WasmModelError::InvalidConfigValue {
+                    key: key.to_string(),
+                    reason: "string values must not be empty".to_string(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionConfigField {
+    pub key: String,
+    pub value_type: ExtensionConfigValueType,
+    pub required: bool,
+    pub default: Option<ExtensionConfigValue>,
+}
+
+impl ExtensionConfigField {
+    pub fn new(
+        key: impl Into<String>,
+        value_type: ExtensionConfigValueType,
+        required: bool,
+    ) -> Result<Self, WasmModelError> {
+        Ok(Self {
+            key: validate_token("extension_config_key", key.into())?,
+            value_type,
+            required,
+            default: None,
+        })
+    }
+
+    pub fn required(
+        key: impl Into<String>,
+        value_type: ExtensionConfigValueType,
+    ) -> Result<Self, WasmModelError> {
+        Self::new(key, value_type, true)
+    }
+
+    pub fn optional(
+        key: impl Into<String>,
+        value_type: ExtensionConfigValueType,
+    ) -> Result<Self, WasmModelError> {
+        Self::new(key, value_type, false)
+    }
+
+    pub fn with_default(mut self, value: ExtensionConfigValue) -> Result<Self, WasmModelError> {
+        if value.value_type() != self.value_type {
+            return Err(WasmModelError::ConfigTypeMismatch {
+                key: self.key.clone(),
+                expected: self.value_type,
+                actual: value.value_type(),
+            });
+        }
+        value.validate_for_key(&self.key)?;
+        self.default = Some(value);
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionConfigSchema {
+    pub version: u32,
+    pub fields: Vec<ExtensionConfigField>,
+}
+
+impl ExtensionConfigSchema {
+    pub fn new(version: u32, fields: Vec<ExtensionConfigField>) -> Result<Self, WasmModelError> {
+        if version == 0 {
+            return Err(WasmModelError::ZeroSchemaVersion {
+                field: "extension_config_schema_version",
+            });
+        }
+
+        let schema = Self { version, fields };
+        schema.validate()?;
+        Ok(schema)
+    }
+
+    pub fn validate(&self) -> Result<(), WasmModelError> {
+        let mut seen = BTreeSet::new();
+        for field in &self.fields {
+            if !seen.insert(field.key.clone()) {
+                return Err(WasmModelError::DuplicateConfigField {
+                    key: field.key.clone(),
+                });
+            }
+
+            if let Some(default) = &field.default {
+                if default.value_type() != field.value_type {
+                    return Err(WasmModelError::ConfigTypeMismatch {
+                        key: field.key.clone(),
+                        expected: field.value_type,
+                        actual: default.value_type(),
+                    });
+                }
+                default.validate_for_key(&field.key)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn effective_values(
+        &self,
+        configured: &BTreeMap<String, ExtensionConfigValue>,
+    ) -> Result<BTreeMap<String, ExtensionConfigValue>, WasmModelError> {
+        self.validate()?;
+
+        for (key, value) in configured {
+            let Some(field) = self.fields.iter().find(|field| field.key == *key) else {
+                return Err(WasmModelError::UnknownConfigField { key: key.clone() });
+            };
+
+            if value.value_type() != field.value_type {
+                return Err(WasmModelError::ConfigTypeMismatch {
+                    key: key.clone(),
+                    expected: field.value_type,
+                    actual: value.value_type(),
+                });
+            }
+
+            value.validate_for_key(key)?;
+        }
+
+        let mut effective = BTreeMap::new();
+        for field in &self.fields {
+            if let Some(value) = configured.get(&field.key) {
+                effective.insert(field.key.clone(), value.clone());
+            } else if let Some(default) = &field.default {
+                effective.insert(field.key.clone(), default.clone());
+            } else if field.required {
+                return Err(WasmModelError::MissingRequiredConfigField {
+                    key: field.key.clone(),
+                });
+            }
+        }
+
+        Ok(effective)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionPackage {
+    pub publisher: String,
+    pub manifest: ExtensionManifest,
+    pub artifact_source: ExtensionArtifactSource,
+    pub artifact_sha256: String,
+    pub config_schema: ExtensionConfigSchema,
+}
+
+impl ExtensionPackage {
+    pub fn new(
+        publisher: impl Into<String>,
+        manifest: ExtensionManifest,
+        artifact_source: ExtensionArtifactSource,
+        artifact_sha256: impl Into<String>,
+        config_schema: ExtensionConfigSchema,
+    ) -> Result<Self, WasmModelError> {
+        Ok(Self {
+            publisher: require_non_empty("extension_publisher", publisher.into())?,
+            manifest,
+            artifact_source,
+            artifact_sha256: validate_sha256("extension_artifact_sha256", artifact_sha256.into())?,
+            config_schema,
+        })
+    }
+
+    pub fn install(
+        &self,
+        installation: ExtensionInstallation,
+        configured_values: &BTreeMap<String, ExtensionConfigValue>,
+    ) -> Result<InstalledExtension, WasmModelError> {
+        let mut installed = InstalledExtension::install(self.manifest.clone(), installation)?;
+        installed.config = self.config_schema.effective_values(configured_values)?;
+        Ok(installed)
+    }
+
+    pub fn id(&self) -> &ExtensionId {
+        &self.manifest.id
+    }
+
+    pub fn version(&self) -> ContractVersion {
+        self.manifest.version
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledHandler {
     pub handler_id: HandlerId,
     pub granted_capabilities: HostGrantSet,
@@ -944,6 +1250,7 @@ impl ExtensionInstallation {
 pub struct InstalledExtension {
     manifest: ExtensionManifest,
     customer_app_id: String,
+    config: BTreeMap<String, ExtensionConfigValue>,
     handlers: BTreeMap<HandlerId, InstalledHandler>,
 }
 
@@ -1004,6 +1311,7 @@ impl InstalledExtension {
         Ok(Self {
             manifest,
             customer_app_id: installation.customer_app_id,
+            config: BTreeMap::new(),
             handlers,
         })
     }
@@ -1020,11 +1328,16 @@ impl InstalledExtension {
         self.handlers.len()
     }
 
+    pub fn config(&self) -> &BTreeMap<String, ExtensionConfigValue> {
+        &self.config
+    }
+
     pub fn prepare_invocation(
         &self,
         handler_id: &HandlerId,
-        context: InvocationContext,
+        mut context: InvocationContext,
     ) -> Result<InvocationPlan, WasmModelError> {
+        context.extension_config = self.config.clone();
         context.validate()?;
 
         let manifest_handler =
@@ -1703,7 +2016,7 @@ pub struct InvocationContext {
     pub customer_app: CustomerAppContext,
     pub principal: PrincipalRef,
     pub trace: TraceContext,
-    pub extension_config: BTreeMap<String, String>,
+    pub extension_config: BTreeMap<String, ExtensionConfigValue>,
     pub input: InvocationInput,
 }
 
@@ -1726,10 +2039,10 @@ impl InvocationContext {
     pub fn with_config_value(
         mut self,
         key: impl Into<String>,
-        value: impl Into<String>,
+        value: ExtensionConfigValue,
     ) -> Result<Self, WasmModelError> {
         let key = validate_token("extension_config_key", key.into())?;
-        let value = require_non_empty("extension_config_value", value.into())?;
+        value.validate_for_key(&key)?;
         self.extension_config.insert(key, value);
         Ok(self)
     }
@@ -1738,7 +2051,7 @@ impl InvocationContext {
         self.principal.validate()?;
         for (key, value) in &self.extension_config {
             validate_token("extension_config_key", key.clone())?;
-            require_non_empty("extension_config_value", value.clone())?;
+            value.validate_for_key(key)?;
         }
         Ok(())
     }
@@ -2188,6 +2501,22 @@ fn validate_token(field: &'static str, value: String) -> Result<String, WasmMode
         Ok(trimmed)
     } else {
         Err(WasmModelError::InvalidToken {
+            field,
+            value: trimmed,
+        })
+    }
+}
+
+fn validate_sha256(field: &'static str, value: String) -> Result<String, WasmModelError> {
+    let trimmed = require_non_empty(field, value)?;
+    if trimmed.len() == 64
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase())
+    {
+        Ok(trimmed)
+    } else {
+        Err(WasmModelError::InvalidChecksum {
             field,
             value: trimmed,
         })

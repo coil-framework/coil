@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use davenda_auth::AuthModelPackage;
@@ -13,7 +13,9 @@ use davenda_data::{MigrationOwner, MigrationPlan};
 use davenda_i18n::LocaleTag;
 use davenda_runtime::{RuntimeBuildError, RuntimeBuilder, RuntimePlan};
 use davenda_template::TemplateNamespace;
-use davenda_wasm::ExtensionInstallation;
+use davenda_wasm::{
+    ContractVersion, ExtensionConfigValue, ExtensionInstallation, ExtensionPackage, WasmModelError,
+};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -36,6 +38,8 @@ pub enum AppModelError {
     DuplicateContentField { model_id: String, field_id: String },
     #[error("extension `{extension_id}` is declared more than once")]
     DuplicateExtension { extension_id: String },
+    #[error("customer app `{app_id}` installs extensions but no extension packages were supplied")]
+    ExtensionPackagesRequired { app_id: String },
     #[error("default locale `{default_locale}` is not in the supported locale set")]
     DefaultLocaleNotSupported { default_locale: String },
     #[error("customer app `{app_id}` must declare at least one canonical domain")]
@@ -105,8 +109,31 @@ pub enum AppModelError {
         extension_customer_app: String,
         app_id: String,
     },
+    #[error("customer app `{app_id}` does not have a package for extension `{extension_id}`")]
+    UnknownExtensionPackage {
+        app_id: String,
+        extension_id: String,
+    },
+    #[error(
+        "customer extension `{extension_id}` pins version `{configured}` but package provides `{actual}`"
+    )]
+    ExtensionVersionMismatch {
+        extension_id: String,
+        configured: ContractVersion,
+        actual: ContractVersion,
+    },
+    #[error(
+        "customer extension `{extension_id}` pins artifact digest `{configured}` but package provides `{actual}`"
+    )]
+    ExtensionArtifactChecksumMismatch {
+        extension_id: String,
+        configured: String,
+        actual: String,
+    },
     #[error("{0}")]
     ModuleCapabilityValidation(#[from] CapabilityValidationError),
+    #[error("{0}")]
+    Wasm(#[from] WasmModelError),
     #[error("{message}")]
     RuntimeBuild { message: String },
 }
@@ -321,18 +348,36 @@ impl AuthStrategy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomerExtension {
     pub id: ExtensionId,
+    pub package_version: ContractVersion,
+    pub artifact_sha256: String,
+    pub config: BTreeMap<String, ExtensionConfigValue>,
     pub installation: ExtensionInstallation,
 }
 
 impl CustomerExtension {
     pub fn new(
         id: impl Into<String>,
+        package_version: ContractVersion,
+        artifact_sha256: impl Into<String>,
         installation: ExtensionInstallation,
     ) -> Result<Self, AppModelError> {
         Ok(Self {
             id: ExtensionId::new(id.into())?,
+            package_version,
+            artifact_sha256: validate_sha256("extension_artifact_sha256", artifact_sha256.into())?,
+            config: BTreeMap::new(),
             installation,
         })
+    }
+
+    pub fn with_config_value(
+        mut self,
+        key: impl Into<String>,
+        value: ExtensionConfigValue,
+    ) -> Result<Self, AppModelError> {
+        let key = validate_token("extension_config_key", key.into())?;
+        self.config.insert(key, value);
+        Ok(self)
     }
 }
 
@@ -601,6 +646,19 @@ impl CustomerAppManifest {
     where
         P: AuthModelPackage,
     {
+        self.build_runtime_plan_with_extensions(config, auth_package, modules, Vec::new())
+    }
+
+    pub fn build_runtime_plan_with_extensions<P>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+        extension_packages: Vec<ExtensionPackage>,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage,
+    {
         if config.app.name != self.id.as_str() {
             return Err(AppModelError::ConfigAppMismatch {
                 manifest: self.id.to_string(),
@@ -687,11 +745,20 @@ impl CustomerAppManifest {
         let composition = self.compose(&auth_package, &manifests)?;
         let migration_summary =
             build_migration_summary(self, auth_package.manifest().name.clone(), &modules);
-        let release_doctor = composition.release_doctor(Some(&config));
+        let release_doctor = self.release_doctor_with_extensions(
+            &auth_package,
+            &manifests,
+            &extension_packages,
+            Some(&config),
+        )?;
+        let installed_extensions = self.resolve_extension_packages(&extension_packages)?;
 
         let mut builder = RuntimeBuilder::new(config, auth_package);
         for module in modules {
             builder = builder.with_boxed_module(module);
+        }
+        for extension in installed_extensions {
+            builder = builder.with_installed_extension(extension);
         }
 
         Ok(CustomerAppRuntimePlan {
@@ -700,6 +767,142 @@ impl CustomerAppManifest {
             migration_summary,
             release_doctor,
         })
+    }
+
+    pub fn release_doctor_with_extensions<P>(
+        &self,
+        auth_package: &P,
+        manifests: &[ModuleManifest],
+        packages: &[ExtensionPackage],
+        config: Option<&PlatformConfig>,
+    ) -> Result<ReleaseDoctorReport, AppModelError>
+    where
+        P: AuthModelPackage,
+    {
+        let composition = self.compose(auth_package, manifests)?;
+        let mut report = composition.release_doctor(config);
+        self.append_extension_doctor_findings(packages, &mut report);
+        Ok(report)
+    }
+
+    fn resolve_extension_packages(
+        &self,
+        packages: &[ExtensionPackage],
+    ) -> Result<Vec<davenda_wasm::InstalledExtension>, AppModelError> {
+        if self.extensions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if packages.is_empty() {
+            return Err(AppModelError::ExtensionPackagesRequired {
+                app_id: self.id.to_string(),
+            });
+        }
+
+        let mut installed = Vec::new();
+        for extension in &self.extensions {
+            let package = packages
+                .iter()
+                .find(|package| package.id().as_str() == extension.id.as_str())
+                .ok_or_else(|| AppModelError::UnknownExtensionPackage {
+                    app_id: self.id.to_string(),
+                    extension_id: extension.id.to_string(),
+                })?;
+
+            if package.version() != extension.package_version {
+                return Err(AppModelError::ExtensionVersionMismatch {
+                    extension_id: extension.id.to_string(),
+                    configured: extension.package_version,
+                    actual: package.version(),
+                });
+            }
+
+            if package.artifact_sha256 != extension.artifact_sha256 {
+                return Err(AppModelError::ExtensionArtifactChecksumMismatch {
+                    extension_id: extension.id.to_string(),
+                    configured: extension.artifact_sha256.clone(),
+                    actual: package.artifact_sha256.clone(),
+                });
+            }
+
+            installed.push(package.install(extension.installation.clone(), &extension.config)?);
+        }
+
+        Ok(installed)
+    }
+
+    fn append_extension_doctor_findings(
+        &self,
+        packages: &[ExtensionPackage],
+        report: &mut ReleaseDoctorReport,
+    ) {
+        if self.extensions.is_empty() {
+            return;
+        }
+
+        if packages.is_empty() {
+            report.findings.push(ReleaseDoctorFinding::new(
+                ReleaseDoctorSeverity::Blocking,
+                "extension.packages.missing",
+                format!(
+                    "customer app `{}` installs extensions but no extension packages were supplied",
+                    self.id
+                ),
+            ));
+            return;
+        }
+
+        for extension in &self.extensions {
+            let Some(package) = packages
+                .iter()
+                .find(|package| package.id().as_str() == extension.id.as_str())
+            else {
+                report.findings.push(ReleaseDoctorFinding::new(
+                    ReleaseDoctorSeverity::Blocking,
+                    "extension.package.unknown",
+                    format!(
+                        "customer extension `{}` does not have a matching package artifact",
+                        extension.id
+                    ),
+                ));
+                continue;
+            };
+
+            if package.version() != extension.package_version {
+                report.findings.push(ReleaseDoctorFinding::new(
+                    ReleaseDoctorSeverity::Blocking,
+                    "extension.version.mismatch",
+                    format!(
+                        "customer extension `{}` pins version `{}` but package provides `{}`",
+                        extension.id,
+                        extension.package_version,
+                        package.version()
+                    ),
+                ));
+            }
+
+            if package.artifact_sha256 != extension.artifact_sha256 {
+                report.findings.push(ReleaseDoctorFinding::new(
+                    ReleaseDoctorSeverity::Blocking,
+                    "extension.checksum.mismatch",
+                    format!(
+                        "customer extension `{}` pins digest `{}` but package provides `{}`",
+                        extension.id, extension.artifact_sha256, package.artifact_sha256
+                    ),
+                ));
+            }
+
+            if let Err(error) = package.config_schema.effective_values(&extension.config) {
+                report.findings.push(ReleaseDoctorFinding::new(
+                    ReleaseDoctorSeverity::Blocking,
+                    "extension.config.invalid",
+                    format!(
+                        "customer extension `{}` has invalid config: {error}",
+                        extension.id
+                    ),
+                ));
+            }
+        }
     }
 }
 
@@ -980,6 +1183,22 @@ fn require_non_empty(field: &'static str, value: String) -> Result<String, AppMo
     }
 }
 
+fn validate_sha256(field: &'static str, value: String) -> Result<String, AppModelError> {
+    let trimmed = require_non_empty(field, value)?;
+    if trimmed.len() == 64
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase())
+    {
+        Ok(trimmed)
+    } else {
+        Err(AppModelError::InvalidToken {
+            field,
+            value: trimmed,
+        })
+    }
+}
+
 fn build_migration_summary(
     manifest: &CustomerAppManifest,
     auth_package_name: String,
@@ -1175,7 +1394,12 @@ mod tests {
     use davenda_data::{
         MigrationId, MigrationOwner as DataMigrationOwner, MigrationPlan, MigrationStep,
     };
-    use davenda_wasm::{HandlerId, HandlerInstallation, HostCapabilityGrant, HostGrantSet};
+    use davenda_wasm::{
+        ContractVersion, ExtensionArtifactSource, ExtensionConfigField, ExtensionConfigSchema,
+        ExtensionConfigValue, ExtensionConfigValueType, ExtensionManifest, ExtensionPackage,
+        ExtensionPoint, HandlerId, HandlerInstallation, HandlerManifest, HostCapabilityGrant,
+        HostGrantSet, RenderHookExtensionPoint, ResourceLimits,
+    };
 
     fn locale(value: &str) -> LocaleTag {
         LocaleTag::new(value).expect("locale is valid")
@@ -1237,19 +1461,72 @@ mod tests {
         .with_extension(
             CustomerExtension::new(
                 "loyalty-widget",
+                ContractVersion::new(1, 2, 3),
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 ExtensionInstallation::new(
                     "harbor-shop",
                     vec![HandlerInstallation::new(
                         HandlerId::new("account.loyalty.widget").unwrap(),
                         HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
-                            slot: "account.summary".to_string(),
+                            slot: "cms.page.render".to_string(),
                         }]),
                     )],
                 )
                 .unwrap(),
             )
+            .unwrap()
+            .with_config_value(
+                "program_slug",
+                ExtensionConfigValue::String("harbor-club".to_string()),
+            )
             .unwrap(),
         )
+    }
+
+    fn extension_package() -> ExtensionPackage {
+        ExtensionPackage::new(
+            "worka",
+            ExtensionManifest::new(
+                davenda_wasm::ExtensionId::new("loyalty-widget").unwrap(),
+                "Loyalty Widget",
+                ContractVersion::new(1, 2, 3),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(davenda_wasm::ExtensionPointKind::RenderHook),
+                vec![HandlerManifest::new(
+                    HandlerId::new("account.loyalty.widget").unwrap(),
+                    "exports.loyalty_widget",
+                    ExtensionPoint::RenderHook(
+                        RenderHookExtensionPoint::new("cms.page.render").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                        slot: "cms.page.render".to_string(),
+                    }]),
+                )
+                .unwrap()],
+            )
+            .unwrap(),
+            ExtensionArtifactSource::local_path("extensions/loyalty-widget.wasm").unwrap(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ExtensionConfigSchema::new(
+                1,
+                vec![
+                    ExtensionConfigField::required(
+                        "program_slug",
+                        ExtensionConfigValueType::String,
+                    )
+                    .unwrap(),
+                    ExtensionConfigField::optional(
+                        "show_points",
+                        ExtensionConfigValueType::Boolean,
+                    )
+                    .unwrap()
+                    .with_default(ExtensionConfigValue::Boolean(true))
+                    .unwrap(),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap()
     }
 
     fn module_manifests() -> Vec<ModuleManifest> {
@@ -1290,6 +1567,11 @@ mod tests {
                     AdminNavigationSection::Content,
                     AdminContributionKind::ResourceIndex,
                     Capability::CmsPagePublish,
+                )])
+                .with_extension_slots(vec![davenda_core::ExtensionSlotDescriptor::new(
+                    davenda_core::ExtensionSlotKind::RenderHook,
+                    "cms.page.render",
+                    "Allows render-hook extensions to augment CMS page rendering",
                 )])
                 .with_search_contributions(vec![SearchIndexContribution::new(
                     "search.cms.pages",
@@ -1540,6 +1822,8 @@ cdn_base_url = "https://cdn.example.com"
         .with_extension(
             CustomerExtension::new(
                 "widget",
+                ContractVersion::new(1, 0, 0),
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 ExtensionInstallation::new("other-app", Vec::new()).unwrap(),
             )
             .unwrap(),
@@ -1637,7 +1921,7 @@ cdn_base_url = "https://cdn.example.com"
     #[test]
     fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
         let runtime = app()
-            .build_runtime_plan(
+            .build_runtime_plan_with_extensions(
                 runtime_config("harbor-shop"),
                 DefaultAuthModelPackage::default(),
                 module_manifests()
@@ -1645,6 +1929,7 @@ cdn_base_url = "https://cdn.example.com"
                     .map(StaticModule::new)
                     .map(|module| Box::new(module) as Box<dyn PlatformModule>)
                     .collect(),
+                vec![extension_package()],
             )
             .unwrap();
 
@@ -1677,6 +1962,55 @@ cdn_base_url = "https://cdn.example.com"
             .findings
             .iter()
             .any(|finding| finding.code == "module.ops.missing"));
+    }
+
+    #[test]
+    fn runtime_build_requires_pinned_extension_packages() {
+        let error = app()
+            .build_runtime_plan(
+                runtime_config("harbor-shop"),
+                DefaultAuthModelPackage::default(),
+                module_manifests()
+                    .into_iter()
+                    .map(StaticModule::new)
+                    .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+                    .collect(),
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            AppModelError::ExtensionPackagesRequired {
+                app_id: "harbor-shop".to_string(),
+            }
+        );
+
+        let mut wrong_checksum = extension_package();
+        wrong_checksum.artifact_sha256 =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
+        let error = app()
+            .build_runtime_plan_with_extensions(
+                runtime_config("harbor-shop"),
+                DefaultAuthModelPackage::default(),
+                module_manifests()
+                    .into_iter()
+                    .map(StaticModule::new)
+                    .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+                    .collect(),
+                vec![wrong_checksum],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            AppModelError::ExtensionArtifactChecksumMismatch {
+                extension_id: "loyalty-widget".to_string(),
+                configured: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+                actual: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    .to_string(),
+            }
+        );
     }
 
     #[test]
@@ -1726,7 +2060,8 @@ cdn_base_url = "https://cdn.example.com"
 
     #[test]
     fn release_doctor_reports_config_drift_and_unpinned_modules() {
-        let composition = app()
+        let manifest = app();
+        let composition = manifest
             .compose(&DefaultAuthModelPackage::default(), &module_manifests())
             .unwrap();
         let report = composition.release_doctor(Some(&runtime_config("harbor-shop")));
@@ -1747,5 +2082,21 @@ cdn_base_url = "https://cdn.example.com"
             .findings
             .iter()
             .any(|finding| finding.code == "config.seo.canonical_host"));
+
+        let mut wrong_checksum = extension_package();
+        wrong_checksum.artifact_sha256 =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
+        let report = manifest
+            .release_doctor_with_extensions(
+                &DefaultAuthModelPackage::default(),
+                &module_manifests(),
+                &[wrong_checksum],
+                Some(&runtime_config("harbor-shop")),
+            )
+            .unwrap();
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "extension.checksum.mismatch"));
     }
 }

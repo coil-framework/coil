@@ -46,6 +46,10 @@ pub enum BrowserHostBuildError {
     MemoryStoreRequiresTestOnlyBrowserHost,
     #[error("memory session stores cannot use a distributed session client")]
     MemoryStoreCannotUseDistributedClient,
+    #[error(
+        "live browser session stores require an explicit distributed runtime; `{kind:?}` is not live-supported"
+    )]
+    LiveSharedSessionStoreRequiresExplicitRuntime { kind: SessionStoreBackendKind },
     #[error("session store client kind mismatch: expected `{expected:?}`, got `{actual:?}`")]
     SessionStoreClientKindMismatch {
         expected: SessionStoreBackendKind,
@@ -86,6 +90,13 @@ impl BrowserHost {
     ) -> Result<Self, BrowserHostBuildError> {
         let (session_store_kind, sessions) =
             SessionStoreBackend::with_client(&services.sessions, client)?;
+        if !sessions.is_live_shared_state_supported() {
+            return Err(
+                BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime {
+                    kind: session_store_kind,
+                },
+            );
+        }
         Ok(Self {
             customer_app,
             services,

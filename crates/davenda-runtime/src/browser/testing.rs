@@ -115,6 +115,10 @@ impl DistributedSessionStoreRuntime for SharedDistributedSessionStoreRuntime {
     fn is_shared_backend(&self) -> bool {
         true
     }
+
+    fn supports_live_shared_state(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

@@ -7,7 +7,6 @@ pub(super) struct JobsBackendState {
 }
 
 impl JobsBackendState {
-    #[cfg(test)]
     pub(super) fn new(runtime: JobsRuntime) -> Self {
         Self {
             runtime,
@@ -15,7 +14,6 @@ impl JobsBackendState {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn snapshot(&self) -> JobsCoordinatorSnapshot {
         self.snapshot.clone()
     }

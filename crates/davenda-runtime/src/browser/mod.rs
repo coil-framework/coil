@@ -20,11 +20,12 @@ pub use session::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use davenda_core::{
         BrowserSecurityServices, CookiePolicy, CookieProtection, CsrfProtection,
         SessionSecurityServices, SessionStoreTopology,
     };
+    use std::sync::Arc;
+    use std::time::Duration;
 
     fn services(store: SessionStoreTopology) -> BrowserSecurityServices {
         BrowserSecurityServices {
@@ -134,25 +135,20 @@ mod tests {
     }
 
     #[test]
-    fn database_session_hosts_share_persistent_backend_across_independent_clients() {
+    fn database_session_hosts_share_explicit_backend_across_independent_clients() {
         let services = services(SessionStoreTopology::Database);
-        let namespace = persistent_namespace("browser-db-persistent");
+        let client =
+            DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Database);
         let mut left = BrowserHost::with_session_store_client(
-            "browser-db-persistent".to_string(),
+            "browser-db-shared".to_string(),
             services.clone(),
-            DistributedSessionStoreClient::new(
-                SessionStoreBackendKind::Database,
-                shared::persistent_runtime(SessionStoreBackendKind::Database, namespace.clone()),
-            ),
+            client.clone(),
         )
         .unwrap();
         let right = BrowserHost::with_session_store_client(
-            "browser-db-persistent".to_string(),
+            "browser-db-shared".to_string(),
             services,
-            DistributedSessionStoreClient::new(
-                SessionStoreBackendKind::Database,
-                shared::persistent_runtime(SessionStoreBackendKind::Database, namespace),
-            ),
+            client,
         )
         .unwrap();
 
@@ -188,19 +184,57 @@ mod tests {
         );
     }
 
-    fn persistent_namespace(prefix: &str) -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::{SystemTime, UNIX_EPOCH};
+    #[test]
+    fn live_browser_rejects_session_clients_without_explicit_shared_support() {
+        #[derive(Debug)]
+        struct UnconfiguredSessionStoreRuntime;
 
-        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        format!(
-            "{prefix}-{}-{timestamp}-{}",
-            std::process::id(),
-            SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        )
+        impl DistributedSessionStoreRuntime for UnconfiguredSessionStoreRuntime {
+            fn issue(&self, _record: BrowserSessionRecord) {}
+
+            fn session(&self, _session_id: &str) -> Option<BrowserSessionRecord> {
+                None
+            }
+
+            fn delete(&self, _session_id: &str) {}
+
+            fn revoke(
+                &self,
+                _session_id: &str,
+                _now: BrowserInstant,
+            ) -> Result<(), RuntimeBrowserError> {
+                Ok(())
+            }
+
+            fn touch_active_session(
+                &self,
+                _session_id: &str,
+                _idle_timeout: Duration,
+                _now: BrowserInstant,
+            ) -> Result<Option<String>, RuntimeBrowserError> {
+                Ok(None)
+            }
+
+            fn is_shared_backend(&self) -> bool {
+                false
+            }
+        }
+
+        let services = services(SessionStoreTopology::Database);
+        let client = DistributedSessionStoreClient::new(
+            SessionStoreBackendKind::Database,
+            Arc::new(UnconfiguredSessionStoreRuntime),
+        );
+
+        let error =
+            BrowserHost::with_session_store_client("browser-live".to_string(), services, client)
+                .unwrap_err();
+
+        assert_eq!(
+            error,
+            BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime {
+                kind: SessionStoreBackendKind::Database,
+            }
+        );
     }
 }

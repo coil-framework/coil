@@ -1388,9 +1388,9 @@ fn browser_host_shares_distributed_sessions_when_reusing_an_explicit_client() {
 fn cache_runtime_shares_distributed_state_when_reusing_an_explicit_backend() {
     let topology = CacheTopology::with_redis();
     let planner = CachePlanner::new(topology);
-    let shared_runtime = davenda_cache::DistributedCacheClient::persistent_shared_runtime(
+    let shared_runtime = crate::plan::shared_cache_runtime_for_test(
         CacheBackendKind::Redis,
-        "runtime-cache-shared-test",
+        "runtime-cache-shared-test".to_string(),
     );
     let adapter = CacheBackendAdapter::with_shared_runtime(topology, shared_runtime);
     let mut left = CacheRuntime::with_backend(topology, adapter.clone());

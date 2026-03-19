@@ -9,11 +9,9 @@ use std::time::Duration;
 
 mod shared;
 mod state;
-#[cfg(test)]
 mod testing;
 
 use state::JobsBackendState;
-#[cfg(test)]
 use testing::EmulatedJobsCoordinationRuntime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +106,9 @@ pub trait JobsCoordinationRuntime: Send + Sync + 'static {
     fn is_shared_backend(&self) -> bool {
         true
     }
+    fn supports_live_shared_state(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]
@@ -149,14 +150,7 @@ impl JobsBackendAdapter {
     }
 
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-        #[cfg(test)]
-        {
-            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
-        }
-        #[cfg(not(test))]
-        {
-            shared::local_runtime(runtime)
-        }
+        Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
     }
 
     #[allow(dead_code)]

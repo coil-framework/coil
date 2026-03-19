@@ -102,6 +102,11 @@ impl RuntimePlan {
             &self.jobs,
             namespace.clone(),
         );
+        #[cfg(not(test))]
+        assert!(
+            shared_runtime.supports_live_shared_state(),
+            "live shared jobs runtime requires an explicit distributed backend; file-backed shared state is test-only"
+        );
 
         Ok(JobsHost::new(
             self.config.app.name.clone(),
@@ -159,6 +164,11 @@ impl RuntimePlan {
             let runtime = davenda_cache::DistributedCacheClient::persistent_shared_runtime(
                 backend,
                 shared_namespace.clone(),
+            );
+            #[cfg(not(test))]
+            assert!(
+                runtime.supports_live_shared_state(),
+                "live shared cache runtime requires an explicit distributed backend; file-backed shared state is test-only"
             );
             Some(runtime)
         } else {

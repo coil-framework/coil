@@ -1,13 +1,11 @@
 use super::*;
 use std::sync::Mutex;
 
-#[cfg(test)]
 #[derive(Debug)]
 pub(super) struct EmulatedJobsCoordinationRuntime {
     state: Mutex<JobsBackendState>,
 }
 
-#[cfg(test)]
 impl EmulatedJobsCoordinationRuntime {
     pub(super) fn new(runtime: JobsRuntime) -> Self {
         Self {
@@ -16,7 +14,6 @@ impl EmulatedJobsCoordinationRuntime {
     }
 }
 
-#[cfg(test)]
 impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         let guard = self.state.lock().expect("jobs backend mutex poisoned");

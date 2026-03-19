@@ -105,6 +105,9 @@ pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
         now: BrowserInstant,
     ) -> Result<Option<String>, RuntimeBrowserError>;
     fn is_shared_backend(&self) -> bool;
+    fn supports_live_shared_state(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]
@@ -126,7 +129,10 @@ impl DistributedSessionStoreClient {
         kind: SessionStoreBackendKind,
         scope: impl Into<String>,
     ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        shared::persistent_runtime(kind, scope.into())
+        Arc::new(UnconfiguredDistributedSessionStoreRuntime::new(
+            kind,
+            scope.into(),
+        ))
     }
 
     pub fn kind(&self) -> SessionStoreBackendKind {
@@ -135,6 +141,10 @@ impl DistributedSessionStoreClient {
 
     pub fn is_shared(&self) -> bool {
         self.runtime.is_shared_backend()
+    }
+
+    pub fn supports_live_shared_state(&self) -> bool {
+        self.runtime.supports_live_shared_state()
     }
 
     pub(super) fn issue(&self, record: BrowserSessionRecord) {
@@ -173,6 +183,64 @@ impl std::fmt::Debug for DistributedSessionStoreClient {
         f.debug_struct("DistributedSessionStoreClient")
             .field("kind", &self.kind)
             .finish()
+    }
+}
+
+#[cfg(not(test))]
+#[derive(Debug)]
+pub(super) struct UnconfiguredDistributedSessionStoreRuntime {
+    kind: SessionStoreBackendKind,
+    scope: String,
+}
+
+#[cfg(not(test))]
+impl UnconfiguredDistributedSessionStoreRuntime {
+    pub(super) fn new(kind: SessionStoreBackendKind, scope: String) -> Self {
+        Self { kind, scope }
+    }
+
+    fn unsupported_message(&self) -> String {
+        format!(
+            "live browser session store `{kind:?}` for `{scope}` requires an explicit distributed runtime; file-backed shared state is test-only",
+            kind = self.kind,
+            scope = self.scope
+        )
+    }
+}
+
+#[cfg(not(test))]
+impl DistributedSessionStoreRuntime for UnconfiguredDistributedSessionStoreRuntime {
+    fn issue(&self, _record: BrowserSessionRecord) {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn session(&self, _session_id: &str) -> Option<BrowserSessionRecord> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn delete(&self, _session_id: &str) {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn revoke(&self, _session_id: &str, _now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn touch_active_session(
+        &self,
+        _session_id: &str,
+        _idle_timeout: Duration,
+        _now: BrowserInstant,
+    ) -> Result<Option<String>, RuntimeBrowserError> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        false
+    }
+
+    fn supports_live_shared_state(&self) -> bool {
+        false
     }
 }
 
@@ -251,6 +319,14 @@ impl SessionStoreBackend {
             #[cfg(test)]
             Self::Local(_) => false,
             Self::Distributed(client) => client.is_shared(),
+        }
+    }
+
+    pub(super) fn is_live_shared_state_supported(&self) -> bool {
+        match self {
+            #[cfg(test)]
+            Self::Local(_) => false,
+            Self::Distributed(client) => client.supports_live_shared_state(),
         }
     }
 

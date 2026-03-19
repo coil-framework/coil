@@ -1,15 +1,25 @@
+#![allow(dead_code)]
+
 use super::{
     BrowserInstant, BrowserSessionRecord, DistributedSessionStoreRuntime, RuntimeBrowserError,
     SessionStoreBackendKind,
 };
+#[cfg(test)]
 use rusqlite::{Connection, OptionalExtension, Row, params};
+#[cfg(test)]
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 
+#[cfg(test)]
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
+#[cfg(test)]
 const SHARED_STATE_NAMESPACE_ENV: &str = "DAVENDA_SHARED_BACKEND_NAMESPACE";
 
+#[cfg(test)]
 pub(crate) fn persistent_runtime(
     kind: SessionStoreBackendKind,
     namespace: impl Into<String>,
@@ -20,11 +30,25 @@ pub(crate) fn persistent_runtime(
     ))
 }
 
+#[cfg(not(test))]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn persistent_runtime(
+    kind: SessionStoreBackendKind,
+    namespace: impl Into<String>,
+) -> Arc<dyn DistributedSessionStoreRuntime> {
+    Arc::new(UnconfiguredDistributedSessionStoreRuntime::new(
+        kind,
+        namespace.into(),
+    ))
+}
+
+#[cfg(test)]
 #[derive(Debug)]
 struct PersistentDistributedSessionStoreRuntime {
     store: SharedSessionStore,
 }
 
+#[cfg(test)]
 impl PersistentDistributedSessionStoreRuntime {
     fn new(kind: SessionStoreBackendKind, namespace: String) -> Self {
         Self {
@@ -33,6 +57,7 @@ impl PersistentDistributedSessionStoreRuntime {
     }
 }
 
+#[cfg(test)]
 impl DistributedSessionStoreRuntime for PersistentDistributedSessionStoreRuntime {
     fn issue(&self, record: BrowserSessionRecord) {
         self.store
@@ -76,13 +101,82 @@ impl DistributedSessionStoreRuntime for PersistentDistributedSessionStoreRuntime
     fn is_shared_backend(&self) -> bool {
         true
     }
+
+    fn supports_live_shared_state(&self) -> bool {
+        false
+    }
 }
 
+#[cfg(not(test))]
+#[cfg(not(test))]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug)]
+struct UnconfiguredDistributedSessionStoreRuntime {
+    kind: SessionStoreBackendKind,
+    namespace: String,
+}
+
+#[cfg(not(test))]
+#[cfg(not(test))]
+#[cfg_attr(not(test), allow(dead_code))]
+impl UnconfiguredDistributedSessionStoreRuntime {
+    fn new(kind: SessionStoreBackendKind, namespace: String) -> Self {
+        Self { kind, namespace }
+    }
+
+    fn unsupported_message(&self) -> String {
+        format!(
+            "live browser session store `{kind:?}` for `{namespace}` requires an explicit distributed runtime; file-backed shared state is test-only",
+            kind = self.kind,
+            namespace = self.namespace
+        )
+    }
+}
+
+#[cfg(not(test))]
+#[cfg(not(test))]
+impl DistributedSessionStoreRuntime for UnconfiguredDistributedSessionStoreRuntime {
+    fn issue(&self, _record: BrowserSessionRecord) {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn session(&self, _session_id: &str) -> Option<BrowserSessionRecord> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn delete(&self, _session_id: &str) {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn revoke(&self, _session_id: &str, _now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn touch_active_session(
+        &self,
+        _session_id: &str,
+        _idle_timeout: std::time::Duration,
+        _now: BrowserInstant,
+    ) -> Result<Option<String>, RuntimeBrowserError> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        false
+    }
+
+    fn supports_live_shared_state(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct SessionStoreSnapshot {
     sessions: BTreeMap<String, BrowserSessionRecord>,
 }
 
+#[cfg(test)]
 impl SessionStoreSnapshot {
     fn issue(&mut self, record: BrowserSessionRecord) {
         self.sessions.insert(record.session_id.clone(), record);
@@ -134,12 +228,14 @@ impl SessionStoreSnapshot {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct SharedSessionStore {
     connection: Mutex<Connection>,
     namespace: String,
 }
 
+#[cfg(test)]
 impl SharedSessionStore {
     fn open(kind: SessionStoreBackendKind, namespace: String) -> Self {
         let namespace = std::env::var(SHARED_STATE_NAMESPACE_ENV).unwrap_or(namespace);
@@ -287,6 +383,7 @@ impl SharedSessionStore {
     }
 }
 
+#[cfg(test)]
 fn database_path(kind: SessionStoreBackendKind, namespace: &str) -> PathBuf {
     shared_state_root()
         .join("browser")
@@ -294,12 +391,14 @@ fn database_path(kind: SessionStoreBackendKind, namespace: &str) -> PathBuf {
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
+#[cfg(test)]
 fn shared_state_root() -> PathBuf {
     std::env::var_os(SHARED_STATE_DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
 }
 
+#[cfg(test)]
 fn session_backend_slug(kind: SessionStoreBackendKind) -> &'static str {
     match kind {
         SessionStoreBackendKind::Local => "local",
@@ -309,6 +408,7 @@ fn session_backend_slug(kind: SessionStoreBackendKind) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn sanitize_namespace(namespace: &str) -> String {
     namespace
         .chars()

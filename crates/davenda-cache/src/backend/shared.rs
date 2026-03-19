@@ -1,18 +1,26 @@
 #![cfg_attr(test, allow(dead_code))]
 
+#[cfg(test)]
 use super::state::CacheBackendState;
 use super::{CacheBackendKind, DistributedCacheRuntime};
 use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheMetrics, CacheModelError, FillDecision,
     FillLease, InvalidationSet, RequestCoalescingMode,
 };
+#[cfg(test)]
 use bincode::{deserialize, serialize};
+#[cfg(test)]
 use rusqlite::{Connection, OptionalExtension, params};
+#[cfg(test)]
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 
+#[cfg(test)]
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
 
+#[cfg(test)]
 pub(crate) fn persistent_runtime(
     kind: CacheBackendKind,
     namespace: impl Into<String>,
@@ -23,6 +31,18 @@ pub(crate) fn persistent_runtime(
     ))
 }
 
+#[cfg(not(test))]
+pub(crate) fn persistent_runtime(
+    kind: CacheBackendKind,
+    namespace: impl Into<String>,
+) -> Arc<dyn DistributedCacheRuntime> {
+    Arc::new(UnconfiguredDistributedCacheRuntime::new(
+        kind,
+        namespace.into(),
+    ))
+}
+
+#[cfg(test)]
 fn cache_kind_slug(kind: CacheBackendKind) -> &'static str {
     match kind {
         CacheBackendKind::Local => "local",
@@ -31,12 +51,14 @@ fn cache_kind_slug(kind: CacheBackendKind) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn shared_state_root() -> PathBuf {
     std::env::var_os(SHARED_STATE_DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
 }
 
+#[cfg(test)]
 fn database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
     shared_state_root()
         .join("cache")
@@ -44,11 +66,13 @@ fn database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct PersistentDistributedCacheRuntime {
     store: SharedCacheStore,
 }
 
+#[cfg(test)]
 impl PersistentDistributedCacheRuntime {
     fn new(kind: CacheBackendKind, namespace: String) -> Self {
         Self {
@@ -57,6 +81,7 @@ impl PersistentDistributedCacheRuntime {
     }
 }
 
+#[cfg(test)]
 impl DistributedCacheRuntime for PersistentDistributedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         self.store
@@ -104,14 +129,82 @@ impl DistributedCacheRuntime for PersistentDistributedCacheRuntime {
     fn is_shared_backend(&self) -> bool {
         true
     }
+
+    fn supports_live_shared_state(&self) -> bool {
+        false
+    }
 }
 
+#[cfg(not(test))]
+#[derive(Debug)]
+struct UnconfiguredDistributedCacheRuntime {
+    kind: CacheBackendKind,
+    namespace: String,
+}
+
+#[cfg(not(test))]
+impl UnconfiguredDistributedCacheRuntime {
+    fn new(kind: CacheBackendKind, namespace: String) -> Self {
+        Self { kind, namespace }
+    }
+
+    fn unsupported_message(&self) -> String {
+        format!(
+            "live shared cache backend `{kind:?}` for `{namespace}` requires an explicit distributed runtime; file-backed shared state is test-only",
+            kind = self.kind,
+            namespace = self.namespace
+        )
+    }
+}
+
+#[cfg(not(test))]
+impl DistributedCacheRuntime for UnconfiguredDistributedCacheRuntime {
+    fn insert(&self, _entry: CacheEntry) {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn lookup(&self, _key: &CacheKey, _now: CacheInstant) -> CacheLookup {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn invalidate(&self, _tags: &InvalidationSet) -> Vec<CacheKey> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn begin_fill(
+        &self,
+        _key: &CacheKey,
+        _mode: RequestCoalescingMode,
+        _holder: String,
+    ) -> FillDecision {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn complete_fill(&self, _lease: &FillLease) -> Result<(), CacheModelError> {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn metrics(&self) -> CacheMetrics {
+        panic!("{}", self.unsupported_message());
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        false
+    }
+
+    fn supports_live_shared_state(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug)]
 struct SharedCacheStore {
     connection: Mutex<Connection>,
     namespace: String,
 }
 
+#[cfg(test)]
 impl SharedCacheStore {
     fn open(kind: CacheBackendKind, namespace: String) -> Self {
         let path = database_path(kind, &namespace);
@@ -258,6 +351,7 @@ impl SharedCacheStore {
     }
 }
 
+#[cfg(test)]
 fn sanitize_namespace(namespace: &str) -> String {
     namespace
         .chars()

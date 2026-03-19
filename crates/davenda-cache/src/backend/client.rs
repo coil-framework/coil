@@ -23,6 +23,9 @@ pub trait DistributedCacheRuntime: Send + Sync + 'static {
     fn is_shared_backend(&self) -> bool {
         true
     }
+    fn supports_live_shared_state(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]

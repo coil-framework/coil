@@ -1,4 +1,22 @@
 use super::*;
+use std::fs;
+use std::path::PathBuf;
+
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum LiveWasmExecutionError {
+    #[error(transparent)]
+    Model(#[from] WasmModelError),
+    #[error(
+        "failed to read installed extension artifact for `{extension_id}` at `{path}`: {reason}"
+    )]
+    ArtifactRead {
+        extension_id: String,
+        path: String,
+        reason: String,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredExtensionSlot {
@@ -89,6 +107,43 @@ impl WasmHost {
                 handler_id: session.plan().handler_id.to_string(),
             })?;
         self.engine.execute_session(module, session, export)
+    }
+
+    pub fn execute_request_surface(
+        &self,
+        execution: &RequestExecution,
+    ) -> Result<Option<ExecutionReceipt>, LiveWasmExecutionError> {
+        match execution.route_area {
+            RouteArea::Api => self
+                .begin_api_invocation(execution)?
+                .map(|session| self.execute_installed_session(session))
+                .transpose(),
+            _ => self
+                .begin_page_invocation(execution)?
+                .map(|session| self.execute_installed_session(session))
+                .transpose(),
+        }
+    }
+
+    pub fn execute_render_hook_slot(
+        &self,
+        slot: &str,
+        execution: &RequestExecution,
+    ) -> Result<Vec<ExecutionReceipt>, LiveWasmExecutionError> {
+        let sessions = self.begin_render_hook_invocations(slot, execution)?;
+        let mut receipts = Vec::with_capacity(sessions.len());
+        for session in sessions {
+            receipts.push(self.execute_installed_session(session)?);
+        }
+        Ok(receipts)
+    }
+
+    fn execute_installed_session(
+        &self,
+        session: WasmExecutionSession,
+    ) -> Result<ExecutionReceipt, LiveWasmExecutionError> {
+        let module = self.load_installed_module(&session.plan().extension_id)?;
+        self.execute_session(&module, session).map_err(Into::into)
     }
 
     pub fn prepare_page_invocation(
@@ -347,6 +402,24 @@ impl WasmHost {
         customer_app =
             customer_app.with_locale(locale.unwrap_or(self.default_locale.as_str()).to_string())?;
         Ok(customer_app)
+    }
+
+    fn load_installed_module(
+        &self,
+        extension_id: &davenda_wasm::ExtensionId,
+    ) -> Result<CompiledWasmModule, LiveWasmExecutionError> {
+        let path = self.installed_module_path(extension_id);
+        let bytes = fs::read(&path).map_err(|error| LiveWasmExecutionError::ArtifactRead {
+            extension_id: extension_id.to_string(),
+            path: path.display().to_string(),
+            reason: error.to_string(),
+        })?;
+
+        self.compile_module(&bytes).map_err(Into::into)
+    }
+
+    fn installed_module_path(&self, extension_id: &davenda_wasm::ExtensionId) -> PathBuf {
+        PathBuf::from(&self.runtime.extension_directory).join(format!("{extension_id}.wasm"))
     }
 }
 

@@ -32,6 +32,10 @@ pub enum RuntimeServerError {
     Execution(#[from] RequestExecutionError),
     #[error(transparent)]
     Secret(#[from] SecretResolutionError),
+    #[error(transparent)]
+    Render(#[from] RuntimeRenderError),
+    #[error(transparent)]
+    WasmExecution(#[from] LiveWasmExecutionError),
     #[error("live request authorization does not support auth package `{package}`")]
     UnsupportedAuthPackage { package: String },
     #[error("live request authorization failed: {reason}")]
@@ -463,6 +467,28 @@ impl HttpServerHost {
         Self::new_with_authorizer(plan, backends, cookie_secret, csrf_secret, route_authorizer)
     }
 
+    pub fn new_with_browser_host(
+        plan: RuntimePlan,
+        browser: BrowserHost,
+        backends: SharedBackendClients,
+        cookie_secret: Vec<u8>,
+        csrf_secret: Vec<u8>,
+    ) -> Self {
+        let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
+            Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
+                plan.data.clone(),
+                plan.auth_package_name.clone(),
+            ));
+        Self::new_with_browser_and_authorizer(
+            plan,
+            browser,
+            backends,
+            cookie_secret,
+            csrf_secret,
+            route_authorizer,
+        )
+    }
+
     pub(crate) fn new_with_authorizer(
         plan: RuntimePlan,
         backends: SharedBackendClients,
@@ -470,8 +496,27 @@ impl HttpServerHost {
         csrf_secret: Vec<u8>,
         route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
     ) -> Self {
+        let browser = plan.browser_host();
+        Self::new_with_browser_and_authorizer(
+            plan,
+            browser,
+            backends,
+            cookie_secret,
+            csrf_secret,
+            route_authorizer,
+        )
+    }
+
+    fn new_with_browser_and_authorizer(
+        plan: RuntimePlan,
+        browser: BrowserHost,
+        backends: SharedBackendClients,
+        cookie_secret: Vec<u8>,
+        csrf_secret: Vec<u8>,
+        route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
+    ) -> Self {
         let state = Arc::new(RuntimeServerState {
-            browser: Mutex::new(plan.browser_host()),
+            browser: Mutex::new(browser),
             plan,
             cookie_secret,
             csrf_secret,
@@ -586,7 +631,7 @@ async fn execute_live_request(
             .execute_request(request, &state.cookie_secret, &state.csrf_secret)?
     };
 
-    Ok(execution_response(execution))
+    execution_response(&state.plan, execution)
 }
 
 async fn authorize_live_request(
@@ -657,16 +702,34 @@ async fn authorize_live_request(
     }
 }
 
-fn execution_response(execution: RequestExecution) -> Response<Body> {
-    let mut response = match execution.response {
-        HandlerResponse::Page(page) => text_response(
-            StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK),
-            format!("render:{}", page.template),
-        ),
-        HandlerResponse::Fragment(fragment) => text_response(
-            StatusCode::OK,
-            format!("fragment:{}:{}", fragment.template, fragment.fragment_id),
-        ),
+fn execution_response(
+    plan: &RuntimePlan,
+    execution: RequestExecution,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let wasm = plan.wasm_host();
+    wasm.execute_request_surface(&execution)?;
+
+    let mut response = match &execution.response {
+        HandlerResponse::Page(page) => {
+            for slot in render_hook_slots_for_execution(plan, &execution) {
+                wasm.execute_render_hook_slot(slot.as_str(), &execution)?;
+            }
+
+            html_response(
+                StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK),
+                plan.render_page_response(&execution, &page)?,
+            )
+        }
+        HandlerResponse::Fragment(fragment) => {
+            for slot in render_hook_slots_for_execution(plan, &execution) {
+                wasm.execute_render_hook_slot(slot.as_str(), &execution)?;
+            }
+
+            html_response(
+                StatusCode::OK,
+                plan.render_fragment_response(&execution, &fragment)?,
+            )
+        }
         HandlerResponse::Redirect(redirect) => {
             let mut response = Response::new(Body::empty());
             *response.status_mut() =
@@ -682,11 +745,11 @@ fn execution_response(execution: RequestExecution) -> Response<Body> {
         }
         HandlerResponse::Json(json) => {
             let mut parts = Vec::new();
-            for (key, value) in json.payload {
+            for (key, value) in &json.payload {
                 parts.push(format!(
                     "\"{}\":\"{}\"",
-                    escape_json(&key),
-                    escape_json(&value)
+                    escape_json(key),
+                    escape_json(value)
                 ));
             }
             let mut response = text_response(
@@ -753,7 +816,7 @@ fn execution_response(execution: RequestExecution) -> Response<Body> {
         }
     }
 
-    response
+    Ok(response)
 }
 
 fn error_response(error: RuntimeServerError) -> Response<Body> {
@@ -862,6 +925,37 @@ fn text_response(status: StatusCode, body: String) -> Response<Body> {
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
     response
+}
+
+fn html_response(status: StatusCode, body: String) -> Response<Body> {
+    let mut response = text_response(status, body);
+    response.headers_mut().insert(
+        "content-type",
+        "text/html; charset=utf-8"
+            .parse()
+            .expect("static content type is valid"),
+    );
+    response
+}
+
+fn render_hook_slots_for_execution(
+    plan: &RuntimePlan,
+    execution: &RequestExecution,
+) -> Vec<String> {
+    let module = plan
+        .http
+        .routes
+        .iter()
+        .find(|route| route.name == execution.route.route_name)
+        .and_then(|route| route.module.as_deref());
+
+    plan.registered_extension_slots
+        .iter()
+        .filter(|slot| {
+            slot.kind == ExtensionPointKind::RenderHook && Some(slot.module.as_str()) == module
+        })
+        .map(|slot| slot.surface.clone())
+        .collect()
 }
 
 fn escape_json(value: &str) -> String {

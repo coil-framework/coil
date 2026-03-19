@@ -110,6 +110,7 @@ impl RuntimePlan {
 
     pub fn wasm_host(&self) -> WasmHost {
         WasmHost::new(
+            self.clone(),
             self.config.app.name.clone(),
             self.wasm.clone(),
             self.extension_registry.clone(),
@@ -440,7 +441,11 @@ fn tenant_id_from_runtime(
     }
 
     let value = hash & i64::MAX as u64;
-    if value == 0 { 1 } else { value as i64 }
+    if value == 0 {
+        1
+    } else {
+        value as i64
+    }
 }
 
 fn environment_label(environment: davenda_config::Environment) -> &'static str {

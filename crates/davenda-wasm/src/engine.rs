@@ -89,7 +89,7 @@ impl EngineHostState {
             }
         })?;
         let call = host_call_for_grant(&self.session, grant, metric)?;
-        self.session.record_host_call(call)?;
+        let _ = self.session.execute_host_call(call)?;
         Ok(0)
     }
 }

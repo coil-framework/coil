@@ -402,6 +402,31 @@ fn execution_session_enforces_host_grants_and_resource_limits() {
             bytes: 1_024,
         })
         .unwrap();
+
+    assert_eq!(session.host_service_executions().len(), 3);
+    assert!(matches!(
+        &session.host_service_executions()[0].result,
+        HostServiceResult::Auth(AuthServiceExecution {
+            allowed: true,
+            checks_seen: 1,
+            ..
+        })
+    ));
+    assert!(matches!(
+        &session.host_service_executions()[1].result,
+        HostServiceResult::Network(NetworkExecution {
+            integration,
+            response_bytes: 512,
+        }) if integration == "crm"
+    ));
+    assert!(matches!(
+        &session.host_service_executions()[2].result,
+        HostServiceResult::Storage(StorageServiceExecution {
+            total_bytes: 1_024,
+            ..
+        })
+    ));
+
     let denied = session
         .record_host_call(HostCall::SecretRead {
             secret: "tls-account".to_string(),

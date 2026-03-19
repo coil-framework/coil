@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::WasmModelError;
 use crate::grants::{
     HostCapabilityGrant, HostGrantSet, MetadataGrant, ResourceLimits, StorageClassGrant,
 };
-use crate::host_services::HostServiceSessionState;
+use crate::host_services::{HostServiceExecution, HostServiceExecutor, HostServiceSessionState};
 use crate::ids::{ExtensionId, ExtensionPointKind, HandlerId, HttpMethod};
 use crate::output::TypedExecutionOutput;
 
@@ -362,6 +363,13 @@ impl InvocationPlan {
         WasmExecutionSession::new(self)
     }
 
+    pub fn begin_execution_with_executor(
+        self,
+        executor: Arc<dyn HostServiceExecutor>,
+    ) -> WasmExecutionSession {
+        WasmExecutionSession::with_executor(self, executor)
+    }
+
     pub fn grant_slots(&self) -> Vec<HostCapabilityGrant> {
         self.granted_capabilities.iter().cloned().collect()
     }
@@ -461,10 +469,11 @@ pub struct ExecutionReceipt {
     pub usage: ExecutionUsage,
     pub outcome: InvocationOutcome,
     pub host_calls: Vec<HostCall>,
+    pub host_service_executions: Vec<HostServiceExecution>,
     pub typed_output: Option<TypedExecutionOutput>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct WasmExecutionSession {
     state: HostServiceSessionState,
 }
@@ -473,6 +482,12 @@ impl WasmExecutionSession {
     pub fn new(plan: InvocationPlan) -> Self {
         Self {
             state: HostServiceSessionState::new(plan),
+        }
+    }
+
+    pub fn with_executor(plan: InvocationPlan, executor: Arc<dyn HostServiceExecutor>) -> Self {
+        Self {
+            state: HostServiceSessionState::with_executor(plan, executor),
         }
     }
 
@@ -488,8 +503,19 @@ impl WasmExecutionSession {
         self.state.host_calls()
     }
 
+    pub fn host_service_executions(&self) -> &[HostServiceExecution] {
+        self.state.host_service_executions()
+    }
+
     pub fn grant_slots(&self) -> Vec<HostCapabilityGrant> {
         self.state.grant_slots()
+    }
+
+    pub fn execute_host_call(
+        &mut self,
+        call: HostCall,
+    ) -> Result<HostServiceExecution, WasmModelError> {
+        self.state.execute_host_call(call)
     }
 
     pub fn record_host_call(&mut self, call: HostCall) -> Result<(), WasmModelError> {

@@ -4,7 +4,7 @@ use std::time::Duration;
 use davenda_config::{DatabaseConfig, DatabaseDriver};
 use thiserror::Error;
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DataModelError {
     #[error("`{field}` cannot be empty")]
     EmptyField { field: &'static str },

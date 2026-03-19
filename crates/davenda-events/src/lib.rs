@@ -8,6 +8,11 @@ use davenda_auth::{
 };
 use davenda_commerce::OrderId;
 use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_data::{
+    DataModelError, DomainWrite, FilterOperator, PageRequest, PublicationVisibility,
+    QueryCacheScope, QueryContext, QueryFilter, QuerySort, QuerySpec, TransactionIsolation,
+    TransactionPlan,
+};
 use davenda_memberships::MembershipTierId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +99,9 @@ pub enum EventModelError {
         field: &'static str,
         base: u64,
         offset_seconds: u64,
+    },
+    DataPlan {
+        error: DataModelError,
     },
 }
 
@@ -202,11 +210,18 @@ impl fmt::Display for EventModelError {
                 f,
                 "timestamp overflow while calculating `{field}` from `{base}` plus `{offset_seconds}` seconds"
             ),
+            Self::DataPlan { error } => write!(f, "{error}"),
         }
     }
 }
 
 impl Error for EventModelError {}
+
+impl From<DataModelError> for EventModelError {
+    fn from(error: DataModelError) -> Self {
+        Self::DataPlan { error }
+    }
+}
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {
@@ -1201,6 +1216,13 @@ pub struct ReservationExpirationOutcome {
     pub promoted_reservations: Vec<Reservation>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventListingQuery {
+    pub query: QuerySpec,
+    pub include_slots: bool,
+    pub include_membership_pricing: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventCatalog {
     events: BTreeMap<EventId, EventRecord>,
@@ -1262,6 +1284,33 @@ impl EventCatalog {
             .ok_or_else(|| EventModelError::MissingEvent {
                 event_id: event_id.to_string(),
             })
+    }
+
+    pub fn public_listing_query(
+        &self,
+        locale: Option<&str>,
+    ) -> Result<EventListingQuery, EventModelError> {
+        let query = QuerySpec::new(
+            PageRequest::new(0, 24)?,
+            QueryContext {
+                locale: locale.map(ToString::to_string),
+                principal_id: None,
+                publication_visibility: PublicationVisibility::PublishedOnly,
+                cache_scope: QueryCacheScope::Public,
+            },
+        )
+        .with_filter(QueryFilter::new(
+            "event_state",
+            FilterOperator::Eq,
+            vec!["live".to_string()],
+        )?)
+        .with_sort(QuerySort::ascending("starts_at")?);
+
+        Ok(EventListingQuery {
+            query,
+            include_slots: true,
+            include_membership_pricing: true,
+        })
     }
 
     pub fn add_slot(&mut self, event_id: &EventId, slot: EventSlot) -> Result<(), EventModelError> {
@@ -1649,6 +1698,56 @@ impl EventCatalog {
         Ok(promoted)
     }
 
+    pub fn reservation_transaction_plan(
+        &self,
+        reservation: &Reservation,
+    ) -> Result<TransactionPlan, EventModelError> {
+        TransactionPlan::new("events.reservation.hold", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("events.reservations", "insert")?)
+            .with_write(DomainWrite::new("events.slots", "hold_capacity")?)
+            .with_after_commit_job("events.reservations.expiry")?
+            .with_after_commit_event(format!("events.reservation.{}", reservation.status))
+            .map_err(EventModelError::from)
+    }
+
+    pub fn booking_confirmation_transaction_plan(
+        &self,
+        booking: &Booking,
+    ) -> Result<TransactionPlan, EventModelError> {
+        TransactionPlan::new("events.booking.confirm", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("events.bookings", "insert")?)
+            .with_write(DomainWrite::new("events.reservations", "confirm")?)
+            .with_write(DomainWrite::new("events.slots", "book_capacity")?)
+            .with_after_commit_job("events.bookings.confirmation_mail")?
+            .with_after_commit_event(format!("events.booking.{}", booking.status))
+            .map_err(EventModelError::from)
+    }
+
+    pub fn booking_cancellation_transaction_plan(
+        &self,
+        outcome: &BookingCancellationOutcome,
+    ) -> Result<TransactionPlan, EventModelError> {
+        let mut transaction =
+            TransactionPlan::new("events.booking.cancel", TransactionIsolation::Serializable)?
+                .with_write(DomainWrite::new("events.bookings", "cancel")?)
+                .with_write(DomainWrite::new("events.slots", "release_capacity")?)
+                .with_after_commit_event("events.booking.cancelled")?;
+
+        if !outcome.promoted_reservations.is_empty() {
+            transaction = transaction.with_after_commit_job("events.waitlist.promotions")?;
+        }
+
+        Ok(transaction)
+    }
+
+    pub fn check_in_transaction_plan(&self, booking: &Booking) -> Result<TransactionPlan, EventModelError> {
+        TransactionPlan::new("events.booking.check_in", TransactionIsolation::Serializable)?
+            .with_write(DomainWrite::new("events.bookings", "check_in")?)
+            .with_write(DomainWrite::new("events.slots", "check_in")?)
+            .with_after_commit_event(format!("events.booking.{}", booking.status))
+            .map_err(EventModelError::from)
+    }
+
     pub fn reservations(&self) -> impl Iterator<Item = &Reservation> {
         self.reservations.values()
     }
@@ -2014,6 +2113,69 @@ mod tests {
                 &OperatorAccessContext::new().with_capability(Capability::EventsBookingCheckIn),
             )
             .unwrap();
+    }
+
+    #[test]
+    fn events_module_exposes_query_and_transaction_plans_for_bookings() {
+        let mut catalog = EventCatalog::new();
+        let event = published_event().unwrap();
+        let event_id = event.id.clone();
+        let slot_id = EventSlotId::new("slot-evening").unwrap();
+        catalog.insert_event(event).unwrap();
+        catalog.add_slot(&event_id, sample_slot().unwrap()).unwrap();
+
+        let listing = catalog.public_listing_query(Some("fr-FR")).unwrap();
+        assert_eq!(listing.query.context.locale.as_deref(), Some("fr-FR"));
+        assert_eq!(listing.query.context.cache_scope, QueryCacheScope::Public);
+        assert_eq!(listing.query.filters.len(), 1);
+
+        let reservation = match catalog
+            .reserve_slot(
+                &event_id,
+                &slot_id,
+                Some(AttendeeId::new("attendee-1").unwrap()),
+                BookingSource::Manual,
+                EventInstant::from_unix_seconds(1_010),
+                &event_context().with_capability(Capability::EventsBookingCreate),
+            )
+            .unwrap()
+        {
+            ReservationOutcome::Held(reservation) => reservation,
+            other => panic!("expected held reservation, got {other:?}"),
+        };
+        let reservation_tx = catalog.reservation_transaction_plan(&reservation).unwrap();
+        assert_eq!(reservation_tx.isolation, TransactionIsolation::Serializable);
+        assert_eq!(
+            reservation_tx.after_commit_jobs,
+            vec!["events.reservations.expiry".to_string()]
+        );
+
+        let booking = catalog
+            .confirm_reservation(
+                &reservation.id,
+                None,
+                EventInstant::from_unix_seconds(1_020),
+            )
+            .unwrap();
+        let confirmation_tx = catalog
+            .booking_confirmation_transaction_plan(&booking)
+            .unwrap();
+        assert_eq!(confirmation_tx.writes.len(), 3);
+        assert_eq!(
+            confirmation_tx.after_commit_events,
+            vec!["events.booking.confirmed".to_string()]
+        );
+
+        let cancellation = catalog
+            .cancel_booking(&booking.id, EventInstant::from_unix_seconds(1_030))
+            .unwrap();
+        let cancellation_tx = catalog
+            .booking_cancellation_transaction_plan(&cancellation)
+            .unwrap();
+        assert_eq!(
+            cancellation_tx.after_commit_events,
+            vec!["events.booking.cancelled".to_string()]
+        );
     }
 
     #[test]

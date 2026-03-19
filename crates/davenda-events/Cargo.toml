@@ -7,4 +7,5 @@ edition = "2024"
 davenda-auth = { path = "../davenda-auth" }
 davenda-commerce = { path = "../davenda-commerce" }
 davenda-core = { path = "../davenda-core" }
+davenda-data = { path = "../davenda-data" }
 davenda-memberships = { path = "../davenda-memberships" }

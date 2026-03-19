@@ -1,4 +1,5 @@
 use super::*;
+use davenda_config::{AcmeChallenge, SecretRef, TlsConfig, TlsMode, TlsProvider};
 
 fn acme_config(challenge: AcmeChallenge, provider: Option<TlsProvider>) -> TlsConfig {
     TlsConfig {

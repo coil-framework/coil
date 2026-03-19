@@ -235,16 +235,15 @@ impl fmt::Debug for DistributedCacheClient {
     }
 }
 
-fn shared_cache_runtime(
-    kind: CacheBackendKind,
-    scope: String,
-) -> Arc<dyn DistributedCacheRuntime> {
+fn shared_cache_runtime(kind: CacheBackendKind, scope: String) -> Arc<dyn DistributedCacheRuntime> {
     static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn DistributedCacheRuntime>>>> =
         OnceLock::new();
 
     let key = format!("{kind:?}:{scope}");
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry.lock().expect("shared cache registry mutex poisoned");
+    let mut guard = registry
+        .lock()
+        .expect("shared cache registry mutex poisoned");
     guard
         .entry(key)
         .or_insert_with(|| Arc::new(SharedDistributedCacheRuntime::new()))
@@ -308,7 +307,21 @@ pub struct CacheBackendAdapter {
 
 impl CacheBackendAdapter {
     pub fn new(topology: CacheTopology) -> Self {
-        Self::for_deployment(topology, 0)
+        Self::shared(topology)
+    }
+
+    pub fn in_memory(topology: CacheTopology) -> Self {
+        let kind = match topology.l2() {
+            Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
+            Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
+            None => CacheBackendKind::Local,
+        };
+
+        Self {
+            kind,
+            topology,
+            storage: CacheBackendStorage::Local(LocalCacheBackendAdapter::new()),
+        }
     }
 
     pub fn distributed(topology: CacheTopology, client: DistributedCacheClient) -> Self {
@@ -335,21 +348,6 @@ impl CacheBackendAdapter {
         } else {
             CacheBackendStorage::Local(LocalCacheBackendAdapter::new())
         };
-
-        Self {
-            kind,
-            topology,
-            storage,
-        }
-    }
-
-    pub(crate) fn for_deployment(topology: CacheTopology, _deployment_id: u64) -> Self {
-        let kind = match topology.l2() {
-            Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
-            Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
-            None => CacheBackendKind::Local,
-        };
-        let storage = CacheBackendStorage::Local(LocalCacheBackendAdapter::new());
 
         Self {
             kind,

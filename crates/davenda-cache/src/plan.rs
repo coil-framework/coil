@@ -143,15 +143,11 @@ impl CachePlan {
 #[derive(Debug, Clone, Copy)]
 pub struct CachePlanner {
     topology: CacheTopology,
-    deployment_id: u64,
 }
 
 impl CachePlanner {
     pub fn new(topology: CacheTopology) -> Self {
-        Self {
-            topology,
-            deployment_id: 0,
-        }
+        Self { topology }
     }
 
     pub fn topology(&self) -> CacheTopology {
@@ -159,7 +155,14 @@ impl CachePlanner {
     }
 
     pub fn runtime(&self) -> crate::CacheRuntime {
-        crate::CacheRuntime::for_deployment(self.topology, self.deployment_id)
+        crate::CacheRuntime::with_backend(
+            self.topology,
+            crate::CacheBackendAdapter::scoped_shared(self.topology, format!("{:p}", self)),
+        )
+    }
+
+    pub fn local_runtime(&self) -> crate::CacheRuntime {
+        crate::CacheRuntime::in_memory(self.topology)
     }
 
     pub fn shared_runtime(&self) -> crate::CacheRuntime {

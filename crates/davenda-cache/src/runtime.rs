@@ -90,15 +90,12 @@ impl CacheRuntime {
         Self::with_backend(topology, crate::CacheBackendAdapter::shared(topology))
     }
 
-    pub fn with_backend(topology: CacheTopology, backend: crate::CacheBackendAdapter) -> Self {
-        Self { topology, backend }
+    pub fn in_memory(topology: CacheTopology) -> Self {
+        Self::with_backend(topology, crate::CacheBackendAdapter::in_memory(topology))
     }
 
-    pub(crate) fn for_deployment(topology: CacheTopology, deployment_id: u64) -> Self {
-        Self::with_backend(
-            topology,
-            crate::CacheBackendAdapter::for_deployment(topology, deployment_id),
-        )
+    pub fn with_backend(topology: CacheTopology, backend: crate::CacheBackendAdapter) -> Self {
+        Self { topology, backend }
     }
 
     pub fn topology(&self) -> CacheTopology {

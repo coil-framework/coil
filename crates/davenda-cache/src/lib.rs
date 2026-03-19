@@ -1,3 +1,4 @@
+mod backend;
 mod error;
 mod plan;
 mod policy;
@@ -7,6 +8,7 @@ mod scope;
 mod topology;
 mod types;
 
+pub use backend::*;
 pub use error::*;
 pub use plan::*;
 pub use policy::*;

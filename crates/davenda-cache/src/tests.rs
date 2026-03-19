@@ -189,6 +189,100 @@ fn planner_respects_explicit_coalescing_override() {
 }
 
 #[test]
+fn local_cache_runtime_clones_do_not_share_state() {
+    let planner = CachePlanner::new(CacheTopology::moka_only());
+    let mut left = planner.runtime();
+    let mut right = left.clone();
+
+    assert_eq!(left.backend_kind(), CacheBackendKind::Local);
+    assert!(!left.backend_is_shared());
+
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:1",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    left.insert(
+        plan.application().unwrap(),
+        "<html>local</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Miss);
+}
+
+#[test]
+fn distributed_cache_runtime_clones_share_state() {
+    let planner = CachePlanner::new(CacheTopology::with_valkey());
+    let mut left = planner.runtime();
+    let mut right = left.clone();
+
+    assert_eq!(left.backend_kind(), CacheBackendKind::Valkey);
+    assert!(left.backend_is_shared());
+
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:2",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    left.insert(
+        plan.application().unwrap(),
+        "<html>shared</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Fresh);
+}
+
+#[test]
 fn no_store_http_policy_can_coexist_with_private_application_cache() {
     let planner = CachePlanner::new(CacheTopology::moka_only());
     let app_policy = ApplicationCachePolicy::new(

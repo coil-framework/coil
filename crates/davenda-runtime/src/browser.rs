@@ -1,13 +1,23 @@
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
 use davenda_core::{BrowserSecurityError, CookieSigner};
-use rand::RngCore;
-use rand::rngs::OsRng;
 
 const FLASH_COOKIE_MAX_AGE_SECS: u64 = 300;
+static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SessionStoreBackendKind {
+    Local,
+    Database,
+    Redis,
+    Valkey,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BrowserInstant(u64);
@@ -62,6 +72,114 @@ pub struct BrowserSessionRecord {
     pub idle_expires_at: BrowserInstant,
     pub absolute_expires_at: BrowserInstant,
     pub revoked_at: Option<BrowserInstant>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SessionStoreState {
+    sessions: HashMap<String, BrowserSessionRecord>,
+}
+
+impl SessionStoreState {
+    fn issue(&mut self, record: BrowserSessionRecord) {
+        self.sessions.insert(record.session_id.clone(), record);
+    }
+
+    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+        self.sessions.get(session_id).cloned()
+    }
+
+    fn revoke(&mut self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
+        let existing = self.sessions.get_mut(session_id).ok_or_else(|| {
+            RuntimeBrowserError::UnknownSession {
+                session_id: session_id.to_string(),
+            }
+        })?;
+        existing.revoked_at = Some(now);
+        Ok(())
+    }
+
+    fn touch_active_session(
+        &mut self,
+        session_id: &str,
+        idle_timeout: Duration,
+        now: BrowserInstant,
+    ) -> Result<Option<String>, RuntimeBrowserError> {
+        let record = self.sessions.get_mut(session_id).ok_or_else(|| {
+            RuntimeBrowserError::UnknownSession {
+                session_id: session_id.to_string(),
+            }
+        })?;
+
+        match record.status_at(now) {
+            BrowserSessionStatus::Active => {
+                record.last_seen_at = now;
+                record.idle_expires_at = now.saturating_add(idle_timeout);
+                Ok(record.principal_id.clone())
+            }
+            BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
+                self.sessions.remove(session_id);
+                Err(RuntimeBrowserError::ExpiredSession {
+                    session_id: session_id.to_string(),
+                })
+            }
+            BrowserSessionStatus::Revoked => Err(RuntimeBrowserError::RevokedSession {
+                session_id: session_id.to_string(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum SessionStoreBackend {
+    Local(SessionStoreState),
+    Shared(Arc<Mutex<SessionStoreState>>),
+}
+
+impl SessionStoreBackend {
+    fn new(topology: davenda_core::SessionStoreTopology) -> (SessionStoreBackendKind, Self) {
+        match topology {
+            davenda_core::SessionStoreTopology::Memory => (
+                SessionStoreBackendKind::Local,
+                Self::Local(SessionStoreState::default()),
+            ),
+            davenda_core::SessionStoreTopology::Database => (
+                SessionStoreBackendKind::Database,
+                Self::Shared(Arc::new(Mutex::new(SessionStoreState::default()))),
+            ),
+            davenda_core::SessionStoreTopology::Redis => (
+                SessionStoreBackendKind::Redis,
+                Self::Shared(Arc::new(Mutex::new(SessionStoreState::default()))),
+            ),
+            davenda_core::SessionStoreTopology::Valkey => (
+                SessionStoreBackendKind::Valkey,
+                Self::Shared(Arc::new(Mutex::new(SessionStoreState::default()))),
+            ),
+        }
+    }
+
+    fn is_shared(&self) -> bool {
+        matches!(self, Self::Shared(_))
+    }
+
+    fn with_state<R>(&self, f: impl FnOnce(&SessionStoreState) -> R) -> R {
+        match self {
+            Self::Local(state) => f(state),
+            Self::Shared(state) => {
+                let guard = state.lock().expect("session backend mutex poisoned");
+                f(&guard)
+            }
+        }
+    }
+
+    fn with_state_mut<R>(&mut self, f: impl FnOnce(&mut SessionStoreState) -> R) -> R {
+        match self {
+            Self::Local(state) => f(state),
+            Self::Shared(state) => {
+                let mut guard = state.lock().expect("session backend mutex poisoned");
+                f(&mut guard)
+            }
+        }
+    }
 }
 
 impl BrowserSessionRecord {
@@ -167,16 +285,27 @@ pub enum RuntimeBrowserError {
 pub struct BrowserHost {
     pub customer_app: String,
     pub services: BrowserSecurityServices,
-    sessions: HashMap<String, BrowserSessionRecord>,
+    session_store_kind: SessionStoreBackendKind,
+    sessions: SessionStoreBackend,
 }
 
 impl BrowserHost {
     pub(crate) fn new(customer_app: String, services: BrowserSecurityServices) -> Self {
+        let (session_store_kind, sessions) = SessionStoreBackend::new(services.sessions.store);
         Self {
             customer_app,
             services,
-            sessions: HashMap::new(),
+            session_store_kind,
+            sessions,
         }
+    }
+
+    pub fn session_store_kind(&self) -> SessionStoreBackendKind {
+        self.session_store_kind
+    }
+
+    pub fn session_store_is_shared(&self) -> bool {
+        self.sessions.is_shared()
     }
 
     pub fn issue_session(
@@ -196,7 +325,7 @@ impl BrowserHost {
             revoked_at: None,
         };
         let issued = self.issue_cookie_for_record(record.clone(), cookie_secret)?;
-        self.sessions.insert(session_id, record);
+        self.sessions.with_state_mut(|state| state.issue(record));
         Ok(issued)
     }
 
@@ -239,14 +368,8 @@ impl BrowserHost {
         now: BrowserInstant,
     ) -> Result<(), RuntimeBrowserError> {
         let session_id = validate_browser_value("session_id", session_id.to_string())?;
-        let existing = self.sessions.get_mut(&session_id).ok_or_else(|| {
-            RuntimeBrowserError::UnknownSession {
-                session_id: session_id.clone(),
-            }
-        })?;
-
-        existing.revoked_at = Some(now);
-        Ok(())
+        self.sessions
+            .with_state_mut(|state| state.revoke(&session_id, now))
     }
 
     pub fn issue_csrf_token(
@@ -292,8 +415,8 @@ impl BrowserHost {
             .render_set_cookie("", Some(Duration::from_secs(0)))
     }
 
-    pub fn session(&self, session_id: &str) -> Option<&BrowserSessionRecord> {
-        self.sessions.get(session_id)
+    pub fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+        self.sessions.with_state(|state| state.session(session_id))
     }
 
     pub fn resolve_request(
@@ -396,37 +519,18 @@ impl BrowserHost {
         cookie_secret: &[u8],
         now: BrowserInstant,
     ) -> Result<(Option<String>, String), RuntimeBrowserError> {
-        let record = self.sessions.get_mut(session_id).ok_or_else(|| {
-            RuntimeBrowserError::UnknownSession {
-                session_id: session_id.to_string(),
-            }
+        let principal_id = self.sessions.with_state_mut(|state| {
+            state.touch_active_session(session_id, self.services.sessions.idle_timeout, now)
         })?;
-
-        match record.status_at(now) {
-            BrowserSessionStatus::Active => {
-                record.last_seen_at = now;
-                record.idle_expires_at = now.saturating_add(self.services.sessions.idle_timeout);
-                let principal_id = record.principal_id.clone();
-                let cookie_value = CookieSigner::new(self.services.sessions.session_cookie.clone())
-                    .sign(cookie_secret, session_id)
-                    .map_err(map_session_cookie_error)?;
-                let cookie_header = self
-                    .services
-                    .sessions
-                    .session_cookie
-                    .render_set_cookie(&cookie_value, Some(self.services.sessions.idle_timeout));
-                Ok((principal_id, cookie_header))
-            }
-            BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
-                self.sessions.remove(session_id);
-                Err(RuntimeBrowserError::ExpiredSession {
-                    session_id: session_id.to_string(),
-                })
-            }
-            BrowserSessionStatus::Revoked => Err(RuntimeBrowserError::RevokedSession {
-                session_id: session_id.to_string(),
-            }),
-        }
+        let cookie_value = CookieSigner::new(self.services.sessions.session_cookie.clone())
+            .sign(cookie_secret, session_id)
+            .map_err(map_session_cookie_error)?;
+        let cookie_header = self
+            .services
+            .sessions
+            .session_cookie
+            .render_set_cookie(&cookie_value, Some(self.services.sessions.idle_timeout));
+        Ok((principal_id, cookie_header))
     }
 }
 
@@ -443,14 +547,14 @@ fn validate_browser_value(
 }
 
 fn issue_session_id() -> String {
-    let mut bytes = [0u8; 24];
-    OsRng.fill_bytes(&mut bytes);
+    let sequence = SESSION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
 
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(output, "{byte:02x}");
-    }
-
+    let mut output = String::with_capacity(40);
+    let _ = write!(output, "{nanos:032x}{sequence:08x}");
     output
 }
 

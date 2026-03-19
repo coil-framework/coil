@@ -2062,6 +2062,19 @@ async fn server_router_exposes_health_readiness_metrics_and_diagnostics_probes()
         .unwrap();
     assert_eq!(readiness.status(), StatusCode::OK);
 
+    let readiness_alias = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/readiness")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(readiness_alias.status(), StatusCode::OK);
+
     let metrics = server
         .router()
         .oneshot(
@@ -2097,6 +2110,60 @@ async fn server_router_exposes_health_readiness_metrics_and_diagnostics_probes()
         .await
         .unwrap();
     assert_eq!(diagnostics.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn server_router_denies_diagnostics_probe_for_authenticated_sessions_without_audit_access() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(StaticLiveRouteCapabilityAuthorizer::new()),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let diagnostics = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/diagnostics")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(diagnostics.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -2182,7 +2249,10 @@ fn runtime_plan_uses_shared_postgres_metadata_audit_backend_in_distributed_mode(
     let host = plan.wasm_host();
 
     assert_eq!(host.metadata_audit_backend_kind(), "postgres");
-    assert!(host.metadata_audit_location().contains("metadata_audit_entries"));
+    assert_eq!(
+        host.metadata_audit_location(),
+        "postgres:public.metadata_audit_entries"
+    );
 }
 
 #[tokio::test]

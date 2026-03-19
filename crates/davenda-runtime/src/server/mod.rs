@@ -192,6 +192,7 @@ impl HttpServerHost {
         let router = Router::new()
             .route("/health", any(serve_health_probe))
             .route("/ready", any(serve_readiness_probe))
+            .route("/readiness", any(serve_readiness_probe))
             .route("/metrics", get(serve_metrics_probe))
             .route("/diagnostics", get(serve_diagnostics_probe))
             .route("/", any(serve_runtime_request))

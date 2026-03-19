@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use crate::validation::require_non_empty;
-use crate::{validation::validate_token, I18nError};
+use crate::{I18nError, validation::validate_token};
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {

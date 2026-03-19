@@ -3,8 +3,8 @@ use std::fmt;
 
 use davenda_i18n::LocaleTag;
 
-use crate::validation::validate_absolute_url;
 use crate::SeoError;
+use crate::validation::validate_absolute_url;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SitemapChangeFrequency {

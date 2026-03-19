@@ -1,5 +1,5 @@
-use crate::validation::{require_non_empty, validate_id};
 use crate::A11yError;
+use crate::validation::{require_non_empty, validate_id};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormFieldContract {

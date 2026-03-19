@@ -1,5 +1,5 @@
-use crate::validation::validate_ratio;
 use crate::A11yError;
+use crate::validation::validate_ratio;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeAccessibilityContract {

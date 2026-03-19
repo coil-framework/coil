@@ -3,8 +3,8 @@ use std::fmt;
 
 use davenda_i18n::LocalizedUrls;
 
-use crate::validation::{require_non_empty, validate_absolute_url};
 use crate::SeoError;
+use crate::validation::{require_non_empty, validate_absolute_url};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RobotsDirective {

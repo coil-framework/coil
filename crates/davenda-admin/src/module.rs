@@ -77,14 +77,16 @@ impl AdminModule {
                     )
                     .expect("constant widget is valid"),
                 ],
-                vec![WorkflowAction::new(
-                    WorkflowId::new("system.modules.apply").expect("valid id"),
-                    "Apply module changes",
-                    BulkActionKind::Custom,
-                    Capability::SystemModuleManage,
-                    "Module changes scheduled",
-                )
-                .expect("constant workflow is valid")],
+                vec![
+                    WorkflowAction::new(
+                        WorkflowId::new("system.modules.apply").expect("valid id"),
+                        "Apply module changes",
+                        BulkActionKind::Custom,
+                        Capability::SystemModuleManage,
+                        "Module changes scheduled",
+                    )
+                    .expect("constant workflow is valid"),
+                ],
             )
             .expect("constant shell is valid"),
         }

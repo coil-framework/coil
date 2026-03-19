@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use davenda_i18n::{LocaleRouter, LocaleTag, LocaleUrlConfig};
 
 use crate::{
-    event_node, page_node, product_node, HeadMetadata, OpenGraphData, OpenGraphType,
-    RobotsDirective, SitemapChangeFrequency, SitemapDocument, SitemapEntry, SitemapImage,
+    HeadMetadata, OpenGraphData, OpenGraphType, RobotsDirective, SitemapChangeFrequency,
+    SitemapDocument, SitemapEntry, SitemapImage, event_node, page_node, product_node,
 };
 
 fn locale(locale: &str) -> LocaleTag {
@@ -64,19 +64,23 @@ fn sitemap_document_keeps_alternate_locale_variants() {
         "fr-FR".to_string(),
         "https://www.example.com/fr-FR/events/spring-tasting".to_string(),
     );
-    let document = SitemapDocument::new(vec![SitemapEntry::new(
-        "https://www.example.com/en-GB/events/spring-tasting",
-        1_710_000_000,
-        SitemapChangeFrequency::Weekly,
-        0.8,
-        alternates,
-        vec![SitemapImage::new(
-            "https://cdn.example.com/event.jpg",
-            Some("Event image".to_string()),
+    let document = SitemapDocument::new(vec![
+        SitemapEntry::new(
+            "https://www.example.com/en-GB/events/spring-tasting",
+            1_710_000_000,
+            SitemapChangeFrequency::Weekly,
+            0.8,
+            alternates,
+            vec![
+                SitemapImage::new(
+                    "https://cdn.example.com/event.jpg",
+                    Some("Event image".to_string()),
+                )
+                .unwrap(),
+            ],
         )
-        .unwrap()],
-    )
-    .unwrap()]);
+        .unwrap(),
+    ]);
 
     let fr_entries = document.localized_entries_for(&locale("fr-FR"));
     assert_eq!(fr_entries.len(), 1);
@@ -119,7 +123,8 @@ fn page_json_ld_builder_uses_absolute_urls() {
     .unwrap();
 
     assert!(node.render().contains("\"@type\":\"WebPage\""));
-    assert!(node
-        .render()
-        .contains("\"url\":\"https://www.example.com/en-GB/events\""));
+    assert!(
+        node.render()
+            .contains("\"url\":\"https://www.example.com/en-GB/events\"")
+    );
 }

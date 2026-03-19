@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
+use crate::SeoError;
 use crate::validation::{
     escape_json, require_non_empty, validate_absolute_url, validate_property_name,
 };
-use crate::SeoError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonLdValue {

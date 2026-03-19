@@ -51,7 +51,9 @@ impl RuntimeOutboundHttpBackend {
         }
     }
 
-    pub(super) fn execute(
+    /// Execute an approved outbound HTTP integration without running the
+    /// network call on the runtime worker lane.
+    pub(super) fn execute_via_blocking_pool(
         &self,
         integration: &str,
         response_bytes_hint: u64,
@@ -67,7 +69,7 @@ impl RuntimeOutboundHttpBackend {
         let endpoint_string = endpoint.to_string();
         let client = self.client.clone();
         let request_timeout = self.request_timeout;
-        execute_on_blocking_pool(move || {
+        execute_outbound_http_on_blocking_pool(move || {
             perform_request(
                 client,
                 endpoint,
@@ -149,7 +151,7 @@ fn perform_request(
 /// The request thread only waits at the boundary; the actual network call and
 /// body read run off the core worker lane when a multi-thread runtime is
 /// present.
-fn execute_on_blocking_pool<T, F>(operation: F) -> Result<T, String>
+fn execute_outbound_http_on_blocking_pool<T, F>(operation: F) -> Result<T, String>
 where
     F: FnOnce() -> Result<T, String> + Send + 'static,
     T: Send + 'static,

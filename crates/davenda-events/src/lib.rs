@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 

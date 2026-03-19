@@ -133,21 +133,15 @@ fn catalog_exposes_search_visibility_rules() {
         .expect("composed catalog should validate");
 
     let visible = catalog.search.visible_to(&[]);
-    assert!(
-        visible
-            .iter()
-            .any(|index| index.id.as_str() == "search.cms.pages")
-    );
-    assert!(
-        visible
-            .iter()
-            .any(|index| index.id.as_str() == "search.media")
-    );
-    assert!(
-        !visible
-            .iter()
-            .any(|index| index.id.as_str() == "search.events.bookings")
-    );
+    assert!(visible
+        .iter()
+        .any(|index| index.id.as_str() == "search.cms.pages"));
+    assert!(visible
+        .iter()
+        .any(|index| index.id.as_str() == "search.media"));
+    assert!(!visible
+        .iter()
+        .any(|index| index.id.as_str() == "search.events.bookings"));
 }
 
 #[test]
@@ -221,22 +215,16 @@ fn search_and_report_definitions_are_registry_ready() {
 
     assert_eq!(manifest.name, "ops");
     assert_eq!(manifest.config_namespace.as_deref(), Some("ops"));
-    assert!(
-        manifest
-            .required_capabilities
-            .contains(&Capability::AdminShellAccess)
-    );
-    assert!(
-        manifest
-            .optional_capabilities
-            .contains(&Capability::CmsPagePublish)
-    );
-    assert!(
-        manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "admin")
-    );
+    assert!(manifest
+        .required_capabilities
+        .contains(&Capability::AdminShellAccess));
+    assert!(manifest
+        .optional_capabilities
+        .contains(&Capability::CmsPagePublish));
+    assert!(manifest
+        .module_dependencies
+        .iter()
+        .any(|dependency| dependency.module == "admin"));
     assert_eq!(manifest.migrations.len(), 3);
     assert_eq!(manifest.route_surfaces.len(), 3);
     assert_eq!(manifest.http_surfaces.len(), 3);
@@ -245,17 +233,13 @@ fn search_and_report_definitions_are_registry_ready() {
     assert_eq!(manifest.admin_resources.len(), 3);
     assert_eq!(manifest.report_definitions.len(), 1);
     assert_eq!(manifest.bulk_operations.len(), 2);
-    assert!(
-        manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Storage)
-    );
-    assert!(
-        manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::Job)
-    );
+    assert!(manifest
+        .core_service_dependencies
+        .contains(&CoreServiceDependency::Storage));
+    assert!(manifest
+        .extension_slots
+        .iter()
+        .any(|slot| slot.kind == ExtensionSlotKind::Job));
     assert_eq!(
         module
             .install_migration_plan()

@@ -115,7 +115,7 @@ pub enum AppModelError {
     #[error("{0}")]
     ModuleCapabilityValidation(#[from] CapabilityValidationError),
     #[error("{0}")]
-    Cli(#[from] CliModelError),
+    Report(#[from] ReportModelError),
     #[error("{0}")]
     Wasm(#[from] WasmModelError),
     #[error("{message}")]

@@ -2,18 +2,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use davenda_auth::AuthModelPackage;
-use davenda_cli::{
-    CliModelError, CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus,
-};
 use davenda_config::PlatformConfig;
 use davenda_core::{
-    AdminResourceContribution, BulkOperationDefinition, CapabilityValidationError,
-    CoreServiceDependency, EventSubscription, JobContract, MigrationContract, ModuleDependency,
-    ModuleDependencyKind, ModuleManifest, PlatformModule, ReportDefinition, RouteSurface,
-    SearchIndexContribution, validate_module_capabilities,
+    validate_module_capabilities, AdminResourceContribution, BulkOperationDefinition,
+    CapabilityValidationError, CoreServiceDependency, EventSubscription, JobContract,
+    MigrationContract, ModuleDependency, ModuleDependencyKind, ModuleManifest, PlatformModule,
+    ReportDefinition, RouteSurface, SearchIndexContribution,
 };
 use davenda_data::{MigrationOwner, MigrationPlan};
 use davenda_i18n::LocaleTag;
+use davenda_report::{
+    CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportModelError, ReportRow, ReportStatus,
+};
 use davenda_runtime::{RuntimeBuildError, RuntimeBuilder, RuntimePlan};
 use davenda_template::TemplateNamespace;
 use davenda_wasm::{

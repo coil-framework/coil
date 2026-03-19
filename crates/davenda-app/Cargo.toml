@@ -11,6 +11,7 @@ davenda-core = { path = "../davenda-core" }
 davenda-data = { path = "../davenda-data" }
 davenda-i18n = { path = "../davenda-i18n" }
 davenda-jobs = { path = "../davenda-jobs" }
+davenda-report = { path = "../davenda-report" }
 davenda-runtime = { path = "../davenda-runtime" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }

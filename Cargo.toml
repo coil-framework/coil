@@ -21,6 +21,7 @@ members = [
     "crates/davenda-memberships",
     "crates/davenda-observability",
     "crates/davenda-ops",
+    "crates/davenda-report",
     "crates/davenda-runtime",
     "crates/davenda-seo",
     "crates/davenda-storage",

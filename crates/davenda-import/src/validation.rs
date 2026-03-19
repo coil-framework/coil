@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use davenda_cli::CliModelError;
+use davenda_report::ReportModelError;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ImportModelError {
@@ -22,7 +22,7 @@ pub enum ImportModelError {
     #[error("import receipt duplicates source key `{source_key}`")]
     DuplicateSourceReceipt { source_key: String },
     #[error("{0}")]
-    Cli(#[from] CliModelError),
+    Report(#[from] ReportModelError),
 }
 
 pub fn require_non_empty(field: &'static str, value: String) -> Result<String, ImportModelError> {

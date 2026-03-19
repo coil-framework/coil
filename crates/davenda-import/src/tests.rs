@@ -1,5 +1,5 @@
 use super::*;
-use davenda_cli::ReportStatus;
+use davenda_report::ReportStatus;
 
 #[test]
 fn manifest_plans_importers_in_dependency_order() {

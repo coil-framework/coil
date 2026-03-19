@@ -1,7 +1,14 @@
 use std::collections::BTreeMap;
 
-use crate::CliModelError;
-use crate::validation::{require_non_empty, validate_token};
+use thiserror::Error;
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ReportModelError {
+    #[error("`{field}` cannot be empty")]
+    EmptyField { field: &'static str },
+    #[error("`{field}` contains an invalid token `{value}`")]
+    InvalidToken { field: &'static str, value: String },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportStatus {
@@ -29,7 +36,7 @@ impl DiagnosticRecord {
         severity: DiagnosticSeverity,
         code: impl Into<String>,
         message: impl Into<String>,
-    ) -> Result<Self, CliModelError> {
+    ) -> Result<Self, ReportModelError> {
         Ok(Self {
             severity,
             code: validate_token("diagnostic_code", code.into())?,
@@ -52,7 +59,7 @@ impl ReportRow {
         mut self,
         column: impl Into<String>,
         value: impl Into<String>,
-    ) -> Result<Self, CliModelError> {
+    ) -> Result<Self, ReportModelError> {
         let column = validate_token("report_column", column.into())?;
         let value = require_non_empty("report_value", value.into())?;
         self.cells.insert(column, value);
@@ -74,13 +81,13 @@ impl CommandReport {
     pub fn new(
         command: impl IntoIterator<Item = impl Into<String>>,
         summary: impl Into<String>,
-    ) -> Result<Self, CliModelError> {
+    ) -> Result<Self, ReportModelError> {
         let command = command
             .into_iter()
             .map(|segment| validate_token("command_segment", segment.into()))
             .collect::<Result<Vec<_>, _>>()?;
         if command.is_empty() {
-            return Err(CliModelError::EmptyField {
+            return Err(ReportModelError::EmptyField {
                 field: "command_path",
             });
         }
@@ -103,7 +110,7 @@ impl CommandReport {
     pub fn with_columns(
         mut self,
         columns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<Self, CliModelError> {
+    ) -> Result<Self, ReportModelError> {
         self.columns = columns
             .into_iter()
             .map(|column| validate_token("report_column", column.into()))
@@ -117,5 +124,29 @@ impl CommandReport {
 
     pub fn push_diagnostic(&mut self, diagnostic: DiagnosticRecord) {
         self.diagnostics.push(diagnostic);
+    }
+}
+
+fn require_non_empty(field: &'static str, value: String) -> Result<String, ReportModelError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err(ReportModelError::EmptyField { field })
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn validate_token(field: &'static str, value: String) -> Result<String, ReportModelError> {
+    let trimmed = require_non_empty(field, value)?;
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/'))
+    {
+        Ok(trimmed)
+    } else {
+        Err(ReportModelError::InvalidToken {
+            field,
+            value: trimmed,
+        })
     }
 }

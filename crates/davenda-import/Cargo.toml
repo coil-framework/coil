@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-davenda-cli = { path = "../davenda-cli" }
+davenda-report = { path = "../davenda-report" }
 thiserror = "2.0.17"

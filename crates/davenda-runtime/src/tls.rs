@@ -1,8 +1,7 @@
 use super::*;
-use davenda_data::DataModelError;
 use davenda_tls::{
     CertificateMaterial, ManualCertificateBundle, ManualImportTlsCertificateExecutor,
-    TlsMaterialProtector,
+    TlsCertificateExecutor, TlsMaterialProtector,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]

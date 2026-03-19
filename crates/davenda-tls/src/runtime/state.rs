@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct TlsAutomationState {
+pub struct TlsControlPlaneState {
     pub inventory: CertificateInventory,
     pub renewal_queue: Vec<RenewalPlan>,
     pub pending_challenges: Vec<ChallengeTicket>,
@@ -109,7 +109,7 @@ impl CertificateInventory {
     }
 }
 
-impl TlsAutomationState {
+impl TlsControlPlaneState {
     pub fn new() -> Self {
         Self::default()
     }

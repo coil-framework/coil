@@ -47,7 +47,7 @@ use davenda_storage::{
 use davenda_tls::{
     CertificateId, CertificateInventory, CertificateProviderKind, CertificateRecord,
     ChallengeTicket, EdgeMode, HostnameBinding, HotReloadEvent, IssuancePlan, RenewalPlan,
-    TlsAutomationRuntime, TlsInstant, TlsModelError,
+    TlsControlPlaneRuntime, TlsInstant, TlsModelError,
 };
 use davenda_wasm::{
     AdminWidgetInvocation, ApiInvocation, CompiledWasmModule, ContractVersion, CustomerAppContext,

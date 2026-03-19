@@ -4,43 +4,43 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::super::planning::TlsRuntime;
-use super::super::state::TlsAutomationState;
-use super::TlsAutomationBackend;
-use crate::{CertificateId, CertificateRecord, CertificateStatus, TlsInstant, TlsModelError};
 use super::super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
+use super::super::state::TlsControlPlaneState;
+use super::TlsControlPlaneStore;
+use crate::{CertificateId, CertificateRecord, CertificateStatus, TlsInstant, TlsModelError};
 
 #[derive(Debug, Clone)]
-pub(crate) struct TestPersistenceTlsAutomationBackend {
+pub(crate) struct TestPersistenceTlsControlPlaneStore {
     path: PathBuf,
 }
 
-impl TestPersistenceTlsAutomationBackend {
+impl TestPersistenceTlsControlPlaneStore {
     pub(crate) fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
 
-    fn load_state(&self) -> Result<TlsAutomationState, TlsModelError> {
+    fn load_state(&self) -> Result<TlsControlPlaneState, TlsModelError> {
         match fs::read_to_string(&self.path) {
             Ok(contents) => serde_json::from_str(&contents).map_err(|error| {
-                TlsModelError::CorruptAutomationState {
+                TlsModelError::CorruptControlPlaneState {
                     path: self.path.display().to_string(),
                     reason: error.to_string(),
                 }
             }),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(TlsAutomationState::default())
+                Ok(TlsControlPlaneState::default())
             }
-            Err(error) => Err(TlsModelError::AutomationStatePersistence {
+            Err(error) => Err(TlsModelError::ControlPlaneStatePersistence {
                 path: self.path.display().to_string(),
                 reason: error.to_string(),
             }),
         }
     }
 
-    fn persist_state(&self, state: &TlsAutomationState) -> Result<(), TlsModelError> {
+    fn persist_state(&self, state: &TlsControlPlaneState) -> Result<(), TlsModelError> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
-                TlsModelError::AutomationStatePersistence {
+                TlsModelError::ControlPlaneStatePersistence {
                     path: self.path.display().to_string(),
                     reason: error.to_string(),
                 }
@@ -51,19 +51,19 @@ impl TestPersistenceTlsAutomationBackend {
             self.path
                 .with_extension(format!("tmp-{}-{}", std::process::id(), current_nanos()));
         let serialized = serde_json::to_string_pretty(state).map_err(|error| {
-            TlsModelError::AutomationStatePersistence {
+            TlsModelError::ControlPlaneStatePersistence {
                 path: self.path.display().to_string(),
                 reason: error.to_string(),
             }
         })?;
         fs::write(&tmp_path, serialized).map_err(|error| {
-            TlsModelError::AutomationStatePersistence {
+            TlsModelError::ControlPlaneStatePersistence {
                 path: self.path.display().to_string(),
                 reason: error.to_string(),
             }
         })?;
         fs::rename(&tmp_path, &self.path).map_err(|error| {
-            TlsModelError::AutomationStatePersistence {
+            TlsModelError::ControlPlaneStatePersistence {
                 path: self.path.display().to_string(),
                 reason: error.to_string(),
             }
@@ -72,10 +72,10 @@ impl TestPersistenceTlsAutomationBackend {
     }
 }
 
-impl TlsAutomationBackend for TestPersistenceTlsAutomationBackend {
-    fn snapshot(&self) -> TlsAutomationState {
+impl TlsControlPlaneStore for TestPersistenceTlsControlPlaneStore {
+    fn snapshot(&self) -> TlsControlPlaneState {
         self.load_state()
-            .expect("TLS automation state should be readable")
+            .expect("TLS control-plane state should be readable")
     }
 
     fn import_certificate(&self, record: CertificateRecord) -> Result<(), TlsModelError> {

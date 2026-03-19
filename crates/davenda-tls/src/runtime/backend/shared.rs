@@ -1,15 +1,15 @@
 use std::future::Future;
 
 use super::super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan, TlsRuntime};
-use super::super::state::TlsAutomationState;
-use super::TlsAutomationBackend;
+use super::super::state::TlsControlPlaneState;
+use super::TlsControlPlaneStore;
 use crate::{CertificateId, CertificateRecord, CertificateStatus, TlsInstant, TlsModelError};
 use davenda_data::{DataRuntime, PostgresDataClient};
 use sqlx::{Postgres, Row};
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]
-pub struct PostgresTlsAutomationBackend {
+pub struct PostgresTlsControlPlaneStore {
     client: PostgresDataClient,
     namespace: String,
     schema: String,
@@ -17,23 +17,24 @@ pub struct PostgresTlsAutomationBackend {
     runtime: Runtime,
 }
 
-impl PostgresTlsAutomationBackend {
+impl PostgresTlsControlPlaneStore {
     pub fn new(
         data_runtime: &DataRuntime,
         namespace: impl Into<String>,
     ) -> Result<Self, TlsModelError> {
         let namespace = namespace.into();
         let client = data_runtime.connect_lazy_postgres().map_err(|error| {
-            TlsModelError::SharedAutomationStatePersistence {
+            TlsModelError::DistributedControlPlaneStatePersistence {
                 namespace: namespace.clone(),
                 reason: error.to_string(),
             }
         })?;
-        let runtime =
-            Runtime::new().map_err(|error| TlsModelError::SharedAutomationStatePersistence {
+        let runtime = Runtime::new().map_err(|error| {
+            TlsModelError::DistributedControlPlaneStatePersistence {
                 namespace: namespace.clone(),
                 reason: error.to_string(),
-            })?;
+            }
+        })?;
 
         Ok(Self {
             schema: data_runtime.schema.clone(),
@@ -60,10 +61,12 @@ impl PostgresTlsAutomationBackend {
         ))
         .execute(&pool)
         .await
-        .map_err(|error| TlsModelError::SharedAutomationStatePersistence {
-            namespace: namespace.clone(),
-            reason: error.to_string(),
-        })?;
+        .map_err(
+            |error| TlsModelError::DistributedControlPlaneStatePersistence {
+                namespace: namespace.clone(),
+                reason: error.to_string(),
+            },
+        )?;
         sqlx::query(&format!(
             "CREATE TABLE IF NOT EXISTS {state_table} (
                 namespace TEXT PRIMARY KEY,
@@ -72,10 +75,12 @@ impl PostgresTlsAutomationBackend {
         ))
         .execute(&pool)
         .await
-        .map_err(|error| TlsModelError::SharedAutomationStatePersistence {
-            namespace,
-            reason: error.to_string(),
-        })?;
+        .map_err(
+            |error| TlsModelError::DistributedControlPlaneStatePersistence {
+                namespace,
+                reason: error.to_string(),
+            },
+        )?;
         Ok(())
     }
 
@@ -84,7 +89,7 @@ impl PostgresTlsAutomationBackend {
         namespace: String,
         schema: String,
         state_table: String,
-    ) -> Result<TlsAutomationState, TlsModelError> {
+    ) -> Result<TlsControlPlaneState, TlsModelError> {
         Self::ensure_schema(
             pool.clone(),
             namespace.clone(),
@@ -99,20 +104,22 @@ impl PostgresTlsAutomationBackend {
         .bind(&namespace)
         .fetch_optional(&pool)
         .await
-        .map_err(|error| TlsModelError::SharedAutomationStatePersistence {
-            namespace: namespace.clone(),
-            reason: error.to_string(),
-        })?
+        .map_err(
+            |error| TlsModelError::DistributedControlPlaneStatePersistence {
+                namespace: namespace.clone(),
+                reason: error.to_string(),
+            },
+        )?
         .map(|row| row.get::<String, _>("payload"));
 
         match payload {
             Some(payload) => serde_json::from_str(&payload).map_err(|error| {
-                TlsModelError::CorruptSharedAutomationState {
+                TlsModelError::CorruptDistributedControlPlaneState {
                     namespace,
                     reason: error.to_string(),
                 }
             }),
-            None => Ok(TlsAutomationState::default()),
+            None => Ok(TlsControlPlaneState::default()),
         }
     }
 
@@ -121,7 +128,7 @@ impl PostgresTlsAutomationBackend {
         namespace: String,
         schema: String,
         state_table: String,
-        op: impl FnOnce(&mut TlsAutomationState) -> Result<T, TlsModelError>,
+        op: impl FnOnce(&mut TlsControlPlaneState) -> Result<T, TlsModelError>,
     ) -> Result<T, TlsModelError> {
         Self::ensure_schema(
             pool.clone(),
@@ -132,15 +139,15 @@ impl PostgresTlsAutomationBackend {
         .await?;
 
         let mut tx = pool.begin().await.map_err(|error| {
-            TlsModelError::SharedAutomationStatePersistence {
+            TlsModelError::DistributedControlPlaneStatePersistence {
                 namespace: namespace.clone(),
                 reason: error.to_string(),
             }
         })?;
 
         let default_payload =
-            serde_json::to_string(&TlsAutomationState::default()).map_err(|error| {
-                TlsModelError::SharedAutomationStatePersistence {
+            serde_json::to_string(&TlsControlPlaneState::default()).map_err(|error| {
+                TlsModelError::DistributedControlPlaneStatePersistence {
                     namespace: namespace.clone(),
                     reason: error.to_string(),
                 }
@@ -154,10 +161,12 @@ impl PostgresTlsAutomationBackend {
         .bind(default_payload)
         .execute(&mut *tx)
         .await
-        .map_err(|error| TlsModelError::SharedAutomationStatePersistence {
-            namespace: namespace.clone(),
-            reason: error.to_string(),
-        })?;
+        .map_err(
+            |error| TlsModelError::DistributedControlPlaneStatePersistence {
+                namespace: namespace.clone(),
+                reason: error.to_string(),
+            },
+        )?;
 
         let payload = sqlx::query(&format!(
             "SELECT payload FROM {state_table} WHERE namespace = $1 FOR UPDATE"
@@ -165,14 +174,16 @@ impl PostgresTlsAutomationBackend {
         .bind(&namespace)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|error| TlsModelError::SharedAutomationStatePersistence {
-            namespace: namespace.clone(),
-            reason: error.to_string(),
-        })?
+        .map_err(
+            |error| TlsModelError::DistributedControlPlaneStatePersistence {
+                namespace: namespace.clone(),
+                reason: error.to_string(),
+            },
+        )?
         .get::<String, _>("payload");
 
         let mut state = serde_json::from_str(&payload).map_err(|error| {
-            TlsModelError::CorruptSharedAutomationState {
+            TlsModelError::CorruptDistributedControlPlaneState {
                 namespace: namespace.clone(),
                 reason: error.to_string(),
             }
@@ -180,7 +191,7 @@ impl PostgresTlsAutomationBackend {
 
         let outcome = op(&mut state)?;
         let serialized = serde_json::to_string(&state).map_err(|error| {
-            TlsModelError::SharedAutomationStatePersistence {
+            TlsModelError::DistributedControlPlaneStatePersistence {
                 namespace: namespace.clone(),
                 reason: error.to_string(),
             }
@@ -193,30 +204,32 @@ impl PostgresTlsAutomationBackend {
         .bind(serialized)
         .execute(&mut *tx)
         .await
-        .map_err(|error| TlsModelError::SharedAutomationStatePersistence {
-            namespace: namespace.clone(),
-            reason: error.to_string(),
-        })?;
+        .map_err(
+            |error| TlsModelError::DistributedControlPlaneStatePersistence {
+                namespace: namespace.clone(),
+                reason: error.to_string(),
+            },
+        )?;
 
-        tx.commit()
-            .await
-            .map_err(|error| TlsModelError::SharedAutomationStatePersistence {
+        tx.commit().await.map_err(|error| {
+            TlsModelError::DistributedControlPlaneStatePersistence {
                 namespace,
                 reason: error.to_string(),
-            })?;
+            }
+        })?;
         Ok(outcome)
     }
 }
 
-impl TlsAutomationBackend for PostgresTlsAutomationBackend {
-    fn snapshot(&self) -> TlsAutomationState {
+impl TlsControlPlaneStore for PostgresTlsControlPlaneStore {
+    fn snapshot(&self) -> TlsControlPlaneState {
         self.block_on(Self::read_state(
             self.client.pool.clone(),
             self.namespace.clone(),
             self.schema.clone(),
             self.state_table.clone(),
         ))
-        .expect("shared TLS automation state should be readable")
+        .expect("distributed TLS control-plane state should be readable")
     }
 
     fn import_certificate(&self, record: CertificateRecord) -> Result<(), TlsModelError> {
@@ -390,7 +403,7 @@ fn state_table_name(schema: &str) -> String {
     format!(
         "{}.{}",
         quote_identifier(schema),
-        quote_identifier("tls_automation_state")
+        quote_identifier("tls_control_plane_state")
     )
 }
 

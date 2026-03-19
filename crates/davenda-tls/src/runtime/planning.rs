@@ -151,8 +151,8 @@ impl TlsRuntime {
     }
 
     #[cfg(test)]
-    pub fn automation(&self) -> super::automation::TlsAutomationRuntime {
-        super::automation::TlsAutomationRuntime::new(self.clone())
+    pub fn control_plane(&self) -> super::control_plane::TlsControlPlaneRuntime {
+        super::control_plane::TlsControlPlaneRuntime::new(self.clone())
     }
 }
 

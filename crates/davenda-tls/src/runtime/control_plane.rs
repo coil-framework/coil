@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use super::backend::{PostgresTlsAutomationBackend, TlsAutomationBackend};
+use super::backend::{PostgresTlsControlPlaneStore, TlsControlPlaneStore};
 use super::planning::TlsRuntime;
-use super::state::{CertificateInventory, TlsAutomationState};
+use super::state::{CertificateInventory, TlsControlPlaneState};
 use crate::{
     CertificateId, CertificateRecord, ChallengeTicket, HotReloadEvent, RenewalPlan, TlsInstant,
     TlsModelError,
@@ -10,51 +10,54 @@ use crate::{
 use davenda_data::DataRuntime;
 
 #[derive(Debug, Clone)]
-pub struct TlsAutomationRuntime {
+pub struct TlsControlPlaneRuntime {
     runtime: TlsRuntime,
-    backend: Arc<dyn TlsAutomationBackend>,
+    store: Arc<dyn TlsControlPlaneStore>,
 }
 
-impl TlsAutomationRuntime {
+impl TlsControlPlaneRuntime {
     #[cfg(test)]
     pub fn new(runtime: TlsRuntime) -> Self {
-        Self::in_memory_for_tests(runtime)
+        Self::in_memory_control_plane_for_tests(runtime)
     }
 
-    pub fn in_memory_for_tests(runtime: TlsRuntime) -> Self {
-        Self::with_backend(
+    pub fn in_memory_control_plane_for_tests(runtime: TlsRuntime) -> Self {
+        Self::with_store(
             runtime,
-            Arc::new(super::backend::MemoryTlsAutomationBackend::new()),
+            Arc::new(super::backend::MemoryTlsControlPlaneStore::new()),
         )
     }
 
     #[cfg(test)]
-    pub fn with_test_persistence_backend(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
-        Self::with_backend(
+    pub fn with_test_persistence_control_plane_for_tests(
+        runtime: TlsRuntime,
+        scope: impl Into<String>,
+    ) -> Self {
+        Self::with_store(
             runtime,
-            Arc::new(super::backend::TestPersistenceTlsAutomationBackend::new(
+            Arc::new(super::backend::TestPersistenceTlsControlPlaneStore::new(
                 super::backend::test_persistence_state_path(scope),
             )),
         )
     }
 
-    pub fn with_postgres_shared_backend(
+    pub fn with_distributed_postgres_control_plane(
         runtime: TlsRuntime,
         data_runtime: &DataRuntime,
         namespace: impl Into<String>,
     ) -> Result<Self, TlsModelError> {
-        Ok(Self::with_backend(
+        Ok(Self::with_store(
             runtime,
-            Arc::new(PostgresTlsAutomationBackend::new(data_runtime, namespace)?),
+            Arc::new(PostgresTlsControlPlaneStore::new(data_runtime, namespace)?),
         ))
     }
 
-    fn with_backend(runtime: TlsRuntime, backend: Arc<dyn TlsAutomationBackend>) -> Self {
-        Self { runtime, backend }
+    fn with_store(runtime: TlsRuntime, store: Arc<dyn TlsControlPlaneStore>) -> Self {
+        Self { runtime, store }
     }
 
-    pub fn snapshot(&self) -> TlsAutomationState {
-        self.backend.snapshot()
+    pub fn snapshot(&self) -> TlsControlPlaneState {
+        self.store.snapshot()
     }
 
     pub fn inventory(&self) -> CertificateInventory {
@@ -74,7 +77,7 @@ impl TlsAutomationRuntime {
     }
 
     pub fn import_certificate(&self, record: CertificateRecord) -> Result<(), TlsModelError> {
-        self.backend.import_certificate(record)
+        self.store.import_certificate(record)
     }
 
     pub fn queue_renewal(
@@ -82,8 +85,7 @@ impl TlsAutomationRuntime {
         certificate_id: &CertificateId,
         now: TlsInstant,
     ) -> Result<RenewalPlan, TlsModelError> {
-        self.backend
-            .queue_renewal(&self.runtime, certificate_id, now)
+        self.store.queue_renewal(&self.runtime, certificate_id, now)
     }
 
     pub fn begin_renewal(
@@ -91,7 +93,7 @@ impl TlsAutomationRuntime {
         certificate_id: &CertificateId,
         replacement_certificate_id: CertificateId,
     ) -> Result<ChallengeTicket, TlsModelError> {
-        self.backend
+        self.store
             .begin_renewal(&self.runtime, certificate_id, replacement_certificate_id)
     }
 
@@ -99,7 +101,7 @@ impl TlsAutomationRuntime {
         &self,
         certificate_id: &CertificateId,
     ) -> Result<CertificateRecord, TlsModelError> {
-        self.backend.fail_renewal(certificate_id)
+        self.store.fail_renewal(certificate_id)
     }
 
     pub fn activate_replacement(
@@ -107,11 +109,11 @@ impl TlsAutomationRuntime {
         certificate_id: &CertificateId,
         replacement: CertificateRecord,
     ) -> Result<HotReloadEvent, TlsModelError> {
-        self.backend
+        self.store
             .activate_replacement(&self.runtime, certificate_id, replacement)
     }
 
-    pub fn backend(&self) -> &dyn TlsAutomationBackend {
-        self.backend.as_ref()
+    pub fn control_plane_store(&self) -> &dyn TlsControlPlaneStore {
+        self.store.as_ref()
     }
 }

@@ -37,12 +37,12 @@ pub enum TlsModelError {
     },
     #[error("certificate `{certificate_id}` has no pending replacement")]
     MissingReplacementCertificate { certificate_id: String },
-    #[error("tls automation state `{path}` is invalid: {reason}")]
-    CorruptAutomationState { path: String, reason: String },
-    #[error("failed to persist tls automation state `{path}`: {reason}")]
-    AutomationStatePersistence { path: String, reason: String },
-    #[error("tls automation state namespace `{namespace}` is invalid: {reason}")]
-    CorruptSharedAutomationState { namespace: String, reason: String },
-    #[error("failed to persist shared tls automation state `{namespace}`: {reason}")]
-    SharedAutomationStatePersistence { namespace: String, reason: String },
+    #[error("tls control-plane state `{path}` is invalid: {reason}")]
+    CorruptControlPlaneState { path: String, reason: String },
+    #[error("failed to persist tls control-plane state `{path}`: {reason}")]
+    ControlPlaneStatePersistence { path: String, reason: String },
+    #[error("distributed tls control-plane namespace `{namespace}` is invalid: {reason}")]
+    CorruptDistributedControlPlaneState { namespace: String, reason: String },
+    #[error("failed to persist distributed tls control-plane state `{namespace}`: {reason}")]
+    DistributedControlPlaneStatePersistence { namespace: String, reason: String },
 }

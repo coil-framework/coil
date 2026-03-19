@@ -22,7 +22,7 @@ pub struct TlsStatusSnapshot {
 pub struct TlsHost {
     pub customer_app: String,
     pub runtime: TlsRuntimeServices,
-    automation: TlsAutomationRuntime,
+    control_plane: TlsControlPlaneRuntime,
 }
 
 impl TlsHost {
@@ -33,22 +33,26 @@ impl TlsHost {
         _shared_backend_namespace: String,
     ) -> Result<Self, RuntimeTlsError> {
         #[cfg(test)]
-        let automation = TlsAutomationRuntime::in_memory_for_tests(runtime.clone());
+        let control_plane =
+            TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
         #[cfg(not(test))]
-        let automation = TlsAutomationRuntime::with_postgres_shared_backend(
+        let control_plane = TlsControlPlaneRuntime::with_distributed_postgres_control_plane(
             runtime.clone(),
             &_data_runtime,
-            format!("customer-app:{}:{}", customer_app, _shared_backend_namespace),
+            format!(
+                "customer-app:{}:{}",
+                customer_app, _shared_backend_namespace
+            ),
         )?;
         Ok(Self {
             customer_app,
             runtime,
-            automation,
+            control_plane,
         })
     }
 
     pub fn status(&self) -> TlsStatusSnapshot {
-        let snapshot = self.automation.snapshot();
+        let snapshot = self.control_plane.snapshot();
         TlsStatusSnapshot {
             customer_app: self.customer_app.clone(),
             mode: self.runtime.mode,
@@ -69,7 +73,7 @@ impl TlsHost {
     }
 
     pub fn import_certificate(&mut self, record: CertificateRecord) -> Result<(), RuntimeTlsError> {
-        Ok(self.automation.import_certificate(record)?)
+        Ok(self.control_plane.import_certificate(record)?)
     }
 
     pub fn queue_renewal(
@@ -77,7 +81,7 @@ impl TlsHost {
         certificate_id: &CertificateId,
         now: TlsInstant,
     ) -> Result<RenewalPlan, RuntimeTlsError> {
-        Ok(self.automation.queue_renewal(certificate_id, now)?)
+        Ok(self.control_plane.queue_renewal(certificate_id, now)?)
     }
 
     pub fn begin_renewal(
@@ -86,7 +90,7 @@ impl TlsHost {
         replacement_certificate_id: CertificateId,
     ) -> Result<ChallengeTicket, RuntimeTlsError> {
         Ok(self
-            .automation
+            .control_plane
             .begin_renewal(certificate_id, replacement_certificate_id)?)
     }
 
@@ -94,7 +98,7 @@ impl TlsHost {
         &mut self,
         certificate_id: &CertificateId,
     ) -> Result<CertificateRecord, RuntimeTlsError> {
-        Ok(self.automation.fail_renewal(certificate_id)?)
+        Ok(self.control_plane.fail_renewal(certificate_id)?)
     }
 
     pub fn activate_replacement(
@@ -103,11 +107,11 @@ impl TlsHost {
         replacement: CertificateRecord,
     ) -> Result<HotReloadEvent, RuntimeTlsError> {
         Ok(self
-            .automation
+            .control_plane
             .activate_replacement(certificate_id, replacement)?)
     }
 
-    pub fn automation(&self) -> &TlsAutomationRuntime {
-        &self.automation
+    pub fn control_plane(&self) -> &TlsControlPlaneRuntime {
+        &self.control_plane
     }
 }

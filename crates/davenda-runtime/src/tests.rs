@@ -3394,7 +3394,7 @@ fn runtime_plan_creates_tls_host_with_expected_provider_mode() {
 }
 
 #[test]
-fn tls_host_status_tracks_inventory_renewals_and_pending_challenges() {
+fn tls_host_status_tracks_control_plane_inventory_renewals_and_pending_challenges() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
@@ -3423,7 +3423,39 @@ fn tls_host_status_tracks_inventory_renewals_and_pending_challenges() {
 }
 
 #[test]
-fn tls_host_activate_replacement_emits_hot_reload_and_supersedes_old_certificate() {
+fn cloned_tls_control_plane_handles_share_state_within_the_runtime_facade() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let host = plan.tls_host().unwrap();
+    let control_plane = host.control_plane().clone();
+    let mirrored_control_plane = control_plane.clone();
+    let certificate_id = CertificateId::new("cert-control-plane").unwrap();
+
+    control_plane
+        .import_certificate(active_certificate(
+            "cert-control-plane",
+            "control-plane.example.com",
+        ))
+        .unwrap();
+    mirrored_control_plane
+        .queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+        .unwrap();
+
+    assert_eq!(
+        control_plane
+            .inventory()
+            .record(&certificate_id)
+            .unwrap()
+            .status,
+        CertificateStatus::RenewalDue
+    );
+    assert_eq!(mirrored_control_plane.renewal_queue().len(), 1);
+}
+
+#[test]
+fn tls_host_activate_replacement_emits_control_plane_hot_reload_and_supersedes_old_certificate() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()

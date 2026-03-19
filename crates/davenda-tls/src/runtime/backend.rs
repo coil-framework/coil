@@ -2,7 +2,7 @@ use std::fmt;
 
 use super::planning::TlsRuntime;
 use super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
-use super::state::TlsAutomationState;
+use super::state::TlsControlPlaneState;
 use crate::{CertificateId, CertificateRecord, TlsInstant, TlsModelError};
 
 mod memory;
@@ -10,15 +10,15 @@ mod shared;
 #[cfg(test)]
 mod testing;
 
-pub(super) use memory::MemoryTlsAutomationBackend;
+pub(super) use memory::MemoryTlsControlPlaneStore;
+pub use shared::PostgresTlsControlPlaneStore;
 #[cfg(test)]
-pub(crate) use testing::TestPersistenceTlsAutomationBackend;
-pub use shared::PostgresTlsAutomationBackend;
+pub(crate) use testing::TestPersistenceTlsControlPlaneStore;
 #[cfg(test)]
 pub(crate) use testing::test_persistence_state_path;
 
-pub trait TlsAutomationBackend: fmt::Debug + Send + Sync {
-    fn snapshot(&self) -> TlsAutomationState;
+pub trait TlsControlPlaneStore: fmt::Debug + Send + Sync {
+    fn snapshot(&self) -> TlsControlPlaneState;
     fn import_certificate(&self, record: CertificateRecord) -> Result<(), TlsModelError>;
     fn queue_renewal(
         &self,

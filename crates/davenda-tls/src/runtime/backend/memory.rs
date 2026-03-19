@@ -4,29 +4,29 @@ use std::sync::{Arc, Mutex};
 
 use super::super::planning::TlsRuntime;
 use super::super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
-use super::super::state::TlsAutomationState;
-use super::TlsAutomationBackend;
+use super::super::state::TlsControlPlaneState;
+use super::TlsControlPlaneStore;
 use crate::{CertificateId, CertificateRecord, CertificateStatus, TlsInstant, TlsModelError};
 
 #[derive(Debug, Clone, Default)]
-pub struct MemoryTlsAutomationBackend {
-    state: Arc<Mutex<TlsAutomationState>>,
+pub struct MemoryTlsControlPlaneStore {
+    state: Arc<Mutex<TlsControlPlaneState>>,
 }
 
-impl MemoryTlsAutomationBackend {
+impl MemoryTlsControlPlaneStore {
     pub fn new() -> Self {
         Self::default()
     }
 
-    fn lock_state(&self) -> std::sync::MutexGuard<'_, TlsAutomationState> {
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, TlsControlPlaneState> {
         self.state
             .lock()
-            .expect("TLS automation state lock poisoned")
+            .expect("TLS control-plane state lock poisoned")
     }
 }
 
-impl TlsAutomationBackend for MemoryTlsAutomationBackend {
-    fn snapshot(&self) -> TlsAutomationState {
+impl TlsControlPlaneStore for MemoryTlsControlPlaneStore {
+    fn snapshot(&self) -> TlsControlPlaneState {
         self.lock_state().clone()
     }
 

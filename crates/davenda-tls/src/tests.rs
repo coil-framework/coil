@@ -144,13 +144,13 @@ fn wildcard_bindings_are_rejected_without_dns_validation() {
 #[test]
 fn inventory_rejects_duplicate_active_hostname_bindings() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = TlsAutomationRuntime::in_memory_for_tests(runtime);
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime);
     let binding = HostnameBinding::new(
         Hostname::new("www.example.com").unwrap(),
         CustomerAppId::new("storefront").unwrap(),
     );
 
-    automation
+    control_plane
         .import_certificate(
             CertificateRecord::new(
                 CertificateId::new("cert-1").unwrap(),
@@ -166,7 +166,7 @@ fn inventory_rejects_duplicate_active_hostname_bindings() {
         )
         .unwrap();
 
-    let error = automation
+    let error = control_plane
         .import_certificate(
             CertificateRecord::new(
                 CertificateId::new("cert-2").unwrap(),
@@ -194,13 +194,13 @@ fn inventory_rejects_duplicate_active_hostname_bindings() {
 #[test]
 fn renewal_failure_keeps_current_certificate_bound() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = TlsAutomationRuntime::in_memory_for_tests(runtime);
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime);
     let certificate_id = CertificateId::new("cert-active").unwrap();
     let binding = HostnameBinding::new(
         Hostname::new("www.example.com").unwrap(),
         CustomerAppId::new("storefront").unwrap(),
     );
-    automation
+    control_plane
         .import_certificate(
             CertificateRecord::new(
                 certificate_id.clone(),
@@ -216,12 +216,12 @@ fn renewal_failure_keeps_current_certificate_bound() {
         )
         .unwrap();
 
-    let queued = automation
+    let queued = control_plane
         .queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
         .unwrap();
     assert_eq!(queued.certificate_id, certificate_id);
 
-    let challenge = automation
+    let challenge = control_plane
         .begin_renewal(
             &certificate_id,
             CertificateId::new("cert-replacement").unwrap(),
@@ -232,11 +232,11 @@ fn renewal_failure_keeps_current_certificate_bound() {
         Some(CertificateId::new("cert-replacement").unwrap())
     );
 
-    let reverted = automation.fail_renewal(&certificate_id).unwrap();
+    let reverted = control_plane.fail_renewal(&certificate_id).unwrap();
     assert_eq!(reverted.status, CertificateStatus::RenewalDue);
     assert!(reverted.replacing_certificate.is_none());
     assert_eq!(
-        automation
+        control_plane
             .inventory()
             .active_for_hostname(&Hostname::new("www.example.com").unwrap())
             .unwrap()
@@ -248,13 +248,13 @@ fn renewal_failure_keeps_current_certificate_bound() {
 #[test]
 fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
-    let automation = TlsAutomationRuntime::in_memory_for_tests(runtime);
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime);
     let certificate_id = CertificateId::new("cert-live").unwrap();
     let binding = HostnameBinding::new(
         Hostname::new("shop.example.com").unwrap(),
         CustomerAppId::new("storefront").unwrap(),
     );
-    automation
+    control_plane
         .import_certificate(
             CertificateRecord::new(
                 certificate_id.clone(),
@@ -269,14 +269,14 @@ fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
             .with_binding(binding.clone()),
         )
         .unwrap();
-    automation
+    control_plane
         .queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
         .unwrap();
-    automation
+    control_plane
         .begin_renewal(&certificate_id, CertificateId::new("cert-next").unwrap())
         .unwrap();
 
-    let event = automation
+    let event = control_plane
         .activate_replacement(
             &certificate_id,
             CertificateRecord::new(
@@ -296,7 +296,7 @@ fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
     assert_eq!(event.certificate_id.as_str(), "cert-next");
     assert!(event.reloaded_without_restart);
     assert_eq!(
-        automation
+        control_plane
             .inventory()
             .active_for_hostname(&binding.hostname)
             .unwrap()
@@ -305,27 +305,27 @@ fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
         "cert-next"
     );
     assert_eq!(
-        automation
+        control_plane
             .inventory()
             .record(&certificate_id)
             .unwrap()
             .status,
         CertificateStatus::Superseded
     );
-    assert_eq!(automation.hot_reload_events().len(), 1);
+    assert_eq!(control_plane.hot_reload_events().len(), 1);
 }
 
 #[test]
-fn persistence_backend_persists_tls_state_between_instances() {
+fn test_persistence_control_plane_persists_tls_state_between_instances() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
     let path = temp_tls_state_path();
-    let automation = TlsAutomationRuntime::with_test_persistence_backend(
+    let control_plane = TlsControlPlaneRuntime::with_test_persistence_control_plane_for_tests(
         runtime.clone(),
         path.to_string_lossy().to_string(),
     );
     let certificate_id = CertificateId::new("cert-persistent").unwrap();
 
-    automation
+    control_plane
         .import_certificate(
             CertificateRecord::new(
                 certificate_id.clone(),
@@ -344,12 +344,13 @@ fn persistence_backend_persists_tls_state_between_instances() {
         )
         .unwrap();
 
-    let second_automation = TlsAutomationRuntime::with_test_persistence_backend(
-        runtime,
-        path.to_string_lossy().to_string(),
-    );
+    let second_control_plane =
+        TlsControlPlaneRuntime::with_test_persistence_control_plane_for_tests(
+            runtime,
+            path.to_string_lossy().to_string(),
+        );
     assert_eq!(
-        second_automation
+        second_control_plane
             .inventory()
             .record(&certificate_id)
             .unwrap()
@@ -359,9 +360,10 @@ fn persistence_backend_persists_tls_state_between_instances() {
 }
 
 #[test]
-fn postgres_shared_backend_persists_state_between_instances_when_database_url_is_available() {
+fn distributed_postgres_control_plane_persists_state_between_instances_when_database_url_is_available()
+ {
     let Some(database_url) = std::env::var("DATABASE_URL").ok() else {
-        eprintln!("skipping postgres TLS shared-backend test: DATABASE_URL is not set");
+        eprintln!("skipping postgres TLS control-plane test: DATABASE_URL is not set");
         return;
     };
 
@@ -379,18 +381,21 @@ fn postgres_shared_backend_persists_state_between_instances_when_database_url_is
 
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
     let namespace = unique_tls_shared_state_namespace("tls_shared_backend");
-    let automation_one = TlsAutomationRuntime::with_postgres_shared_backend(
+    let control_plane_one = TlsControlPlaneRuntime::with_distributed_postgres_control_plane(
         runtime.clone(),
         &data_runtime,
         namespace.clone(),
     )
     .unwrap();
-    let automation_two =
-        TlsAutomationRuntime::with_postgres_shared_backend(runtime, &data_runtime, namespace)
-            .unwrap();
+    let control_plane_two = TlsControlPlaneRuntime::with_distributed_postgres_control_plane(
+        runtime,
+        &data_runtime,
+        namespace,
+    )
+    .unwrap();
     let certificate_id = CertificateId::new("cert-shared").unwrap();
 
-    automation_one
+    control_plane_one
         .import_certificate(
             CertificateRecord::new(
                 certificate_id.clone(),
@@ -409,19 +414,19 @@ fn postgres_shared_backend_persists_state_between_instances_when_database_url_is
         )
         .unwrap();
 
-    automation_one
+    control_plane_one
         .queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
         .unwrap();
 
     assert_eq!(
-        automation_two
+        control_plane_two
             .inventory()
             .record(&certificate_id)
             .unwrap()
             .status,
         CertificateStatus::RenewalDue
     );
-    assert_eq!(automation_two.renewal_queue().len(), 1);
+    assert_eq!(control_plane_two.renewal_queue().len(), 1);
 }
 
 fn temp_tls_state_path() -> PathBuf {

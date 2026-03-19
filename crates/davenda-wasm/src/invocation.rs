@@ -359,6 +359,10 @@ impl InvocationPlan {
     pub fn begin_execution(self) -> WasmExecutionSession {
         WasmExecutionSession::new(self)
     }
+
+    pub fn grant_slots(&self) -> Vec<HostCapabilityGrant> {
+        self.granted_capabilities.iter().cloned().collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -455,6 +459,31 @@ impl InvocationOutcome {
             Self::RenderHook => "render_hook",
         }
     }
+
+    pub fn engine_code(&self) -> i32 {
+        match self {
+            Self::Page => 0,
+            Self::ApiJson => 1,
+            Self::JobCompleted => 2,
+            Self::ScheduledJobCompleted => 3,
+            Self::WebhookAccepted => 4,
+            Self::AdminWidget => 5,
+            Self::RenderHook => 6,
+        }
+    }
+
+    pub fn from_engine_code(code: i32, handler_id: String) -> Result<Self, WasmModelError> {
+        match code {
+            0 => Ok(Self::Page),
+            1 => Ok(Self::ApiJson),
+            2 => Ok(Self::JobCompleted),
+            3 => Ok(Self::ScheduledJobCompleted),
+            4 => Ok(Self::WebhookAccepted),
+            5 => Ok(Self::AdminWidget),
+            6 => Ok(Self::RenderHook),
+            _ => Err(WasmModelError::InvalidOutcomeCode { handler_id, code }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -498,6 +527,10 @@ impl WasmExecutionSession {
 
     pub fn usage(&self) -> &ExecutionUsage {
         &self.usage
+    }
+
+    pub fn grant_slots(&self) -> Vec<HostCapabilityGrant> {
+        self.plan.grant_slots()
     }
 
     pub fn record_host_call(&mut self, call: HostCall) -> Result<(), WasmModelError> {

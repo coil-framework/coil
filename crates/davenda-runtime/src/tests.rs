@@ -1,4 +1,6 @@
 use super::*;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use davenda_admin::AdminModule;
 use davenda_assets::{
     AssetDeliveryTarget, AssetId, ContentFingerprint, DeliveryAudience, DeploymentArtifact,
@@ -315,6 +317,25 @@ fn installed_scheduled_job_extension() -> InstalledExtension {
     .unwrap()
 }
 
+fn guest_module(export: &str, host_calls: &[(i32, i64)], outcome: InvocationOutcome) -> String {
+    let mut body = String::new();
+    for (slot, metric) in host_calls {
+        body.push_str(&format!(
+            "    i32.const {slot}\n    i64.const {metric}\n    call $host_call\n    drop\n"
+        ));
+    }
+
+    format!(
+        "(module
+            (import \"davenda\" \"host_call\" (func $host_call (param i32 i64) (result i32)))
+            (func (export \"{export}\") (result i32)
+{body}                i32.const {}
+            )
+        )",
+        outcome.engine_code()
+    )
+}
+
 #[derive(Debug)]
 struct StaticManifestModule {
     manifest: ModuleManifest,
@@ -372,6 +393,16 @@ fn active_certificate(id: &str, hostname: &str) -> CertificateRecord {
 
 fn content_fingerprint(fill: char) -> ContentFingerprint {
     ContentFingerprint::new(FingerprintAlgorithm::Sha256, fill.to_string().repeat(64)).unwrap()
+}
+
+fn config_with_backend_secrets() -> String {
+    let with_storage_secret = VALID_CONFIG.replace(
+        "local_root = \"/var/lib/platform\"",
+        "local_root = \"/var/lib/platform\"\nobject_store_secret = { kind = \"env\", var = \"OBJECT_STORE_URL\" }",
+    );
+    format!(
+        "{with_storage_secret}\n[database]\nurl = {{ kind = \"env\", var = \"DATABASE_URL\" }}\n"
+    )
 }
 
 fn cookie_value(set_cookie_header: &str) -> String {
@@ -1232,6 +1263,137 @@ fn cache_host_stores_and_revalidates_public_route_responses() {
 }
 
 #[test]
+fn runtime_plan_materializes_shared_backend_clients_from_config_secrets() {
+    let config = PlatformConfig::from_toml_str(&config_with_backend_secrets()).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "OBJECT_STORE_URL".to_string(),
+            },
+            "https://s3.internal/runtime",
+        )
+        .unwrap();
+
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    assert_eq!(
+        backends.database.driver,
+        davenda_config::DatabaseDriver::Postgres
+    );
+    assert_eq!(
+        backends.database.url.as_deref(),
+        Some("postgres://platform:secret@db.internal/platform")
+    );
+    assert_eq!(
+        backends
+            .distributed_cache
+            .as_ref()
+            .map(|cache| cache.backend),
+        Some(DistributedCacheBackend::Redis)
+    );
+    assert_eq!(backends.jobs.backend, davenda_config::JobBackend::Redis);
+    assert_eq!(
+        backends
+            .object_store
+            .as_ref()
+            .and_then(|store| store.credential_reference.as_deref()),
+        Some("https://s3.internal/runtime")
+    );
+}
+
+#[test]
+fn live_http_request_adapter_extracts_runtime_headers_and_cookies() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let request = Request::builder()
+        .method("POST")
+        .uri("/admin/pages/publish")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("x-request-id", "req-live-1")
+        .header("x-csrf-token", "csrf-123")
+        .header("x-davenda-maintenance-bypass", "ops-bypass")
+        .header(
+            "cookie",
+            "davenda_session=v1.session.sig; davenda_flash=v1.flash.sig",
+        )
+        .body(Body::empty())
+        .unwrap();
+
+    let live = LiveHttpRequest::from_request(&request, &plan.browser).unwrap();
+    assert_eq!(live.method, HttpMethod::Post);
+    assert_eq!(live.host, "www.example.com");
+    assert_eq!(live.forwarded_proto.as_deref(), Some("https"));
+    assert_eq!(live.request_id.as_deref(), Some("req-live-1"));
+    assert_eq!(live.session_cookie.as_deref(), Some("v1.session.sig"));
+    assert_eq!(live.flash_cookie.as_deref(), Some("v1.flash.sig"));
+    assert_eq!(live.csrf_token.as_deref(), Some("csrf-123"));
+    assert_eq!(live.maintenance_bypass_token.as_deref(), Some("ops-bypass"));
+}
+
+#[tokio::test]
+async fn server_host_adapts_live_requests_into_runtime_execution() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .build()
+        .unwrap();
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-live-1")
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let server = plan
+        .server_host(&resolver, cookie_secret, csrf_secret)
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/account")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={session_cookie}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-davenda-route").unwrap(),
+        "account.dashboard"
+    );
+    assert_eq!(response.headers().get("x-davenda-locale").unwrap(), "en-GB");
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "private, max-age=60, stale-while-revalidate=30"
+    );
+}
+
+#[test]
 fn execute_request_blocks_routes_when_feature_flag_is_disabled() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let feature_flag = FeatureFlag::new("beta-events", false)
@@ -1898,6 +2060,69 @@ fn wasm_host_prepares_admin_widget_invocations_from_request_execution() {
         .finish(Duration::from_millis(10), InvocationOutcome::AdminWidget)
         .unwrap();
 
+    assert_eq!(receipt.point, ExtensionPointKind::AdminWidget);
+}
+
+#[test]
+fn wasm_host_executes_admin_widget_handlers_inside_the_engine() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_installed_extension(installed_admin_widget_extension())
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-operator-2")
+        .unwrap();
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/admin")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .with_principal("operator-2")
+                .grant_capability(Capability::AdminShellAccess),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    let mut sessions = plan
+        .wasm_host()
+        .begin_admin_widget_invocations("admin.dashboard.summary", &execution)
+        .unwrap();
+    let session = sessions.remove(0);
+    let slots = session.grant_slots();
+    let data_slot = slots
+        .iter()
+        .position(|grant| {
+            grant
+                == &HostCapabilityGrant::DataRead {
+                    resource: "events.waitlist".to_string(),
+                }
+        })
+        .unwrap() as i32;
+    let auth_slot = slots
+        .iter()
+        .position(|grant| grant == &HostCapabilityGrant::AuthCheck)
+        .unwrap() as i32;
+
+    let host = plan.wasm_host();
+    let module = host
+        .compile_module(
+            guest_module(
+                "exports.waitlist_summary",
+                &[(data_slot, 0), (auth_slot, 0)],
+                InvocationOutcome::AdminWidget,
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+
+    let receipt = host.execute_session(&module, session).unwrap();
+    assert_eq!(receipt.outcome, InvocationOutcome::AdminWidget);
     assert_eq!(receipt.point, ExtensionPointKind::AdminWidget);
 }
 

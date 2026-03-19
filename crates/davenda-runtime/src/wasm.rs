@@ -50,6 +50,7 @@ pub struct WasmHost {
     pub customer_app: String,
     pub runtime: WasmRuntimeServices,
     registry: ExtensionRegistry,
+    engine: WasmEngine,
     default_locale: String,
     registered_jobs: Vec<RuntimeJobDefinition>,
 }
@@ -66,9 +67,28 @@ impl WasmHost {
             customer_app,
             runtime,
             registry,
+            engine: WasmEngine::new(),
             default_locale,
             registered_jobs,
         }
+    }
+
+    pub fn compile_module(&self, bytes: &[u8]) -> Result<CompiledWasmModule, WasmModelError> {
+        self.engine.compile_module(bytes)
+    }
+
+    pub fn execute_session(
+        &self,
+        module: &CompiledWasmModule,
+        session: WasmExecutionSession,
+    ) -> Result<ExecutionReceipt, WasmModelError> {
+        let export = self
+            .registry
+            .handler_export(&session.plan().extension_id, &session.plan().handler_id)
+            .ok_or_else(|| WasmModelError::HandlerNotFound {
+                handler_id: session.plan().handler_id.to_string(),
+            })?;
+        self.engine.execute_session(module, session, export)
     }
 
     pub fn prepare_page_invocation(

@@ -348,6 +348,17 @@ impl ExtensionRegistry {
         self.prepare_many(self.render_hook_handlers(slot), context)
     }
 
+    pub fn handler_export(
+        &self,
+        extension_id: &ExtensionId,
+        handler_id: &HandlerId,
+    ) -> Option<&str> {
+        self.extensions
+            .get(extension_id)
+            .and_then(|extension| extension.manifest().handler(handler_id))
+            .map(|handler| handler.export.as_str())
+    }
+
     fn prepare(
         &self,
         handler: &RegisteredExtensionHandler,

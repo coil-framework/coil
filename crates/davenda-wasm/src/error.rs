@@ -127,6 +127,33 @@ pub enum WasmModelError {
         max_runtime: std::time::Duration,
         actual_runtime: std::time::Duration,
     },
+    EngineCompile {
+        reason: String,
+    },
+    EngineInstantiate {
+        handler_id: String,
+        reason: String,
+    },
+    EngineExportMissing {
+        handler_id: String,
+        export: String,
+    },
+    EngineTrap {
+        handler_id: String,
+        reason: String,
+    },
+    InvalidHostCapabilitySlot {
+        handler_id: String,
+        slot: i32,
+    },
+    InvalidHostCallMetric {
+        handler_id: String,
+        metric: i64,
+    },
+    InvalidOutcomeCode {
+        handler_id: String,
+        code: i32,
+    },
 }
 
 impl fmt::Display for WasmModelError {
@@ -284,6 +311,33 @@ impl fmt::Display for WasmModelError {
                 f,
                 "handler `{handler_id}` exceeded runtime budget {:?} with {:?}",
                 max_runtime, actual_runtime
+            ),
+            Self::EngineCompile { reason } => {
+                write!(f, "wasm engine could not compile module: {reason}")
+            }
+            Self::EngineInstantiate { handler_id, reason } => write!(
+                f,
+                "handler `{handler_id}` could not be instantiated in the wasm engine: {reason}"
+            ),
+            Self::EngineExportMissing { handler_id, export } => write!(
+                f,
+                "handler `{handler_id}` expected wasm export `{export}` but it was not present"
+            ),
+            Self::EngineTrap { handler_id, reason } => write!(
+                f,
+                "handler `{handler_id}` trapped during wasm execution: {reason}"
+            ),
+            Self::InvalidHostCapabilitySlot { handler_id, slot } => write!(
+                f,
+                "handler `{handler_id}` requested undeclared host capability slot `{slot}`"
+            ),
+            Self::InvalidHostCallMetric { handler_id, metric } => write!(
+                f,
+                "handler `{handler_id}` supplied invalid host-call metric `{metric}`"
+            ),
+            Self::InvalidOutcomeCode { handler_id, code } => write!(
+                f,
+                "handler `{handler_id}` returned unknown wasm outcome code `{code}`"
             ),
         }
     }

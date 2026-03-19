@@ -6,6 +6,25 @@ fn default_limits() -> ResourceLimits {
     ResourceLimits::baseline_for(ExtensionPointKind::Page)
 }
 
+fn guest_module(export: &str, host_calls: &[(i32, i64)], outcome: InvocationOutcome) -> String {
+    let mut body = String::new();
+    for (slot, metric) in host_calls {
+        body.push_str(&format!(
+            "    i32.const {slot}\n    i64.const {metric}\n    call $host_call\n    drop\n"
+        ));
+    }
+
+    format!(
+        "(module
+            (import \"davenda\" \"host_call\" (func $host_call (param i32 i64) (result i32)))
+            (func (export \"{export}\") (result i32)
+{body}                i32.const {}
+            )
+        )",
+        outcome.engine_code()
+    )
+}
+
 fn page_manifest() -> ExtensionManifest {
     let page_handler = HandlerManifest::new(
         HandlerId::new("waitlist-page").unwrap(),
@@ -393,6 +412,118 @@ fn execution_session_rejects_invalid_outcomes_and_runtime_overruns() {
         over_budget,
         WasmModelError::RuntimeBudgetExceeded { .. }
     ));
+}
+
+#[test]
+fn wasm_engine_executes_guest_handlers_against_granted_slots() {
+    let plan = InstalledExtension::install(
+        page_manifest(),
+        ExtensionInstallation::new(
+            "customer-app",
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                HostGrantSet::from_grants([
+                    HostCapabilityGrant::AuthCheck,
+                    HostCapabilityGrant::DataRead {
+                        resource: "events.waitlist".to_string(),
+                    },
+                ]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .prepare_invocation(
+        &HandlerId::new("waitlist-page").unwrap(),
+        InvocationContext::new(
+            CustomerAppContext::new("customer-app").unwrap(),
+            PrincipalRef::user("user-99").unwrap(),
+            TraceContext::new("trace-engine").unwrap(),
+            InvocationInput::Page(
+                PageInvocation::new("/events/waitlist", HttpMethod::Get).unwrap(),
+            ),
+        ),
+    )
+    .unwrap();
+
+    let slots = plan.grant_slots();
+    let data_slot = slots
+        .iter()
+        .position(|grant| {
+            grant
+                == &HostCapabilityGrant::DataRead {
+                    resource: "events.waitlist".to_string(),
+                }
+        })
+        .unwrap() as i32;
+    let auth_slot = slots
+        .iter()
+        .position(|grant| grant == &HostCapabilityGrant::AuthCheck)
+        .unwrap() as i32;
+
+    let engine = WasmEngine::new();
+    let module = engine
+        .compile_module(
+            guest_module(
+                "exports.page_waitlist",
+                &[(data_slot, 0), (auth_slot, 0)],
+                InvocationOutcome::Page,
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+
+    let receipt = engine
+        .execute_session(&module, plan.begin_execution(), "exports.page_waitlist")
+        .unwrap();
+    assert_eq!(receipt.outcome, InvocationOutcome::Page);
+    assert_eq!(receipt.point, ExtensionPointKind::Page);
+}
+
+#[test]
+fn wasm_engine_rejects_invalid_capability_slots() {
+    let plan = InstalledExtension::install(
+        page_manifest(),
+        ExtensionInstallation::new(
+            "customer-app",
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .prepare_invocation(
+        &HandlerId::new("waitlist-page").unwrap(),
+        InvocationContext::new(
+            CustomerAppContext::new("customer-app").unwrap(),
+            PrincipalRef::user("user-5").unwrap(),
+            TraceContext::new("trace-invalid-slot").unwrap(),
+            InvocationInput::Page(
+                PageInvocation::new("/events/waitlist", HttpMethod::Get).unwrap(),
+            ),
+        ),
+    )
+    .unwrap();
+
+    let engine = WasmEngine::new();
+    let module = engine
+        .compile_module(
+            guest_module("exports.page_waitlist", &[(99, 0)], InvocationOutcome::Page).as_bytes(),
+        )
+        .unwrap();
+
+    let error = engine
+        .execute_session(&module, plan.begin_execution(), "exports.page_waitlist")
+        .unwrap_err();
+    assert_eq!(
+        error,
+        WasmModelError::InvalidHostCapabilitySlot {
+            handler_id: "waitlist-page".to_string(),
+            slot: 99,
+        }
+    );
 }
 
 #[test]

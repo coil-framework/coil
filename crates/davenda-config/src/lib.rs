@@ -2,6 +2,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::path::Path;
+use std::net::SocketAddr;
 
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
@@ -303,6 +304,21 @@ pub struct ServerConfig {
     pub trusted_proxies: Vec<String>,
     #[serde(default)]
     pub max_body_bytes: Option<usize>,
+}
+
+impl ServerConfig {
+    pub fn trusts_forwarded_headers(&self, remote_addr: Option<&SocketAddr>) -> bool {
+        let Some(remote_addr) = remote_addr else {
+            return false;
+        };
+
+        self.trusted_proxies.iter().any(|trusted_proxy| {
+            trusted_proxy
+                .parse::<IpNet>()
+                .map(|network| network.contains(&remote_addr.ip()))
+                .unwrap_or(false)
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1014,5 +1030,22 @@ canonical_host = "preview.example.com"
         assert!(rendered.contains("showcase-events"));
         assert!(rendered.contains("platform-default-auth"));
         assert!(rendered.contains("cdn.example.com"));
+    }
+
+    #[test]
+    fn trusted_proxies_gate_forwarded_metadata_trust() {
+        use std::net::SocketAddr;
+
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+
+        assert!(config.server.trusts_forwarded_headers(Some(&SocketAddr::from((
+            [10, 0, 0, 8],
+            443,
+        )))));
+        assert!(!config.server.trusts_forwarded_headers(Some(&SocketAddr::from((
+            [192, 168, 1, 8],
+            443,
+        )))));
+        assert!(!config.server.trusts_forwarded_headers(None));
     }
 }

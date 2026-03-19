@@ -63,6 +63,7 @@ impl LiveRouteCapabilityAuthorizer for PermissiveLiveRouteCapabilityAuthorizer {
 }
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1717,7 +1718,13 @@ fn live_http_request_adapter_extracts_runtime_headers_and_cookies() {
         .body(Body::empty())
         .unwrap();
 
-    let live = LiveHttpRequest::from_request(&request, &plan.browser).unwrap();
+    let live = LiveHttpRequest::from_request(
+        &request,
+        &plan.browser,
+        &plan.config.server,
+        Some(SocketAddr::from(([10, 0, 0, 42], 443))),
+    )
+    .unwrap();
     assert_eq!(live.method, HttpMethod::Post);
     assert_eq!(live.host, "www.example.com");
     assert_eq!(live.forwarded_proto.as_deref(), Some("https"));
@@ -1726,6 +1733,39 @@ fn live_http_request_adapter_extracts_runtime_headers_and_cookies() {
     assert_eq!(live.flash_cookie.as_deref(), Some("v1.flash.sig"));
     assert_eq!(live.csrf_token.as_deref(), Some("csrf-123"));
     assert_eq!(live.maintenance_bypass_token.as_deref(), Some("ops-bypass"));
+}
+
+#[tokio::test]
+async fn server_host_ignores_forwarded_metadata_from_untrusted_peers() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("events.list", HttpMethod::Get, "/events")
+                .unwrap()
+                .localized(),
+        )
+        .with_handler(HandlerDefinition::page("events.list", "events/list").unwrap())
+        .build()
+        .unwrap();
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/events")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+
+    let live = LiveHttpRequest::from_request(
+        &request,
+        &plan.browser,
+        &plan.config.server,
+        Some(SocketAddr::from(([192, 168, 1, 42], 443))),
+    )
+    .unwrap();
+
+    assert_eq!(live.forwarded_proto, None);
+    assert_eq!(live.scheme, "http");
 }
 
 #[tokio::test]

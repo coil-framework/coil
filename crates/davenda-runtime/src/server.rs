@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::http::header::{COOKIE, HOST, LOCATION};
 use axum::http::{HeaderMap, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
@@ -16,8 +17,6 @@ use davenda_cache::DistributedCacheBackend;
 use davenda_config::{
     DatabaseDriver, DistributedCache, JobBackend, ObjectStoreKind, SecretRef, SessionStore,
 };
-use tower::ServiceExt;
-
 use super::*;
 use crate::backends::RuntimeBackendMaterializer;
 
@@ -207,17 +206,22 @@ pub(crate) trait LiveRouteCapabilityAuthorizer: Send + Sync {
 
 struct DeferredPostgresRouteCapabilityAuthorizer {
     data: DataRuntimeServices,
+    tenant_id: i64,
     database_url: Option<String>,
     auth_package_name: String,
     authorizer: OnceLock<Result<PostgresRouteCapabilityAuthorizer, String>>,
 }
 
 impl DeferredPostgresRouteCapabilityAuthorizer {
-    const TENANT_ID: i64 = 1;
-
-    fn new(data: DataRuntimeServices, database_url: Option<String>, auth_package_name: String) -> Self {
+    fn new(
+        data: DataRuntimeServices,
+        tenant_id: i64,
+        database_url: Option<String>,
+        auth_package_name: String,
+    ) -> Self {
         Self {
             data,
+            tenant_id,
             database_url,
             auth_package_name,
             authorizer: OnceLock::new(),
@@ -252,7 +256,7 @@ impl DeferredPostgresRouteCapabilityAuthorizer {
         let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
 
         Ok(PostgresRouteCapabilityAuthorizer {
-            auth: davenda_auth::DavendaAuth::new(engine, Self::TENANT_ID),
+            auth: davenda_auth::DavendaAuth::new(engine, self.tenant_id),
             package,
         })
     }
@@ -408,10 +412,17 @@ impl LiveHttpRequest {
     pub fn from_request(
         request: &Request<Body>,
         browser: &BrowserSecurityServices,
+        server: &davenda_config::ServerConfig,
+        remote_addr: Option<SocketAddr>,
     ) -> Result<Self, RuntimeServerError> {
         let headers = request.headers();
         let host = header_value(headers, HOST)?.ok_or(RuntimeServerError::MissingHost)?;
-        let forwarded_proto = header_value(headers, "x-forwarded-proto")?;
+        let trusted_forwarded_headers = server.trusts_forwarded_headers(remote_addr.as_ref());
+        let forwarded_proto = if trusted_forwarded_headers {
+            header_value(headers, "x-forwarded-proto")?
+        } else {
+            None
+        };
         let scheme = forwarded_proto
             .clone()
             .unwrap_or_else(|| "http".to_string());
@@ -495,6 +506,7 @@ impl HttpServerHost {
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
+                plan.tenant_id(),
                 backends.database.url.clone(),
                 plan.auth_package_name.clone(),
             ));
@@ -521,6 +533,7 @@ impl HttpServerHost {
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
+                plan.tenant_id(),
                 backends.database.url.clone(),
                 plan.auth_package_name.clone(),
             ));
@@ -601,15 +614,17 @@ impl HttpServerHost {
         &self,
         request: Request<Body>,
     ) -> Result<Response<Body>, RuntimeServerError> {
-        self.router.clone().oneshot(request).await.map_err(|error| {
-            RuntimeServerError::UnsupportedMethod {
-                method: error.to_string(),
-            }
+        Ok(match execute_live_request(&self.state, request, None).await {
+            Ok(response) => response,
+            Err(error) => error_response(error),
         })
     }
 
     pub async fn serve(self, listener: tokio::net::TcpListener) -> std::io::Result<()> {
-        serve(listener, self.router)
+        serve(
+            listener,
+            self.router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
             .await
             .map_err(std::io::Error::other)
     }
@@ -617,9 +632,10 @@ impl HttpServerHost {
 
 pub(crate) async fn serve_runtime_request(
     State(state): State<Arc<RuntimeServerState>>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     request: Request<Body>,
 ) -> Response<Body> {
-    match execute_live_request(&state, request).await {
+    match execute_live_request(&state, request, Some(remote_addr)).await {
         Ok(response) => response,
         Err(error) => error_response(error),
     }
@@ -628,9 +644,15 @@ pub(crate) async fn serve_runtime_request(
 async fn execute_live_request(
     state: &RuntimeServerState,
     request: Request<Body>,
+    remote_addr: Option<SocketAddr>,
 ) -> Result<Response<Body>, RuntimeServerError> {
-    let mut request =
-        LiveHttpRequest::from_request(&request, &state.plan.browser)?.into_request_input()?;
+    let mut request = LiveHttpRequest::from_request(
+        &request,
+        &state.plan.browser,
+        &state.plan.config.server,
+        remote_addr,
+    )?
+    .into_request_input()?;
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

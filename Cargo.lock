@@ -574,6 +574,7 @@ dependencies = [
  "davenda-core",
  "davenda-data",
  "davenda-events",
+ "davenda-jobs",
  "davenda-media",
  "davenda-memberships",
  "davenda-observability",

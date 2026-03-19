@@ -4,15 +4,22 @@ use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    bootstrap_core_services, validate_module_capabilities, validate_module_installation,
     BrowserSecurityServices, BulkOperationDefinition, CapabilityValidationError,
     CliRuntimeServices, CookieSigner, DataRuntimeServices, EventSubscription, HttpFileDeliveryMode,
     HttpResponseContract, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, JobContract,
-    JobsRuntimeServices, ModuleInstallationError, ModuleManifest, ObservabilityRuntimeServices,
-    PlatformModule, RegistrationError, ReportDefinition, SearchIndexContribution,
-    ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
+    JobTriggerKind, JobsRuntimeServices, ModuleInstallationError, ModuleManifest,
+    ObservabilityRuntimeServices, PlatformModule, RegistrationError, ReportDefinition,
+    SearchIndexContribution, ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices,
+    WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
+    validate_module_installation,
 };
 use davenda_data::{DataModelError, MigrationPlan};
+use davenda_jobs::{
+    DeadLetterReason, DomainEventEnvelope, DomainEventId, DomainEventType, EventHandlerId,
+    EventHandlerMetadata, EventSubscriptionId, EventSubscriptionMetadata, IdempotencyKey,
+    JobFailureDisposition, JobId, JobInstant, JobLease, JobName, JobQueueName, JobSpec,
+    JobsCoordinator, JobsDomain, JobsModelError, QueueTopology, RetryPolicy, SchedulerLeadership,
+};
 use davenda_observability::{
     CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
     ObservabilityError,
@@ -808,6 +815,8 @@ where
                     })
                 })
                 .collect::<Vec<_>>();
+        let (registered_runtime_jobs, registered_runtime_event_subscriptions, jobs_domain) =
+            build_runtime_jobs_domain(&bootstrap.jobs, &module_jobs, &module_event_subscriptions)?;
         let registered_extension_slots = collect_extension_slots(&module_manifests)?;
         let mut extension_registry = ExtensionRegistry::new(ContractVersion::new(1, 0, 0));
         let mut installed_extensions = Vec::new();
@@ -859,6 +868,9 @@ where
             module_search_contributions,
             module_report_definitions,
             module_bulk_operations,
+            registered_runtime_jobs,
+            registered_runtime_event_subscriptions,
+            jobs_domain,
         })
     }
 }
@@ -889,6 +901,9 @@ pub struct RuntimePlan {
     pub module_search_contributions: Vec<RegisteredSearchContribution>,
     pub module_report_definitions: Vec<RegisteredReportDefinition>,
     pub module_bulk_operations: Vec<RegisteredBulkOperation>,
+    pub registered_runtime_jobs: Vec<RuntimeJobDefinition>,
+    pub registered_runtime_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
+    pub jobs_domain: JobsDomain,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -937,7 +952,371 @@ pub struct RegisteredBulkOperation {
     pub definition: BulkOperationDefinition,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeJobDefinition {
+    pub module: String,
+    pub contract: JobContract,
+    pub queue: JobQueueName,
+    pub retry_policy: RetryPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeEventSubscriptionDefinition {
+    pub module: String,
+    pub event_type: DomainEventType,
+    pub subscription_id: EventSubscriptionId,
+    pub handler_id: EventHandlerId,
+    pub job_name: String,
+    pub reaction_queue: JobQueueName,
+    pub retry_policy: RetryPolicy,
+    pub target_trigger: JobTriggerKind,
+    pub target_queue: JobQueueName,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobDispatchRequest {
+    pub job_name: String,
+    pub payload_description: String,
+    pub scheduled_for: Option<JobInstant>,
+    pub idempotency_key: Option<String>,
+}
+
+impl JobDispatchRequest {
+    pub fn new(
+        job_name: impl Into<String>,
+        payload_description: impl Into<String>,
+    ) -> Result<Self, RuntimeJobsError> {
+        let job_name = validate_runtime_identifier("job_name", job_name.into())?;
+        let payload_description =
+            validate_runtime_identifier("payload_description", payload_description.into())?;
+
+        Ok(Self {
+            job_name,
+            payload_description,
+            scheduled_for: None,
+            idempotency_key: None,
+        })
+    }
+
+    pub fn scheduled_for(mut self, instant: JobInstant) -> Self {
+        self.scheduled_for = Some(instant);
+        self
+    }
+
+    pub fn with_idempotency_key(
+        mut self,
+        key: impl Into<String>,
+    ) -> Result<Self, RuntimeJobsError> {
+        self.idempotency_key = Some(validate_runtime_identifier("idempotency_key", key.into())?);
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainEventDispatchRequest {
+    pub event_type: String,
+    pub aggregate_kind: String,
+    pub aggregate_id: String,
+    pub payload_description: String,
+    pub correlation_id: Option<String>,
+    pub causation_id: Option<String>,
+}
+
+impl DomainEventDispatchRequest {
+    pub fn new(
+        event_type: impl Into<String>,
+        aggregate_kind: impl Into<String>,
+        aggregate_id: impl Into<String>,
+        payload_description: impl Into<String>,
+    ) -> Result<Self, RuntimeJobsError> {
+        Ok(Self {
+            event_type: validate_runtime_identifier("event_type", event_type.into())?,
+            aggregate_kind: validate_runtime_identifier("aggregate_kind", aggregate_kind.into())?,
+            aggregate_id: validate_runtime_identifier("aggregate_id", aggregate_id.into())?,
+            payload_description: validate_runtime_identifier(
+                "payload_description",
+                payload_description.into(),
+            )?,
+            correlation_id: None,
+            causation_id: None,
+        })
+    }
+
+    pub fn with_correlation_id(
+        mut self,
+        correlation_id: impl Into<String>,
+    ) -> Result<Self, RuntimeJobsError> {
+        self.correlation_id = Some(validate_runtime_identifier(
+            "correlation_id",
+            correlation_id.into(),
+        )?);
+        Ok(self)
+    }
+
+    pub fn with_causation_id(
+        mut self,
+        causation_id: impl Into<String>,
+    ) -> Result<Self, RuntimeJobsError> {
+        self.causation_id = Some(validate_runtime_identifier(
+            "causation_id",
+            causation_id.into(),
+        )?);
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainEventDispatch {
+    pub event_id: DomainEventId,
+    pub event_type: DomainEventType,
+    pub enqueued_jobs: Vec<JobId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JobsHost {
+    pub customer_app: String,
+    pub scheduler_node_id: String,
+    pub runtime: JobsRuntimeServices,
+    pub queue_topology: QueueTopology,
+    pub registered_jobs: Vec<RuntimeJobDefinition>,
+    pub registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
+    pub jobs_domain: JobsDomain,
+    coordinator: JobsCoordinator,
+    next_job_sequence: u64,
+    next_event_sequence: u64,
+}
+
+impl JobsHost {
+    pub fn enqueue_job(
+        &mut self,
+        request: JobDispatchRequest,
+        now: JobInstant,
+    ) -> Result<JobId, RuntimeJobsError> {
+        let Some(definition) = self
+            .registered_jobs
+            .iter()
+            .find(|definition| definition.contract.name == request.job_name)
+            .cloned()
+        else {
+            return Err(RuntimeJobsError::UnknownJob {
+                job: request.job_name,
+            });
+        };
+
+        match definition.contract.trigger {
+            JobTriggerKind::Scheduled if request.scheduled_for.is_none() => {
+                return Err(RuntimeJobsError::ScheduledJobRequiresSchedule {
+                    job: definition.contract.name,
+                });
+            }
+            JobTriggerKind::Scheduled => {}
+            JobTriggerKind::DomainEvent => {
+                return Err(RuntimeJobsError::DomainEventJobRequiresEventDispatch {
+                    job: definition.contract.name,
+                });
+            }
+            trigger if request.scheduled_for.is_some() => {
+                return Err(RuntimeJobsError::UnexpectedSchedule {
+                    job: definition.contract.name,
+                    trigger,
+                });
+            }
+            _ => {}
+        }
+
+        let mut spec = JobSpec::new(
+            self.issue_job_id(&definition.contract.name)?,
+            JobName::new(definition.contract.name.clone())?,
+            definition.queue.clone(),
+            request.payload_description,
+        )?
+        .with_retry_policy(definition.retry_policy.clone());
+
+        if let Some(scheduled_for) = request.scheduled_for {
+            spec = spec.scheduled_for(scheduled_for);
+        }
+
+        match request.idempotency_key {
+            Some(key) => {
+                spec = spec.with_idempotency_key(IdempotencyKey::new(key)?);
+            }
+            None if definition.retry_policy.is_retrying() => {
+                return Err(RuntimeJobsError::MissingIdempotencyKey {
+                    job: definition.contract.name,
+                });
+            }
+            None => {}
+        }
+
+        let job_id = spec.job_id.clone();
+        self.coordinator.enqueue(spec, now)?;
+        Ok(job_id)
+    }
+
+    pub fn emit_domain_event(
+        &mut self,
+        request: DomainEventDispatchRequest,
+        now: JobInstant,
+    ) -> Result<DomainEventDispatch, RuntimeJobsError> {
+        let event_type = DomainEventType::new(request.event_type.clone())?;
+        let event_id = self.issue_event_id(&request.event_type)?;
+        let mut envelope = DomainEventEnvelope::new(
+            event_id.clone(),
+            event_type.clone(),
+            request.aggregate_kind,
+            request.aggregate_id,
+            now,
+            request.payload_description,
+        )?;
+
+        if let Some(correlation_id) = request.correlation_id {
+            envelope = envelope.with_correlation_id(correlation_id)?;
+        }
+
+        if let Some(causation_id) = request.causation_id {
+            envelope = envelope.with_causation_id(causation_id)?;
+        }
+
+        let mut enqueued_jobs = Vec::new();
+        for subscription in self
+            .registered_event_subscriptions
+            .iter()
+            .filter(|subscription| subscription.event_type == event_type)
+            .cloned()
+        {
+            let mut spec = JobSpec::new(
+                JobId::new(format!(
+                    "event:{}:{}",
+                    event_id.as_str(),
+                    subscription.subscription_id.as_str()
+                ))?,
+                JobName::new(format!("event-handler:{}", subscription.job_name))?,
+                subscription.reaction_queue,
+                format!(
+                    "dispatch {} for {}:{}",
+                    event_type.as_str(),
+                    envelope.aggregate_kind,
+                    envelope.aggregate_id
+                ),
+            )?
+            .with_retry_policy(subscription.retry_policy.clone());
+
+            if subscription.retry_policy.is_retrying() {
+                spec = spec.with_idempotency_key(IdempotencyKey::new(format!(
+                    "event:{}:{}:{}",
+                    event_id.as_str(),
+                    subscription.module,
+                    subscription.job_name
+                ))?);
+            }
+
+            let job_id = spec.job_id.clone();
+            self.coordinator.enqueue(spec, now)?;
+            enqueued_jobs.push(job_id);
+        }
+
+        Ok(DomainEventDispatch {
+            event_id,
+            event_type,
+            enqueued_jobs,
+        })
+    }
+
+    pub fn acquire_scheduler_leadership(
+        &mut self,
+        now: JobInstant,
+        lease_ttl: std::time::Duration,
+    ) -> Result<SchedulerLeadership, RuntimeJobsError> {
+        Ok(self.coordinator.acquire_scheduler_leadership(
+            self.scheduler_node_id.clone(),
+            now,
+            lease_ttl,
+        )?)
+    }
+
+    pub fn promote_due_jobs(&mut self, now: JobInstant) -> Result<Vec<JobId>, RuntimeJobsError> {
+        Ok(self
+            .coordinator
+            .promote_due_jobs(&self.scheduler_node_id, now)?)
+    }
+
+    pub fn lease_ready_jobs(
+        &mut self,
+        queue: &JobQueueName,
+        worker_id: impl Into<String>,
+        now: JobInstant,
+        lease_ttl: std::time::Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, RuntimeJobsError> {
+        Ok(self
+            .coordinator
+            .lease_ready_jobs(queue, worker_id, now, lease_ttl, max_jobs)?)
+    }
+
+    pub fn acknowledge_completed(
+        &mut self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), RuntimeJobsError> {
+        Ok(self.coordinator.acknowledge_completed(lease, now)?)
+    }
+
+    pub fn acknowledge_failed(
+        &mut self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: impl Into<String>,
+    ) -> Result<JobFailureDisposition, RuntimeJobsError> {
+        Ok(self
+            .coordinator
+            .acknowledge_failed(lease, now, reason, error_message.into())?)
+    }
+
+    pub fn coordinator(&self) -> &JobsCoordinator {
+        &self.coordinator
+    }
+
+    fn issue_job_id(&mut self, job_name: &str) -> Result<JobId, RuntimeJobsError> {
+        self.next_job_sequence += 1;
+        Ok(JobId::new(format!(
+            "job:{}:{}",
+            job_name, self.next_job_sequence
+        ))?)
+    }
+
+    fn issue_event_id(&mut self, event_type: &str) -> Result<DomainEventId, RuntimeJobsError> {
+        self.next_event_sequence += 1;
+        Ok(DomainEventId::new(format!(
+            "evt:{}:{}",
+            event_type, self.next_event_sequence
+        ))?)
+    }
+}
+
 impl RuntimePlan {
+    pub fn jobs_host(
+        &self,
+        scheduler_node_id: impl Into<String>,
+    ) -> Result<JobsHost, RuntimeJobsError> {
+        let scheduler_node_id =
+            validate_runtime_identifier("scheduler_node_id", scheduler_node_id.into())?;
+
+        Ok(JobsHost {
+            customer_app: self.config.app.name.clone(),
+            scheduler_node_id,
+            runtime: self.jobs.clone(),
+            queue_topology: self.jobs.describe().clone(),
+            registered_jobs: self.registered_runtime_jobs.clone(),
+            registered_event_subscriptions: self.registered_runtime_event_subscriptions.clone(),
+            jobs_domain: self.jobs_domain.clone(),
+            coordinator: self.jobs.coordinator(),
+            next_job_sequence: 0,
+            next_event_sequence: 0,
+        })
+    }
+
     pub fn execute_request(
         &self,
         request: RequestInput,
@@ -1357,6 +1736,27 @@ fn render_route_path(
     }
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeJobsError {
+    #[error(transparent)]
+    Jobs(#[from] JobsModelError),
+    #[error("runtime value `{field}` cannot be empty")]
+    EmptyValue { field: &'static str },
+    #[error("job `{job}` is not declared by the runtime")]
+    UnknownJob { job: String },
+    #[error("job `{job}` must be dispatched through a domain event")]
+    DomainEventJobRequiresEventDispatch { job: String },
+    #[error("scheduled job `{job}` requires a scheduled execution instant")]
+    ScheduledJobRequiresSchedule { job: String },
+    #[error("job `{job}` uses trigger `{trigger:?}` and cannot be scheduled explicitly")]
+    UnexpectedSchedule {
+        job: String,
+        trigger: JobTriggerKind,
+    },
+    #[error("job `{job}` requires an explicit idempotency key")]
+    MissingIdempotencyKey { job: String },
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeBuildError {
     #[error(transparent)]
@@ -1375,6 +1775,8 @@ pub enum RuntimeBuildError {
     Observability(#[from] ObservabilityError),
     #[error(transparent)]
     Wasm(#[from] WasmModelError),
+    #[error(transparent)]
+    Jobs(#[from] JobsModelError),
     #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
     AuthPackageMismatch { configured: String, actual: String },
     #[error(
@@ -1407,6 +1809,198 @@ pub enum RuntimeBuildError {
         point: ExtensionPointKind,
         surface: String,
     },
+    #[error(
+        "job `{job}` is declared by both `{first_module}` and `{second_module}`; runtime job names must be unique"
+    )]
+    DuplicateRuntimeJobName {
+        job: String,
+        first_module: String,
+        second_module: String,
+    },
+    #[error("event subscription `{event}` in module `{module}` must target a declared job")]
+    EventSubscriptionMissingJob { module: String, event: String },
+    #[error("event subscription `{event}` in module `{module}` targets unknown job `{job}`")]
+    UnknownEventSubscriptionJob {
+        module: String,
+        event: String,
+        job: String,
+    },
+    #[error(
+        "event subscription `{event}` in module `{module}` targets job `{job}` with trigger `{trigger:?}`; domain-event subscriptions must target domain-event jobs"
+    )]
+    EventSubscriptionTriggerMismatch {
+        module: String,
+        event: String,
+        job: String,
+        trigger: JobTriggerKind,
+    },
+}
+
+fn build_runtime_jobs_domain(
+    runtime: &JobsRuntimeServices,
+    module_jobs: &[RegisteredModuleJob],
+    module_event_subscriptions: &[RegisteredEventSubscription],
+) -> Result<
+    (
+        Vec<RuntimeJobDefinition>,
+        Vec<RuntimeEventSubscriptionDefinition>,
+        JobsDomain,
+    ),
+    RuntimeBuildError,
+> {
+    let mut jobs_by_name = BTreeMap::<String, RuntimeJobDefinition>::new();
+
+    for registered in module_jobs {
+        let queue = queue_for_job_trigger(runtime, registered.job.trigger);
+        let retry_policy = retry_policy_for_job(runtime, &queue, &registered.job);
+        let job = RuntimeJobDefinition {
+            module: registered.module.clone(),
+            contract: registered.job.clone(),
+            queue,
+            retry_policy,
+        };
+
+        if let Some(existing) = jobs_by_name.insert(job.contract.name.clone(), job.clone()) {
+            return Err(RuntimeBuildError::DuplicateRuntimeJobName {
+                job: job.contract.name,
+                first_module: existing.module,
+                second_module: job.module,
+            });
+        }
+    }
+
+    let mut domain = JobsDomain::new(runtime.clone());
+    let mut subscriptions_by_handler = BTreeMap::<String, Vec<EventSubscriptionMetadata>>::new();
+    let mut resolved_subscriptions = Vec::new();
+
+    for registered in module_event_subscriptions {
+        let Some(job_name) = registered.subscription.job.clone() else {
+            return Err(RuntimeBuildError::EventSubscriptionMissingJob {
+                module: registered.module.clone(),
+                event: registered.subscription.event.clone(),
+            });
+        };
+        let Some(job) = jobs_by_name.get(&job_name) else {
+            return Err(RuntimeBuildError::UnknownEventSubscriptionJob {
+                module: registered.module.clone(),
+                event: registered.subscription.event.clone(),
+                job: job_name,
+            });
+        };
+
+        let event_type = DomainEventType::new(registered.subscription.event.clone())?;
+        let subscription_id = EventSubscriptionId::new(format!(
+            "{}:{}:{}",
+            registered.module, registered.subscription.event, job.contract.name
+        ))?;
+        let handler_id = EventHandlerId::new(job.contract.name.clone())?;
+        let reaction_queue = runtime.describe().domain_events_queue.clone();
+        let reaction_retry_policy =
+            retry_policy_for_contract_shape(runtime, &reaction_queue, job.contract.idempotent);
+        let mut metadata = EventSubscriptionMetadata::new(
+            subscription_id.clone(),
+            event_type.clone(),
+            reaction_queue.clone(),
+            handler_id.clone(),
+            reaction_retry_policy.clone(),
+        );
+
+        if reaction_retry_policy.is_retrying() {
+            metadata = metadata.with_idempotency_key(IdempotencyKey::new(format!(
+                "subscription:{}",
+                subscription_id.as_str()
+            ))?);
+        }
+
+        metadata = metadata.with_description(registered.subscription.description.clone())?;
+        subscriptions_by_handler
+            .entry(job.contract.name.clone())
+            .or_default()
+            .push(metadata.clone());
+        resolved_subscriptions.push(RuntimeEventSubscriptionDefinition {
+            module: registered.module.clone(),
+            event_type,
+            subscription_id,
+            handler_id,
+            job_name: job.contract.name.clone(),
+            reaction_queue,
+            retry_policy: reaction_retry_policy,
+            target_trigger: job.contract.trigger,
+            target_queue: job.queue.clone(),
+            description: registered.subscription.description.clone(),
+        });
+        domain = domain.add_subscription(metadata);
+    }
+
+    let mut resolved_jobs = jobs_by_name.into_values().collect::<Vec<_>>();
+    resolved_jobs.sort_by(|left, right| left.contract.name.cmp(&right.contract.name));
+    resolved_subscriptions.sort_by(|left, right| left.subscription_id.cmp(&right.subscription_id));
+
+    for (job_name, subscriptions) in &subscriptions_by_handler {
+        let handler_id = EventHandlerId::new(job_name.clone())?;
+        let mut handler = EventHandlerMetadata::new(
+            handler_id,
+            job_name.clone(),
+            runtime.describe().domain_events_queue.clone(),
+            RetryPolicy::default(),
+        )?;
+
+        for subscription in subscriptions {
+            handler = handler.add_subscription(subscription.clone());
+        }
+
+        domain = domain.add_handler(handler);
+    }
+
+    domain.validate()?;
+
+    Ok((resolved_jobs, resolved_subscriptions, domain))
+}
+
+fn queue_for_job_trigger(runtime: &JobsRuntimeServices, trigger: JobTriggerKind) -> JobQueueName {
+    match trigger {
+        JobTriggerKind::Scheduled => runtime.describe().scheduled_queue.clone(),
+        JobTriggerKind::DomainEvent => runtime.describe().domain_events_queue.clone(),
+        JobTriggerKind::Operator | JobTriggerKind::Webhook | JobTriggerKind::InlineFollowup => {
+            runtime.describe().work_queue.clone()
+        }
+    }
+}
+
+fn retry_policy_for_job(
+    runtime: &JobsRuntimeServices,
+    queue: &JobQueueName,
+    contract: &JobContract,
+) -> RetryPolicy {
+    retry_policy_for_contract_shape(runtime, queue, contract.idempotent)
+}
+
+fn retry_policy_for_contract_shape(
+    runtime: &JobsRuntimeServices,
+    queue: &JobQueueName,
+    idempotent: bool,
+) -> RetryPolicy {
+    if idempotent {
+        runtime
+            .describe()
+            .queue(queue)
+            .map(|definition| definition.retry_policy.clone())
+            .unwrap_or_default()
+    } else {
+        RetryPolicy::default()
+    }
+}
+
+fn validate_runtime_identifier(
+    field: &'static str,
+    value: String,
+) -> Result<String, RuntimeJobsError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err(RuntimeJobsError::EmptyValue { field })
+    } else {
+        Ok(trimmed.to_string())
+    }
 }
 
 fn collect_extension_slots(
@@ -1615,20 +2209,22 @@ cdn_base_url = "https://cdn.example.com"
                 ContractVersion::new(1, 0, 0),
                 ContractVersion::new(1, 0, 0),
                 ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
-                vec![HandlerManifest::new(
-                    HandlerId::new("waitlist-summary").unwrap(),
-                    "exports.waitlist_summary",
-                    ExtensionPoint::AdminWidget(
-                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
-                    ),
-                    HostGrantSet::from_grants([
-                        HostCapabilityGrant::AuthCheck,
-                        HostCapabilityGrant::DataRead {
-                            resource: "events.waitlist".to_string(),
-                        },
-                    ]),
-                )
-                .unwrap()],
+                vec![
+                    HandlerManifest::new(
+                        HandlerId::new("waitlist-summary").unwrap(),
+                        "exports.waitlist_summary",
+                        ExtensionPoint::AdminWidget(
+                            AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                        ),
+                        HostGrantSet::from_grants([
+                            HostCapabilityGrant::AuthCheck,
+                            HostCapabilityGrant::DataRead {
+                                resource: "events.waitlist".to_string(),
+                            },
+                        ]),
+                    )
+                    .unwrap(),
+                ],
             )
             .unwrap(),
             ExtensionInstallation::new(
@@ -1646,6 +2242,30 @@ cdn_base_url = "https://cdn.example.com"
             .unwrap(),
         )
         .unwrap()
+    }
+
+    #[derive(Debug)]
+    struct StaticManifestModule {
+        manifest: ModuleManifest,
+    }
+
+    impl StaticManifestModule {
+        fn new(manifest: ModuleManifest) -> Self {
+            Self { manifest }
+        }
+    }
+
+    impl PlatformModule for StaticManifestModule {
+        fn manifest(&self) -> ModuleManifest {
+            self.manifest.clone()
+        }
+
+        fn register(
+            &self,
+            _registry: &mut davenda_core::ServiceRegistry,
+        ) -> Result<(), RegistrationError> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -1680,11 +2300,12 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
         assert_eq!(plan.browser.csrf.field_name, "_csrf");
-        assert!(plan
-            .cli
-            .registry
-            .commands()
-            .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()]));
+        assert!(
+            plan.cli
+                .registry
+                .commands()
+                .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()])
+        );
         assert_eq!(plan.data.driver, davenda_config::DatabaseDriver::Postgres);
         assert_eq!(plan.data.schema, "public");
         assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);
@@ -1746,30 +2367,36 @@ cdn_base_url = "https://cdn.example.com"
                 .max_runtime,
             Duration::from_millis(50)
         );
-        assert!(plan
-            .services
-            .iter()
-            .any(|service| service.id == "module.admin.shell"));
-        assert!(plan
-            .services
-            .iter()
-            .any(|service| service.id == "module.cms.pages"));
-        assert!(plan
-            .services
-            .iter()
-            .any(|service| service.id == "module.commerce.checkout"));
-        assert!(plan
-            .services
-            .iter()
-            .any(|service| service.id == "module.memberships.entitlements"));
-        assert!(plan
-            .services
-            .iter()
-            .any(|service| service.id == "module.events.bookings"));
-        assert!(plan
-            .services
-            .iter()
-            .any(|service| service.id == "module.media.assets"));
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.admin.shell")
+        );
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.cms.pages")
+        );
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.commerce.checkout")
+        );
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.memberships.entitlements")
+        );
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.events.bookings")
+        );
+        assert!(
+            plan.services
+                .iter()
+                .any(|service| service.id == "module.media.assets")
+        );
         assert_eq!(plan.modules.len(), 6);
         assert_eq!(plan.modules[0].name, "admin");
         assert_eq!(plan.modules[1].name, "cms");
@@ -1777,22 +2404,43 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(plan.modules[3].name, "memberships");
         assert_eq!(plan.modules[4].name, "events");
         assert_eq!(plan.modules[5].name, "media");
-        assert!(plan
-            .install_migrations
-            .ordered_steps()
-            .iter()
-            .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string())));
+        assert!(
+            plan.install_migrations
+                .ordered_steps()
+                .iter()
+                .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string()))
+        );
         assert!(plan.install_migrations.ordered_steps().iter().any(|step| {
             step.owner == davenda_data::MigrationOwner::Module("memberships".to_string())
         }));
-        assert!(plan
-            .module_jobs
-            .iter()
-            .any(|registered| registered.job.name == "events.reminders"));
+        assert!(
+            plan.module_jobs
+                .iter()
+                .any(|registered| registered.job.name == "events.reminders")
+        );
         assert!(plan.module_event_subscriptions.iter().any(|registered| {
             registered.subscription.event == "commerce.order.paid"
                 && registered.module == "memberships"
         }));
+        assert!(plan.registered_runtime_jobs.iter().any(|registered| {
+            registered.contract.name == "events.reminders"
+                && registered.queue == plan.jobs.topology.scheduled_queue
+        }));
+        assert!(
+            plan.registered_runtime_event_subscriptions
+                .iter()
+                .any(|registered| {
+                    registered.module == "memberships"
+                        && registered.event_type.as_str() == "commerce.order.paid"
+                        && registered.job_name == "memberships.entitlements.sync"
+                })
+        );
+        assert!(
+            plan.jobs_domain
+                .handlers
+                .iter()
+                .any(|handler| handler.id.as_str() == "memberships.entitlements.sync")
+        );
         assert!(plan.module_search_contributions.iter().any(|registered| {
             registered.module == "commerce"
                 && registered.contribution.id == "search.catalog.products"
@@ -2130,6 +2778,199 @@ cdn_base_url = "https://cdn.example.com"
                 dependency,
             }) if module == "memberships" && dependency == "commerce"
         ));
+    }
+
+    #[test]
+    fn runtime_builder_materializes_jobs_domain_for_module_subscriptions() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
+            .with_module(MembershipsModule::new())
+            .with_module(EventsModule::new())
+            .build()
+            .unwrap();
+
+        assert!(plan.registered_runtime_jobs.iter().any(|job| {
+            job.contract.name == "memberships.entitlements.sync"
+                && job.queue == plan.jobs.topology.domain_events_queue
+        }));
+        assert!(
+            plan.registered_runtime_event_subscriptions
+                .iter()
+                .any(|subscription| {
+                    subscription.job_name == "memberships.entitlements.sync"
+                        && subscription.event_type.as_str() == "commerce.order.paid"
+                })
+        );
+        assert!(plan.jobs_domain.validate().is_ok());
+    }
+
+    #[test]
+    fn jobs_host_dispatches_domain_events_and_retries_declared_jobs() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
+            .with_module(MembershipsModule::new())
+            .build()
+            .unwrap();
+        let mut host = plan.jobs_host("scheduler-a").unwrap();
+
+        let dispatch = host
+            .emit_domain_event(
+                DomainEventDispatchRequest::new(
+                    "commerce.order.paid",
+                    "order",
+                    "order-42",
+                    "membership checkout completed",
+                )
+                .unwrap(),
+                JobInstant::from_unix_seconds(200),
+            )
+            .unwrap();
+
+        assert_eq!(dispatch.event_type.as_str(), "commerce.order.paid");
+        assert_eq!(dispatch.enqueued_jobs.len(), 2);
+        assert_eq!(host.coordinator().ready_jobs().len(), 2);
+        assert!(host.coordinator().ready_jobs().iter().any(|record| {
+            record.spec.job_name.as_str() == "event-handler:memberships.entitlements.sync"
+        }));
+
+        let first_lease = host
+            .lease_ready_jobs(
+                &plan.jobs.topology.domain_events_queue,
+                "worker-a",
+                JobInstant::from_unix_seconds(200),
+                Duration::from_secs(30),
+                1,
+            )
+            .unwrap()
+            .remove(0);
+        let retry = host
+            .acknowledge_failed(
+                &first_lease,
+                JobInstant::from_unix_seconds(205),
+                DeadLetterReason::PolicyViolation,
+                "temporary membership projection failure",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            retry,
+            JobFailureDisposition::Retried { ref queue, .. }
+                if queue == &plan.jobs.topology.domain_events_queue
+        ));
+    }
+
+    #[test]
+    fn jobs_host_requires_scheduler_leadership_for_scheduled_jobs() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CmsModule::new())
+            .build()
+            .unwrap();
+        let mut host = plan.jobs_host("scheduler-a").unwrap();
+        let scheduled =
+            JobDispatchRequest::new("cms.publish-scheduled", "publish scheduled landing page")
+                .unwrap()
+                .scheduled_for(JobInstant::from_unix_seconds(120))
+                .with_idempotency_key("cms.publish-scheduled:page-42")
+                .unwrap();
+
+        let job_id = host
+            .enqueue_job(scheduled, JobInstant::from_unix_seconds(100))
+            .unwrap();
+        assert_eq!(host.coordinator().scheduled_jobs().len(), 1);
+
+        let err = host
+            .promote_due_jobs(JobInstant::from_unix_seconds(120))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeJobsError::Jobs(JobsModelError::MissingSchedulerLeadership { node_id })
+                if node_id == "scheduler-a"
+        ));
+
+        host.acquire_scheduler_leadership(
+            JobInstant::from_unix_seconds(110),
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let promoted = host
+            .promote_due_jobs(JobInstant::from_unix_seconds(120))
+            .unwrap();
+        assert_eq!(promoted, vec![job_id]);
+        assert_eq!(host.coordinator().ready_jobs().len(), 1);
+    }
+
+    #[test]
+    fn jobs_host_rejects_domain_event_jobs_without_event_dispatch() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
+            .with_module(MembershipsModule::new())
+            .build()
+            .unwrap();
+        let mut host = plan.jobs_host("scheduler-a").unwrap();
+        let request = JobDispatchRequest::new(
+            "memberships.entitlements.sync",
+            "attempt to bypass event flow",
+        )
+        .unwrap()
+        .with_idempotency_key("memberships.entitlements.sync:42")
+        .unwrap();
+
+        let err = host
+            .enqueue_job(request, JobInstant::from_unix_seconds(50))
+            .unwrap_err();
+        assert_eq!(
+            err,
+            RuntimeJobsError::DomainEventJobRequiresEventDispatch {
+                job: "memberships.entitlements.sync".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_builder_rejects_duplicate_runtime_job_names() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let first = StaticManifestModule::new(ModuleManifest::new("invalid").with_jobs(vec![
+            JobContract::new(
+                "shared.job",
+                JobTriggerKind::Operator,
+                true,
+                "first copy of a duplicated runtime job",
+            ),
+        ]));
+        let second = StaticManifestModule::new(ModuleManifest::new("other").with_jobs(vec![
+            JobContract::new(
+                "shared.job",
+                JobTriggerKind::Webhook,
+                true,
+                "second copy of a duplicated runtime job",
+            ),
+        ]));
+
+        let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(first)
+            .with_module(second)
+            .build()
+            .unwrap_err();
+
+        match error {
+            RuntimeBuildError::DuplicateRuntimeJobName {
+                job,
+                first_module,
+                second_module,
+            } => {
+                assert_eq!(job, "shared.job");
+                assert_eq!(first_module, "invalid");
+                assert_eq!(second_module, "other");
+            }
+            other => panic!("expected duplicate runtime job error, got {other:?}"),
+        }
     }
 
     #[test]

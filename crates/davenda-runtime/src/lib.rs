@@ -35,8 +35,10 @@ use davenda_observability::{
     ObservabilityError,
 };
 use davenda_ops::{
-    BulkOperationPlan, BulkOperationRequest, OpsCatalog, OpsModelError, OpsPlanner,
-    ReportExportPlan, ReportExportRequest,
+    BulkExecutionId, BulkOperationId, BulkOperationPlan, BulkOperationRequest, OpsCatalog,
+    OpsModelError, OpsPlanner, ReportExportPlan, ReportExportRequest, SearchCatalog,
+    SearchIndexContribution as OpsSearchIndexContribution, SearchInvalidationTrigger,
+    SearchRebuildStrategy,
 };
 use davenda_storage::{
     PathPolicyRule, StoragePlan, StoragePlanRequest, StoragePlanner, StoragePlanningError,
@@ -1430,6 +1432,117 @@ impl OpsHost {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchInvalidationPlan {
+    pub trigger: SearchInvalidationTrigger,
+    pub indexes: Vec<OpsSearchIndexContribution>,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeSearchError {
+    #[error(transparent)]
+    Ops(#[from] RuntimeOpsError),
+    #[error(transparent)]
+    Model(#[from] OpsModelError),
+    #[error(transparent)]
+    Jobs(#[from] JobsModelError),
+    #[error("search host requires at least one configured index contribution")]
+    EmptyCatalog,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchHost {
+    catalog: SearchCatalog,
+    ops: OpsHost,
+}
+
+impl SearchHost {
+    pub fn catalog(&self) -> &SearchCatalog {
+        &self.catalog
+    }
+
+    pub fn visible_to(
+        &self,
+        capabilities: &[davenda_auth::Capability],
+    ) -> Vec<&OpsSearchIndexContribution> {
+        self.catalog.visible_to(capabilities)
+    }
+
+    pub fn indexes_for_trigger(
+        &self,
+        trigger: SearchInvalidationTrigger,
+    ) -> Vec<&OpsSearchIndexContribution> {
+        self.catalog
+            .contributions
+            .iter()
+            .filter(|index| {
+                index
+                    .invalidation_rules
+                    .iter()
+                    .any(|rule| rule.trigger == trigger)
+            })
+            .collect()
+    }
+
+    pub fn invalidation_plan(&self, trigger: SearchInvalidationTrigger) -> SearchInvalidationPlan {
+        SearchInvalidationPlan {
+            trigger,
+            indexes: self
+                .indexes_for_trigger(trigger)
+                .into_iter()
+                .cloned()
+                .collect(),
+        }
+    }
+
+    pub fn scheduled_rebuilds(&self) -> Vec<&OpsSearchIndexContribution> {
+        self.catalog
+            .contributions
+            .iter()
+            .filter(|index| {
+                matches!(
+                    index.rebuild_strategy,
+                    SearchRebuildStrategy::Scheduled { .. }
+                )
+            })
+            .collect()
+    }
+
+    pub fn queue_full_reindex(
+        &mut self,
+        execution_id: BulkExecutionId,
+        requested_by: impl Into<String>,
+        requested_at: JobInstant,
+        operator_capabilities: Vec<davenda_auth::Capability>,
+        dry_run: bool,
+    ) -> Result<QueuedBulkOperation, RuntimeSearchError> {
+        if self.catalog.contributions.is_empty() {
+            return Err(RuntimeSearchError::EmptyCatalog);
+        }
+
+        let idempotency_key = IdempotencyKey::new(format!(
+            "search.reindex:{}",
+            execution_id.as_str()
+        ))?;
+        let mut request = BulkOperationRequest::new(
+            execution_id,
+            BulkOperationId::new("bulk.search.reindex")?,
+            requested_by,
+            requested_at,
+            self.catalog.contributions.len(),
+        )?;
+
+        for capability in operator_capabilities {
+            request = request.with_capability(capability);
+        }
+
+        request = request
+            .with_idempotency_key(idempotency_key)
+            .dry_run(dry_run);
+        Ok(self.ops.queue_bulk_operation(request)?)
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeTlsError {
     #[error(transparent)]
@@ -1982,6 +2095,16 @@ impl RuntimePlan {
         Ok(OpsHost {
             planner: OpsPlanner::new(self.jobs.clone(), self.ops_catalog.clone())?,
             jobs: self.jobs_host(scheduler_node_id)?,
+        })
+    }
+
+    pub fn search_host(
+        &self,
+        scheduler_node_id: impl Into<String>,
+    ) -> Result<SearchHost, RuntimeSearchError> {
+        Ok(SearchHost {
+            catalog: self.ops_catalog.search.clone(),
+            ops: self.ops_host(scheduler_node_id)?,
         })
     }
 
@@ -5050,6 +5173,83 @@ cdn_base_url = "https://cdn.example.com"
             AssetDeliveryTarget::LocalPath { path }
                 if path == "/var/lib/platform/vault/secure/docs/orders.csv"
         ));
+    }
+
+    #[test]
+    fn search_host_exposes_visibility_and_invalidation_catalog() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_module(OpsModule::new())
+            .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
+            .with_module(EventsModule::new())
+            .with_module(MediaModule::new())
+            .build()
+            .unwrap();
+        let host = plan.search_host("scheduler-a").unwrap();
+
+        let public_visible = host
+            .visible_to(&[])
+            .into_iter()
+            .map(|index| index.id.as_str().to_string())
+            .collect::<BTreeSet<_>>();
+        assert!(public_visible.contains("search.cms.pages"));
+        assert!(public_visible.contains("search.catalog.products"));
+        assert!(public_visible.contains("search.media"));
+        assert!(!public_visible.contains("search.events.bookings"));
+
+        let events_visible = host
+            .visible_to(&[Capability::EventsBookingCheckIn])
+            .into_iter()
+            .map(|index| index.id.as_str().to_string())
+            .collect::<BTreeSet<_>>();
+        assert!(events_visible.contains("search.events.bookings"));
+
+        let published = host.invalidation_plan(SearchInvalidationTrigger::Published);
+        let published_ids = published
+            .indexes
+            .iter()
+            .map(|index| index.id.as_str().to_string())
+            .collect::<BTreeSet<_>>();
+        assert!(published_ids.contains("search.cms.pages"));
+        assert!(published_ids.contains("search.catalog.products"));
+        assert!(published_ids.contains("search.media"));
+        assert!(!published_ids.contains("search.events.bookings"));
+
+        let scheduled = host.scheduled_rebuilds();
+        assert!(scheduled.iter().all(|index| matches!(
+            index.rebuild_strategy,
+            SearchRebuildStrategy::Scheduled { .. }
+        )));
+    }
+
+    #[test]
+    fn search_host_queues_full_reindex_through_ops_bulk_workflow() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_module(OpsModule::new())
+            .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
+            .build()
+            .unwrap();
+        let expected_index_count = plan.ops_catalog.search.contributions.len();
+
+        let mut host = plan.search_host("scheduler-a").unwrap();
+        let queued = host
+            .queue_full_reindex(
+                BulkExecutionId::new("search-reindex-1").unwrap(),
+                "operator-1",
+                JobInstant::from_unix_seconds(200),
+                vec![Capability::SystemModuleManage],
+                false,
+            )
+            .unwrap();
+
+        assert_eq!(queued.plan.definition.id.as_str(), "bulk.search.reindex");
+        assert_eq!(queued.plan.target_count, expected_index_count);
+        assert_eq!(queued.queued_job_id.as_str(), "search-reindex-1");
     }
 
     #[test]

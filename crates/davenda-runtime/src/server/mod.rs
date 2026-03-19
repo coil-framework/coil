@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::backends::RuntimeBackendMaterializer;
+use crate::wasm::RuntimeWasmHostServices;
 use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
@@ -22,10 +24,10 @@ pub use backend::{
     SecretResolutionError, SecretResolver, SessionStoreClientTarget, SharedBackendClients,
     StaticSecretResolver,
 };
-pub use request::LiveHttpRequest;
 use observability::{
     serve_diagnostics_probe, serve_health_probe, serve_metrics_probe, serve_readiness_probe,
 };
+pub use request::LiveHttpRequest;
 use request::{error_response, execute_live_request, serve_runtime_request};
 
 #[cfg(test)]
@@ -60,6 +62,7 @@ pub enum RuntimeServerError {
 pub(crate) struct RuntimeServerState {
     plan: RuntimePlan,
     browser: Mutex<BrowserHost>,
+    wasm_host: WasmHost,
     cookie_secret: Vec<u8>,
     csrf_secret: Vec<u8>,
     backends: SharedBackendClients,
@@ -86,6 +89,7 @@ impl HttpServerHost {
     pub(crate) fn new(
         plan: RuntimePlan,
         backends: SharedBackendClients,
+        wasm_secrets: BTreeMap<String, String>,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
     ) -> Result<Self, RuntimeServerError> {
@@ -100,9 +104,19 @@ impl HttpServerHost {
             ));
         let browser =
             materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
+        let wasm_host = WasmHost::with_host_services(
+            plan.clone(),
+            plan.config.app.name.clone(),
+            plan.wasm.clone(),
+            plan.extension_registry.clone(),
+            plan.config.i18n.default_locale.clone(),
+            plan.registered_runtime_jobs.clone(),
+            RuntimeWasmHostServices::with_runtime_secrets(plan.clone(), wasm_secrets),
+        );
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
+            wasm_host,
             backends,
             cookie_secret,
             csrf_secret,
@@ -124,9 +138,11 @@ impl HttpServerHost {
                 backends.database.url.clone(),
                 plan.auth_package.clone(),
             ));
+        let wasm_host = plan.wasm_host();
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
+            wasm_host,
             backends,
             cookie_secret,
             csrf_secret,
@@ -143,9 +159,11 @@ impl HttpServerHost {
         route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
     ) -> Result<Self, RuntimeServerError> {
         let browser = plan.browser_host()?;
+        let wasm_host = plan.wasm_host();
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
+            wasm_host,
             backends,
             cookie_secret,
             csrf_secret,
@@ -156,6 +174,7 @@ impl HttpServerHost {
     fn new_with_browser_and_authorizer(
         plan: RuntimePlan,
         browser: BrowserHost,
+        wasm_host: WasmHost,
         backends: SharedBackendClients,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
@@ -163,6 +182,7 @@ impl HttpServerHost {
     ) -> Self {
         let state = Arc::new(RuntimeServerState {
             browser: Mutex::new(browser),
+            wasm_host,
             plan,
             cookie_secret,
             csrf_secret,

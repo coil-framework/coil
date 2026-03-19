@@ -27,7 +27,6 @@ impl RuntimeHostServiceExecutor {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn with_services(plan: RuntimePlan, services: RuntimeWasmHostServices) -> Self {
         Self {
             services,
@@ -550,7 +549,7 @@ publish_manifest = false
         let network = session
             .execute_host_call(davenda_wasm::HostCall::OutboundHttp {
                 integration: "crm".to_string(),
-                response_bytes: 1,
+                response_bytes: "live-response".len() as u64,
             })
             .unwrap();
         assert!(matches!(
@@ -646,6 +645,98 @@ publish_manifest = false
         assert_eq!(records[1].app_id, "customer-app");
 
         server.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_host_service_executor_uses_runtime_scoped_secret_bindings() {
+        let plan = RuntimeBuilder::new(
+            PlatformConfig::from_toml_str(TEST_CONFIG).unwrap(),
+            DefaultAuthModelPackage::default(),
+        )
+        .build()
+        .unwrap();
+
+        let mut secrets = BTreeMap::new();
+        secrets.insert("api-token".to_string(), "super-secret".to_string());
+
+        let services = RuntimeWasmHostServices::with_runtime_secrets(plan.clone(), secrets);
+        let executor = RuntimeHostServiceExecutor::with_services(plan.clone(), services.clone());
+        let session_plan = InvocationPlan {
+            extension_id: ExtensionId::new("extensions.live").unwrap(),
+            handler_id: HandlerId::new("handler-live").unwrap(),
+            point: ExtensionPointKind::Page,
+            customer_app_id: "customer-app".to_string(),
+            granted_capabilities: HostGrantSet::from_grants([HostCapabilityGrant::SecretRead {
+                secret: "api-token".to_string(),
+            }]),
+            limits: ResourceLimits::baseline_for(ExtensionPointKind::Page),
+            context: InvocationContext::new(
+                CustomerAppContext::new("customer-app").unwrap(),
+                PrincipalRef::user("user-1").unwrap(),
+                TraceContext::new("trace-1").unwrap(),
+                InvocationInput::Page(
+                    PageInvocation::new("/host-side-effects", HttpMethod::Get).unwrap(),
+                ),
+            ),
+        };
+
+        let mut session = session_plan.begin_execution_with_executor(Arc::new(executor));
+        let secret = session
+            .execute_host_call(davenda_wasm::HostCall::SecretRead {
+                secret: "api-token".to_string(),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            secret.result,
+            HostServiceResult::Secret(SecretExecution {
+                secret,
+                source,
+                value_bytes,
+            }) if secret == "api-token"
+                && source == "runtime:wasm-host-tests:api-token"
+                && value_bytes == "super-secret".len()
+        ));
+    }
+
+    #[test]
+    fn runtime_host_service_executor_denies_unbound_secrets_without_env_fallback() {
+        let plan = RuntimeBuilder::new(
+            PlatformConfig::from_toml_str(TEST_CONFIG).unwrap(),
+            DefaultAuthModelPackage::default(),
+        )
+        .build()
+        .unwrap();
+
+        let services = RuntimeWasmHostServices::new(plan.clone());
+        let executor = RuntimeHostServiceExecutor::with_services(plan.clone(), services);
+        let session_plan = InvocationPlan {
+            extension_id: ExtensionId::new("extensions.live").unwrap(),
+            handler_id: HandlerId::new("handler-live").unwrap(),
+            point: ExtensionPointKind::Page,
+            customer_app_id: "customer-app".to_string(),
+            granted_capabilities: HostGrantSet::from_grants([HostCapabilityGrant::SecretRead {
+                secret: "api-token".to_string(),
+            }]),
+            limits: ResourceLimits::baseline_for(ExtensionPointKind::Page),
+            context: InvocationContext::new(
+                CustomerAppContext::new("customer-app").unwrap(),
+                PrincipalRef::user("user-1").unwrap(),
+                TraceContext::new("trace-1").unwrap(),
+                InvocationInput::Page(
+                    PageInvocation::new("/host-side-effects", HttpMethod::Get).unwrap(),
+                ),
+            ),
+        };
+
+        let mut session = session_plan.begin_execution_with_executor(Arc::new(executor));
+        let error = session
+            .execute_host_call(davenda_wasm::HostCall::SecretRead {
+                secret: "api-token".to_string(),
+            })
+            .unwrap_err();
+
+        assert!(format!("{error:?}").contains("was not provided to runtime"));
     }
 
     fn spawn_http_server(body: &'static str) -> (String, thread::JoinHandle<()>) {

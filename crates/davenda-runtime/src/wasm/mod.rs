@@ -25,6 +25,7 @@ mod executor;
 mod host;
 mod support;
 
+pub(crate) use host::RuntimeWasmHostServices;
 pub use host::{
     ExtensionPrincipal, InstalledExtensionSummary, LiveWasmExecutionError, RegisteredExtensionSlot,
     WasmHost,

@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
-
 use davenda_wasm::{
     JobExecution, MetadataExecution, MetadataGrant, NetworkExecution, SecretExecution,
 };
 
 use super::super::*;
+
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 mod http;
 mod jobs;
@@ -12,6 +13,7 @@ mod keys;
 mod metadata;
 mod secrets;
 
+#[cfg(test)]
 pub(crate) use metadata::MetadataWriteRecord;
 
 #[derive(Debug, Clone)]
@@ -26,7 +28,22 @@ impl RuntimeWasmHostServices {
     pub(crate) fn new(plan: RuntimePlan) -> Self {
         Self {
             http: http::RuntimeOutboundHttpBackend::new(plan.wasm.allow_network),
-            secrets: secrets::RuntimeSecretBackend::default(),
+            secrets: secrets::RuntimeSecretBackend::deny_all(plan.config.app.name.clone()),
+            jobs: jobs::RuntimeJobBackend::new(plan),
+            metadata: metadata::RuntimeMetadataBackend::default(),
+        }
+    }
+
+    pub(crate) fn with_runtime_secrets(
+        plan: RuntimePlan,
+        secrets: BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            http: http::RuntimeOutboundHttpBackend::new(plan.wasm.allow_network),
+            secrets: secrets::RuntimeSecretBackend::runtime_scoped(
+                plan.config.app.name.clone(),
+                secrets,
+            ),
             jobs: jobs::RuntimeJobBackend::new(plan),
             metadata: metadata::RuntimeMetadataBackend::default(),
         }

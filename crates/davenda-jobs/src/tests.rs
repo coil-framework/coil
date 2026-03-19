@@ -1,11 +1,86 @@
 use super::*;
 use davenda_config::JobBackend;
+use std::sync::Arc;
 use std::time::Duration;
 
 fn config(backend: JobBackend) -> davenda_config::JobsConfig {
     davenda_config::JobsConfig {
         backend,
         retry_limit: 3,
+    }
+}
+
+#[derive(Clone)]
+struct SharedJobsRuntimeHarness {
+    runtime: Arc<dyn JobsCoordinationRuntime>,
+}
+
+impl SharedJobsRuntimeHarness {
+    fn new(runtime: Arc<dyn JobsCoordinationRuntime>) -> Self {
+        Self { runtime }
+    }
+}
+
+impl JobsCoordinationRuntime for SharedJobsRuntimeHarness {
+    fn snapshot(&self) -> JobsCoordinatorSnapshot {
+        self.runtime.snapshot()
+    }
+
+    fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
+        self.runtime.enqueue(spec, now)
+    }
+
+    fn acquire_scheduler_leadership(
+        &self,
+        node_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+    ) -> Result<SchedulerLeadership, JobsModelError> {
+        self.runtime
+            .acquire_scheduler_leadership(node_id, now, lease_ttl)
+    }
+
+    fn promote_due_jobs(
+        &self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        self.runtime.promote_due_jobs(node_id, now)
+    }
+
+    fn lease_ready_jobs(
+        &self,
+        queue: &JobQueueName,
+        worker_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, JobsModelError> {
+        self.runtime
+            .lease_ready_jobs(queue, worker_id, now, lease_ttl, max_jobs)
+    }
+
+    fn acknowledge_completed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError> {
+        self.runtime.acknowledge_completed(lease, now)
+    }
+
+    fn acknowledge_failed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: String,
+    ) -> Result<JobFailureDisposition, JobsModelError> {
+        self.runtime
+            .acknowledge_failed(lease, now, reason, error_message)
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        true
     }
 }
 
@@ -408,22 +483,31 @@ fn compatibility_shared_shims_remain_local_only() {
 #[test]
 fn explicit_shared_runtime_constructors_report_shared_state_honestly() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-    let shared_runtime = JobsBackendAdapter::emulated_shared_runtime(&runtime);
+    let emulated = JobsBackendAdapter::emulated_shared_runtime(&runtime);
+    let shared_runtime = Arc::new(SharedJobsRuntimeHarness::new(emulated.clone()));
     let shared = JobsBackendAdapter::with_shared_runtime(
         runtime.backend,
         runtime.topology.clone(),
         shared_runtime,
     );
     let local = JobsBackendAdapter::local_for_testing(&runtime);
+    let explicit_emulated = JobsBackendAdapter::with_shared_runtime(
+        runtime.backend,
+        runtime.topology.clone(),
+        emulated,
+    );
 
     assert!(shared.is_shared());
     assert!(!local.is_shared());
+    assert!(!explicit_emulated.is_shared());
 }
 
 #[test]
 fn distributed_coordinators_share_backend_when_using_an_explicit_shared_runtime() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-    let shared_runtime = JobsBackendAdapter::emulated_shared_runtime(&runtime);
+    let shared_runtime = Arc::new(SharedJobsRuntimeHarness::new(
+        JobsBackendAdapter::emulated_shared_runtime(&runtime),
+    ));
     let mut left = runtime.coordinator_with_shared_runtime(shared_runtime.clone());
     let mut right = runtime.coordinator_with_shared_runtime(shared_runtime);
 

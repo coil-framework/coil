@@ -6,6 +6,52 @@ fn tag(value: &str) -> InvalidationTag {
     InvalidationTag::new(value).unwrap()
 }
 
+#[derive(Clone)]
+struct SharedCacheRuntimeHarness {
+    runtime: Arc<dyn DistributedCacheRuntime>,
+}
+
+impl SharedCacheRuntimeHarness {
+    fn new(runtime: Arc<dyn DistributedCacheRuntime>) -> Self {
+        Self { runtime }
+    }
+}
+
+impl DistributedCacheRuntime for SharedCacheRuntimeHarness {
+    fn insert(&self, entry: CacheEntry) {
+        self.runtime.insert(entry);
+    }
+
+    fn lookup(&self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
+        self.runtime.lookup(key, now)
+    }
+
+    fn invalidate(&self, tags: &InvalidationSet) -> Vec<CacheKey> {
+        self.runtime.invalidate(tags)
+    }
+
+    fn begin_fill(
+        &self,
+        key: &CacheKey,
+        mode: RequestCoalescingMode,
+        holder: String,
+    ) -> FillDecision {
+        self.runtime.begin_fill(key, mode, holder)
+    }
+
+    fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
+        self.runtime.complete_fill(lease)
+    }
+
+    fn metrics(&self) -> CacheMetrics {
+        self.runtime.metrics()
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        true
+    }
+}
+
 #[test]
 fn variation_keys_are_stable_for_equivalent_scopes() {
     let left = CacheScope::public()
@@ -167,9 +213,18 @@ fn cache_runtime_new_keeps_distributed_topologies_local_until_explicitly_shared(
 fn compatibility_shared_shims_remain_local_only() {
     let client = DistributedCacheClient::shared(CacheBackendKind::Redis);
     let adapter = CacheBackendAdapter::shared(CacheTopology::with_redis());
+    let emulated = DistributedCacheClient::emulated_shared_runtime(CacheBackendKind::Redis);
+    let explicit = CacheBackendAdapter::with_shared_runtime(
+        CacheTopology::with_redis(),
+        Arc::new(SharedCacheRuntimeHarness::new(emulated.clone())),
+    );
+    let explicit_emulated =
+        CacheBackendAdapter::with_shared_runtime(CacheTopology::with_redis(), emulated);
 
     assert!(!client.is_shared());
     assert!(!adapter.is_shared());
+    assert!(explicit.is_shared());
+    assert!(!explicit_emulated.is_shared());
 }
 
 #[test]
@@ -424,7 +479,9 @@ fn distributed_planner_runtimes_share_backend_when_reusing_an_explicit_handle() 
         )
         .unwrap();
 
-    let shared_runtime = DistributedCacheClient::emulated_shared_runtime(CacheBackendKind::Valkey);
+    let shared_runtime = Arc::new(SharedCacheRuntimeHarness::new(
+        DistributedCacheClient::emulated_shared_runtime(CacheBackendKind::Valkey),
+    ));
     let adapter = CacheBackendAdapter::with_shared_runtime(topology, shared_runtime);
     let mut left = CacheRuntime::with_backend(topology, adapter.clone());
     let mut right = CacheRuntime::with_backend(topology, adapter);

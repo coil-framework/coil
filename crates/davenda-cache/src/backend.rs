@@ -113,6 +113,9 @@ pub trait DistributedCacheRuntime: Send + Sync + 'static {
     ) -> FillDecision;
     fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError>;
     fn metrics(&self) -> CacheMetrics;
+    fn is_shared_backend(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug)]
@@ -163,6 +166,10 @@ impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
         let guard = self.state.lock().expect("cache backend mutex poisoned");
         guard.metrics
     }
+
+    fn is_shared_backend(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]
@@ -187,7 +194,7 @@ impl DistributedCacheClient {
     ) -> Self {
         Self {
             kind,
-            shared: true,
+            shared: runtime.is_shared_backend(),
             runtime,
         }
     }
@@ -360,6 +367,14 @@ impl CacheBackendAdapter {
         topology: CacheTopology,
         runtime: Arc<dyn DistributedCacheRuntime>,
     ) -> Self {
+        let client = DistributedCacheClient::with_shared_runtime(
+            match topology.l2() {
+                Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
+                Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
+                None => CacheBackendKind::Local,
+            },
+            runtime,
+        );
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
@@ -368,10 +383,8 @@ impl CacheBackendAdapter {
         Self {
             kind,
             topology,
-            shared: true,
-            storage: CacheBackendStorage::Distributed(DistributedCacheClient::with_shared_runtime(
-                kind, runtime,
-            )),
+            shared: client.is_shared(),
+            storage: CacheBackendStorage::Distributed(client),
         }
     }
 

@@ -95,6 +95,9 @@ pub trait JobsCoordinationRuntime: Send + Sync + 'static {
         reason: DeadLetterReason,
         error_message: String,
     ) -> Result<JobFailureDisposition, JobsModelError>;
+    fn is_shared_backend(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug)]
@@ -171,6 +174,10 @@ impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
         let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
         guard.acknowledge_failed(lease, now, reason, error_message)
     }
+
+    fn is_shared_backend(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]
@@ -198,7 +205,7 @@ impl JobsBackendAdapter {
         Self {
             backend,
             queue_topology,
-            shared: true,
+            shared: runtime.is_shared_backend(),
             runtime,
         }
     }

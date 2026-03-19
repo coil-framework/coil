@@ -1,18 +1,18 @@
-#[path = "execution/auth.rs"]
+#[path = "auth.rs"]
 mod auth;
-#[path = "execution/cache.rs"]
+#[path = "cache.rs"]
 mod cache;
-#[path = "execution/data.rs"]
+#[path = "data.rs"]
 mod data;
-#[path = "execution/journal.rs"]
+#[path = "journal.rs"]
 mod journal;
-#[path = "execution/render.rs"]
+#[path = "render.rs"]
 mod render;
-#[path = "execution/storage.rs"]
+#[path = "storage.rs"]
 mod storage;
-#[path = "execution/synthetic.rs"]
+#[path = "synthetic.rs"]
 mod synthetic;
-#[path = "execution/types.rs"]
+#[path = "types.rs"]
 mod types;
 
 pub use auth::{AuthServiceDetails, AuthServiceExecution};

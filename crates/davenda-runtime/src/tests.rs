@@ -3042,6 +3042,61 @@ fn runtime_backend_materializer_reuses_explicit_session_runtime_for_browser_host
 }
 
 #[test]
+fn runtime_backend_materializer_keeps_session_state_local_to_each_instance() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+
+    let clients = SharedBackendClients {
+        database: DatabaseClientTarget {
+            driver: davenda_config::DatabaseDriver::Postgres,
+            url: None,
+            min_connections: 1,
+            max_connections: 1,
+            statement_timeout_secs: 30,
+        },
+        distributed_cache: None,
+        jobs: JobsClientTarget {
+            backend: davenda_config::JobBackend::Redis,
+            shared: true,
+        },
+        session_store: Some(SessionStoreClientTarget {
+            kind: SessionStoreBackendKind::Redis,
+            shared: true,
+        }),
+        object_store: None,
+    };
+    let left_materializer = crate::backends::RuntimeBackendMaterializer::new(
+        plan.shared_backend_scope.clone(),
+        clients.clone(),
+    );
+    let right_materializer = crate::backends::RuntimeBackendMaterializer::new(
+        plan.shared_backend_scope.clone(),
+        clients,
+    );
+
+    let mut left = left_materializer
+        .browser_host(plan.config.app.name.clone(), plan.browser.clone())
+        .unwrap();
+    let right = right_materializer
+        .browser_host(plan.config.app.name.clone(), plan.browser.clone())
+        .unwrap();
+
+    let issued = left
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-isolated")
+                .unwrap(),
+            b"01234567012345670123456701234567",
+            BrowserInstant::from_unix_seconds(100),
+        )
+        .unwrap();
+
+    assert!(right.session(&issued.record.session_id).is_none());
+}
+
+#[test]
 fn jobs_host_dispatches_domain_events_and_retries_declared_jobs() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())

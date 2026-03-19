@@ -1,8 +1,11 @@
 use super::*;
 use axum::http::StatusCode;
 
+mod graph;
 mod response;
 
+pub(crate) use graph::LiveHtmlResponseGraph;
+use graph::LiveJsonResponseGraph;
 pub(crate) use response::{LiveCacheHeaders, LiveResponseAnnotations, LiveResponseComposition};
 
 #[derive(Debug, Clone, Default)]
@@ -90,29 +93,11 @@ impl LiveExecutionReceipts {
 
     pub(crate) fn compose_json_payload(
         &self,
-        mut payload: BTreeMap<String, String>,
+        payload: BTreeMap<String, String>,
     ) -> BTreeMap<String, String> {
-        if let Some(output) = self.request_surface_output() {
-            if let TypedResponseBody::JsonObject(typed_payload) = &output.body {
-                payload.extend(typed_payload.clone());
-            }
-        }
-
-        payload
-    }
-
-    fn compose_html_output(&self, html: String) -> String {
-        let body_fragments = self
-            .typed_outputs()
-            .into_iter()
-            .filter_map(typed_output_fragment)
-            .collect::<Vec<_>>();
-
-        if body_fragments.is_empty() {
-            html
-        } else {
-            inject_body_markup(html, &body_fragments.join(""))
-        }
+        LiveJsonResponseGraph::new(payload)
+            .with_request_surface(self.request_surface_output())
+            .render()
     }
 
     pub(crate) fn compose_response(
@@ -120,12 +105,13 @@ impl LiveExecutionReceipts {
         plan: &RuntimePlan,
         execution: &RequestExecution,
     ) -> Result<LiveResponseComposition, RuntimeServerError> {
+        let metadata = self.merged_metadata();
         let cache_hint = self.merged_cache_hint();
         let annotations = LiveResponseAnnotations::default()
             .request_surface(self.request_surface.clone())
             .render_hooks(self.render_hooks.clone())
             .admin_widgets(self.admin_widgets.clone())
-            .metadata(self.merged_metadata())
+            .metadata(metadata.clone())
             .cache_hint(cache_hint.clone())
             .cache_headers(LiveCacheHeaders::from_parts(
                 execution.cache_plan.headers.clone(),
@@ -135,16 +121,15 @@ impl LiveExecutionReceipts {
             .locale(execution.locale.clone());
         let mut response = match &execution.response {
             HandlerResponse::Page(page) => {
-                let html =
-                    plan.render_page_response(execution, page, self.merged_metadata().as_ref())?;
+                let html = plan.render_page_response(execution, page, metadata.as_ref())?;
                 let status = self
                     .response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK));
-                LiveResponseComposition::html(status, self.compose_html_output(html))
+                LiveResponseComposition::html(status, self.compose_html_graph(html))
             }
             HandlerResponse::Fragment(fragment) => {
                 let html = plan.render_fragment_response(execution, fragment)?;
                 let status = self.response_status(StatusCode::OK);
-                LiveResponseComposition::html(status, self.compose_html_output(html))
+                LiveResponseComposition::html(status, self.compose_html_graph(html))
             }
             HandlerResponse::Redirect(redirect) => {
                 let status = StatusCode::from_u16(redirect.status).unwrap_or(StatusCode::SEE_OTHER);
@@ -192,7 +177,26 @@ impl LiveExecutionReceipts {
         );
         outputs
     }
+
+    fn compose_html_graph(&self, html: String) -> LiveHtmlResponseGraph {
+        let mut graph = LiveHtmlResponseGraph::new(html);
+        graph = graph.with_request_surface(self.request_surface_output());
+        for receipt in &self.render_hooks {
+            graph = graph.with_render_hook(
+                receipt.handler_id.to_string(),
+                receipt.typed_output.as_ref(),
+            );
+        }
+        for receipt in &self.admin_widgets {
+            graph = graph.with_admin_widget(
+                receipt.handler_id.to_string(),
+                receipt.typed_output.as_ref(),
+            );
+        }
+        graph
+    }
 }
+
 fn render_cache_control(cache_hint: &TypedCacheHint) -> String {
     let mut directives = Vec::new();
     directives.push(match cache_hint.visibility {
@@ -213,42 +217,6 @@ fn render_cache_control(cache_hint: &TypedCacheHint) -> String {
         directives.push("vary-by-session".to_string());
     }
     directives.join(",")
-}
-
-fn inject_body_markup(document_html: String, body_markup: &str) -> String {
-    if body_markup.is_empty() {
-        return document_html;
-    }
-
-    if let Some(index) = document_html.find("</body>") {
-        let mut html = document_html;
-        html.insert_str(index, body_markup);
-        return html;
-    }
-
-    format!("{document_html}{body_markup}")
-}
-
-fn typed_output_fragment(output: &TypedExecutionOutput) -> Option<String> {
-    match &output.body {
-        TypedResponseBody::HtmlDocument(html) => Some(document_body_fragment(html)),
-        TypedResponseBody::HtmlFragment(html) => Some(html.clone()),
-        TypedResponseBody::JsonObject(_) => None,
-    }
-}
-
-fn document_body_fragment(document_html: &str) -> String {
-    let Some(body_start) = document_html.find("<body") else {
-        return document_html.to_string();
-    };
-    let Some(body_open_end) = document_html[body_start..].find('>') else {
-        return document_html.to_string();
-    };
-    let content_start = body_start + body_open_end + 1;
-    let Some(body_close) = document_html[content_start..].find("</body>") else {
-        return document_html.to_string();
-    };
-    document_html[content_start..content_start + body_close].to_string()
 }
 
 fn render_hook_slots_for_execution(

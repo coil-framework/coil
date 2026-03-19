@@ -6,7 +6,7 @@ use axum::response::Response;
 
 use davenda_wasm::{CacheVisibility, ExecutionReceipt, TypedCacheHint, TypedMetadata};
 
-use super::{FileDeliveryMode, render_cache_control};
+use super::{FileDeliveryMode, LiveHtmlResponseGraph, render_cache_control};
 
 #[derive(Debug, Clone)]
 pub(crate) struct LiveResponseComposition {
@@ -116,7 +116,7 @@ impl LiveCacheHeaders {
 
 #[derive(Debug, Clone)]
 enum LiveResponseBody {
-    Html(String),
+    Html(LiveHtmlResponseGraph),
     Json(BTreeMap<String, String>),
     Redirect {
         location: String,
@@ -129,7 +129,7 @@ enum LiveResponseBody {
 }
 
 impl LiveResponseComposition {
-    pub(crate) fn html(status: StatusCode, body: String) -> Self {
+    pub(crate) fn html(status: StatusCode, body: LiveHtmlResponseGraph) -> Self {
         Self {
             status,
             cookies: Vec::new(),
@@ -189,7 +189,7 @@ impl LiveResponseComposition {
     pub(crate) fn into_response(self) -> Response<Body> {
         let mut response = match self.body {
             LiveResponseBody::Html(body) => {
-                body_response(self.status, body, Some("text/html; charset=utf-8"))
+                body_response(self.status, body.render(), Some("text/html; charset=utf-8"))
             }
             LiveResponseBody::Json(payload) => {
                 let body = render_json_object(payload);
@@ -547,6 +547,7 @@ fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
     use davenda_wasm::{CacheVisibility, TypedCacheHint, TypedMetadata};
 
     #[test]
@@ -638,5 +639,41 @@ mod tests {
         );
         assert_eq!(response.headers().get("x-davenda-locale").unwrap(), "en-GB");
         assert_eq!(response.headers().get("X-Trace").unwrap(), "preserve");
+    }
+
+    #[tokio::test]
+    async fn html_response_composition_renders_structured_html_graphs() {
+        let response = LiveResponseComposition::html(
+            StatusCode::OK,
+            crate::live::LiveHtmlResponseGraph::new("<html><body><main>base</main></body></html>")
+                .with_request_surface(Some(&davenda_wasm::TypedExecutionOutput {
+                    surface: davenda_wasm::ExtensionPointKind::Page,
+                    status: 200,
+                    body: davenda_wasm::TypedResponseBody::HtmlDocument(
+                        "<html><body><section>request</section></body></html>".to_string(),
+                    ),
+                    metadata: davenda_wasm::TypedMetadata::new(),
+                    cache_hint: None,
+                }))
+                .with_render_hook(
+                    "hook-1",
+                    Some(&davenda_wasm::TypedExecutionOutput {
+                        surface: davenda_wasm::ExtensionPointKind::RenderHook,
+                        status: 200,
+                        body: davenda_wasm::TypedResponseBody::HtmlFragment(
+                            "<aside>hook</aside>".to_string(),
+                        ),
+                        metadata: davenda_wasm::TypedMetadata::new(),
+                        cache_hint: None,
+                    }),
+                ),
+        );
+
+        let response = response.into_response();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            body.as_ref(),
+            b"<html><body><main>base</main><section>request</section><aside>hook</aside></body></html>"
+        );
     }
 }

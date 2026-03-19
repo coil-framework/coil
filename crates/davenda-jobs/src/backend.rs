@@ -5,7 +5,6 @@ use crate::runtime::{JobSpec, JobsRuntime};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
-#[cfg(test)]
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -105,13 +104,11 @@ pub trait JobsCoordinationRuntime: Send + Sync + 'static {
     }
 }
 
-#[cfg(test)]
 #[derive(Debug)]
 struct EmulatedJobsCoordinationRuntime {
     state: Mutex<JobsBackendState>,
 }
 
-#[cfg(test)]
 impl EmulatedJobsCoordinationRuntime {
     fn new(runtime: JobsRuntime) -> Self {
         Self {
@@ -120,7 +117,6 @@ impl EmulatedJobsCoordinationRuntime {
     }
 }
 
-#[cfg(test)]
 impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         let guard = self.state.lock().expect("jobs backend mutex poisoned");
@@ -227,7 +223,7 @@ impl JobsBackendAdapter {
     }
 
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-        shared::shared_runtime(runtime)
+        Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
     }
 
     #[allow(dead_code)]
@@ -350,7 +346,6 @@ struct JobsBackendState {
 }
 
 impl JobsBackendState {
-    #[cfg(test)]
     fn new(runtime: JobsRuntime) -> Self {
         Self {
             runtime,
@@ -358,7 +353,6 @@ impl JobsBackendState {
         }
     }
 
-    #[cfg(test)]
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         self.snapshot.clone()
     }

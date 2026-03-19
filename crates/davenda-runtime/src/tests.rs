@@ -2949,7 +2949,7 @@ fn runtime_backend_materializer_uses_shared_jobs_backends_even_when_not_flagged_
         .unwrap();
 
     let materializer = crate::backends::RuntimeBackendMaterializer::new(
-        plan.shared_backend_scope.clone(),
+        plan.shared_backend_namespace(),
         SharedBackendClients {
             database: DatabaseClientTarget {
                 driver: davenda_config::DatabaseDriver::Postgres,
@@ -2994,7 +2994,7 @@ fn runtime_backend_materializer_reuses_explicit_session_runtime_for_browser_host
         .unwrap();
 
     let materializer = crate::backends::RuntimeBackendMaterializer::new(
-        plan.shared_backend_scope.clone(),
+        plan.shared_backend_namespace(),
         SharedBackendClients {
             database: DatabaseClientTarget {
                 driver: davenda_config::DatabaseDriver::Postgres,
@@ -3068,13 +3068,11 @@ fn runtime_backend_materializer_keeps_session_state_local_to_each_instance() {
         object_store: None,
     };
     let left_materializer = crate::backends::RuntimeBackendMaterializer::new(
-        plan.shared_backend_scope.clone(),
+        plan.shared_backend_namespace(),
         clients.clone(),
     );
-    let right_materializer = crate::backends::RuntimeBackendMaterializer::new(
-        plan.shared_backend_scope.clone(),
-        clients,
-    );
+    let right_materializer =
+        crate::backends::RuntimeBackendMaterializer::new(plan.shared_backend_namespace(), clients);
 
     let mut left = left_materializer
         .browser_host(plan.config.app.name.clone(), plan.browser.clone())

@@ -505,7 +505,7 @@ impl HttpServerHost {
         csrf_secret: Vec<u8>,
     ) -> Result<Self, RuntimeServerError> {
         let materializer =
-            RuntimeBackendMaterializer::new(plan.shared_backend_scope.clone(), backends.clone());
+            RuntimeBackendMaterializer::new(plan.shared_backend_namespace(), backends.clone());
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),

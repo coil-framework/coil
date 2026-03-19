@@ -1,6 +1,5 @@
 use super::*;
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredModuleJob {
@@ -159,25 +158,6 @@ pub struct DomainEventDispatch {
     pub enqueued_jobs: Vec<JobId>,
 }
 
-pub(crate) fn shared_coordinator_runtime(
-    runtime: &JobsRuntimeServices,
-    scope: impl Into<String>,
-) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
-    static REGISTRY: OnceLock<
-        Mutex<BTreeMap<String, Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>,
-    > = OnceLock::new();
-
-    let key = format!("{runtime:?}:{}", scope.into());
-    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry
-        .lock()
-        .expect("shared jobs runtime registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| davenda_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
-        .clone()
-}
-
 #[derive(Debug, Clone)]
 pub struct JobsHost {
     pub customer_app: String,
@@ -187,6 +167,7 @@ pub struct JobsHost {
     pub registered_jobs: Vec<RuntimeJobDefinition>,
     pub registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
     pub jobs_domain: JobsDomain,
+    pub shared_backend_namespace: String,
     coordinator: JobsCoordinator,
     next_job_sequence: u64,
     next_event_sequence: u64,
@@ -195,16 +176,16 @@ pub struct JobsHost {
 impl JobsHost {
     pub(crate) fn new(
         customer_app: String,
-        backend_scope: String,
         scheduler_node_id: String,
         runtime: JobsRuntimeServices,
         queue_topology: QueueTopology,
         registered_jobs: Vec<RuntimeJobDefinition>,
         registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
         jobs_domain: JobsDomain,
+        shared_runtime: Arc<dyn davenda_jobs::JobsCoordinationRuntime>,
+        shared_backend_namespace: String,
     ) -> Self {
-        let coordinator = runtime
-            .coordinator_with_shared_runtime(shared_coordinator_runtime(&runtime, backend_scope));
+        let coordinator = runtime.coordinator_with_shared_runtime(shared_runtime);
         Self {
             customer_app,
             scheduler_node_id,
@@ -213,6 +194,7 @@ impl JobsHost {
             registered_jobs,
             registered_event_subscriptions,
             jobs_domain,
+            shared_backend_namespace,
             coordinator,
             next_job_sequence: 0,
             next_event_sequence: 0,

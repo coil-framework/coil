@@ -1,6 +1,5 @@
 use super::*;
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeCacheError {
@@ -8,30 +7,11 @@ pub enum RuntimeCacheError {
     Cache(#[from] CacheModelError),
 }
 
-pub(crate) fn shared_distributed_runtime(
-    topology: CacheTopology,
-    backend: davenda_cache::CacheBackendKind,
-    scope: impl Into<String>,
-) -> Arc<dyn davenda_cache::DistributedCacheRuntime> {
-    static REGISTRY: OnceLock<
-        Mutex<BTreeMap<String, Arc<dyn davenda_cache::DistributedCacheRuntime>>>,
-    > = OnceLock::new();
-
-    let key = format!("{topology:?}:{backend:?}:{}", scope.into());
-    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry
-        .lock()
-        .expect("shared cache runtime registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| davenda_cache::DistributedCacheClient::emulated_shared_runtime(backend))
-        .clone()
-}
-
 #[derive(Debug, Clone)]
 pub struct CacheHost {
     pub customer_app: String,
     pub namespace: CacheNamespace,
+    pub shared_backend_namespace: String,
     pub planner: CachePlanner,
     runtime: CacheRuntime,
 }
@@ -39,35 +19,24 @@ pub struct CacheHost {
 impl CacheHost {
     pub(crate) fn new(
         customer_app: String,
-        backend_scope: String,
         namespace: CacheNamespace,
         planner: CachePlanner,
+        shared_runtime: Option<Arc<dyn davenda_cache::DistributedCacheRuntime>>,
+        shared_backend_namespace: String,
     ) -> Self {
-        let runtime = if planner.topology().supports_shared_invalidation() {
-            let backend = match planner
-                .topology()
-                .l2()
-                .expect("shared cache backend requires distributed l2")
-            {
-                davenda_cache::DistributedCacheBackend::Redis => {
-                    davenda_cache::CacheBackendKind::Redis
-                }
-                davenda_cache::DistributedCacheBackend::Valkey => {
-                    davenda_cache::CacheBackendKind::Valkey
-                }
-            };
-            CacheRuntime::with_shared_runtime(
-                planner.topology(),
-                shared_distributed_runtime(planner.topology(), backend, backend_scope),
-            )
-        } else {
-            planner.runtime()
+        let runtime = match (
+            planner.topology().supports_shared_invalidation(),
+            shared_runtime,
+        ) {
+            (true, Some(runtime)) => CacheRuntime::with_shared_runtime(planner.topology(), runtime),
+            _ => planner.runtime(),
         };
         Self {
             customer_app,
             namespace,
             planner,
             runtime,
+            shared_backend_namespace,
         }
     }
 

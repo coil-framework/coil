@@ -1,30 +1,28 @@
 use super::*;
 use davenda_cache::CacheBackendKind;
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub(crate) struct RuntimeBackendMaterializer {
-    scope: String,
+    namespace: String,
     plans: SharedBackendClients,
-    session_runtimes: Arc<SessionRuntimeRegistry>,
     cache_runtime: Option<Arc<dyn davenda_cache::DistributedCacheRuntime>>,
     jobs_runtime: Arc<Mutex<Option<Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>>,
 }
 
 impl RuntimeBackendMaterializer {
-    pub(crate) fn new(scope: String, plans: SharedBackendClients) -> Self {
+    pub(crate) fn new(namespace: String, plans: SharedBackendClients) -> Self {
         let cache_runtime = plans.distributed_cache.as_ref().map(|target| {
-            davenda_cache::DistributedCacheClient::emulated_shared_runtime(cache_backend_kind(
-                target.backend,
-            ))
+            davenda_cache::DistributedCacheClient::persistent_shared_runtime(
+                cache_backend_kind(target.backend),
+                namespace.clone(),
+            )
         });
 
         Self {
-            scope,
+            namespace,
             plans,
-            session_runtimes: Arc::new(SessionRuntimeRegistry::default()),
             cache_runtime,
             jobs_runtime: Arc::new(Mutex::new(None)),
         }
@@ -41,14 +39,17 @@ impl RuntimeBackendMaterializer {
                 services.clone(),
                 DistributedSessionStoreClient::new(
                     target.kind,
-                    self.session_runtimes
-                        .runtime_for(target.kind, format!("{}:{customer_app}", self.scope)),
+                    DistributedSessionStoreClient::shared_runtime(
+                        target.kind,
+                        format!("{}:{customer_app}", self.namespace),
+                    ),
                 ),
             ),
             None => Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost),
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn cache_runtime(&self, planner: CachePlanner) -> CacheRuntime {
         if planner.topology().supports_shared_invalidation() {
             self.cache_runtime
@@ -62,6 +63,7 @@ impl RuntimeBackendMaterializer {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn jobs_coordinator(
         &self,
         _customer_app: &str,
@@ -74,7 +76,10 @@ impl RuntimeBackendMaterializer {
                 .expect("shared jobs runtime mutex poisoned");
             guard
                 .get_or_insert_with(|| {
-                    davenda_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime)
+                    davenda_jobs::JobsBackendAdapter::persistent_shared_runtime(
+                        runtime,
+                        self.namespace.clone(),
+                    )
                 })
                 .clone()
         };
@@ -86,9 +91,8 @@ impl RuntimeBackendMaterializer {
 impl fmt::Debug for RuntimeBackendMaterializer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RuntimeBackendMaterializer")
-            .field("scope", &self.scope)
+            .field("namespace", &self.namespace)
             .field("plans", &self.plans)
-            .field("session_runtimes", &self.session_runtimes)
             .field(
                 "cache_runtime",
                 &self.cache_runtime.as_ref().map(|_| "shared"),
@@ -105,35 +109,5 @@ fn cache_backend_kind(backend: davenda_cache::DistributedCacheBackend) -> CacheB
     match backend {
         davenda_cache::DistributedCacheBackend::Redis => CacheBackendKind::Redis,
         davenda_cache::DistributedCacheBackend::Valkey => CacheBackendKind::Valkey,
-    }
-}
-
-#[derive(Default)]
-struct SessionRuntimeRegistry {
-    runtimes: Mutex<BTreeMap<String, Arc<dyn DistributedSessionStoreRuntime>>>,
-}
-
-impl SessionRuntimeRegistry {
-    fn runtime_for(
-        &self,
-        kind: SessionStoreBackendKind,
-        scope: String,
-    ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        let key = format!("{kind:?}:{scope}");
-        let mut guard = self
-            .runtimes
-            .lock()
-            .expect("session runtime registry mutex poisoned");
-        guard
-            .entry(key)
-            .or_insert_with(|| DistributedSessionStoreClient::shared_runtime(kind))
-            .clone()
-    }
-}
-
-impl fmt::Debug for SessionRuntimeRegistry {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SessionRuntimeRegistry")
-            .finish_non_exhaustive()
     }
 }

@@ -49,16 +49,22 @@ impl RuntimePlan {
     ) -> Result<JobsHost, RuntimeJobsError> {
         let scheduler_node_id =
             validate_runtime_identifier("scheduler_node_id", scheduler_node_id.into())?;
+        let namespace = self.shared_backend_namespace();
+        let shared_runtime = davenda_jobs::JobsBackendAdapter::persistent_shared_runtime(
+            &self.jobs,
+            namespace.clone(),
+        );
 
         Ok(JobsHost::new(
             self.config.app.name.clone(),
-            self.shared_backend_scope.clone(),
             scheduler_node_id,
             self.jobs.clone(),
             self.jobs.describe().clone(),
             self.registered_runtime_jobs.clone(),
             self.registered_runtime_event_subscriptions.clone(),
             self.jobs_domain.clone(),
+            shared_runtime,
+            namespace,
         ))
     }
 
@@ -84,11 +90,36 @@ impl RuntimePlan {
 
     pub fn cache_host(&self) -> Result<CacheHost, RuntimeCacheError> {
         let namespace = self.cache_namespace()?;
+        let shared_namespace = self.shared_backend_namespace();
+        let shared_runtime = if self.cache_planner.topology().supports_shared_invalidation() {
+            let backend = match self
+                .cache_planner
+                .topology()
+                .l2()
+                .expect("shared cache runtime requires distributed l2")
+            {
+                davenda_cache::DistributedCacheBackend::Redis => {
+                    davenda_cache::CacheBackendKind::Redis
+                }
+                davenda_cache::DistributedCacheBackend::Valkey => {
+                    davenda_cache::CacheBackendKind::Valkey
+                }
+            };
+            Some(
+                davenda_cache::DistributedCacheClient::persistent_shared_runtime(
+                    backend,
+                    shared_namespace.clone(),
+                ),
+            )
+        } else {
+            None
+        };
         Ok(CacheHost::new(
             self.config.app.name.clone(),
-            self.shared_backend_scope.clone(),
             namespace,
             self.cache_planner,
+            shared_runtime,
+            shared_namespace,
         ))
     }
 
@@ -151,6 +182,13 @@ impl RuntimePlan {
 
     pub(crate) fn cache_namespace(&self) -> Result<CacheNamespace, CacheModelError> {
         CacheNamespace::new(format!("customer-app:{}", self.config.app.name))
+    }
+
+    pub(crate) fn shared_backend_namespace(&self) -> String {
+        format!(
+            "customer-app:{}:{}",
+            self.config.app.name, self.shared_backend_scope
+        )
     }
 
     pub fn execute_request(

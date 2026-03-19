@@ -1,6 +1,5 @@
 use std::fmt;
 use std::sync::Arc;
-#[cfg(test)]
 use std::sync::Mutex;
 
 use crate::{
@@ -123,13 +122,11 @@ pub trait DistributedCacheRuntime: Send + Sync + 'static {
     }
 }
 
-#[cfg(test)]
 #[derive(Debug)]
 struct EmulatedDistributedCacheRuntime {
     state: Mutex<CacheBackendState>,
 }
 
-#[cfg(test)]
 impl EmulatedDistributedCacheRuntime {
     fn new() -> Self {
         Self {
@@ -138,7 +135,6 @@ impl EmulatedDistributedCacheRuntime {
     }
 }
 
-#[cfg(test)]
 impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         let mut guard = self.state.lock().expect("cache backend mutex poisoned");
@@ -208,7 +204,8 @@ impl DistributedCacheClient {
     }
 
     pub fn emulated_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
-        shared::shared_runtime(kind)
+        let _ = kind;
+        Arc::new(EmulatedDistributedCacheRuntime::new())
     }
 
     #[allow(dead_code)]

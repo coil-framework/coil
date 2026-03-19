@@ -7,29 +7,10 @@ use crate::runtime::JobSpec;
 use bincode::{deserialize, serialize};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
-#[cfg(not(test))]
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
-#[cfg(not(test))]
-const SHARED_STATE_NAMESPACE_ENV: &str = "DAVENDA_SHARED_BACKEND_NAMESPACE";
-
-#[cfg(not(test))]
-static NAMESPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-pub(crate) fn shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-    #[cfg(test)]
-    {
-        Arc::new(super::EmulatedJobsCoordinationRuntime::new(runtime.clone()))
-    }
-
-    #[cfg(not(test))]
-    {
-        persistent_runtime(runtime, default_namespace(runtime))
-    }
-}
 
 pub(crate) fn persistent_runtime(
     runtime: &JobsRuntime,
@@ -39,20 +20,6 @@ pub(crate) fn persistent_runtime(
         runtime.clone(),
         namespace.into(),
     ))
-}
-
-#[cfg(not(test))]
-fn default_namespace(runtime: &JobsRuntime) -> String {
-    if let Ok(namespace) = std::env::var(SHARED_STATE_NAMESPACE_ENV) {
-        return namespace;
-    }
-
-    format!(
-        "jobs-{}-{}-{}",
-        job_backend_slug(runtime.backend),
-        std::process::id(),
-        NAMESPACE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    )
 }
 
 fn job_backend_slug(backend: davenda_config::JobBackend) -> &'static str {

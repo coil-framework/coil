@@ -1,8 +1,7 @@
 #![cfg_attr(test, allow(dead_code))]
 
-#[cfg(test)]
-use super::EmulatedDistributedCacheRuntime;
-use super::{CacheBackendKind, CacheBackendState, DistributedCacheRuntime};
+use super::state::CacheBackendState;
+use super::{CacheBackendKind, DistributedCacheRuntime};
 use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheMetrics, CacheModelError, FillDecision,
     FillLease, InvalidationSet, RequestCoalescingMode,
@@ -10,8 +9,6 @@ use crate::{
 use bincode::{deserialize, serialize};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
-#[cfg(test)]
-use std::sync::OnceLock;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,42 +17,6 @@ const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
 #[cfg(not(test))]
 static LOCAL_NAMESPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(test)]
-pub(crate) fn persistent_runtime(
-    kind: CacheBackendKind,
-    namespace: impl Into<String>,
-) -> Arc<dyn DistributedCacheRuntime> {
-    shared_test_runtime(kind, namespace.into())
-}
-
-#[cfg(not(test))]
-pub(crate) fn local_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
-    persistent_runtime(kind, default_namespace("cache", kind))
-}
-
-#[cfg(test)]
-fn shared_test_runtime(
-    kind: CacheBackendKind,
-    namespace: String,
-) -> Arc<dyn DistributedCacheRuntime> {
-    static REGISTRY: OnceLock<
-        Mutex<std::collections::BTreeMap<String, Arc<dyn DistributedCacheRuntime>>>,
-    > = OnceLock::new();
-
-    let key = format!("{}:{kind:?}:{namespace}", test_scope());
-    let registry = REGISTRY.get_or_init(|| Mutex::new(std::collections::BTreeMap::new()));
-    let mut guard = registry.lock().expect("test cache registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| {
-            Arc::new(SharedCacheRuntimeHarness::new(Arc::new(
-                EmulatedDistributedCacheRuntime::new(),
-            )))
-        })
-        .clone()
-}
-
-#[cfg(not(test))]
 pub(crate) fn persistent_runtime(
     kind: CacheBackendKind,
     namespace: impl Into<String>,
@@ -64,6 +25,11 @@ pub(crate) fn persistent_runtime(
         kind,
         namespace.into(),
     ))
+}
+
+#[cfg(not(test))]
+pub(crate) fn local_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
+    persistent_runtime(kind, default_namespace("cache", kind))
 }
 
 #[cfg(not(test))]
@@ -155,7 +121,7 @@ impl DistributedCacheRuntime for PersistentDistributedCacheRuntime {
 
     fn metrics(&self) -> CacheMetrics {
         self.store
-            .read_state(|state| state.metrics)
+            .read_state(|state| state.metrics())
             .expect("persistent cache backend metrics read failed")
     }
 
@@ -327,61 +293,4 @@ fn sanitize_namespace(namespace: &str) -> String {
             }
         })
         .collect()
-}
-
-#[cfg(test)]
-fn test_scope() -> String {
-    std::thread::current()
-        .name()
-        .unwrap_or("unnamed-test")
-        .to_string()
-}
-
-#[cfg(test)]
-#[derive(Clone)]
-struct SharedCacheRuntimeHarness {
-    runtime: Arc<dyn DistributedCacheRuntime>,
-}
-
-#[cfg(test)]
-impl SharedCacheRuntimeHarness {
-    fn new(runtime: Arc<dyn DistributedCacheRuntime>) -> Self {
-        Self { runtime }
-    }
-}
-
-#[cfg(test)]
-impl DistributedCacheRuntime for SharedCacheRuntimeHarness {
-    fn insert(&self, entry: CacheEntry) {
-        self.runtime.insert(entry);
-    }
-
-    fn lookup(&self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
-        self.runtime.lookup(key, now)
-    }
-
-    fn invalidate(&self, tags: &InvalidationSet) -> Vec<CacheKey> {
-        self.runtime.invalidate(tags)
-    }
-
-    fn begin_fill(
-        &self,
-        key: &CacheKey,
-        mode: RequestCoalescingMode,
-        holder: String,
-    ) -> FillDecision {
-        self.runtime.begin_fill(key, mode, holder)
-    }
-
-    fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
-        self.runtime.complete_fill(lease)
-    }
-
-    fn metrics(&self) -> CacheMetrics {
-        self.runtime.metrics()
-    }
-
-    fn is_shared_backend(&self) -> bool {
-        true
-    }
 }

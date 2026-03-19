@@ -27,7 +27,7 @@ fn public_asset_policies_are_public_delivery_eligible() {
 fn public_delivery_invariant_is_centralized_on_storage_plans() {
     let planner = StoragePlanner::from_config(&test_config());
     let plan = planner
-        .plan_write(
+        .plan_scalable_write(
             StoragePlanRequest::new("uploads/catalog/item.jpg")
                 .with_storage_class(davenda_config::StorageClass::PublicUpload),
         )
@@ -37,7 +37,7 @@ fn public_delivery_invariant_is_centralized_on_storage_plans() {
     assert_eq!(plan.ensure_public_delivery_allowed(), Ok(()));
 
     let private_plan = planner
-        .plan_write(
+        .plan_scalable_write(
             StoragePlanRequest::new("secure/reports/march.csv")
                 .with_storage_class(davenda_config::StorageClass::PrivateShared),
         )
@@ -113,7 +113,7 @@ fn object_store_policies_plan_write_through_storage() {
     );
 
     let plan = planner
-        .plan_write(
+        .plan_scalable_write(
             StoragePlanRequest::new("uploads/marketing/hero.webp")
                 .with_storage_class(davenda_config::StorageClass::PublicUpload),
         )
@@ -135,11 +135,32 @@ fn object_store_policies_plan_write_through_storage() {
 }
 
 #[test]
+fn scalable_planner_rejects_the_single_node_escape_hatch() {
+    let planner = StoragePlanner::from_config(&test_config());
+
+    let error = planner
+        .plan_scalable_write(
+            StoragePlanRequest::new("secure/reports/march.csv")
+                .with_storage_class(davenda_config::StorageClass::PrivateShared)
+                .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),
+        )
+        .expect_err("scalable planning should not accept the single-node escape hatch");
+
+    assert_eq!(
+        error,
+        StoragePlanningError::SingleNodeEscapeHatchRequested {
+            logical_path: "secure/reports/march.csv".to_string(),
+            policy: StoragePolicy::single_node_sensitive(),
+        }
+    );
+}
+
+#[test]
 fn single_node_escape_hatch_override_keeps_sensitive_files_on_server() {
     let planner = StoragePlanner::from_config(&test_config());
 
     let plan = planner
-        .plan_write(
+        .plan_single_node_escape_hatch_write(
             StoragePlanRequest::new("secure/reports/march.csv")
                 .with_storage_class(davenda_config::StorageClass::PrivateShared)
                 .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),
@@ -167,7 +188,7 @@ fn single_node_escape_hatch_override_is_rejected_for_distributed_deployments() {
     let planner = StoragePlanner::from_config(&config);
 
     let error = planner
-        .plan_write(
+        .plan_single_node_escape_hatch_write(
             StoragePlanRequest::new("secure/reports/march.csv")
                 .with_storage_class(davenda_config::StorageClass::PrivateShared)
                 .with_override(StoragePolicyOverride::force_single_node_escape_hatch()),
@@ -190,7 +211,7 @@ fn rejects_parent_traversal() {
     let planner = StoragePlanner::from_config(&test_config());
 
     let error = planner
-        .plan_write(StoragePlanRequest::new("../secrets.txt"))
+        .plan_scalable_write(StoragePlanRequest::new("../secrets.txt"))
         .expect_err("parent traversal must be rejected");
 
     assert_eq!(
@@ -208,7 +229,7 @@ fn object_store_sync_requires_backend_configuration() {
     let planner = StoragePlanner::from_config(&config);
 
     let error = planner
-        .plan_write(
+        .plan_scalable_write(
             StoragePlanRequest::new("uploads/catalog/item.jpg")
                 .with_storage_class(davenda_config::StorageClass::PublicUpload),
         )

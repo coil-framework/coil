@@ -124,7 +124,7 @@ impl StoragePlanner {
         &self.policies
     }
 
-    pub fn plan_write(
+    pub fn plan_scalable_write(
         &self,
         request: StoragePlanRequest,
     ) -> Result<StoragePlan, StoragePlanningError> {
@@ -136,67 +136,74 @@ impl StoragePlanner {
             request.override_policy.as_ref(),
         )?;
 
+        self.plan_resolved_scalable_write(logical_path, resolved)
+    }
+
+    pub fn plan_single_node_escape_hatch_write(
+        &self,
+        request: StoragePlanRequest,
+    ) -> Result<StoragePlan, StoragePlanningError> {
+        let logical_path = normalize_relative_path(&request.logical_path)?;
+        let storage_class = request.storage_class.unwrap_or(self.topology.default_class);
+        let resolved = self.policies.resolve(
+            storage_class,
+            &logical_path,
+            request.override_policy.as_ref(),
+        )?;
+
+        self.plan_resolved_single_node_escape_hatch_write(logical_path, resolved)
+    }
+
+    pub fn plan_write(
+        &self,
+        request: StoragePlanRequest,
+    ) -> Result<StoragePlan, StoragePlanningError> {
+        self.plan_scalable_write(request.clone()).or_else(|error| match error {
+            StoragePlanningError::SingleNodeEscapeHatchRequested { .. } => {
+                self.plan_single_node_escape_hatch_write(request)
+            }
+            other => Err(other),
+        })
+    }
+
+    fn plan_resolved_scalable_write(
+        &self,
+        logical_path: String,
+        resolved: crate::ResolvedStoragePolicy,
+    ) -> Result<StoragePlan, StoragePlanningError> {
         let policy = resolved.policy;
+        if policy.sync_mode == SyncMode::LocalOnly {
+            return Err(StoragePlanningError::SingleNodeEscapeHatchRequested {
+                logical_path,
+                policy,
+            });
+        }
+
         let durable_store = policy.durable_store();
+        let object_key = Some(join_relative(
+            resolved.object_prefix.as_deref(),
+            &logical_path,
+        ));
 
-        let object_key = match policy.sync_mode {
-            SyncMode::ObjectStore => {
-                if self.topology.object_store.is_none() {
-                    return Err(StoragePlanningError::ObjectStoreRequired {
-                        logical_path,
-                        policy,
-                    });
-                }
+        if self.topology.object_store.is_none() {
+            return Err(StoragePlanningError::ObjectStoreRequired {
+                logical_path,
+                policy,
+            });
+        }
 
-                Some(join_relative(
-                    resolved.object_prefix.as_deref(),
-                    &logical_path,
-                ))
-            }
-            SyncMode::LocalOnly => None,
-        };
-
-        let local_path = match policy.sync_mode {
-            SyncMode::ObjectStore => None,
-            SyncMode::LocalOnly => {
-                if !self.topology.allows_explicit_local_only() {
-                    return Err(StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
-                        logical_path,
-                        policy,
-                        deployment: self.topology.deployment,
-                        single_node_escape_hatch: self.topology.single_node_escape_hatch,
-                    });
-                }
-
-                Some(join_local_path(
-                    &self.topology.local_root,
-                    resolved.local_subdir.as_deref(),
-                    &logical_path,
-                ))
-            }
-        };
-
-        let write_targets = match policy.sync_mode {
-            SyncMode::ObjectStore => vec![WriteTarget {
-                backend: self
-                    .topology
-                    .object_store
-                    .as_ref()
-                    .expect("object store availability checked")
-                    .backend_kind(),
-                locator: object_key
-                    .clone()
-                    .expect("object key is present for object store policies"),
-                kind: WriteTargetKind::Primary,
-            }],
-            SyncMode::LocalOnly => vec![WriteTarget {
-                backend: StorageBackendKind::LocalDisk,
-                locator: local_path
-                    .clone()
-                    .expect("local path is present for local policies"),
-                kind: WriteTargetKind::Primary,
-            }],
-        };
+        let write_targets = vec![WriteTarget {
+            backend: self
+                .topology
+                .object_store
+                .as_ref()
+                .expect("object store availability checked")
+                .backend_kind(),
+            locator: object_key
+                .clone()
+                .expect("object key is present for object store policies"),
+            kind: WriteTargetKind::Primary,
+        }];
 
         Ok(StoragePlan {
             logical_path,
@@ -204,13 +211,55 @@ impl StoragePlanner {
             policy,
             durable_store,
             object_key,
+            local_path: None,
+            matched_rule_prefix: resolved.matched_rule_prefix,
+            write_targets,
+            deployment_scope: StorageDeploymentScope::Scalable,
+        })
+    }
+
+    fn plan_resolved_single_node_escape_hatch_write(
+        &self,
+        logical_path: String,
+        resolved: crate::ResolvedStoragePolicy,
+    ) -> Result<StoragePlan, StoragePlanningError> {
+        let policy = resolved.policy;
+        if policy.sync_mode != SyncMode::LocalOnly {
+            return self.plan_resolved_scalable_write(logical_path, resolved);
+        }
+
+        if !self.topology.allows_explicit_local_only() {
+            return Err(StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
+                logical_path,
+                policy,
+                deployment: self.topology.deployment,
+                single_node_escape_hatch: self.topology.single_node_escape_hatch,
+            });
+        }
+
+        let local_path = Some(join_local_path(
+            &self.topology.local_root,
+            resolved.local_subdir.as_deref(),
+            &logical_path,
+        ));
+        let write_targets = vec![WriteTarget {
+            backend: StorageBackendKind::LocalDisk,
+            locator: local_path
+                .clone()
+                .expect("local path is present for local policies"),
+            kind: WriteTargetKind::Primary,
+        }];
+
+        Ok(StoragePlan {
+            logical_path,
+            storage_class: resolved.storage_class,
+            policy,
+            durable_store: policy.durable_store(),
+            object_key: None,
             local_path,
             matched_rule_prefix: resolved.matched_rule_prefix,
             write_targets,
-            deployment_scope: match policy.sync_mode {
-                SyncMode::ObjectStore => StorageDeploymentScope::Scalable,
-                SyncMode::LocalOnly => StorageDeploymentScope::SingleNodeOnly,
-            },
+            deployment_scope: StorageDeploymentScope::SingleNodeOnly,
         })
     }
 }
@@ -223,6 +272,13 @@ pub enum StoragePlanningError {
         "storage plan for `{logical_path}` is not eligible for public delivery with policy {policy:?}"
     )]
     PublicDeliveryNotEligible {
+        logical_path: String,
+        policy: StoragePolicy,
+    },
+    #[error(
+        "storage plan for `{logical_path}` with policy {policy:?} requires the single-node escape hatch and must use the explicit escape-hatch planner"
+    )]
+    SingleNodeEscapeHatchRequested {
         logical_path: String,
         policy: StoragePolicy,
     },

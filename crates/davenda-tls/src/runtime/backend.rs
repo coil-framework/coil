@@ -12,10 +12,10 @@ mod testing;
 
 pub(super) use memory::MemoryTlsAutomationBackend;
 #[cfg(test)]
-pub(crate) use testing::TestFileTlsAutomationBackend;
-pub use shared::SharedTlsAutomationBackend;
+pub(crate) use testing::TestPersistenceTlsAutomationBackend;
+pub use shared::PostgresTlsAutomationBackend;
 #[cfg(test)]
-pub(crate) use testing::test_file_state_path;
+pub(crate) use testing::test_persistence_state_path;
 
 pub trait TlsAutomationBackend: fmt::Debug + Send + Sync {
     fn snapshot(&self) -> TlsAutomationState;

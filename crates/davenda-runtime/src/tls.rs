@@ -29,16 +29,16 @@ impl TlsHost {
     pub(crate) fn new(
         customer_app: String,
         runtime: TlsRuntimeServices,
-        _data: DataRuntimeServices,
-        _shared_backend_scope: String,
+        _data_runtime: DataRuntimeServices,
+        _shared_backend_namespace: String,
     ) -> Result<Self, RuntimeTlsError> {
         #[cfg(test)]
         let automation = TlsAutomationRuntime::in_memory_for_tests(runtime.clone());
         #[cfg(not(test))]
-        let automation = TlsAutomationRuntime::with_shared_backend(
+        let automation = TlsAutomationRuntime::with_postgres_shared_backend(
             runtime.clone(),
-            &_data,
-            format!("customer-app:{}:{}", customer_app, _shared_backend_scope),
+            &_data_runtime,
+            format!("customer-app:{}:{}", customer_app, _shared_backend_namespace),
         )?;
         Ok(Self {
             customer_app,

@@ -10,11 +10,11 @@ use crate::{CertificateId, CertificateRecord, CertificateStatus, TlsInstant, Tls
 use super::super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
 
 #[derive(Debug, Clone)]
-pub(crate) struct TestFileTlsAutomationBackend {
+pub(crate) struct TestPersistenceTlsAutomationBackend {
     path: PathBuf,
 }
 
-impl TestFileTlsAutomationBackend {
+impl TestPersistenceTlsAutomationBackend {
     pub(crate) fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
@@ -72,7 +72,7 @@ impl TestFileTlsAutomationBackend {
     }
 }
 
-impl TlsAutomationBackend for TestFileTlsAutomationBackend {
+impl TlsAutomationBackend for TestPersistenceTlsAutomationBackend {
     fn snapshot(&self) -> TlsAutomationState {
         self.load_state()
             .expect("TLS automation state should be readable")
@@ -222,7 +222,7 @@ fn current_nanos() -> u128 {
         .as_nanos()
 }
 
-pub(crate) fn test_file_state_path(scope: impl Into<String>) -> PathBuf {
+pub(crate) fn test_persistence_state_path(scope: impl Into<String>) -> PathBuf {
     let base = std::env::var_os("DAVENDA_TLS_STATE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("davenda/tls"));

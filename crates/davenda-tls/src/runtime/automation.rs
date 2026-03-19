@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::backend::{SharedTlsAutomationBackend, TlsAutomationBackend};
+use super::backend::{PostgresTlsAutomationBackend, TlsAutomationBackend};
 use super::planning::TlsRuntime;
 use super::state::{CertificateInventory, TlsAutomationState};
 use crate::{
@@ -29,23 +29,23 @@ impl TlsAutomationRuntime {
     }
 
     #[cfg(test)]
-    pub fn with_test_file_backend(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
+    pub fn with_test_persistence_backend(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
         Self::with_backend(
             runtime,
-            Arc::new(super::backend::TestFileTlsAutomationBackend::new(
-                super::backend::test_file_state_path(scope),
+            Arc::new(super::backend::TestPersistenceTlsAutomationBackend::new(
+                super::backend::test_persistence_state_path(scope),
             )),
         )
     }
 
-    pub fn with_shared_backend(
+    pub fn with_postgres_shared_backend(
         runtime: TlsRuntime,
         data_runtime: &DataRuntime,
         namespace: impl Into<String>,
     ) -> Result<Self, TlsModelError> {
         Ok(Self::with_backend(
             runtime,
-            Arc::new(SharedTlsAutomationBackend::new(data_runtime, namespace)?),
+            Arc::new(PostgresTlsAutomationBackend::new(data_runtime, namespace)?),
         ))
     }
 

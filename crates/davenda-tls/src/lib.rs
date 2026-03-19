@@ -14,6 +14,6 @@ pub use model::{
 };
 pub use runtime::{
     CertificateInventory, ChallengeTicket, HotReloadEvent, IssuancePlan, RenewalPlan,
-    SharedTlsAutomationBackend, TlsAutomationBackend, TlsAutomationRuntime, TlsAutomationState,
-    TlsPlanner, TlsRuntime,
+    PostgresTlsAutomationBackend, TlsAutomationBackend, TlsAutomationRuntime,
+    TlsAutomationState, TlsPlanner, TlsRuntime,
 };

@@ -313,10 +313,10 @@ fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
 }
 
 #[test]
-fn file_backend_persists_tls_state_between_instances() {
+fn persistence_backend_persists_tls_state_between_instances() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
     let path = temp_tls_state_path();
-    let automation = TlsAutomationRuntime::with_test_file_backend(
+    let automation = TlsAutomationRuntime::with_test_persistence_backend(
         runtime.clone(),
         path.to_string_lossy().to_string(),
     );
@@ -341,7 +341,7 @@ fn file_backend_persists_tls_state_between_instances() {
         )
         .unwrap();
 
-    let second_automation = TlsAutomationRuntime::with_test_file_backend(
+    let second_automation = TlsAutomationRuntime::with_test_persistence_backend(
         runtime,
         path.to_string_lossy().to_string(),
     );

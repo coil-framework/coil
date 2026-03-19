@@ -9,7 +9,7 @@ use sqlx::{Postgres, Row};
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]
-pub struct SharedTlsAutomationBackend {
+pub struct PostgresTlsAutomationBackend {
     client: PostgresDataClient,
     namespace: String,
     schema: String,
@@ -17,7 +17,7 @@ pub struct SharedTlsAutomationBackend {
     runtime: Runtime,
 }
 
-impl SharedTlsAutomationBackend {
+impl PostgresTlsAutomationBackend {
     pub fn new(
         data_runtime: &DataRuntime,
         namespace: impl Into<String>,
@@ -208,7 +208,7 @@ impl SharedTlsAutomationBackend {
     }
 }
 
-impl TlsAutomationBackend for SharedTlsAutomationBackend {
+impl TlsAutomationBackend for PostgresTlsAutomationBackend {
     fn snapshot(&self) -> TlsAutomationState {
         self.block_on(Self::read_state(
             self.client.pool.clone(),

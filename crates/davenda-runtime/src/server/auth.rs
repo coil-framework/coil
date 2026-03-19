@@ -2,7 +2,7 @@ use super::*;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub(super) type RouteAuthorizationFuture<'a> =
     Pin<Box<dyn Future<Output = Result<bool, RuntimeServerError>> + Send + 'a>>;
@@ -20,7 +20,7 @@ pub(super) struct DeferredPostgresRouteCapabilityAuthorizer {
     data: DataRuntimeServices,
     tenant_id: i64,
     database_url: Option<String>,
-    auth_package_name: String,
+    auth_package: davenda_auth::AuthModelPackageSelection,
     authorizer: OnceLock<Result<PostgresRouteCapabilityAuthorizer, String>>,
 }
 
@@ -29,13 +29,13 @@ impl DeferredPostgresRouteCapabilityAuthorizer {
         data: DataRuntimeServices,
         tenant_id: i64,
         database_url: Option<String>,
-        auth_package_name: String,
+        auth_package: davenda_auth::AuthModelPackageSelection,
     ) -> Self {
         Self {
             data,
             tenant_id,
             database_url,
-            auth_package_name,
+            auth_package,
             authorizer: OnceLock::new(),
         }
     }
@@ -50,13 +50,6 @@ impl DeferredPostgresRouteCapabilityAuthorizer {
     }
 
     fn build_authorizer(&self) -> Result<PostgresRouteCapabilityAuthorizer, String> {
-        let package =
-            default_live_auth_package(&self.auth_package_name).map_err(|error| match error {
-                RuntimeServerError::UnsupportedAuthPackage { package } => {
-                    format!("unsupported auth package `{package}`")
-                }
-                other => other.to_string(),
-            })?;
         let runtime = self
             .database_url
             .as_ref()
@@ -69,7 +62,7 @@ impl DeferredPostgresRouteCapabilityAuthorizer {
 
         Ok(PostgresRouteCapabilityAuthorizer {
             auth: davenda_auth::DavendaAuth::new(engine, self.tenant_id),
-            package,
+            package: self.auth_package.clone(),
         })
     }
 }
@@ -77,7 +70,7 @@ impl DeferredPostgresRouteCapabilityAuthorizer {
 impl fmt::Debug for DeferredPostgresRouteCapabilityAuthorizer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DeferredPostgresRouteCapabilityAuthorizer")
-            .field("auth_package_name", &self.auth_package_name)
+            .field("auth_package", &self.auth_package.manifest().name)
             .finish_non_exhaustive()
     }
 }
@@ -99,7 +92,7 @@ impl LiveRouteCapabilityAuthorizer for DeferredPostgresRouteCapabilityAuthorizer
 
 struct PostgresRouteCapabilityAuthorizer {
     auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
-    package: davenda_auth::DefaultAuthModelPackage,
+    package: davenda_auth::AuthModelPackageSelection,
 }
 
 impl PostgresRouteCapabilityAuthorizer {
@@ -110,7 +103,7 @@ impl PostgresRouteCapabilityAuthorizer {
         object: &davenda_auth::Entity,
     ) -> Result<bool, RuntimeServerError> {
         self.auth
-            .check_capability(&self.package, subject, capability, object)
+            .check_capability(self.package.package(), subject, capability, object)
             .await
             .map_err(|error| RuntimeServerError::Authorization {
                 reason: error.to_string(),
@@ -124,19 +117,6 @@ impl fmt::Debug for PostgresRouteCapabilityAuthorizer {
             .field("tenant_id", &self.auth.tenant_id())
             .field("auth_package", &self.package.manifest().name)
             .finish()
-    }
-}
-
-fn default_live_auth_package(
-    auth_package_name: &str,
-) -> Result<davenda_auth::DefaultAuthModelPackage, RuntimeServerError> {
-    let package = davenda_auth::DefaultAuthModelPackage::default();
-    if package.manifest().name == auth_package_name {
-        Ok(package)
-    } else {
-        Err(RuntimeServerError::UnsupportedAuthPackage {
-            package: auth_package_name.to_string(),
-        })
     }
 }
 
@@ -171,7 +151,7 @@ pub(super) async fn authorize_live_request(
     let Some(principal_id) = request.principal_id.as_deref() else {
         return Ok(());
     };
-    let package = default_live_auth_package(&state.plan.auth_package_name)?;
+    let package = state.plan.auth_package.package();
     let module_manifest = matched.route.module.as_deref().and_then(|module_name| {
         state
             .plan
@@ -181,7 +161,7 @@ pub(super) async fn authorize_live_request(
     });
     let Some(object) = matched
         .resolved
-        .capability_auth_resource(&matched.route, module_manifest, &package)
+        .capability_auth_resource(&matched.route, module_manifest, package)
         .map_err(|error| RuntimeServerError::Authorization {
             reason: error.to_string(),
         })?

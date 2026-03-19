@@ -14,6 +14,7 @@ pub enum HostServiceDomain {
     Network,
     Secrets,
     Jobs,
+    Metadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +85,7 @@ impl HostServiceRequest {
             Self::OutboundHttp { .. } => HostServiceDomain::Network,
             Self::SecretRead { .. } => HostServiceDomain::Secrets,
             Self::EnqueueJob { .. } => HostServiceDomain::Jobs,
-            Self::MetadataWrite { .. } => HostServiceDomain::Render,
+            Self::MetadataWrite { .. } => HostServiceDomain::Metadata,
         }
     }
 }

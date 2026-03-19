@@ -3,13 +3,14 @@ use super::support::{
     subject_for_principal, synthetic_auth_execution, tenant_object,
 };
 use super::*;
+use zanzibar::RebacEngine;
 
-pub(super) struct RuntimeAuthBackend {
-    auth: Option<davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>>,
-    package: DefaultAuthModelPackage,
+pub(super) struct RuntimeAuthBackend<E = zanzibar::postgres::PostgresRebacEngine> {
+    auth: Option<davenda_auth::DavendaAuth<E>>,
+    package: davenda_auth::AuthModelPackageSelection,
 }
 
-impl std::fmt::Debug for RuntimeAuthBackend {
+impl<E> std::fmt::Debug for RuntimeAuthBackend<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RuntimeAuthBackend")
             .field(
@@ -21,15 +22,9 @@ impl std::fmt::Debug for RuntimeAuthBackend {
     }
 }
 
-impl RuntimeAuthBackend {
+impl RuntimeAuthBackend<zanzibar::postgres::PostgresRebacEngine> {
     pub(super) fn new(plan: &RuntimePlan) -> Result<Self, String> {
-        let package = DefaultAuthModelPackage::default();
-        if package.manifest().name != plan.auth_package_name {
-            return Err(format!(
-                "unsupported auth package `{}`",
-                plan.auth_package_name
-            ));
-        }
+        let package = plan.auth_package.clone();
 
         match plan.data.connect_lazy_postgres() {
             Ok(client) => {
@@ -54,6 +49,32 @@ impl RuntimeAuthBackend {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+impl<E> RuntimeAuthBackend<E>
+where
+    E: RebacEngine + Clone,
+{
+    pub(crate) fn from_auth(
+        auth: davenda_auth::DavendaAuth<E>,
+        package: davenda_auth::AuthModelPackageSelection,
+    ) -> Self {
+        Self {
+            auth: Some(auth),
+            package,
+        }
+    }
+}
+
+impl<E> RuntimeAuthBackend<E>
+where
+    E: RebacEngine + Clone,
+{
+    #[cfg(test)]
+    pub(super) fn package(&self) -> &dyn davenda_auth::AuthModelPackage {
+        self.package.package()
     }
 
     pub(super) fn execute(
@@ -83,15 +104,16 @@ impl RuntimeAuthBackend {
 
     fn execute_check(
         &self,
-        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        auth: davenda_auth::DavendaAuth<E>,
         subject: DefaultSubject,
         tenant: Entity,
         principal_id: Option<String>,
     ) -> Result<AuthServiceExecution, String> {
+        let capability = Capability::SystemConfigRead;
+        let package = self.package.package();
         block_on_auth(async move {
-            let capability = Capability::SystemConfigRead;
             let allowed = auth
-                .check_default_capability(&subject, capability, &tenant)
+                .check_capability(package, &subject, capability, &tenant)
                 .await
                 .map_err(|error| error.to_string())?;
 
@@ -111,13 +133,14 @@ impl RuntimeAuthBackend {
 
     fn execute_list(
         &self,
-        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        auth: davenda_auth::DavendaAuth<E>,
         subject: DefaultSubject,
         principal_id: Option<String>,
     ) -> Result<AuthServiceExecution, String> {
         let capability = Capability::CmsPageRead;
         let binding = self
             .package
+            .package()
             .binding_for(capability)
             .ok_or_else(|| format!("no capability binding for `{capability}`"))?;
         let namespace = *binding
@@ -148,13 +171,14 @@ impl RuntimeAuthBackend {
 
     fn execute_lookup(
         &self,
-        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        auth: davenda_auth::DavendaAuth<E>,
         tenant: Entity,
         principal_id: Option<String>,
     ) -> Result<AuthServiceExecution, String> {
         let capability = Capability::SystemModuleManage;
         let binding = self
             .package
+            .package()
             .binding_for(capability)
             .ok_or_else(|| format!("no capability binding for `{capability}`"))?;
         let relation = binding.relation;
@@ -183,17 +207,23 @@ impl RuntimeAuthBackend {
 
     fn execute_tuple_write(
         &self,
-        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        auth: davenda_auth::DavendaAuth<E>,
         subject: DefaultSubject,
         tenant: Entity,
         principal_id: Option<String>,
     ) -> Result<AuthServiceExecution, String> {
         let capability = Capability::SystemConfigWrite;
-        let relation = Relation::Manage;
+        let binding = self
+            .package
+            .package()
+            .binding_for(capability)
+            .ok_or_else(|| format!("no capability binding for `{capability}`"))?;
+        let relation = binding.relation;
+        let package = self.package.package();
 
         block_on_auth(async move {
             let allowed = auth
-                .check_default_capability(&subject, capability, &tenant)
+                .check_capability(package, &subject, capability, &tenant)
                 .await
                 .map_err(|error| error.to_string())?;
             let updates = vec![DefaultTupleUpdate::Write(DefaultTuple::new(
@@ -225,5 +255,307 @@ impl RuntimeAuthBackend {
                 },
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Clone)]
+    struct TestAuthModelPackage {
+        manifest: davenda_auth::AuthModelManifest,
+        schema: zanzibar::Schema,
+        capability_bindings: HashMap<davenda_auth::Capability, davenda_auth::CapabilityBinding>,
+    }
+
+    impl TestAuthModelPackage {
+        fn new(name: &str, mode: davenda_auth::PackageMode) -> Self {
+            let mut manifest = davenda_auth::default_manifest();
+            manifest.name = name.to_string();
+            manifest.mode = mode;
+            Self {
+                manifest,
+                schema: davenda_auth::default_schema(),
+                capability_bindings: davenda_auth::default_capability_bindings(),
+            }
+        }
+    }
+
+    impl davenda_auth::AuthModelPackage for TestAuthModelPackage {
+        fn manifest(&self) -> &davenda_auth::AuthModelManifest {
+            &self.manifest
+        }
+
+        fn schema(&self) -> &zanzibar::Schema {
+            &self.schema
+        }
+
+        fn capability_bindings(
+            &self,
+        ) -> &HashMap<davenda_auth::Capability, davenda_auth::CapabilityBinding> {
+            &self.capability_bindings
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct MemoryRebacEngine {
+        tuples: Arc<Mutex<Vec<zanzibar::Tuple>>>,
+    }
+
+    impl MemoryRebacEngine {
+        fn with_tuple(self, tuple: zanzibar::Tuple) -> Self {
+            self.tuples
+                .lock()
+                .expect("memory auth engine mutex poisoned")
+                .push(tuple);
+            self
+        }
+
+        fn object(namespace: &str, id: &str) -> zanzibar::Object {
+            zanzibar::Object {
+                namespace: namespace.to_string(),
+                id: id.to_string(),
+            }
+        }
+
+        fn subject_entity(namespace: &str, id: &str) -> zanzibar::Subject {
+            zanzibar::Subject::Entity(Self::object(namespace, id))
+        }
+
+        fn tuple(
+            object_namespace: &str,
+            object_id: &str,
+            relation: &str,
+            subject_namespace: &str,
+            subject_id: &str,
+            subject_relation: Option<&str>,
+        ) -> zanzibar::Tuple {
+            zanzibar::Tuple {
+                object: Self::object(object_namespace, object_id),
+                relation: relation.to_string(),
+                subject: match subject_relation {
+                    Some(relation) => zanzibar::Subject::Userset {
+                        object: Self::object(subject_namespace, subject_id),
+                        relation: relation.to_string(),
+                    },
+                    None => Self::subject_entity(subject_namespace, subject_id),
+                },
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    #[async_trait::async_trait]
+    impl RebacEngine for MemoryRebacEngine {
+        async fn apply_schema(
+            &self,
+            _tenant_id: i64,
+            _schema: zanzibar::Schema,
+        ) -> Result<(), zanzibar::RebacError> {
+            Ok(())
+        }
+
+        async fn write_tuples(
+            &self,
+            _tenant_id: i64,
+            updates: Vec<zanzibar::TupleUpdate>,
+        ) -> Result<(), zanzibar::RebacError> {
+            let mut tuples = self
+                .tuples
+                .lock()
+                .expect("memory auth engine mutex poisoned");
+            for update in updates {
+                match update {
+                    zanzibar::TupleUpdate::Write(tuple) => {
+                        tuples.push(tuple);
+                    }
+                    zanzibar::TupleUpdate::Delete(tuple) => {
+                        tuples.retain(|existing| existing != &tuple);
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        async fn read_tuples(
+            &self,
+            _tenant_id: i64,
+            object: Option<zanzibar::Object>,
+            relation: Option<String>,
+            subject: Option<zanzibar::Subject>,
+        ) -> Result<Vec<zanzibar::Tuple>, zanzibar::RebacError> {
+            let tuples = self
+                .tuples
+                .lock()
+                .expect("memory auth engine mutex poisoned");
+            Ok(tuples
+                .iter()
+                .filter(|tuple| object.as_ref().is_none_or(|expected| &tuple.object == expected))
+                .filter(|tuple| relation.as_ref().is_none_or(|expected| &tuple.relation == expected))
+                .filter(|tuple| subject.as_ref().is_none_or(|expected| &tuple.subject == expected))
+                .cloned()
+                .collect())
+        }
+
+        async fn check(
+            &self,
+            _tenant_id: i64,
+            subject: &zanzibar::Subject,
+            relation: &str,
+            object: &zanzibar::Object,
+        ) -> Result<bool, zanzibar::RebacError> {
+            let tuples = self
+                .tuples
+                .lock()
+                .expect("memory auth engine mutex poisoned");
+            Ok(tuples.iter().any(|tuple| {
+                &tuple.object == object && tuple.relation == relation && &tuple.subject == subject
+            }))
+        }
+
+        async fn check_many(
+            &self,
+            tenant_id: i64,
+            requests: Vec<zanzibar::CheckRequest>,
+        ) -> Result<Vec<bool>, zanzibar::RebacError> {
+            let mut results = Vec::with_capacity(requests.len());
+            for request in requests {
+                results.push(
+                    self.check(tenant_id, &request.subject, &request.relation, &request.object)
+                        .await?,
+                );
+            }
+            Ok(results)
+        }
+
+        async fn list_objects(
+            &self,
+            _tenant_id: i64,
+            subject: &zanzibar::Subject,
+            relation: &str,
+            object_namespace: &str,
+        ) -> Result<Vec<String>, zanzibar::RebacError> {
+            let tuples = self
+                .tuples
+                .lock()
+                .expect("memory auth engine mutex poisoned");
+            Ok(tuples
+                .iter()
+                .filter(|tuple| {
+                    tuple.object.namespace == object_namespace
+                        && tuple.relation == relation
+                        && &tuple.subject == subject
+                })
+                .map(|tuple| tuple.object.id.clone())
+                .collect())
+        }
+
+        async fn list_subjects(
+            &self,
+            _tenant_id: i64,
+            object: &zanzibar::Object,
+            relation: &str,
+            subject_namespace: &str,
+        ) -> Result<Vec<String>, zanzibar::RebacError> {
+            let tuples = self
+                .tuples
+                .lock()
+                .expect("memory auth engine mutex poisoned");
+            Ok(tuples
+                .iter()
+                .filter(|tuple| {
+                    &tuple.object == object
+                        && tuple.relation == relation
+                        && tuple.subject.namespace() == subject_namespace
+                })
+                .map(|tuple| tuple.subject.id().to_string())
+                .collect())
+        }
+    }
+
+    fn package_selection(
+        name: &str,
+        mode: davenda_auth::PackageMode,
+    ) -> davenda_auth::AuthModelPackageSelection {
+        davenda_auth::AuthModelPackageSelection::new(TestAuthModelPackage::new(name, mode))
+    }
+
+    fn invocation_context(principal_id: &str) -> InvocationContext {
+        InvocationContext::new(
+            CustomerAppContext::new("showcase-events")
+                .unwrap()
+                    .with_tenant_id("101")
+                    .unwrap()
+                    .with_locale("en-GB")
+                    .unwrap(),
+                PrincipalRef::user(principal_id).unwrap(),
+                TraceContext::new("trace-auth").unwrap(),
+                InvocationInput::Api(
+                    ApiInvocation::new("/auth", davenda_wasm::HttpMethod::Get).unwrap(),
+                ),
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn runtime_auth_backend_accepts_replacement_packages_and_uses_selected_bindings() {
+        let package = package_selection("platform-extended-auth", davenda_auth::PackageMode::Extend);
+        let engine = MemoryRebacEngine::default()
+            .with_tuple(MemoryRebacEngine::tuple(
+                "tenant",
+                "101",
+                "view",
+                "user",
+                "alice",
+                None,
+            ))
+            .with_tuple(MemoryRebacEngine::tuple(
+                "page",
+                "home",
+                "view",
+                "user",
+                "alice",
+                None,
+            ))
+            .with_tuple(MemoryRebacEngine::tuple(
+                "tenant",
+                "101",
+                "manage",
+                "user",
+                "alice",
+                None,
+            ));
+        let auth = davenda_auth::DavendaAuth::new(engine, 101);
+        let backend = RuntimeAuthBackend::from_auth(auth, package);
+        assert_eq!(backend.package().manifest().name, "platform-extended-auth");
+        assert_eq!(backend.package().manifest().mode, davenda_auth::PackageMode::Extend);
+
+        let context = invocation_context("alice");
+
+        let check = backend
+            .execute(&AuthServiceRequest::Check, &context, 101)
+            .expect("check execution should succeed");
+        assert!(check.allowed);
+
+        let list = backend
+            .execute(&AuthServiceRequest::List, &context, 101)
+            .expect("list execution should succeed");
+        assert!(list.allowed);
+
+        let lookup = backend
+            .execute(&AuthServiceRequest::Lookup, &context, 101)
+            .expect("lookup execution should succeed");
+        assert!(lookup.allowed);
+
+        let tuple_write = backend
+            .execute(&AuthServiceRequest::TupleWrite, &context, 101)
+            .expect("tuple write execution should succeed");
+        assert!(tuple_write.allowed);
+        assert!(matches!(
+            tuple_write.details,
+            AuthServiceDetails::TupleWrite { .. }
+        ));
     }
 }

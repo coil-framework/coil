@@ -68,6 +68,18 @@ pub(super) fn runtime_data_backend_error(
     }
 }
 
+pub(super) fn runtime_host_service_error(
+    context: &InvocationContext,
+    domain: HostServiceDomain,
+    reason: impl ToString,
+) -> WasmModelError {
+    WasmModelError::HostServiceUnavailable {
+        handler_id: trace_id(context).to_string(),
+        domain,
+        reason: reason.to_string(),
+    }
+}
+
 pub(super) fn block_on_auth<T>(
     future: impl Future<Output = Result<T, String>> + Send,
 ) -> Result<T, String>

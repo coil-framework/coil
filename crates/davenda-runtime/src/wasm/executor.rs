@@ -1,7 +1,9 @@
 use super::auth_backend::RuntimeAuthBackend;
+use davenda_wasm::MetadataGrant;
+use super::host::RuntimeWasmHostServices;
 use super::support::{
     runtime_auth_backend_error, runtime_data_backend_error, runtime_executor_error,
-    storage_class_from_grant, trace_id,
+    runtime_host_service_error, storage_class_from_grant, trace_id,
 };
 use super::*;
 use std::sync::OnceLock;
@@ -12,11 +14,23 @@ pub(super) struct RuntimeHostServiceExecutor {
     plan: RuntimePlan,
     auth_backend: OnceLock<Result<RuntimeAuthBackend, String>>,
     data_backend: OnceLock<Result<RuntimeDataBackend, String>>,
+    services: RuntimeWasmHostServices,
 }
 
 impl RuntimeHostServiceExecutor {
     pub(super) fn new(plan: RuntimePlan) -> Self {
         Self {
+            services: RuntimeWasmHostServices::new(plan.clone()),
+            plan,
+            auth_backend: OnceLock::new(),
+            data_backend: OnceLock::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_services(plan: RuntimePlan, services: RuntimeWasmHostServices) -> Self {
+        Self {
+            services,
             plan,
             auth_backend: OnceLock::new(),
             data_backend: OnceLock::new(),
@@ -204,6 +218,77 @@ impl RuntimeHostServiceExecutor {
         })
     }
 
+    fn execute_network(
+        &self,
+        call: &HostServiceCall,
+        context: &InvocationContext,
+        integration: &str,
+        response_bytes: u64,
+    ) -> Result<HostServiceExecution, WasmModelError> {
+        let execution = self
+            .services
+            .execute_http(integration, response_bytes, context)
+            .map_err(|reason| runtime_host_service_error(context, HostServiceDomain::Network, reason))?;
+
+        Ok(HostServiceExecution {
+            call: call.clone(),
+            result: HostServiceResult::Network(execution),
+        })
+    }
+
+    fn execute_secret(
+        &self,
+        call: &HostServiceCall,
+        context: &InvocationContext,
+        secret: &str,
+    ) -> Result<HostServiceExecution, WasmModelError> {
+        let execution = self
+            .services
+            .read_secret(secret, context)
+            .map_err(|reason| runtime_host_service_error(context, HostServiceDomain::Secrets, reason))?;
+
+        Ok(HostServiceExecution {
+            call: call.clone(),
+            result: HostServiceResult::Secret(execution),
+        })
+    }
+
+    fn execute_job(
+        &self,
+        call: &HostServiceCall,
+        context: &InvocationContext,
+        queue: &str,
+    ) -> Result<HostServiceExecution, WasmModelError> {
+        let execution = self
+            .services
+            .enqueue_job(queue, context)
+            .map_err(|reason| runtime_host_service_error(context, HostServiceDomain::Jobs, reason))?;
+
+        Ok(HostServiceExecution {
+            call: call.clone(),
+            result: HostServiceResult::Job(execution),
+        })
+    }
+
+    fn execute_metadata(
+        &self,
+        call: &HostServiceCall,
+        context: &InvocationContext,
+        kind: MetadataGrant,
+    ) -> Result<HostServiceExecution, WasmModelError> {
+        let execution = self
+            .services
+            .record_metadata_write(kind, context)
+            .map_err(|reason| {
+                runtime_host_service_error(context, HostServiceDomain::Metadata, reason)
+            })?;
+
+        Ok(HostServiceExecution {
+            call: call.clone(),
+            result: HostServiceResult::Metadata(execution),
+        })
+    }
+
     fn render_fragment(
         &self,
         request: &RenderServiceRequest,
@@ -300,32 +385,263 @@ impl HostServiceExecutor for RuntimeHostServiceExecutor {
             HostServiceRequest::OutboundHttp {
                 integration,
                 response_bytes,
-            } => Ok(HostServiceExecution {
-                call: call.clone(),
-                result: HostServiceResult::Network(NetworkExecution {
-                    integration: integration.clone(),
-                    response_bytes: *response_bytes,
-                }),
-            }),
-            HostServiceRequest::SecretRead { secret } => Ok(HostServiceExecution {
-                call: call.clone(),
-                result: HostServiceResult::Secret(SecretExecution {
-                    secret: secret.clone(),
-                }),
-            }),
-            HostServiceRequest::EnqueueJob { queue } => Ok(HostServiceExecution {
-                call: call.clone(),
-                result: HostServiceResult::Job(JobExecution {
-                    queue: queue.clone(),
-                }),
-            }),
-            HostServiceRequest::MetadataWrite { kind } => Ok(HostServiceExecution {
-                call: call.clone(),
-                result: HostServiceResult::Metadata(MetadataExecution {
-                    kind: *kind,
-                    recorded: true,
-                }),
-            }),
+            } => self.execute_network(call, context, integration, *response_bytes),
+            HostServiceRequest::SecretRead { secret } => self.execute_secret(call, context, secret),
+            HostServiceRequest::EnqueueJob { queue } => self.execute_job(call, context, queue),
+            HostServiceRequest::MetadataWrite { kind } => {
+                self.execute_metadata(call, context, *kind)
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use davenda_auth::DefaultAuthModelPackage;
+    use davenda_config::PlatformConfig;
+    use crate::RuntimeBuilder;
+    use davenda_wasm::{
+        CustomerAppContext, ExtensionId, HandlerId, HostCapabilityGrant, HostGrantSet,
+        HttpMethod, InvocationContext, InvocationInput, InvocationPlan, JobExecution,
+        MetadataExecution, MetadataGrant, NetworkExecution, PageInvocation, PrincipalRef,
+        ResourceLimits, SecretExecution, TraceContext,
+    };
+    use std::collections::BTreeMap;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::thread;
+
+    const TEST_CONFIG: &str = r#"
+[app]
+name = "wasm-host-tests"
+environment = "development"
+
+[server]
+bind = "127.0.0.1:0"
+trusted_proxies = []
+
+[http.session]
+store = "memory"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 7200
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = false
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "external"
+
+[storage]
+default_class = "public_upload"
+single_node_escape_hatch = "disabled"
+deployment = "distributed"
+local_root = "/tmp/davenda-runtime-tests"
+
+[cache]
+l1 = "moka"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB"]
+fallback_locale = "en-GB"
+localized_routes = false
+
+[seo]
+canonical_host = "example.test"
+emit_json_ld = false
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 1
+
+[modules]
+enabled = ["cms-pages"]
+
+[wasm]
+directory = "/tmp/davenda-wasm-tests"
+default_time_limit_ms = 50
+allow_network = true
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = false
+tracing = false
+
+[assets]
+publish_manifest = false
+"#;
+
+    #[test]
+    fn runtime_host_service_executor_uses_live_backends() {
+        let plan = RuntimeBuilder::new(
+            PlatformConfig::from_toml_str(TEST_CONFIG).unwrap(),
+            DefaultAuthModelPackage::default(),
+        )
+        .build()
+        .unwrap();
+        let (endpoint, server) = spawn_http_server("live-response");
+
+        let mut http_targets = BTreeMap::new();
+        http_targets.insert("crm".to_string(), endpoint.clone());
+        let mut secrets = BTreeMap::new();
+        secrets.insert("api-token".to_string(), "super-secret".to_string());
+
+        let services = RuntimeWasmHostServices::with_backends(plan.clone(), http_targets, secrets);
+        let executor = RuntimeHostServiceExecutor::with_services(plan.clone(), services.clone());
+        let session_plan = InvocationPlan {
+            extension_id: ExtensionId::new("extensions.live").unwrap(),
+            handler_id: HandlerId::new("handler-live").unwrap(),
+            point: ExtensionPointKind::Page,
+            customer_app_id: "customer-app".to_string(),
+            granted_capabilities: HostGrantSet::from_grants([
+                HostCapabilityGrant::OutboundHttp {
+                    integration: "crm".to_string(),
+                },
+                HostCapabilityGrant::SecretRead {
+                    secret: "api-token".to_string(),
+                },
+                HostCapabilityGrant::EnqueueJob {
+                    queue: "jobs.work".to_string(),
+                },
+                HostCapabilityGrant::MetadataWrite {
+                    kind: MetadataGrant::JsonLd,
+                },
+            ]),
+            limits: ResourceLimits::baseline_for(ExtensionPointKind::Page),
+            context: InvocationContext::new(
+                CustomerAppContext::new("customer-app").unwrap(),
+                PrincipalRef::user("user-1").unwrap(),
+                TraceContext::new("trace-1").unwrap(),
+                InvocationInput::Page(PageInvocation::new("/host-side-effects", HttpMethod::Get).unwrap()),
+            ),
+        };
+
+        let mut session = session_plan.begin_execution_with_executor(Arc::new(executor));
+
+        let network = session
+            .execute_host_call(davenda_wasm::HostCall::OutboundHttp {
+                integration: "crm".to_string(),
+                response_bytes: 1,
+            })
+            .unwrap();
+        assert!(matches!(
+            network.result,
+            HostServiceResult::Network(NetworkExecution {
+                integration,
+                endpoint: recorded_endpoint,
+                status,
+                response_bytes,
+            }) if integration == "crm"
+                && recorded_endpoint == endpoint
+                && status == 200
+                && response_bytes == "live-response".len() as u64
+        ));
+        assert_eq!(session.usage().outbound_response_bytes, "live-response".len() as u64);
+
+        let secret = session
+            .execute_host_call(davenda_wasm::HostCall::SecretRead {
+                secret: "api-token".to_string(),
+            })
+            .unwrap();
+        assert!(matches!(
+            secret.result,
+            HostServiceResult::Secret(SecretExecution {
+                secret,
+                source,
+                value_bytes,
+            }) if secret == "api-token"
+                && source == "in-memory:api-token"
+                && value_bytes == "super-secret".len()
+        ));
+
+        let job = session
+            .execute_host_call(davenda_wasm::HostCall::EnqueueJob {
+                queue: "jobs.work".to_string(),
+            })
+            .unwrap();
+        assert!(matches!(
+            job.result,
+            HostServiceResult::Job(JobExecution {
+                queue,
+                job_id,
+                enqueued_at_unix_seconds,
+            }) if queue == "jobs.work"
+                && job_id.starts_with("wasm:")
+                && enqueued_at_unix_seconds > 0
+        ));
+
+        let jobs = plan.jobs_host("scheduler-a").unwrap();
+        assert_eq!(jobs.coordinator().ready_jobs().len(), 1);
+        assert_eq!(jobs.coordinator().ready_jobs()[0].spec.queue.as_str(), "jobs.work");
+
+        let metadata = session
+            .execute_host_call(davenda_wasm::HostCall::MetadataWrite {
+                kind: MetadataGrant::JsonLd,
+            })
+            .unwrap();
+        assert!(matches!(
+            metadata.result,
+            HostServiceResult::Metadata(MetadataExecution {
+                kind: MetadataGrant::JsonLd,
+                recorded: true,
+                journal_entries: 1,
+            })
+        ));
+
+        let metadata = session
+            .execute_host_call(davenda_wasm::HostCall::MetadataWrite {
+                kind: MetadataGrant::JsonLd,
+            })
+            .unwrap();
+        assert!(matches!(
+            metadata.result,
+            HostServiceResult::Metadata(MetadataExecution {
+                kind: MetadataGrant::JsonLd,
+                recorded: true,
+                journal_entries: 2,
+            })
+        ));
+        assert_eq!(services.metadata_records().len(), 2);
+
+        server.join().unwrap();
+    }
+
+    fn spawn_http_server(body: &'static str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        (endpoint, handle)
     }
 }

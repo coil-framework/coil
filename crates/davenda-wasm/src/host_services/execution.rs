@@ -94,23 +94,30 @@ pub struct CacheIntentExecution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkExecution {
     pub integration: String,
+    pub endpoint: String,
+    pub status: u16,
     pub response_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretExecution {
     pub secret: String,
+    pub source: String,
+    pub value_bytes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobExecution {
     pub queue: String,
+    pub job_id: String,
+    pub enqueued_at_unix_seconds: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetadataExecution {
     pub kind: MetadataGrant,
     pub recorded: bool,
+    pub journal_entries: usize,
 }
 
 pub trait HostServiceExecutor: std::fmt::Debug + Send + Sync {
@@ -172,6 +179,8 @@ struct SyntheticHostServiceState {
     storage_bytes_by_class: std::collections::BTreeMap<StorageClassGrant, u64>,
     render_fragments: std::collections::BTreeMap<String, String>,
     cache_hints: Vec<String>,
+    metadata_writes: usize,
+    job_sequences: u64,
 }
 
 impl SyntheticHostServiceState {
@@ -233,20 +242,31 @@ impl SyntheticHostServiceState {
                 response_bytes,
             } => HostServiceResult::Network(NetworkExecution {
                 integration: integration.clone(),
+                endpoint: format!("synthetic://{integration}"),
+                status: 200,
                 response_bytes: *response_bytes,
             }),
             HostServiceRequest::SecretRead { secret } => {
                 HostServiceResult::Secret(SecretExecution {
                     secret: secret.clone(),
+                    source: "synthetic".to_string(),
+                    value_bytes: secret.len(),
                 })
             }
-            HostServiceRequest::EnqueueJob { queue } => HostServiceResult::Job(JobExecution {
-                queue: queue.clone(),
-            }),
+            HostServiceRequest::EnqueueJob { queue } => {
+                self.job_sequences = self.job_sequences.saturating_add(1);
+                HostServiceResult::Job(JobExecution {
+                    queue: queue.clone(),
+                    job_id: format!("synthetic:{queue}:{}", self.job_sequences),
+                    enqueued_at_unix_seconds: self.job_sequences,
+                })
+            }
             HostServiceRequest::MetadataWrite { kind } => {
+                self.metadata_writes = self.metadata_writes.saturating_add(1);
                 HostServiceResult::Metadata(MetadataExecution {
                     kind: *kind,
                     recorded: true,
+                    journal_entries: self.metadata_writes,
                 })
             }
         };

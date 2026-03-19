@@ -12,8 +12,10 @@ mod cache;
 mod context;
 mod prepare;
 mod principal;
+mod services;
 
 pub use principal::ExtensionPrincipal;
+pub(crate) use services::RuntimeWasmHostServices;
 
 #[derive(Debug, Error)]
 pub enum LiveWasmExecutionError {

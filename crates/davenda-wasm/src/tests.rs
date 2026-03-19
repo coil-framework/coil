@@ -522,6 +522,7 @@ fn execution_session_enforces_host_grants_and_resource_limits() {
         HostServiceResult::Network(NetworkExecution {
             integration,
             response_bytes: 512,
+            ..
         }) if integration == "crm"
     ));
     assert!(matches!(

@@ -7,7 +7,9 @@ use crate::host_api::{
     AuthServiceRequest, CacheIntentServiceRequest, DataServiceRequest, HostServiceCall,
     HostServiceRequest, ModuleDataContract, RenderServiceRequest, StorageServiceRequest,
 };
-use crate::host_services::{HostServiceExecution, HostServiceExecutor, HostServiceJournal};
+use crate::host_services::{
+    HostServiceExecution, HostServiceExecutor, HostServiceJournal, HostServiceResult,
+};
 use crate::invocation::{
     ExecutionReceipt, ExecutionUsage, HostCall, InvocationOutcome, InvocationPlan,
 };
@@ -77,11 +79,11 @@ impl HostServiceSessionState {
             });
         }
 
-        self.record_usage_for_call(&call)?;
         let service_call = host_service_call_for_host_call(&self.plan, &call)?;
         let execution = self
             .host_service_journal
             .execute(service_call, &self.plan.context)?;
+        self.record_usage_for_execution(&call, &execution)?;
         self.host_calls.push(call);
         Ok(execution)
     }
@@ -167,7 +169,11 @@ impl HostServiceSessionState {
         })
     }
 
-    fn record_usage_for_call(&mut self, call: &HostCall) -> Result<(), WasmModelError> {
+    fn record_usage_for_execution(
+        &mut self,
+        call: &HostCall,
+        execution: &HostServiceExecution,
+    ) -> Result<(), WasmModelError> {
         match call {
             HostCall::StorageWrite { bytes, .. } => {
                 self.usage.storage_writes = self.usage.storage_writes.saturating_add(1);
@@ -185,12 +191,16 @@ impl HostServiceSessionState {
                     });
                 }
             }
-            HostCall::OutboundHttp { response_bytes, .. } => {
+            HostCall::OutboundHttp { .. } => {
+                let response_bytes = match &execution.result {
+                    HostServiceResult::Network(network) => network.response_bytes,
+                    _ => 0,
+                };
                 self.usage.outbound_requests = self.usage.outbound_requests.saturating_add(1);
                 self.usage.outbound_response_bytes = self
                     .usage
                     .outbound_response_bytes
-                    .saturating_add(*response_bytes);
+                    .saturating_add(response_bytes);
                 if self.usage.outbound_requests > self.plan.limits.max_outbound_requests {
                     return Err(WasmModelError::ResourceLimitExceeded {
                         handler_id: self.plan.handler_id.to_string(),

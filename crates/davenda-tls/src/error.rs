@@ -37,6 +37,18 @@ pub enum TlsModelError {
     },
     #[error("certificate `{certificate_id}` has no pending replacement")]
     MissingReplacementCertificate { certificate_id: String },
+    #[error("certificate material `{certificate_id}` is already attached")]
+    CertificateMaterialAlreadyAttached { certificate_id: String },
+    #[error("certificate material `{certificate_id}` is missing")]
+    MissingCertificateMaterial { certificate_id: String },
+    #[error("certificate material cannot be decrypted with key `{key_id}`")]
+    UnsupportedEncryptedMaterialKey { key_id: String },
+    #[error("invalid certificate material `{field}`: {reason}")]
+    InvalidCertificateMaterial { field: &'static str, reason: String },
+    #[error("failed to encrypt certificate material: {reason}")]
+    CertificateMaterialEncryptionFailed { reason: String },
+    #[error("failed to decrypt certificate material: {reason}")]
+    CertificateMaterialDecryptionFailed { reason: String },
     #[error("tls control-plane state `{path}` is invalid: {reason}")]
     CorruptControlPlaneState { path: String, reason: String },
     #[error("failed to persist tls control-plane state `{path}`: {reason}")]

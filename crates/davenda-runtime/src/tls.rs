@@ -1,9 +1,16 @@
 use super::*;
+use davenda_data::DataModelError;
+use davenda_tls::{
+    CertificateMaterial, ManualCertificateBundle, ManualImportTlsCertificateExecutor,
+    TlsMaterialProtector,
+};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeTlsError {
     #[error(transparent)]
     Tls(#[from] TlsModelError),
+    #[error(transparent)]
+    Data(#[from] davenda_data::DataModelError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,31 +30,47 @@ pub struct TlsHost {
     pub customer_app: String,
     pub runtime: TlsRuntimeServices,
     control_plane: TlsControlPlaneRuntime,
+    material_executor: ManualImportTlsCertificateExecutor,
 }
 
 impl TlsHost {
     pub(crate) fn new(
         customer_app: String,
         runtime: TlsRuntimeServices,
-        _data_runtime: DataRuntimeServices,
-        _shared_backend_namespace: String,
+        data_runtime: DataRuntimeServices,
+        shared_backend_namespace: String,
     ) -> Result<Self, RuntimeTlsError> {
+        let material_seed = {
+            #[cfg(test)]
+            {
+                format!(
+                    "test-tls-material:{}:{}",
+                    customer_app, shared_backend_namespace
+                )
+            }
+
+            #[cfg(not(test))]
+            {
+                data_runtime.resolve_connection_url()?
+            }
+        };
+        let material_protector = TlsMaterialProtector::from_seed(material_seed)?;
         #[cfg(test)]
         let control_plane =
             TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
         #[cfg(not(test))]
         let control_plane = TlsControlPlaneRuntime::with_distributed_postgres_control_plane(
             runtime.clone(),
-            &_data_runtime,
-            format!(
-                "customer-app:{}:{}",
-                customer_app, _shared_backend_namespace
-            ),
+            &data_runtime,
+            format!("customer-app:{}:{}", customer_app, shared_backend_namespace),
         )?;
+        let material_executor =
+            ManualImportTlsCertificateExecutor::new(control_plane.clone(), material_protector);
         Ok(Self {
             customer_app,
             runtime,
             control_plane,
+            material_executor,
         })
     }
 
@@ -74,6 +97,23 @@ impl TlsHost {
 
     pub fn import_certificate(&mut self, record: CertificateRecord) -> Result<(), RuntimeTlsError> {
         Ok(self.control_plane.import_certificate(record)?)
+    }
+
+    pub fn import_manual_certificate(
+        &mut self,
+        bundle: ManualCertificateBundle,
+    ) -> Result<(), RuntimeTlsError> {
+        let bundle = self.runtime.planner().import_manual_certificate(bundle)?;
+        Ok(self.material_executor.import_manual_certificate(bundle)?)
+    }
+
+    pub fn certificate_material(
+        &self,
+        certificate_id: &CertificateId,
+    ) -> Result<CertificateMaterial, RuntimeTlsError> {
+        Ok(self
+            .material_executor
+            .certificate_material(certificate_id)?)
     }
 
     pub fn queue_renewal(

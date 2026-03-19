@@ -1,4 +1,5 @@
 mod error;
+mod material;
 mod model;
 mod runtime;
 #[cfg(test)]
@@ -6,6 +7,10 @@ mod tests;
 mod validation;
 
 pub use error::TlsModelError;
+pub use material::{
+    CertificateChainPem, CertificateMaterial, EncryptedCertificateMaterial,
+    ManualCertificateBundle, PrivateKeyPem, TlsMaterialProtector,
+};
 pub use model::{
     CertificateFingerprint, CertificateId, CertificateProviderKind, CertificateRecord,
     CertificateStateStore, CertificateStatus, ChallengeStrategy, CloudflareEncryptionMode,
@@ -14,6 +19,7 @@ pub use model::{
 };
 pub use runtime::{
     CertificateInventory, ChallengeTicket, HotReloadEvent, IssuancePlan,
-    PostgresTlsControlPlaneStore, RenewalPlan, TlsControlPlaneRuntime, TlsControlPlaneState,
-    TlsControlPlaneStore, TlsPlanner, TlsRuntime,
+    ManualImportTlsCertificateExecutor, PostgresTlsControlPlaneStore, RenewalPlan,
+    TlsCertificateExecutor, TlsControlPlaneRuntime, TlsControlPlaneState, TlsControlPlaneStore,
+    TlsPlanner, TlsRuntime,
 };

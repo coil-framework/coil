@@ -142,6 +142,105 @@ fn wildcard_bindings_are_rejected_without_dns_validation() {
 }
 
 #[test]
+fn manual_imports_encrypt_certificate_material_and_can_be_recovered() {
+    let runtime = TlsRuntime::from_config(&TlsConfig {
+        mode: TlsMode::Manual,
+        challenge: None,
+        provider: Some(TlsProvider::ManualImport),
+        account_secret: None,
+    });
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime);
+    let executor = ManualImportTlsCertificateExecutor::new(
+        control_plane.clone(),
+        TlsMaterialProtector::from_seed("manual-material-test").unwrap(),
+    );
+
+    let certificate_id = CertificateId::new("cert-manual").unwrap();
+    let binding = HostnameBinding::new(
+        Hostname::new("manual.example.com").unwrap(),
+        CustomerAppId::new("storefront").unwrap(),
+    );
+    let bundle = ManualCertificateBundle::new(
+        CertificateRecord::new(
+            certificate_id.clone(),
+            CertificateProviderKind::ManualImport,
+            CertificateStatus::Active,
+            CertificateFingerprint::new("sha256:manual").unwrap(),
+            TlsInstant::from_unix_seconds(1_000),
+            TlsInstant::from_unix_seconds(4_000_000),
+            SecretMaterialRef::new("secrets/tls/cert-manual").unwrap(),
+            CertificateStateStore::OperatorManaged,
+        )
+        .with_binding(binding),
+        CertificateMaterial::new(
+            "-----BEGIN CERTIFICATE-----\nmanual\n-----END CERTIFICATE-----\n",
+            "-----BEGIN PRIVATE KEY-----\nmanual\n-----END PRIVATE KEY-----\n",
+        )
+        .unwrap(),
+    );
+
+    executor.import_manual_certificate(bundle).unwrap();
+
+    let material = executor.certificate_material(&certificate_id).unwrap();
+    assert_eq!(
+        material.certificate_chain_pem().as_str(),
+        "-----BEGIN CERTIFICATE-----\nmanual\n-----END CERTIFICATE-----\n"
+    );
+    assert_eq!(
+        material.private_key_pem().as_str(),
+        "-----BEGIN PRIVATE KEY-----\nmanual\n-----END PRIVATE KEY-----\n"
+    );
+    assert!(
+        control_plane
+            .inventory()
+            .record(&certificate_id)
+            .unwrap()
+            .material
+            .is_some()
+    );
+}
+
+#[test]
+fn manual_import_planner_rejects_non_manual_provider() {
+    let mut runtime = TlsRuntime::from_config(&TlsConfig {
+        mode: TlsMode::Manual,
+        challenge: None,
+        provider: Some(TlsProvider::ManualImport),
+        account_secret: None,
+    });
+    runtime.provider = Some(CertificateProviderKind::Acme);
+    let bundle = ManualCertificateBundle::new(
+        CertificateRecord::new(
+            CertificateId::new("cert-acme").unwrap(),
+            CertificateProviderKind::Acme,
+            CertificateStatus::Active,
+            CertificateFingerprint::new("sha256:acme").unwrap(),
+            TlsInstant::from_unix_seconds(1_000),
+            TlsInstant::from_unix_seconds(4_000_000),
+            SecretMaterialRef::new("secrets/tls/cert-acme").unwrap(),
+            CertificateStateStore::SharedSecrets,
+        ),
+        CertificateMaterial::new(
+            "-----BEGIN CERTIFICATE-----\nacme\n-----END CERTIFICATE-----\n",
+            "-----BEGIN PRIVATE KEY-----\nacme\n-----END PRIVATE KEY-----\n",
+        )
+        .unwrap(),
+    );
+
+    let error = runtime
+        .planner()
+        .import_manual_certificate(bundle)
+        .unwrap_err();
+    assert_eq!(
+        error,
+        TlsModelError::InvalidCertificateMaterial {
+            field: "certificate_provider",
+            reason: "manual imports require provider=manual_import".to_string(),
+        }
+    );
+}
+
+#[test]
 fn inventory_rejects_duplicate_active_hostname_bindings() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
     let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime);

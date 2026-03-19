@@ -5,6 +5,7 @@ use davenda_config::AcmeChallenge;
 use serde::{Deserialize, Serialize};
 
 use crate::TlsModelError;
+use crate::material::EncryptedCertificateMaterial;
 use crate::validation::validate_token;
 
 macro_rules! token_type {
@@ -200,6 +201,8 @@ pub struct CertificateRecord {
     pub issued_at: TlsInstant,
     pub not_after: TlsInstant,
     pub material_ref: SecretMaterialRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<EncryptedCertificateMaterial>,
     pub bindings: Vec<HostnameBinding>,
     pub store: CertificateStateStore,
     pub cloudflare_mode: Option<CloudflareEncryptionMode>,
@@ -225,6 +228,7 @@ impl CertificateRecord {
             issued_at,
             not_after,
             material_ref,
+            material: None,
             bindings: Vec::new(),
             store,
             cloudflare_mode: None,
@@ -234,6 +238,11 @@ impl CertificateRecord {
 
     pub fn with_binding(mut self, binding: HostnameBinding) -> Self {
         self.bindings.push(binding);
+        self
+    }
+
+    pub fn with_material(mut self, material: EncryptedCertificateMaterial) -> Self {
+        self.material = Some(material);
         self
     }
 

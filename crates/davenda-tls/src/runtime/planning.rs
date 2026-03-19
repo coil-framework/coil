@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     CertificateId, CertificateProviderKind, CertificateRecord, CertificateStateStore,
     CertificateStatus, ChallengeStrategy, CloudflareEncryptionMode, EdgeMode, HostnameBinding,
-    TlsInstant, TlsModelError,
+    ManualCertificateBundle, TlsInstant, TlsModelError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,13 +198,20 @@ impl TlsPlanner {
 
     pub fn import_manual_certificate(
         &self,
-        record: CertificateRecord,
-    ) -> Result<CertificateRecord, TlsModelError> {
+        bundle: ManualCertificateBundle,
+    ) -> Result<ManualCertificateBundle, TlsModelError> {
         if self.runtime.mode != TlsMode::Manual {
             return Err(TlsModelError::ManualModeRequiresImportedCertificate);
         }
 
-        Ok(record)
+        if bundle.record.provider != CertificateProviderKind::ManualImport {
+            return Err(TlsModelError::InvalidCertificateMaterial {
+                field: "certificate_provider",
+                reason: "manual imports require provider=manual_import".to_string(),
+            });
+        }
+
+        Ok(bundle)
     }
 
     pub fn renewal_plan(

@@ -63,30 +63,34 @@ impl RuntimeOutboundHttpBackend {
 
         let endpoint = self.resolve_endpoint(integration)?;
         let byte_limit = self.response_byte_limit(response_bytes_hint)?;
-        let response = self
-            .client
-            .get(endpoint.as_str())
-            .timeout(self.request_timeout)
-            .call()
-            .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?;
-        let status = response.status();
-        let mut reader = response.into_reader().take(byte_limit.saturating_add(1));
-        let mut response_bytes = Vec::new();
-        reader
-            .read_to_end(&mut response_bytes)
-            .map_err(|error| format!("failed to read `{endpoint}` response body: {error}"))?;
+        let integration = integration.to_string();
+        let endpoint_string = endpoint.to_string();
+        run_blocking(|| {
+            let response = self
+                .client
+                .get(endpoint.as_str())
+                .timeout(self.request_timeout)
+                .call()
+                .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?;
+            let status = response.status();
+            let mut reader = response.into_reader().take(byte_limit.saturating_add(1));
+            let mut response_bytes = Vec::new();
+            reader
+                .read_to_end(&mut response_bytes)
+                .map_err(|error| format!("failed to read `{endpoint}` response body: {error}"))?;
 
-        if response_bytes.len() as u64 > byte_limit {
-            return Err(format!(
-                "response from `{endpoint}` exceeded the configured limit of {byte_limit} bytes"
-            ));
-        }
+            if response_bytes.len() as u64 > byte_limit {
+                return Err(format!(
+                    "response from `{endpoint}` exceeded the configured limit of {byte_limit} bytes"
+                ));
+            }
 
-        Ok(NetworkExecution {
-            integration: integration.to_string(),
-            endpoint: endpoint.to_string(),
-            status,
-            response_bytes: response_bytes.len() as u64,
+            Ok(NetworkExecution {
+                integration,
+                endpoint: endpoint_string,
+                status,
+                response_bytes: response_bytes.len() as u64,
+            })
         })
     }
 
@@ -121,12 +125,30 @@ impl RuntimeOutboundHttpBackend {
     }
 }
 
+fn run_blocking<T, F>(operation: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    if matches!(
+        tokio::runtime::Handle::try_current()
+            .ok()
+            .map(|handle| handle.runtime_flavor()),
+        Some(tokio::runtime::RuntimeFlavor::MultiThread)
+    ) {
+        Ok(tokio::task::block_in_place(operation)?)
+    } else {
+        operation()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::ffi::OsString;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;
 
     struct EnvVarGuard {
@@ -289,6 +311,62 @@ mod tests {
 
         assert!(error.contains("timed out"), "unexpected error: {error}");
 
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_outbound_http_backend_yields_worker_threads_while_waiting() {
+        let (endpoint, server) =
+            spawn_http_server("slow-response", Some(Duration::from_millis(150)));
+        let mut targets = BTreeMap::new();
+        targets.insert("billing".to_string(), Url::parse(&endpoint).unwrap());
+
+        let backend = RuntimeOutboundHttpBackend::with_settings(
+            true,
+            targets,
+            Duration::from_millis(500),
+            1024,
+        );
+        let progress = Arc::new(AtomicUsize::new(0));
+        let armed = Arc::new(AtomicBool::new(false));
+        let progress_probe = Arc::clone(&progress);
+        let armed_probe = Arc::clone(&armed);
+        let arming_thread = thread::spawn({
+            let armed = Arc::clone(&armed);
+            move || {
+                std::thread::sleep(Duration::from_millis(20));
+                armed.store(true, Ordering::SeqCst);
+            }
+        });
+        let worker = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap();
+
+            runtime.block_on(async move {
+                let probe = tokio::spawn(async move {
+                    while !armed_probe.load(Ordering::SeqCst) {
+                        tokio::task::yield_now().await;
+                    }
+                    progress_probe.fetch_add(1, Ordering::SeqCst);
+                });
+
+                let result = backend.execute("billing", 64, &execution_context());
+                assert!(result.is_ok(), "unexpected error: {result:?}");
+                probe.await.unwrap();
+            });
+        });
+
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            progress.load(Ordering::SeqCst) > 0,
+            "worker thread was pinned while outbound HTTP was in flight"
+        );
+
+        worker.join().unwrap();
+        arming_thread.join().unwrap();
         server.join().unwrap();
     }
 }

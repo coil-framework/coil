@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/davenda-a11y",
+    "crates/davenda-app",
     "crates/davenda-admin",
     "crates/davenda-assets",
     "crates/davenda-auth",

@@ -29,7 +29,6 @@ fn load_live_auth_explain_backend(
     LiveAuthExplainBackend::from_config(config)
 }
 
-#[cfg(test)]
 pub(crate) fn execute_live_auth_explain_with_backend<B: AuthExplainBackend>(
     backend: &B,
     invocation: AuthExplainInvocation,

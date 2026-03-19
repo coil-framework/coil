@@ -252,7 +252,7 @@ mod tests {
         );
 
         let error = backend
-            .execute("http://127.0.0.1:8080", 64, &execution_context())
+            .execute_via_blocking_pool("http://127.0.0.1:8080", 64, &execution_context())
             .unwrap_err();
 
         assert!(error.contains("not mapped"), "unexpected error: {error}");
@@ -278,7 +278,7 @@ mod tests {
         );
 
         let error = backend
-            .execute("no-fallback", 64, &execution_context())
+            .execute_via_blocking_pool("no-fallback", 64, &execution_context())
             .unwrap_err();
 
         assert!(error.contains("not mapped"), "unexpected error: {error}");
@@ -293,7 +293,7 @@ mod tests {
         let backend =
             RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
         let execution = backend
-            .execute("crm", 64, &execution_context())
+            .execute_via_blocking_pool("crm", 64, &execution_context())
             .expect("mapped endpoint should succeed");
 
         assert_eq!(execution.integration, "crm");
@@ -316,7 +316,7 @@ mod tests {
         let backend =
             RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
         let error = backend
-            .execute("search", 4, &execution_context())
+            .execute_via_blocking_pool("search", 4, &execution_context())
             .unwrap_err();
 
         assert!(
@@ -341,7 +341,7 @@ mod tests {
             1024,
         );
         let error = backend
-            .execute("billing", 64, &execution_context())
+            .execute_via_blocking_pool("billing", 64, &execution_context())
             .unwrap_err();
 
         assert!(error.contains("timed out"), "unexpected error: {error}");
@@ -388,7 +388,8 @@ mod tests {
                     progress_probe.fetch_add(1, Ordering::SeqCst);
                 });
 
-                let result = backend.execute("billing", 64, &execution_context());
+                let result =
+                    backend.execute_via_blocking_pool("billing", 64, &execution_context());
                 assert!(result.is_ok(), "unexpected error: {result:?}");
                 probe.await.unwrap();
             });

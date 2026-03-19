@@ -189,9 +189,11 @@ impl HttpServerHost {
             backends,
             route_authorizer,
         });
+        let public_router = observability_router();
+        let privileged_router = diagnostics_router(state.clone());
         let router = Router::new()
-            .merge(observability_router())
-            .merge(diagnostics_router(state.clone()))
+            .merge(public_router)
+            .merge(privileged_router)
             .route("/", any(serve_runtime_request))
             .fallback(any(serve_runtime_request))
             .with_state(state.clone());
@@ -205,6 +207,16 @@ impl HttpServerHost {
 
     pub fn router(&self) -> Router {
         self.router.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn public_router(&self) -> Router {
+        observability_router().with_state(self.state.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn privileged_router(&self) -> Router {
+        diagnostics_router(self.state.clone()).with_state(self.state.clone())
     }
 
     pub fn issue_session(

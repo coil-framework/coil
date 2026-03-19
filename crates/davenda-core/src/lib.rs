@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use davenda_a11y::{NavigationContract, ThemeAccessibilityContract};
 use davenda_auth::{AuthModelPackage, Capability};
 use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
@@ -26,7 +26,7 @@ use davenda_template::{TemplateNamespace, TemplateRegistry, TemplateRuntime};
 use davenda_tls::TlsRuntime;
 use davenda_wasm::{ExtensionPointKind, ResourceLimits};
 use hmac::{Hmac, Mac};
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use sha2::Sha256;
 use thiserror::Error;
 
@@ -2099,11 +2099,13 @@ cdn_base_url = "https://cdn.example.com"
             "davenda_session"
         );
         assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
-        assert!(bootstrap
-            .cli
-            .registry
-            .commands()
-            .any(|command| command.path == vec!["config".to_string(), "validate".to_string()]));
+        assert!(
+            bootstrap
+                .cli
+                .registry
+                .commands()
+                .any(|command| command.path == vec!["config".to_string(), "validate".to_string()])
+        );
         assert_eq!(
             bootstrap.data.driver,
             davenda_config::DatabaseDriver::Postgres
@@ -2128,42 +2130,54 @@ cdn_base_url = "https://cdn.example.com"
         assert!(bootstrap.tls.hot_reload_supported);
         assert!(bootstrap.observability.telemetry.metrics_enabled);
         assert!(bootstrap.observability.telemetry.trace.enabled);
-        assert!(bootstrap
-            .observability
-            .readiness
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.kind == DependencyKind::Database));
-        assert!(bootstrap
-            .observability
-            .readiness
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.kind == DependencyKind::DistributedCache));
-        assert!(bootstrap
-            .observability
-            .readiness
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.kind == DependencyKind::Queue));
-        assert!(bootstrap
-            .observability
-            .readiness
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.kind == DependencyKind::ObjectStore));
-        assert!(bootstrap
-            .observability
-            .readiness
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.kind == DependencyKind::Secrets));
-        assert!(bootstrap
-            .observability
-            .readiness
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.kind == DependencyKind::Tls));
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Database)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::DistributedCache)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Queue)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::ObjectStore)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Secrets)
+        );
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Tls)
+        );
         let locale_context = bootstrap.i18n.request_context(Some("fr-FR"));
         assert_eq!(locale_context.locale.as_str(), "fr-FR");
         assert_eq!(locale_context.currency.as_str(), "EUR");
@@ -2320,17 +2334,19 @@ cdn_base_url = "https://cdn.example.com"
             }
         );
 
-        assert!(validate_module_installation(
-            &manifest,
-            &["commerce".to_string(), "memberships".to_string()],
-            &[
-                "core.auth",
-                "core.data",
-                "core.data.migrations",
-                "core.jobs"
-            ],
-        )
-        .is_ok());
+        assert!(
+            validate_module_installation(
+                &manifest,
+                &["commerce".to_string(), "memberships".to_string()],
+                &[
+                    "core.auth",
+                    "core.data",
+                    "core.data.migrations",
+                    "core.jobs"
+                ],
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -2361,16 +2377,20 @@ cdn_base_url = "https://cdn.example.com"
             .issue_token(secret, "sess_123", "/checkout")
             .unwrap();
 
-        assert!(bootstrap
-            .browser
-            .csrf
-            .verify_token(secret, "sess_123", "/checkout", &token)
-            .unwrap());
-        assert!(!bootstrap
-            .browser
-            .csrf
-            .verify_token(secret, "sess_999", "/checkout", &token)
-            .unwrap());
+        assert!(
+            bootstrap
+                .browser
+                .csrf
+                .verify_token(secret, "sess_123", "/checkout", &token)
+                .unwrap()
+        );
+        assert!(
+            !bootstrap
+                .browser
+                .csrf
+                .verify_token(secret, "sess_999", "/checkout", &token)
+                .unwrap()
+        );
     }
 }
 

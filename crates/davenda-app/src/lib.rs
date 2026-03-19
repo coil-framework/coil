@@ -7,10 +7,10 @@ use davenda_cli::{
 };
 use davenda_config::PlatformConfig;
 use davenda_core::{
-    validate_module_capabilities, AdminResourceContribution, BulkOperationDefinition,
-    CapabilityValidationError, CoreServiceDependency, EventSubscription, JobContract,
-    MigrationContract, ModuleDependency, ModuleDependencyKind, ModuleManifest, PlatformModule,
-    ReportDefinition, RouteSurface, SearchIndexContribution,
+    AdminResourceContribution, BulkOperationDefinition, CapabilityValidationError,
+    CoreServiceDependency, EventSubscription, JobContract, MigrationContract, ModuleDependency,
+    ModuleDependencyKind, ModuleManifest, PlatformModule, ReportDefinition, RouteSurface,
+    SearchIndexContribution, validate_module_capabilities,
 };
 use davenda_data::{MigrationOwner, MigrationPlan};
 use davenda_i18n::LocaleTag;
@@ -1674,17 +1674,19 @@ mod tests {
                 ContractVersion::new(1, 2, 3),
                 ContractVersion::new(1, 0, 0),
                 ResourceLimits::baseline_for(davenda_wasm::ExtensionPointKind::RenderHook),
-                vec![HandlerManifest::new(
-                    HandlerId::new("account.loyalty.widget").unwrap(),
-                    "exports.loyalty_widget",
-                    ExtensionPoint::RenderHook(
-                        RenderHookExtensionPoint::new("cms.page.render").unwrap(),
-                    ),
-                    HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
-                        slot: "cms.page.render".to_string(),
-                    }]),
-                )
-                .unwrap()],
+                vec![
+                    HandlerManifest::new(
+                        HandlerId::new("account.loyalty.widget").unwrap(),
+                        "exports.loyalty_widget",
+                        ExtensionPoint::RenderHook(
+                            RenderHookExtensionPoint::new("cms.page.render").unwrap(),
+                        ),
+                        HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                            slot: "cms.page.render".to_string(),
+                        }]),
+                    )
+                    .unwrap(),
+                ],
             )
             .unwrap(),
             ExtensionArtifactSource::local_path("extensions/loyalty-widget.wasm").unwrap(),
@@ -2037,12 +2039,16 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(composition.bulk_operations.len(), 1);
         assert_eq!(composition.migrations.len(), 2);
         assert_eq!(composition.canonical_domain(), Some("shop.example.com"));
-        assert!(composition
-            .required_core_services
-            .contains(&CoreServiceDependency::Seo));
-        assert!(composition
-            .required_core_services
-            .contains(&CoreServiceDependency::Jobs));
+        assert!(
+            composition
+                .required_core_services
+                .contains(&CoreServiceDependency::Seo)
+        );
+        assert!(
+            composition
+                .required_core_services
+                .contains(&CoreServiceDependency::Jobs)
+        );
         assert_eq!(
             composition.module_list()[0].id,
             ModuleId::new("cms").unwrap()
@@ -2130,20 +2136,24 @@ cdn_base_url = "https://cdn.example.com"
                 entry.owner,
                 MigrationPlanOwner::AuthPackage(ref package) if package == "platform-default-auth"
             )));
-        assert!(runtime
-            .migration_summary
-            .entries()
-            .iter()
-            .any(|entry| matches!(
-                entry.owner,
-                MigrationPlanOwner::CustomerApp(ref app_id) if app_id == "harbor-shop"
-            )));
+        assert!(
+            runtime
+                .migration_summary
+                .entries()
+                .iter()
+                .any(|entry| matches!(
+                    entry.owner,
+                    MigrationPlanOwner::CustomerApp(ref app_id) if app_id == "harbor-shop"
+                ))
+        );
         assert!(!runtime.release_doctor.is_compatible());
-        assert!(runtime
-            .release_doctor
-            .findings
-            .iter()
-            .any(|finding| finding.code == "module.ops.missing"));
+        assert!(
+            runtime
+                .release_doctor
+                .findings
+                .iter()
+                .any(|finding| finding.code == "module.ops.missing")
+        );
     }
 
     #[test]
@@ -2248,22 +2258,28 @@ cdn_base_url = "https://cdn.example.com"
             .unwrap();
         let report = composition.release_doctor(Some(&runtime_config("harbor-shop")));
 
-        assert!(report
-            .findings
-            .iter()
-            .any(|finding| finding.code == "module.version.unpinned"));
-        assert!(report
-            .findings
-            .iter()
-            .any(|finding| finding.code == "module.ops.missing"));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.code == "module.version.unpinned")
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.code == "module.ops.missing")
+        );
 
         let mut drifted = runtime_config("harbor-shop");
         drifted.seo.canonical_host = "preview.example.com".to_string();
         let report = composition.release_doctor(Some(&drifted));
-        assert!(report
-            .findings
-            .iter()
-            .any(|finding| finding.code == "config.seo.canonical_host"));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.code == "config.seo.canonical_host")
+        );
 
         let mut wrong_checksum = extension_package();
         wrong_checksum.artifact_sha256 =
@@ -2276,10 +2292,12 @@ cdn_base_url = "https://cdn.example.com"
                 Some(&runtime_config("harbor-shop")),
             )
             .unwrap();
-        assert!(report
-            .findings
-            .iter()
-            .any(|finding| finding.code == "extension.checksum.mismatch"));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.code == "extension.checksum.mismatch")
+        );
     }
 
     #[test]
@@ -2316,9 +2334,11 @@ cdn_base_url = "https://cdn.example.com"
             release.command,
             vec!["release".to_string(), "doctor".to_string()]
         );
-        assert!(release
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "module.ops.missing"));
+        assert!(
+            release
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "module.ops.missing")
+        );
     }
 }

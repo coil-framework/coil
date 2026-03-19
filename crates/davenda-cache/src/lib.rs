@@ -833,7 +833,9 @@ impl CacheRuntime {
             };
         };
 
-        let age = now.as_unix_seconds().saturating_sub(entry.stored_at.as_unix_seconds());
+        let age = now
+            .as_unix_seconds()
+            .saturating_sub(entry.stored_at.as_unix_seconds());
         if age <= entry.freshness.ttl_seconds() {
             self.metrics.hits += 1;
             return CacheLookup {
@@ -873,7 +875,12 @@ impl CacheRuntime {
         let removed = self
             .entries
             .iter()
-            .filter(|(_, entry)| entry.tags.iter().any(|tag| tags.iter().any(|wanted| wanted == tag)))
+            .filter(|(_, entry)| {
+                entry
+                    .tags
+                    .iter()
+                    .any(|tag| tags.iter().any(|wanted| wanted == tag))
+            })
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
         for key in &removed {
@@ -1336,7 +1343,15 @@ mod tests {
 
         let removed = runtime.invalidate(&InvalidationSet::from_tags([tag("nav:main")]));
         assert_eq!(removed.len(), 2);
-        assert_eq!(runtime.lookup(page_plan.application().unwrap().key(), CacheInstant::from_unix_seconds(110)).state, CacheLookupState::Miss);
+        assert_eq!(
+            runtime
+                .lookup(
+                    page_plan.application().unwrap().key(),
+                    CacheInstant::from_unix_seconds(110)
+                )
+                .state,
+            CacheLookupState::Miss
+        );
         assert_eq!(runtime.metrics().invalidations, 2);
     }
 

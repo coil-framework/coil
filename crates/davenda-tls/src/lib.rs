@@ -24,9 +24,7 @@ pub enum TlsModelError {
     RenewalAlreadyInProgress { certificate_id: String },
     #[error("certificate `{certificate_id}` is not known to the TLS inventory")]
     UnknownCertificate { certificate_id: String },
-    #[error(
-        "hostname `{hostname}` is already bound to active certificate `{certificate_id}`"
-    )]
+    #[error("hostname `{hostname}` is already bound to active certificate `{certificate_id}`")]
     DuplicateHostnameBinding {
         hostname: String,
         certificate_id: String,
@@ -347,7 +345,10 @@ impl CertificateInventory {
 
     pub fn active_for_hostname(&self, hostname: &Hostname) -> Option<&CertificateRecord> {
         self.certificates.iter().find(|record| {
-            record.bindings.iter().any(|binding| &binding.hostname == hostname)
+            record
+                .bindings
+                .iter()
+                .any(|binding| &binding.hostname == hostname)
                 && matches!(
                     record.status,
                     CertificateStatus::Active
@@ -358,7 +359,9 @@ impl CertificateInventory {
     }
 
     pub fn record(&self, certificate_id: &CertificateId) -> Option<&CertificateRecord> {
-        self.certificates.iter().find(|record| &record.id == certificate_id)
+        self.certificates
+            .iter()
+            .find(|record| &record.id == certificate_id)
     }
 
     pub fn record_mut(&mut self, certificate_id: &CertificateId) -> Option<&mut CertificateRecord> {
@@ -378,11 +381,11 @@ impl CertificateInventory {
         certificate_id: &CertificateId,
         replacement: CertificateRecord,
     ) -> Result<(), TlsModelError> {
-        let original = self
-            .record(certificate_id)
-            .ok_or_else(|| TlsModelError::UnknownCertificate {
-                certificate_id: certificate_id.to_string(),
-            })?;
+        let original =
+            self.record(certificate_id)
+                .ok_or_else(|| TlsModelError::UnknownCertificate {
+                    certificate_id: certificate_id.to_string(),
+                })?;
         if original.replacing_certificate.as_ref() != Some(&replacement.id) {
             return Err(TlsModelError::MissingReplacementCertificate {
                 certificate_id: certificate_id.to_string(),
@@ -390,11 +393,11 @@ impl CertificateInventory {
         }
 
         self.ensure_unique_bindings(&replacement, Some(certificate_id))?;
-        let original = self
-            .record_mut(certificate_id)
-            .ok_or_else(|| TlsModelError::UnknownCertificate {
-                certificate_id: certificate_id.to_string(),
-            })?;
+        let original =
+            self.record_mut(certificate_id)
+                .ok_or_else(|| TlsModelError::UnknownCertificate {
+                    certificate_id: certificate_id.to_string(),
+                })?;
         original.status = CertificateStatus::Superseded;
         original.replacing_certificate = None;
 
@@ -507,12 +510,11 @@ impl TlsAutomationRuntime {
         certificate_id: &CertificateId,
         replacement_certificate_id: CertificateId,
     ) -> Result<ChallengeTicket, TlsModelError> {
-        let record = self
-            .inventory
-            .record_mut(certificate_id)
-            .ok_or_else(|| TlsModelError::UnknownCertificate {
+        let record = self.inventory.record_mut(certificate_id).ok_or_else(|| {
+            TlsModelError::UnknownCertificate {
                 certificate_id: certificate_id.to_string(),
-            })?;
+            }
+        })?;
         if record.replacing_certificate.is_some() {
             return Err(TlsModelError::RenewalAlreadyInProgress {
                 certificate_id: certificate_id.to_string(),
@@ -538,12 +540,11 @@ impl TlsAutomationRuntime {
         &mut self,
         certificate_id: &CertificateId,
     ) -> Result<CertificateRecord, TlsModelError> {
-        let record = self
-            .inventory
-            .record_mut(certificate_id)
-            .ok_or_else(|| TlsModelError::UnknownCertificate {
+        let record = self.inventory.record_mut(certificate_id).ok_or_else(|| {
+            TlsModelError::UnknownCertificate {
                 certificate_id: certificate_id.to_string(),
-            })?;
+            }
+        })?;
         record.status = CertificateStatus::RenewalDue;
         record.replacing_certificate = None;
         self.pending_challenges
@@ -994,7 +995,10 @@ mod tests {
         assert_eq!(queued.certificate_id, certificate_id);
 
         let challenge = automation
-            .begin_renewal(&certificate_id, CertificateId::new("cert-replacement").unwrap())
+            .begin_renewal(
+                &certificate_id,
+                CertificateId::new("cert-replacement").unwrap(),
+            )
             .unwrap();
         assert_eq!(
             challenge.replacement_certificate_id,

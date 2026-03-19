@@ -1207,6 +1207,19 @@ pub enum CapabilityValidationError {
         module: String,
         capability: Capability,
     },
+    #[error("module `{module}` declares duplicate job `{job}`")]
+    DuplicateModuleJob {
+        module: String,
+        job: String,
+    },
+    #[error(
+        "module `{module}` subscribes to `{event}` with unknown job `{job}`"
+    )]
+    UnknownSubscriptionJob {
+        module: String,
+        event: String,
+        job: String,
+    },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -1453,6 +1466,28 @@ where
                 module: manifest.name.clone(),
                 capability: contract.capability,
             });
+        }
+    }
+
+    let mut seen_jobs = std::collections::BTreeSet::new();
+    for job in &manifest.jobs {
+        if !seen_jobs.insert(job.name.clone()) {
+            return Err(CapabilityValidationError::DuplicateModuleJob {
+                module: manifest.name.clone(),
+                job: job.name.clone(),
+            });
+        }
+    }
+
+    for subscription in &manifest.event_subscriptions {
+        if let Some(job) = &subscription.job {
+            if !manifest.jobs.iter().any(|declared| declared.name == *job) {
+                return Err(CapabilityValidationError::UnknownSubscriptionJob {
+                    module: manifest.name.clone(),
+                    event: subscription.event.clone(),
+                    job: job.clone(),
+                });
+            }
         }
     }
 
@@ -1806,9 +1841,40 @@ cdn_base_url = "https://cdn.example.com"
             .with_capability_contracts(vec![
                 CapabilityContract::required(Capability::CmsPageRead, ["page"]),
                 CapabilityContract::required(Capability::CmsPagePublish, ["page"]),
-            ]);
+            ])
+            .with_jobs(vec![JobContract::new(
+                "cms.publish-scheduled",
+                JobTriggerKind::Scheduled,
+                true,
+                "Publishes scheduled pages",
+            )])
+            .with_event_subscriptions(vec![EventSubscription::new(
+                "cms.page.publish-requested",
+                Some("cms.publish-scheduled"),
+                "Schedules page publication",
+            )]);
 
         assert!(validate_module_capabilities(&package, &manifest).is_ok());
+
+        let invalid = ModuleManifest::new("cms-pages")
+            .with_required_capabilities(vec![Capability::CmsPageRead])
+            .with_capability_contracts(vec![CapabilityContract::required(
+                Capability::CmsPageRead,
+                ["page"],
+            )])
+            .with_event_subscriptions(vec![EventSubscription::new(
+                "cms.page.publish-requested",
+                Some("cms.publish-scheduled"),
+                "Schedules page publication",
+            )]);
+        assert_eq!(
+            validate_module_capabilities(&package, &invalid).unwrap_err(),
+            CapabilityValidationError::UnknownSubscriptionJob {
+                module: "cms-pages".to_string(),
+                event: "cms.page.publish-requested".to_string(),
+                job: "cms.publish-scheduled".to_string(),
+            }
+        );
     }
 
     #[test]

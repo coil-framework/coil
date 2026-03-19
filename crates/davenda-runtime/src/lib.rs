@@ -5,11 +5,12 @@ use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     BrowserSecurityServices, CapabilityValidationError, CliRuntimeServices, CookieSigner,
-    DataRuntimeServices, HttpFileDeliveryMode, HttpResponseContract, HttpSurfaceArea,
-    HttpSurfaceContribution, HttpSurfaceMethod, JobsRuntimeServices, ModuleInstallationError,
-    ModuleManifest, ObservabilityRuntimeServices, PlatformModule, RegistrationError,
-    ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
-    bootstrap_core_services, validate_module_capabilities, validate_module_installation,
+    DataRuntimeServices, EventSubscription, HttpFileDeliveryMode, HttpResponseContract,
+    HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, JobContract,
+    JobsRuntimeServices, ModuleInstallationError, ModuleManifest, ObservabilityRuntimeServices,
+    PlatformModule, RegistrationError, ServiceDescriptor, TemplateRuntimeServices,
+    TlsRuntimeServices, WasmRuntimeServices, bootstrap_core_services,
+    validate_module_capabilities, validate_module_installation,
 };
 use davenda_data::{DataModelError, MigrationPlan};
 use davenda_observability::{
@@ -725,6 +726,27 @@ where
             module.register(&mut registry)?;
         }
 
+        let module_jobs = module_manifests
+            .iter()
+            .flat_map(|manifest| {
+                manifest.jobs.iter().cloned().map(|job| RegisteredModuleJob {
+                    module: manifest.name.clone(),
+                    job,
+                })
+            })
+            .collect::<Vec<_>>();
+        let module_event_subscriptions = module_manifests
+            .iter()
+            .flat_map(|manifest| {
+                manifest.event_subscriptions.iter().cloned().map(|subscription| {
+                    RegisteredEventSubscription {
+                        module: manifest.name.clone(),
+                        subscription,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
         Ok(RuntimePlan {
             config: self.config,
             auth_package_name: self.auth_package.manifest().name.clone(),
@@ -742,6 +764,8 @@ where
             services: registry.services().cloned().collect(),
             modules: module_manifests,
             install_migrations,
+            module_jobs,
+            module_event_subscriptions,
         })
     }
 }
@@ -764,6 +788,20 @@ pub struct RuntimePlan {
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
     pub install_migrations: MigrationPlan,
+    pub module_jobs: Vec<RegisteredModuleJob>,
+    pub module_event_subscriptions: Vec<RegisteredEventSubscription>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredModuleJob {
+    pub module: String,
+    pub job: JobContract,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredEventSubscription {
+    pub module: String,
+    pub subscription: EventSubscription,
 }
 
 impl RuntimePlan {
@@ -1493,6 +1531,17 @@ cdn_base_url = "https://cdn.example.com"
                     step.owner
                         == davenda_data::MigrationOwner::Module("memberships".to_string())
                 })
+        );
+        assert!(
+            plan.module_jobs
+                .iter()
+                .any(|registered| registered.job.name == "events.reminders")
+        );
+        assert!(
+            plan.module_event_subscriptions.iter().any(|registered| {
+                registered.subscription.event == "commerce.order.paid"
+                    && registered.module == "memberships"
+            })
         );
     }
 

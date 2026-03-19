@@ -6,6 +6,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use davenda_a11y::{NavigationContract, ThemeAccessibilityContract};
 use davenda_auth::{AuthModelPackage, Capability};
 use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
+use davenda_cli::CliRuntime;
 use davenda_config::{
     CookieConfig as HttpCookieConfig, CsrfConfig as HttpCsrfConfig, DistributedCache,
     PlatformConfig, SameSitePolicy, SessionStore as ConfigSessionStore, TlsMode,
@@ -371,6 +372,7 @@ pub struct A11yRuntimeServices {
     pub theme_baseline: ThemeAccessibilityContract,
 }
 
+pub type CliRuntimeServices = CliRuntime;
 pub type DataRuntimeServices = DataRuntime;
 pub type JobsRuntimeServices = JobsRuntime;
 pub type ObservabilityRuntimeServices = ObservabilityRuntime;
@@ -381,6 +383,7 @@ pub struct CoreBootstrap {
     pub registry: ServiceRegistry,
     pub cache: CacheRuntimeServices,
     pub browser: BrowserSecurityServices,
+    pub cli: CliRuntimeServices,
     pub data: DataRuntimeServices,
     pub jobs: JobsRuntimeServices,
     pub observability: ObservabilityRuntimeServices,
@@ -542,6 +545,7 @@ pub fn bootstrap_core_services(
         planner: CachePlanner::new(cache_topology),
     };
     let browser = browser_security_from_config(config);
+    let cli = cli_runtime_from_config(config);
     let data = data_runtime_from_config(config);
     let jobs = jobs_runtime_from_config(config);
     let observability = observability_runtime_from_config(config);
@@ -553,6 +557,13 @@ pub fn bootstrap_core_services(
     let wasm = wasm_runtime_from_config(config);
 
     registry.register_core_service("core.config", "Typed platform configuration")?;
+    registry.register_core_service(
+        "core.cli",
+        format!(
+            "Platform CLI contract with {} baseline commands",
+            cli.registry.commands().count()
+        ),
+    )?;
     registry.register_core_service("core.logging", "Structured logging service")?;
     registry.register_core_service(
         "core.health",
@@ -708,6 +719,7 @@ pub fn bootstrap_core_services(
         registry,
         cache,
         browser,
+        cli,
         data,
         jobs,
         observability,
@@ -840,6 +852,7 @@ cdn_base_url = "https://cdn.example.com"
             .collect::<Vec<_>>();
 
         assert!(ids.contains(&"core.config"));
+        assert!(ids.contains(&"core.cli"));
         assert!(ids.contains(&"core.auth"));
         assert!(ids.contains(&"core.tls"));
         assert!(ids.contains(&"core.tls.reload"));
@@ -882,6 +895,13 @@ cdn_base_url = "https://cdn.example.com"
             "davenda_session"
         );
         assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
+        assert!(
+            bootstrap
+                .cli
+                .registry
+                .commands()
+                .any(|command| command.path == vec!["config".to_string(), "validate".to_string()])
+        );
         assert_eq!(
             bootstrap.data.driver,
             davenda_config::DatabaseDriver::Postgres
@@ -1151,6 +1171,10 @@ fn jobs_runtime_from_config(config: &PlatformConfig) -> JobsRuntimeServices {
 
 fn data_runtime_from_config(config: &PlatformConfig) -> DataRuntimeServices {
     DataRuntime::from_config(&config.database).expect("data runtime config must be valid")
+}
+
+fn cli_runtime_from_config(config: &PlatformConfig) -> CliRuntimeServices {
+    CliRuntime::baseline(&config.app.name).expect("cli runtime config must be valid")
 }
 
 fn tls_runtime_from_config(config: &PlatformConfig) -> TlsRuntimeServices {

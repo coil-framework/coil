@@ -7,6 +7,7 @@ members = [
     "crates/davenda-auth",
     "crates/davenda-cache",
     "crates/davenda-cms",
+    "crates/davenda-cli",
     "crates/davenda-commerce",
     "crates/davenda-config",
     "crates/davenda-core",

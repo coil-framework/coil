@@ -8,6 +8,7 @@ base64 = "0.22"
 davenda-a11y = { path = "../davenda-a11y" }
 davenda-auth = { path = "../davenda-auth" }
 davenda-cache = { path = "../davenda-cache" }
+davenda-cli = { path = "../davenda-cli" }
 davenda-config = { path = "../davenda-config" }
 davenda-data = { path = "../davenda-data" }
 davenda-i18n = { path = "../davenda-i18n" }

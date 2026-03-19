@@ -400,6 +400,13 @@ name = "davenda-cache"
 version = "0.1.0"
 
 [[package]]
+name = "davenda-cli"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "davenda-cms"
 version = "0.1.0"
 dependencies = [
@@ -432,6 +439,7 @@ dependencies = [
  "davenda-a11y",
  "davenda-auth",
  "davenda-cache",
+ "davenda-cli",
  "davenda-config",
  "davenda-data",
  "davenda-i18n",

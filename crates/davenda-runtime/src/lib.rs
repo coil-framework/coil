@@ -4,10 +4,10 @@ use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    BrowserSecurityServices, CapabilityValidationError, CookieSigner, DataRuntimeServices,
-    JobsRuntimeServices, ModuleManifest, ObservabilityRuntimeServices, PlatformModule,
-    RegistrationError, ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices,
-    WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
+    BrowserSecurityServices, CapabilityValidationError, CliRuntimeServices, CookieSigner,
+    DataRuntimeServices, JobsRuntimeServices, ModuleManifest, ObservabilityRuntimeServices,
+    PlatformModule, RegistrationError, ServiceDescriptor, TemplateRuntimeServices,
+    TlsRuntimeServices, WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
 };
 use davenda_observability::{
     CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
@@ -625,6 +625,7 @@ where
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
             browser: bootstrap.browser,
+            cli: bootstrap.cli,
             data: bootstrap.data,
             jobs: bootstrap.jobs,
             observability,
@@ -645,6 +646,7 @@ pub struct RuntimePlan {
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
     pub browser: BrowserSecurityServices,
+    pub cli: CliRuntimeServices,
     pub data: DataRuntimeServices,
     pub jobs: JobsRuntimeServices,
     pub observability: ObservabilityRuntimeServices,
@@ -1084,6 +1086,12 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
         assert_eq!(plan.browser.csrf.field_name, "_csrf");
+        assert!(
+            plan.cli
+                .registry
+                .commands()
+                .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()])
+        );
         assert_eq!(plan.data.driver, davenda_config::DatabaseDriver::Postgres);
         assert_eq!(plan.data.schema, "public");
         assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);

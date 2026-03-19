@@ -1,6 +1,10 @@
 use super::*;
 use davenda_assets::ManagedAsset;
 use davenda_auth::{AuthModelPackage, Capability, DavendaAuth, DefaultSubject};
+use davenda_storage::execution::{
+    StorageDeliveryLocation, StorageExecutionError, StorageExecutor, StorageReadReceipt,
+    StorageWriteReceipt,
+};
 use zanzibar::RebacEngine;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -359,6 +363,7 @@ tracing = false
 
 [assets]
 publish_manifest = false
+cdn_base_url = "https://cdn.example.test"
 "#,
         )
         .unwrap()

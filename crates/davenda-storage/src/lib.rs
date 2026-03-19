@@ -1,4 +1,4 @@
-mod execution;
+pub mod execution;
 mod planner;
 mod policy;
 

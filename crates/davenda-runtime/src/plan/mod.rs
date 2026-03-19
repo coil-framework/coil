@@ -2,6 +2,7 @@ use super::*;
 use url::Url;
 
 mod execution;
+mod live;
 #[cfg(test)]
 mod testing;
 
@@ -99,12 +100,9 @@ impl RuntimePlan {
         let shared_runtime = shared_jobs_runtime_for_test(&self.jobs, namespace.clone());
         #[cfg(not(test))]
         // Live builds never fall back to local/shared-volume jobs state.
-        let shared_runtime = davenda_jobs::JobsBackendAdapter::live_rejection_shared_runtime(
-            &self.jobs,
-            namespace.clone(),
-        );
+        let shared_runtime = live::live_rejection_jobs_runtime(&self.jobs, namespace.clone());
         #[cfg(not(test))]
-        if !shared_runtime.supports_live_shared_state() {
+        if !shared_runtime.is_shared_backend() {
             return Err(RuntimeJobsError::LiveSharedRuntimeRequiresExplicitBackend {
                 backend: self.jobs.backend,
             });
@@ -164,12 +162,9 @@ impl RuntimePlan {
             let runtime = shared_cache_runtime_for_test(backend, shared_namespace.clone());
             #[cfg(not(test))]
             // Live builds never fall back to local/shared-volume cache state.
-            let runtime = davenda_cache::DistributedCacheClient::live_rejection_shared_runtime(
-                backend,
-                shared_namespace.clone(),
-            );
+            let runtime = live::live_rejection_cache_runtime(backend, shared_namespace.clone());
             #[cfg(not(test))]
-            if !runtime.supports_live_shared_state() {
+            if !runtime.is_shared_backend() {
                 return Err(
                     RuntimeCacheError::LiveSharedRuntimeRequiresExplicitBackend { kind: backend },
                 );

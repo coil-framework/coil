@@ -197,16 +197,12 @@ fn module_manifest_and_registration_match_first_party_patterns() {
     let module = MediaModule::default();
     let manifest = module.manifest();
     assert_eq!(manifest.name, "media");
-    assert!(
-        manifest
-            .required_capabilities
-            .contains(&Capability::AssetManageStorage)
-    );
-    assert!(
-        manifest
-            .optional_capabilities
-            .contains(&Capability::AdminShellAccess)
-    );
+    assert!(manifest
+        .required_capabilities
+        .contains(&Capability::AssetManageStorage));
+    assert!(manifest
+        .optional_capabilities
+        .contains(&Capability::AdminShellAccess));
     assert_eq!(manifest.migrations.len(), 3);
     assert_eq!(manifest.route_surfaces.len(), 3);
     assert_eq!(manifest.http_surfaces.len(), 3);
@@ -214,17 +210,13 @@ fn module_manifest_and_registration_match_first_party_patterns() {
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.admin_resources.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 1);
-    assert!(
-        manifest
-            .behaviors
-            .contains(&ModuleBehavior::AuthGovernedPublication)
-    );
-    assert!(
-        manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget)
-    );
+    assert!(manifest
+        .behaviors
+        .contains(&ModuleBehavior::AuthGovernedPublication));
+    assert!(manifest
+        .extension_slots
+        .iter()
+        .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
     assert_eq!(
         module
             .install_migration_plan()

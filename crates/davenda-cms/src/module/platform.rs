@@ -1,189 +1,5 @@
+use super::support::{cms_live_pages_repository, default_retry_policy};
 use super::*;
-use std::time::Duration;
-
-use davenda_auth::Capability;
-use davenda_core::{
-    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    BulkOperationDefinition, BulkOperationKind, BulkOperationScope, CapabilityContract,
-    CoreServiceDependency, DataRepositoryContribution, DataRepositoryQueryProfile,
-    EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind, HttpSurfaceArea,
-    HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
-    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
-    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
-};
-use davenda_data::{
-    FilterOperator, MigrationId, MigrationOwner, MigrationPlan, MigrationStep, PageRequest,
-    PublicationVisibility, QueryCacheScope, QueryContext, QueryField, QueryFilter, QuerySort,
-    QuerySpec, RepositorySpec, TableName,
-};
-use davenda_jobs::RetryPolicy;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CmsModule {
-    name: String,
-    config_namespace: String,
-    admin_resources: Vec<AdminResourceContribution>,
-}
-
-impl CmsModule {
-    pub fn new() -> Self {
-        Self {
-            name: "cms".to_string(),
-            config_namespace: "cms".to_string(),
-            admin_resources: vec![
-                AdminResourceContribution::new(
-                    "cms.pages",
-                    "/admin/cms/pages",
-                    "Pages",
-                    "Pages",
-                    AdminNavigationSection::Content,
-                    AdminContributionKind::ResourceIndex,
-                    Capability::CmsPageRead,
-                ),
-                AdminResourceContribution::new(
-                    "cms.navigation",
-                    "/admin/cms/navigation",
-                    "Navigation",
-                    "Navigation",
-                    AdminNavigationSection::Content,
-                    AdminContributionKind::ResourceIndex,
-                    Capability::CmsNavigationEdit,
-                ),
-                AdminResourceContribution::new(
-                    "cms.media",
-                    "/admin/cms/media",
-                    "Media",
-                    "Media",
-                    AdminNavigationSection::Content,
-                    AdminContributionKind::ResourceIndex,
-                    Capability::AssetRead,
-                ),
-            ],
-        }
-    }
-
-    pub fn admin_resources(&self) -> &[AdminResourceContribution] {
-        &self.admin_resources
-    }
-
-    pub fn live_pages_query(&self, locale: Option<&str>) -> Result<CmsPageQuery, CmsModelError> {
-        let query = QuerySpec::new(
-            PageRequest::new(0, 50)?,
-            QueryContext {
-                locale: locale.map(str::to_owned),
-                principal_id: None,
-                publication_visibility: PublicationVisibility::PublishedOnly,
-                cache_scope: if locale.is_some() {
-                    QueryCacheScope::LocaleScoped
-                } else {
-                    QueryCacheScope::Public
-                },
-            },
-        )
-        .with_filter(QueryFilter::new(
-            "workflow_status",
-            FilterOperator::Eq,
-            vec![PageWorkflowStatus::Published.to_string()],
-        )?)
-        .with_sort(QuerySort::ascending("live_path")?);
-
-        Ok(CmsPageQuery { query })
-    }
-
-    pub fn editorial_queue_query(
-        &self,
-        principal_id: &str,
-        locale: Option<&str>,
-    ) -> Result<CmsPageQuery, CmsModelError> {
-        let query = QuerySpec::new(
-            PageRequest::new(0, 100)?,
-            QueryContext {
-                locale: locale.map(str::to_owned),
-                principal_id: Some(require_non_empty("principal_id", principal_id.to_string())?),
-                publication_visibility: PublicationVisibility::IncludeDrafts,
-                cache_scope: QueryCacheScope::UserScoped,
-            },
-        )
-        .with_filter(QueryFilter::new(
-            "workflow_status",
-            FilterOperator::In,
-            vec![
-                PageWorkflowStatus::DraftOnly.to_string(),
-                PageWorkflowStatus::Scheduled.to_string(),
-                PageWorkflowStatus::PublishedWithDraft.to_string(),
-                PageWorkflowStatus::PublishedWithScheduledDraft.to_string(),
-            ],
-        )?)
-        .with_sort(QuerySort::ascending("updated_at")?);
-
-        Ok(CmsPageQuery { query })
-    }
-
-    pub fn redirect_lookup_query(
-        &self,
-        path: &str,
-        locale: Option<&str>,
-    ) -> Result<RedirectLookupQuery, CmsModelError> {
-        let query = QuerySpec::new(
-            PageRequest::new(0, 1)?,
-            QueryContext {
-                locale: locale.map(str::to_owned),
-                principal_id: None,
-                publication_visibility: PublicationVisibility::PublishedOnly,
-                cache_scope: if locale.is_some() {
-                    QueryCacheScope::LocaleScoped
-                } else {
-                    QueryCacheScope::Public
-                },
-            },
-        )
-        .with_filter(QueryFilter::new(
-            "redirect_from",
-            FilterOperator::Eq,
-            vec![validate_path("redirect_lookup_path", path.to_string())?],
-        )?);
-
-        Ok(RedirectLookupQuery { query })
-    }
-
-    pub fn migration_plan(&self) -> Result<MigrationPlan, CmsModelError> {
-        let owner = MigrationOwner::Module(self.name.clone());
-        let mut plan = MigrationPlan::new();
-        plan.insert(MigrationStep::new(
-            MigrationId::new("001_pages_revisions")?,
-            owner.clone(),
-            10,
-            "create cms pages, localized revisions, and seo metadata tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("002_navigation")?,
-            owner.clone(),
-            20,
-            "create navigation trees and navigation item adjacency tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("003_redirects")?,
-            owner.clone(),
-            30,
-            "create redirect rules and route handoff tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("004_publication_queue")?,
-            owner,
-            40,
-            "create scheduled publication queue and preview token tables",
-        )?)?;
-        Ok(plan)
-    }
-}
-
-impl Default for CmsModule {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl PlatformModule for CmsModule {
     fn manifest(&self) -> ModuleManifest {
@@ -208,35 +24,17 @@ impl PlatformModule for CmsModule {
                 CapabilityContract::required(Capability::CmsPageRead, ["page"]),
                 CapabilityContract::required(Capability::CmsPageEdit, ["page"]),
                 CapabilityContract::required(Capability::CmsPagePublish, ["page"]),
-                CapabilityContract::required(
-                    Capability::CmsNavigationEdit,
-                    ["navigation"],
-                ),
-                CapabilityContract::optional(
-                    Capability::AdminShellAccess,
-                    ["admin_module"],
-                ),
-                CapabilityContract::optional(
-                    Capability::SeoMetadataEdit,
-                    ["page", "navigation"],
-                ),
+                CapabilityContract::required(Capability::CmsNavigationEdit, ["navigation"]),
+                CapabilityContract::optional(Capability::AdminShellAccess, ["admin_module"]),
+                CapabilityContract::optional(Capability::SeoMetadataEdit, ["page", "navigation"]),
                 CapabilityContract::optional(
                     Capability::I18nTranslationEdit,
                     ["page", "navigation"],
                 ),
                 CapabilityContract::optional(Capability::AssetRead, ["asset", "media"]),
-                CapabilityContract::optional(
-                    Capability::AssetReadPublic,
-                    ["asset", "media"],
-                ),
-                CapabilityContract::optional(
-                    Capability::AssetPublish,
-                    ["asset", "media"],
-                ),
-                CapabilityContract::optional(
-                    Capability::AssetReplace,
-                    ["asset", "media"],
-                ),
+                CapabilityContract::optional(Capability::AssetReadPublic, ["asset", "media"]),
+                CapabilityContract::optional(Capability::AssetPublish, ["asset", "media"]),
+                CapabilityContract::optional(Capability::AssetReplace, ["asset", "media"]),
             ])
             .with_module_dependencies(vec![
                 ModuleDependency::optional(
@@ -286,12 +84,8 @@ impl PlatformModule for CmsModule {
                     "/admin/pages/preview",
                 )
                 .gated_by(Capability::CmsPageRead),
-                RouteSurface::new(
-                    "cms.pages.index",
-                    RouteSurfaceKind::AdminPage,
-                    "/admin/pages",
-                )
-                .gated_by(Capability::CmsPageRead),
+                RouteSurface::new("cms.pages.index", RouteSurfaceKind::AdminPage, "/admin/pages")
+                    .gated_by(Capability::CmsPageRead),
                 RouteSurface::new(
                     "cms.navigation.index",
                     RouteSurfaceKind::AdminPage,
@@ -519,40 +313,4 @@ impl PlatformModule for CmsModule {
     fn install_migration_plan(&self) -> Option<MigrationPlan> {
         Some(CmsModule::migration_plan(self).expect("cms migration plan is constant and valid"))
     }
-}
-
-fn cms_live_pages_repository() -> DataRepositoryContribution {
-    DataRepositoryContribution::new(
-        RepositorySpec::new(
-            "cms.pages.live",
-            TableName::new("davenda.cms_pages").expect("constant cms table is valid"),
-            vec![
-                QueryField::new("page_id").expect("constant cms field is valid"),
-                QueryField::new("title").expect("constant cms field is valid"),
-                QueryField::new("live_path").expect("constant cms field is valid"),
-                QueryField::new("updated_at").expect("constant cms field is valid"),
-            ],
-        )
-        .expect("constant cms repository is valid")
-        .with_locale_field("locale")
-        .expect("constant cms locale field is valid")
-        .with_publication_field("workflow_status", "published")
-        .expect("constant cms publication field is valid")
-        .with_filterable_field("slug")
-        .expect("constant cms filter field is valid")
-        .with_sortable_field("live_path")
-        .expect("constant cms sortable field is valid")
-        .with_default_sort(QuerySort::ascending("live_path").expect("constant cms sort is valid")),
-        DataRepositoryQueryProfile::new(
-            PageRequest::new(0, 24).expect("constant cms page size is valid"),
-            PublicationVisibility::PublishedOnly,
-            QueryCacheScope::Public,
-        )
-        .with_localized_cache_scope(QueryCacheScope::LocaleScoped),
-    )
-}
-
-fn default_retry_policy() -> RetryPolicy {
-    RetryPolicy::new(3, Duration::from_secs(15), Duration::from_secs(300))
-        .expect("constant retry policy is valid")
 }

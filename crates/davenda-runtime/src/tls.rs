@@ -36,15 +36,16 @@ impl TlsHost {
     }
 
     pub fn status(&self) -> TlsStatusSnapshot {
+        let snapshot = self.automation.snapshot();
         TlsStatusSnapshot {
             customer_app: self.customer_app.clone(),
             mode: self.runtime.mode,
             edge_mode: self.runtime.edge_mode,
             provider: self.runtime.provider,
-            inventory: self.automation.inventory().clone(),
-            queued_renewals: self.automation.renewal_queue().to_vec(),
-            pending_challenges: self.automation.pending_challenges().to_vec(),
-            hot_reload_events: self.automation.hot_reload_events().to_vec(),
+            inventory: snapshot.inventory,
+            queued_renewals: snapshot.renewal_queue,
+            pending_challenges: snapshot.pending_challenges,
+            hot_reload_events: snapshot.hot_reload_events,
         }
     }
 

@@ -50,11 +50,12 @@ use davenda_tls::{
     TlsAutomationRuntime, TlsInstant, TlsModelError,
 };
 use davenda_wasm::{
-    AdminWidgetInvocation, ApiInvocation, ContractVersion, CustomerAppContext, ExtensionPointKind,
-    ExtensionRegistry, HttpMethod as WasmHttpMethod, InstalledExtension, InvocationContext,
-    InvocationInput, InvocationPlan, JobInvocation, PageInvocation, PrincipalRef,
-    RenderHookInvocation, ScheduledJobInvocation, TraceContext, WasmExecutionSession,
-    WasmModelError, WebhookInvocation,
+    AdminWidgetInvocation, ApiInvocation, CompiledWasmModule, ContractVersion,
+    CustomerAppContext, ExecutionReceipt, ExtensionPointKind, ExtensionRegistry,
+    HttpMethod as WasmHttpMethod, InstalledExtension, InvocationContext, InvocationInput,
+    InvocationPlan, JobInvocation, PageInvocation, PrincipalRef, RenderHookInvocation,
+    ScheduledJobInvocation, TraceContext, WasmEngine, WasmExecutionSession, WasmModelError,
+    WebhookInvocation,
 };
 use thiserror::Error;
 
@@ -65,6 +66,7 @@ mod http;
 mod jobs;
 mod ops;
 mod plan;
+mod server;
 mod storage;
 mod tls;
 mod wasm;
@@ -76,6 +78,7 @@ pub use http::*;
 pub use jobs::*;
 pub use ops::*;
 pub use plan::*;
+pub use server::*;
 pub use storage::*;
 pub use tls::*;
 pub use wasm::*;

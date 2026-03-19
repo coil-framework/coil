@@ -39,7 +39,7 @@ use davenda_wasm::{
     JobExtensionPoint, PrincipalKind, RenderHookExtensionPoint, ResourceLimits,
     ScheduledJobExtensionPoint, WasmModelError, WebhookExtensionPoint,
 };
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const VALID_CONFIG: &str = r#"
 [app]
@@ -1357,9 +1357,6 @@ async fn server_host_adapts_live_requests_into_runtime_execution() {
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
-        .sign(cookie_secret, "session-live-1")
-        .unwrap();
     let resolver = StaticSecretResolver::new()
         .with_secret(
             davenda_config::SecretRef::Env {
@@ -1371,12 +1368,26 @@ async fn server_host_adapts_live_requests_into_runtime_execution() {
     let server = plan
         .server_host(&resolver, cookie_secret, csrf_secret)
         .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
     let request = Request::builder()
         .method("GET")
         .uri("/account")
         .header("host", "www.example.com")
         .header("x-forwarded-proto", "https")
-        .header("cookie", format!("davenda_session={session_cookie}"))
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
         .body(Body::empty())
         .unwrap();
 

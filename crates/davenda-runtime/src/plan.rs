@@ -108,6 +108,27 @@ impl RuntimePlan {
         )
     }
 
+    pub fn shared_backend_clients<R: SecretResolver>(
+        &self,
+        resolver: &R,
+    ) -> Result<SharedBackendClients, RuntimeServerError> {
+        Ok(SharedBackendClients::from_config(&self.config, resolver)?)
+    }
+
+    pub fn server_host<R: SecretResolver>(
+        &self,
+        resolver: &R,
+        cookie_secret: &[u8],
+        csrf_secret: &[u8],
+    ) -> Result<HttpServerHost, RuntimeServerError> {
+        Ok(HttpServerHost::new(
+            self.clone(),
+            self.shared_backend_clients(resolver)?,
+            cookie_secret.to_vec(),
+            csrf_secret.to_vec(),
+        ))
+    }
+
     pub(crate) fn cache_namespace(&self) -> Result<CacheNamespace, CacheModelError> {
         CacheNamespace::new(format!("customer-app:{}", self.config.app.name))
     }

@@ -1,7 +1,10 @@
 use std::fmt;
+use std::str::FromStr;
 use std::time::Duration;
 
 use davenda_config::{DatabaseConfig, DatabaseDriver, SecretRef};
+use sqlx::postgres::{PgArguments, PgConnectOptions, PgPoolOptions};
+use sqlx::{Pool, Postgres};
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -51,6 +54,14 @@ pub enum DataModelError {
     MissingConnectionSecretEnv { var: String },
     #[error("secret reference `{secret_ref}` is not supported by the local data runtime")]
     UnsupportedSecretRef { secret_ref: String },
+    #[error("database driver `{driver:?}` does not support sqlx-backed postgres execution")]
+    UnsupportedSqlxDriver { driver: DatabaseDriver },
+    #[error("database connection URL is invalid: {reason}")]
+    InvalidConnectionUrl { reason: String },
+    #[error("unsigned value `{value}` cannot be represented as a Postgres BIGINT bind")]
+    UnsupportedUnsignedBindValue { value: u64 },
+    #[error("sqlx execution failed: {reason}")]
+    Sqlx { reason: String },
     #[error("migration `{migration_id}` has no SQL statements to apply")]
     MissingMigrationStatements { migration_id: String },
 }
@@ -950,6 +961,28 @@ pub struct DataRuntime {
     pub pool: ConnectionPoolProfile,
 }
 
+#[derive(Debug, Clone)]
+pub struct PostgresDataClient {
+    pub runtime: DataRuntime,
+    pub connection_url: String,
+    pub pool: Pool<Postgres>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatementExecution {
+    pub rows_affected: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransactionExecution {
+    pub statements_executed: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationBatchExecution {
+    pub statements_executed: usize,
+}
+
 impl DataRuntime {
     pub fn from_config(config: &DatabaseConfig) -> Result<Self, DataModelError> {
         if config.max_connections == 0 || config.min_connections > config.max_connections {
@@ -989,6 +1022,32 @@ impl DataRuntime {
             }),
             None => Err(DataModelError::MissingConnectionSecret),
         }
+    }
+
+    pub fn connect_lazy_postgres(&self) -> Result<PostgresDataClient, DataModelError> {
+        if self.driver != DatabaseDriver::Postgres {
+            return Err(DataModelError::UnsupportedSqlxDriver {
+                driver: self.driver,
+            });
+        }
+
+        let connection_url = self.resolve_connection_url()?;
+        let options = PgConnectOptions::from_str(&connection_url).map_err(|error| {
+            DataModelError::InvalidConnectionUrl {
+                reason: error.to_string(),
+            }
+        })?;
+        let pool = PgPoolOptions::new()
+            .min_connections(u32::from(self.pool.min_connections))
+            .max_connections(u32::from(self.pool.max_connections))
+            .acquire_timeout(self.pool.statement_timeout)
+            .connect_lazy_with(options);
+
+        Ok(PostgresDataClient {
+            runtime: self.clone(),
+            connection_url,
+            pool,
+        })
     }
 
     pub fn compile_query(
@@ -1063,6 +1122,142 @@ impl DataRuntime {
     ) -> Result<CompiledMigrationBatch, DataModelError> {
         registry.compile_apply_batch(self)
     }
+}
+
+impl PostgresDataClient {
+    pub async fn ping(&self) -> Result<(), DataModelError> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|error| DataModelError::Sqlx {
+                reason: error.to_string(),
+            })?;
+        Ok(())
+    }
+
+    pub async fn execute_statement(
+        &self,
+        statement: &CompiledStatement,
+    ) -> Result<StatementExecution, DataModelError> {
+        self.apply_statement_timeout().await?;
+        let result = bind_query(sqlx::query(&statement.sql), &statement.bind_values)?
+            .execute(&self.pool)
+            .await
+            .map_err(|error| DataModelError::Sqlx {
+                reason: error.to_string(),
+            })?;
+
+        Ok(StatementExecution {
+            rows_affected: result.rows_affected(),
+        })
+    }
+
+    pub async fn execute_transaction(
+        &self,
+        transaction: &CompiledTransaction,
+    ) -> Result<TransactionExecution, DataModelError> {
+        let mut tx = self.pool.begin().await.map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        sqlx::query(&format!(
+            "SET LOCAL statement_timeout = {}",
+            self.runtime.pool.statement_timeout.as_millis()
+        ))
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        for statement in &transaction.statements {
+            bind_query(sqlx::query(&statement.sql), &statement.bind_values)?
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| DataModelError::Sqlx {
+                    reason: error.to_string(),
+                })?;
+        }
+
+        tx.commit().await.map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        Ok(TransactionExecution {
+            statements_executed: transaction.statements.len(),
+        })
+    }
+
+    pub async fn apply_migrations(
+        &self,
+        batch: &CompiledMigrationBatch,
+    ) -> Result<MigrationBatchExecution, DataModelError> {
+        let mut tx = self.pool.begin().await.map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        sqlx::query(&format!(
+            "SET LOCAL statement_timeout = {}",
+            self.runtime.pool.statement_timeout.as_millis()
+        ))
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        for statement in &batch.statements {
+            bind_query(sqlx::query(&statement.sql), &statement.bind_values)?
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| DataModelError::Sqlx {
+                    reason: error.to_string(),
+                })?;
+        }
+
+        tx.commit().await.map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        Ok(MigrationBatchExecution {
+            statements_executed: batch.statements.len(),
+        })
+    }
+
+    async fn apply_statement_timeout(&self) -> Result<(), DataModelError> {
+        sqlx::query(&format!(
+            "SET statement_timeout = {}",
+            self.runtime.pool.statement_timeout.as_millis()
+        ))
+        .execute(&self.pool)
+        .await
+        .map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+        Ok(())
+    }
+}
+
+fn bind_query<'q>(
+    mut query: sqlx::query::Query<'q, Postgres, PgArguments>,
+    values: &[DataValue],
+) -> Result<sqlx::query::Query<'q, Postgres, PgArguments>, DataModelError> {
+    for value in values {
+        query = match value {
+            DataValue::String(value) => query.bind(value.clone()),
+            DataValue::Int(value) => query.bind(*value),
+            DataValue::UInt(value) => {
+                let value =
+                    i64::try_from(*value).map_err(|_| DataModelError::UnsupportedUnsignedBindValue {
+                        value: *value,
+                    })?;
+                query.bind(value)
+            }
+            DataValue::Bool(value) => query.bind(*value),
+        };
+    }
+
+    Ok(query)
 }
 
 fn owner_rank(owner: &MigrationOwner) -> u8 {
@@ -1238,6 +1433,7 @@ fn require_non_empty(field: &'static str, value: String) -> Result<String, DataM
 mod tests {
     use super::*;
     use davenda_config::{DatabaseConfig, SecretRef};
+    use std::env;
 
     #[test]
     fn data_runtime_maps_database_config_into_pool_profile() {
@@ -1268,6 +1464,71 @@ mod tests {
         assert_eq!(runtime.schema, "davenda");
         assert_eq!(runtime.pool.max_connections, 16);
         assert_eq!(runtime.pool.statement_timeout, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn runtime_can_create_a_lazy_postgres_client() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            let var = "DAVENDA_TEST_DATABASE_URL";
+            let previous = env::var(var).ok();
+            unsafe {
+                env::set_var(var, "postgres://davenda:davenda@localhost/davenda");
+            }
+
+            let runtime = DataRuntime::from_config(&DatabaseConfig {
+                url: Some(SecretRef::Env {
+                    var: var.to_string(),
+                }),
+                ..DatabaseConfig::default()
+            })
+            .unwrap();
+            let client = runtime.connect_lazy_postgres().unwrap();
+
+            assert_eq!(client.runtime.driver, DatabaseDriver::Postgres);
+            assert_eq!(
+                client.connection_url,
+                "postgres://davenda:davenda@localhost/davenda"
+            );
+
+            match previous {
+                Some(value) => unsafe {
+                    env::set_var(var, value);
+                },
+                None => unsafe {
+                    env::remove_var(var);
+                },
+            }
+        });
+    }
+
+    #[test]
+    fn connect_lazy_postgres_requires_a_resolvable_connection_secret() {
+        let runtime = DataRuntime::from_config(&DatabaseConfig {
+            url: None,
+            ..DatabaseConfig::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            runtime.connect_lazy_postgres().unwrap_err(),
+            DataModelError::MissingConnectionSecret
+        );
+    }
+
+    #[test]
+    fn bind_query_rejects_unsigned_values_that_exceed_bigint() {
+        match bind_query(sqlx::query("SELECT $1"), &[DataValue::UInt(u64::MAX)]) {
+            Err(error) => assert_eq!(
+                error,
+                DataModelError::UnsupportedUnsignedBindValue { value: u64::MAX }
+            ),
+            Ok(_) => panic!("expected oversized unsigned bind to be rejected"),
+        }
     }
 
     #[test]

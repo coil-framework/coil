@@ -330,6 +330,7 @@ deployment = "single_node"
 
 [cache]
 l1 = "moka"
+l2 = "redis"
 
 [i18n]
 default_locale = "en"
@@ -347,7 +348,7 @@ explain_api = false
 tenant_id = 1
 
 [modules]
-enabled = []
+enabled = ["cms"]
 
 [wasm]
 directory = "/tmp/davenda-runtime-storage-tests"

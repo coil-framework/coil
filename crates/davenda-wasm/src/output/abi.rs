@@ -112,7 +112,7 @@ impl TypedExecutionOutput {
         )
     }
 
-    pub fn new(
+    pub(crate) fn new(
         surface: ExtensionPointKind,
         status: u16,
         body: TypedResponseBody,

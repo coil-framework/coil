@@ -1004,6 +1004,10 @@ impl JobsBackendAdapter {
         )
     }
 
+    pub fn shared(runtime: &JobsRuntime) -> Self {
+        Self::in_memory(runtime)
+    }
+
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         self.runtime.snapshot()
     }

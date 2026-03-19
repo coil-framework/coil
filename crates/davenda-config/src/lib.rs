@@ -1,7 +1,9 @@
 use std::env;
+use std::fmt;
 use std::fs;
 use std::path::Path;
 
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -76,6 +78,14 @@ impl PlatformConfig {
 
         if self.server.bind.trim().is_empty() {
             errors.push(ConfigValidationError::EmptyServerBind);
+        }
+
+        for trusted_proxy in &self.server.trusted_proxies {
+            if trusted_proxy.parse::<IpNet>().is_err() {
+                errors.push(ConfigValidationError::InvalidTrustedProxy {
+                    value: trusted_proxy.clone(),
+                });
+            }
         }
 
         if self.http.session.idle_timeout_secs == 0 {
@@ -331,6 +341,8 @@ pub struct CookieConfig {
     pub secure: bool,
     #[serde(default = "default_true")]
     pub http_only: bool,
+    #[serde(default)]
+    pub protection: CookieProtection,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -339,6 +351,14 @@ pub enum SameSitePolicy {
     Lax,
     Strict,
     None,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CookieProtection {
+    #[default]
+    Signed,
+    Encrypted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -584,6 +604,8 @@ pub enum ConfigValidationError {
     EmptyAppName,
     #[error("server.bind must not be empty")]
     EmptyServerBind,
+    #[error("server.trusted_proxies contains invalid entry `{value}`")]
+    InvalidTrustedProxy { value: String },
     #[error("{field} must be greater than zero")]
     InvalidSessionTimeout { field: &'static str },
     #[error(
@@ -712,8 +734,6 @@ fn default_true() -> bool {
     true
 }
 
-use std::fmt;
-
 fn merge_toml_value(base: &mut toml::Value, overlay: toml::Value) {
     match (base, overlay) {
         (toml::Value::Table(base_table), toml::Value::Table(overlay_table)) => {
@@ -834,6 +854,10 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(config.cache.l1, CacheL1::Moka);
         assert_eq!(config.cache.l2, Some(DistributedCache::Redis));
         assert_eq!(config.http.session.store, SessionStore::Redis);
+        assert_eq!(
+            config.http.session_cookie.protection,
+            CookieProtection::Signed
+        );
     }
 
     #[test]
@@ -929,6 +953,38 @@ max_connections = 4
             }
             other => panic!("expected validation error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rejects_invalid_trusted_proxy_entries() {
+        let invalid = VALID_CONFIG.replace("10.0.0.0/8", "not-a-proxy");
+
+        let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
+
+        match error {
+            ConfigError::Validation(errors) => {
+                assert!(errors.0.contains(&ConfigValidationError::InvalidTrustedProxy {
+                    value: "not-a-proxy".to_string(),
+                }));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_cookie_protection_overrides() {
+        let overlay = r#"
+[http.session_cookie]
+protection = "encrypted"
+"#;
+
+        let config = PlatformConfig::from_toml_str_with_overlays(VALID_CONFIG, [overlay]).unwrap();
+
+        assert_eq!(
+            config.http.session_cookie.protection,
+            CookieProtection::Encrypted
+        );
+        assert_eq!(config.http.flash_cookie.protection, CookieProtection::Signed);
     }
 
     #[test]

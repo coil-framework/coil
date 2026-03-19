@@ -15,7 +15,7 @@ use davenda_cache::{
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     BrowserSecurityServices, BulkOperationDefinition, CapabilityValidationError,
-    CliRuntimeServices, CookieSigner, DataRuntimeServices, EventSubscription, HttpFileDeliveryMode,
+    CliRuntimeServices, DataRuntimeServices, EventSubscription, HttpFileDeliveryMode,
     HttpResponseContract, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod,
     I18nRuntimeServices, JobContract, JobTriggerKind, JobsRuntimeServices, ModuleInstallationError,
     ModuleManifest, ObservabilityRuntimeServices, PlatformModule, RegistrationError,
@@ -54,6 +54,7 @@ use davenda_wasm::{
     ExecutionReceipt, ExtensionPointKind, ExtensionRegistry, HttpMethod as WasmHttpMethod,
     InstalledExtension, InvocationContext, InvocationInput, InvocationPlan, JobInvocation,
     PageInvocation, PrincipalRef, RenderHookInvocation, ScheduledJobInvocation, TraceContext,
+    CacheVisibility, TypedCacheHint, TypedExecutionOutput, TypedMetadata, TypedResponseBody,
     WasmEngine, WasmExecutionSession, WasmModelError, WebhookInvocation,
 };
 use thiserror::Error;
@@ -78,7 +79,7 @@ pub use builder::*;
 pub use cache::*;
 pub use http::*;
 pub use jobs::*;
-pub use live::*;
+pub(crate) use live::*;
 pub use ops::*;
 pub use plan::*;
 pub use render::*;

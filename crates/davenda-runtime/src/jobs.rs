@@ -175,7 +175,11 @@ impl JobsHost {
         registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
         jobs_domain: JobsDomain,
     ) -> Self {
+        #[cfg(test)]
         let coordinator = runtime.coordinator();
+        #[cfg(not(test))]
+        let coordinator =
+            runtime.coordinator_with_backend(davenda_jobs::JobsBackendAdapter::shared(&runtime));
         Self {
             customer_app,
             scheduler_node_id,

@@ -1,7 +1,8 @@
 use super::*;
 use davenda_i18n::{I18nError, LocaleTag, LocalizedUrls};
+use davenda_wasm::{RobotsDirective as TypedRobotsDirective, TypedMetadata};
 use davenda_seo::{
-    page_node, HeadMetadata, OpenGraphData, OpenGraphType, RobotsDirective, SeoError,
+    HeadMetadata, OpenGraphData, OpenGraphType, RobotsDirective, SeoError, page_node,
 };
 use davenda_template::{
     AttributeNode, DocumentRenderRequest, ElementNode, FragmentRenderRequest, Node, RenderModel,
@@ -27,6 +28,7 @@ impl RuntimePlan {
         &self,
         execution: &RequestExecution,
         page: &PageResponse,
+        extra_metadata: Option<&TypedMetadata>,
     ) -> Result<String, RuntimeRenderError> {
         let selector = template_selector(&page.template)?;
         let namespaces = self.template_namespaces_for_execution(execution);
@@ -49,7 +51,7 @@ impl RuntimePlan {
             Err(error) => return Err(error.into()),
         };
 
-        self.decorate_page_document(execution, &page.template, html)
+        self.decorate_page_document(execution, &page.template, html, extra_metadata)
     }
 
     pub fn render_fragment_response(
@@ -278,8 +280,9 @@ impl RuntimePlan {
         execution: &RequestExecution,
         template_name: &str,
         document_html: String,
+        extra_metadata: Option<&TypedMetadata>,
     ) -> Result<String, RuntimeRenderError> {
-        let metadata = self.head_metadata_for_execution(execution, template_name)?;
+        let metadata = self.head_metadata_for_execution(execution, template_name, extra_metadata)?;
         let json_ld = if self.seo.allows_json_ld() {
             vec![page_node(
                 metadata.title.clone(),
@@ -289,7 +292,16 @@ impl RuntimePlan {
         } else {
             Vec::new()
         };
-        let head_markup = render_head_markup(&metadata, &json_ld);
+        let extra_json_ld = extra_metadata
+            .map(|extra_metadata| {
+                extra_metadata
+                    .json_ld
+                    .iter()
+                    .map(davenda_wasm::JsonLdNode::render)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let head_markup = render_head_markup(&metadata, &json_ld, &extra_json_ld);
         Ok(inject_head_markup(document_html, &head_markup))
     }
 
@@ -297,8 +309,12 @@ impl RuntimePlan {
         &self,
         execution: &RequestExecution,
         template_name: &str,
+        extra_metadata: Option<&TypedMetadata>,
     ) -> Result<HeadMetadata, RuntimeRenderError> {
-        let title = format!("{} · {}", execution.route.route_name, execution.customer_app);
+        let title = format!(
+            "{} · {}",
+            execution.route.route_name, execution.customer_app
+        );
         let description = format!(
             "{} response for {} using {}",
             execution.route.route_name, execution.customer_app, template_name
@@ -311,13 +327,43 @@ impl RuntimePlan {
             OpenGraphType::Website,
         )?);
 
-        Ok(HeadMetadata::new(
+        let mut metadata = HeadMetadata::new(
             title,
             description,
             urls,
             [RobotsDirective::Index, RobotsDirective::Follow],
             open_graph,
-        )?)
+        )?;
+
+        if let Some(extra_metadata) = extra_metadata {
+            if let Some(title) = &extra_metadata.title {
+                metadata.title = title.clone();
+            }
+            if let Some(description) = &extra_metadata.description {
+                metadata.description = description.clone();
+            }
+            if let Some(canonical_url) = &extra_metadata.canonical_url {
+                metadata.canonical_url = canonical_url.clone();
+            }
+            metadata
+                .alternate_urls
+                .extend(extra_metadata.alternate_urls.clone());
+            metadata.robots.extend(extra_metadata.robots.iter().map(|directive| match directive {
+                TypedRobotsDirective::Index => RobotsDirective::Index,
+                TypedRobotsDirective::NoIndex => RobotsDirective::NoIndex,
+                TypedRobotsDirective::Follow => RobotsDirective::Follow,
+                TypedRobotsDirective::NoFollow => RobotsDirective::NoFollow,
+                TypedRobotsDirective::NoArchive => RobotsDirective::NoArchive,
+            }));
+            metadata.open_graph = Some(OpenGraphData::new(
+                metadata.title.clone(),
+                metadata.description.clone(),
+                None,
+                OpenGraphType::Website,
+            )?);
+        }
+
+        Ok(metadata)
     }
 
     fn localized_urls_for_execution(
@@ -406,10 +452,12 @@ fn runtime_fallback_page_template(
     name: TemplateName,
 ) -> Result<TemplateDefinition, TemplateModelError> {
     let heading = ElementNode::new("h1", vec![Node::value("route_name")?])?;
-    let path = ElementNode::new("p", vec![Node::value("path")?])?
-        .with_attribute(AttributeNode::static_value("class", "davenda-runtime-path")?);
-    let template = ElementNode::new("p", vec![Node::value("template_name")?])?
-        .with_attribute(AttributeNode::static_value("class", "davenda-runtime-template")?);
+    let path = ElementNode::new("p", vec![Node::value("path")?])?.with_attribute(
+        AttributeNode::static_value("class", "davenda-runtime-path")?,
+    );
+    let template = ElementNode::new("p", vec![Node::value("template_name")?])?.with_attribute(
+        AttributeNode::static_value("class", "davenda-runtime-template")?,
+    );
     let main = ElementNode::new(
         "main",
         vec![
@@ -463,7 +511,11 @@ fn runtime_fallback_fragment_template(
     ))
 }
 
-fn render_head_markup(metadata: &HeadMetadata, json_ld: &[davenda_seo::JsonLdNode]) -> String {
+fn render_head_markup(
+    metadata: &HeadMetadata,
+    json_ld: &[davenda_seo::JsonLdNode],
+    extra_json_ld: &[String],
+) -> String {
     let mut markup = String::new();
     markup.push_str(&format!(
         "<meta name=\"description\" content=\"{}\">",
@@ -510,6 +562,12 @@ fn render_head_markup(metadata: &HeadMetadata, json_ld: &[davenda_seo::JsonLdNod
         markup.push_str(&format!(
             "<script type=\"application/ld+json\">{}</script>",
             node.render()
+        ));
+    }
+    for node in extra_json_ld {
+        markup.push_str(&format!(
+            "<script type=\"application/ld+json\">{}</script>",
+            node
         ));
     }
     markup

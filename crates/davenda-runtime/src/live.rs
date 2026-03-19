@@ -1,5 +1,5 @@
 use super::*;
-use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveExecutionReceipts {
@@ -44,6 +44,114 @@ impl LiveExecutionReceipts {
             render_hooks,
             admin_widgets,
         })
+    }
+
+    pub(crate) fn request_surface_output(&self) -> Option<&TypedExecutionOutput> {
+        self.request_surface
+            .as_ref()
+            .and_then(|receipt| receipt.typed_output.as_ref())
+    }
+
+    pub(crate) fn response_status(&self, base: StatusCode) -> StatusCode {
+        self.request_surface_output()
+            .and_then(|output| StatusCode::from_u16(output.status).ok())
+            .unwrap_or(base)
+    }
+
+    pub(crate) fn merged_metadata(&self) -> Option<TypedMetadata> {
+        let mut merged: Option<TypedMetadata> = None;
+        for output in self.typed_outputs() {
+            if let Some(metadata) = &mut merged {
+                metadata.merge_from(&output.metadata);
+            } else {
+                merged = Some(output.metadata.clone());
+            }
+        }
+        merged
+    }
+
+    pub(crate) fn merged_cache_hint(&self) -> Option<TypedCacheHint> {
+        let mut merged: Option<TypedCacheHint> = None;
+        for output in self.typed_outputs() {
+            if let Some(cache_hint) = &output.cache_hint {
+                if let Some(existing) = &mut merged {
+                    existing.merge_from(cache_hint);
+                } else {
+                    merged = Some(cache_hint.clone());
+                }
+            }
+        }
+        merged
+    }
+
+    pub(crate) fn merge_page_html(&self, html: String) -> String {
+        let mut html = html;
+        let mut body_fragments = Vec::new();
+
+        if let Some(output) = self.request_surface_output()
+            && let Some(fragment) = typed_output_fragment(output)
+        {
+            body_fragments.push(fragment);
+        }
+
+        for output in self.render_hook_outputs() {
+            if let Some(fragment) = typed_output_fragment(output) {
+                body_fragments.push(fragment);
+            }
+        }
+
+        for output in self.admin_widget_outputs() {
+            if let Some(fragment) = typed_output_fragment(output) {
+                body_fragments.push(fragment);
+            }
+        }
+
+        if let Some(metadata) = self.merged_metadata() {
+            let head_markup = render_typed_head_markup(&metadata);
+            html = inject_head_markup(html, &head_markup);
+        }
+
+        if !body_fragments.is_empty() {
+            html = inject_body_markup(html, &body_fragments.join(""));
+        }
+
+        html
+    }
+
+    pub(crate) fn merge_fragment_html(&self, html: String) -> String {
+        let mut html = html;
+        let mut body_fragments = Vec::new();
+
+        for output in self.render_hook_outputs() {
+            if let Some(fragment) = typed_output_fragment(output) {
+                body_fragments.push(fragment);
+            }
+        }
+
+        for output in self.admin_widget_outputs() {
+            if let Some(fragment) = typed_output_fragment(output) {
+                body_fragments.push(fragment);
+            }
+        }
+
+        if !body_fragments.is_empty() {
+            html = inject_body_markup(html, &body_fragments.join(""));
+        }
+
+        html
+    }
+
+    pub(crate) fn merge_json_payload(
+        &self,
+        mut payload: BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        if let Some(output) = self.request_surface_output()
+            && let TypedResponseBody::JsonObject(typed_payload) = &output.body
+        {
+            payload.extend(typed_payload.clone());
+        }
+
+        payload
     }
 
     pub(crate) fn decorate_response_headers(&self, headers: &mut HeaderMap) {
@@ -96,6 +204,114 @@ impl LiveExecutionReceipts {
                 append_receipt_headers(headers, "admin-widget", receipt);
             }
         }
+
+        if let Some(metadata) = self.merged_metadata() {
+            if let Some(title) = metadata.title.as_ref() {
+                insert_header(headers, "x-davenda-wasm-metadata-title", title.clone());
+            }
+            if let Some(description) = metadata.description.as_ref() {
+                insert_header(
+                    headers,
+                    "x-davenda-wasm-metadata-description",
+                    description.clone(),
+                );
+            }
+            if let Some(canonical_url) = metadata.canonical_url.as_ref() {
+                insert_header(
+                    headers,
+                    "x-davenda-wasm-metadata-canonical",
+                    canonical_url.clone(),
+                );
+            }
+            if !metadata.alternate_urls.is_empty() {
+                insert_header(
+                    headers,
+                    "x-davenda-wasm-metadata-alternates",
+                    metadata
+                        .alternate_urls
+                        .iter()
+                        .map(|(locale, url)| format!("{locale}={url}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
+            if !metadata.robots.is_empty() {
+                insert_header(
+                    headers,
+                    "x-davenda-wasm-metadata-robots",
+                    metadata
+                        .robots
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
+            if !metadata.json_ld.is_empty() {
+                insert_header(
+                    headers,
+                    "x-davenda-wasm-metadata-json-ld-count",
+                    metadata.json_ld.len().to_string(),
+                );
+            }
+        }
+
+        if let Some(cache_hint) = self.merged_cache_hint() {
+            insert_header(
+                headers,
+                "x-davenda-wasm-cache-visibility",
+                match cache_hint.visibility {
+                    CacheVisibility::Public => "public".to_string(),
+                    CacheVisibility::Private => "private".to_string(),
+                },
+            );
+            insert_header(
+                headers,
+                "x-davenda-wasm-cache-control",
+                render_cache_control(&cache_hint),
+            );
+            if !cache_hint.tags.is_empty() {
+                insert_header(
+                    headers,
+                    "x-davenda-wasm-cache-tags",
+                    cache_hint.tags.iter().cloned().collect::<Vec<_>>().join(","),
+                );
+            }
+        }
+    }
+
+    fn typed_outputs(&self) -> Vec<&TypedExecutionOutput> {
+        let mut outputs = Vec::new();
+        if let Some(receipt) = &self.request_surface
+            && let Some(output) = receipt.typed_output.as_ref()
+        {
+            outputs.push(output);
+        }
+        outputs.extend(
+            self.render_hooks
+                .iter()
+                .filter_map(|receipt| receipt.typed_output.as_ref()),
+        );
+        outputs.extend(
+            self.admin_widgets
+                .iter()
+                .filter_map(|receipt| receipt.typed_output.as_ref()),
+        );
+        outputs
+    }
+
+    fn render_hook_outputs(&self) -> Vec<&TypedExecutionOutput> {
+        self.render_hooks
+            .iter()
+            .filter_map(|receipt| receipt.typed_output.as_ref())
+            .collect()
+    }
+
+    fn admin_widget_outputs(&self) -> Vec<&TypedExecutionOutput> {
+        self.admin_widgets
+            .iter()
+            .filter_map(|receipt| receipt.typed_output.as_ref())
+            .collect()
     }
 }
 
@@ -133,6 +349,141 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: String) {
             headers.insert(header_name, header_value);
         }
     }
+}
+
+fn render_cache_control(cache_hint: &TypedCacheHint) -> String {
+    let mut directives = Vec::new();
+    directives.push(match cache_hint.visibility {
+        CacheVisibility::Public => "public".to_string(),
+        CacheVisibility::Private => "private".to_string(),
+    });
+    directives.push(format!("max-age={}", cache_hint.max_age_seconds));
+    if let Some(value) = cache_hint.stale_while_revalidate_seconds {
+        directives.push(format!("stale-while-revalidate={value}"));
+    }
+    if cache_hint.vary_by_locale {
+        directives.push("vary-by-locale".to_string());
+    }
+    if cache_hint.vary_by_user {
+        directives.push("vary-by-user".to_string());
+    }
+    if cache_hint.vary_by_session {
+        directives.push("vary-by-session".to_string());
+    }
+    directives.join(",")
+}
+
+fn render_typed_head_markup(metadata: &TypedMetadata) -> String {
+    let mut markup = String::new();
+    if let Some(title) = &metadata.title {
+        markup.push_str(&format!(
+            "<title>{}</title>",
+            escape_html_attribute(title)
+        ));
+    }
+    if let Some(description) = &metadata.description {
+        markup.push_str(&format!(
+            "<meta name=\"description\" content=\"{}\">",
+            escape_html_attribute(description)
+        ));
+    }
+    if let Some(canonical) = &metadata.canonical_url {
+        markup.push_str(&format!(
+            "<link rel=\"canonical\" href=\"{}\">",
+            escape_html_attribute(canonical)
+        ));
+    }
+    for (locale, url) in &metadata.alternate_urls {
+        markup.push_str(&format!(
+            "<link rel=\"alternate\" hreflang=\"{}\" href=\"{}\">",
+            escape_html_attribute(locale),
+            escape_html_attribute(url)
+        ));
+    }
+    if !metadata.robots.is_empty() {
+        markup.push_str(&format!(
+            "<meta name=\"robots\" content=\"{}\">",
+            escape_html_attribute(
+                &metadata
+                    .robots
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            )
+        ));
+    }
+    for node in &metadata.json_ld {
+        markup.push_str(&format!(
+            "<script type=\"application/ld+json\">{}</script>",
+            node.render()
+        ));
+    }
+    markup
+}
+
+fn inject_head_markup(document_html: String, head_markup: &str) -> String {
+    if head_markup.is_empty() {
+        return document_html;
+    }
+
+    if let Some(index) = document_html.find("</head>") {
+        let mut html = document_html;
+        html.insert_str(index, head_markup);
+        return html;
+    }
+
+    if let Some(index) = document_html.find("<body") {
+        let mut html = document_html;
+        html.insert_str(index, &format!("<head>{head_markup}</head>"));
+        return html;
+    }
+
+    format!("<head>{head_markup}</head>{document_html}")
+}
+
+fn inject_body_markup(document_html: String, body_markup: &str) -> String {
+    if body_markup.is_empty() {
+        return document_html;
+    }
+
+    if let Some(index) = document_html.find("</body>") {
+        let mut html = document_html;
+        html.insert_str(index, body_markup);
+        return html;
+    }
+
+    format!("{document_html}{body_markup}")
+}
+
+fn typed_output_fragment(output: &TypedExecutionOutput) -> Option<String> {
+    match &output.body {
+        TypedResponseBody::HtmlDocument(html) => Some(document_body_fragment(html)),
+        TypedResponseBody::HtmlFragment(html) => Some(html.clone()),
+        TypedResponseBody::JsonObject(_) => None,
+    }
+}
+
+fn document_body_fragment(document_html: &str) -> String {
+    let Some(body_start) = document_html.find("<body") else {
+        return document_html.to_string();
+    };
+    let Some(body_open_end) = document_html[body_start..].find('>') else {
+        return document_html.to_string();
+    };
+    let content_start = body_start + body_open_end + 1;
+    let Some(body_close) = document_html[content_start..].find("</body>") else {
+        return document_html.to_string();
+    };
+    document_html[content_start..content_start + body_close].to_string()
+}
+
+fn escape_html_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn render_hook_slots_for_execution(

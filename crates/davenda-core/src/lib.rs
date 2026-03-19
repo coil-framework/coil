@@ -10,8 +10,9 @@ use davenda_auth::{AuthModelPackage, Capability};
 use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
 use davenda_cli::CliRuntime;
 use davenda_config::{
-    CookieConfig as HttpCookieConfig, CsrfConfig as HttpCsrfConfig, DistributedCache,
-    PlatformConfig, SameSitePolicy, SessionStore as ConfigSessionStore, TlsMode,
+    CookieConfig as HttpCookieConfig, CookieProtection as ConfigCookieProtection,
+    CsrfConfig as HttpCsrfConfig, DistributedCache, PlatformConfig, SameSitePolicy,
+    SessionStore as ConfigSessionStore, TlsMode,
 };
 use davenda_data::{DataRuntime, MigrationPlan};
 use davenda_i18n::{
@@ -122,7 +123,7 @@ pub struct CookiePolicy {
 }
 
 impl CookiePolicy {
-    pub fn from_config(config: &HttpCookieConfig, protection: CookieProtection) -> Self {
+    pub fn from_config(config: &HttpCookieConfig) -> Self {
         Self {
             name: config.name.clone(),
             domain: config.domain.clone(),
@@ -130,7 +131,28 @@ impl CookiePolicy {
             same_site: config.same_site,
             secure: config.secure,
             http_only: config.http_only,
-            protection,
+            protection: match config.protection {
+                ConfigCookieProtection::Signed => CookieProtection::Signed,
+                ConfigCookieProtection::Encrypted => CookieProtection::Encrypted,
+            },
+        }
+    }
+
+    pub fn protect(&self, secret: &[u8], value: &str) -> Result<String, BrowserSecurityError> {
+        match self.protection {
+            CookieProtection::Signed => CookieSigner::new(self.clone()).sign(secret, value),
+            CookieProtection::Encrypted => CookieSealer::new(self.clone()).seal(secret, value),
+        }
+    }
+
+    pub fn unprotect(
+        &self,
+        secret: &[u8],
+        encoded: &str,
+    ) -> Result<String, BrowserSecurityError> {
+        match self.protection {
+            CookieProtection::Signed => CookieSigner::new(self.clone()).verify(secret, encoded),
+            CookieProtection::Encrypted => CookieSealer::new(self.clone()).open(secret, encoded),
         }
     }
 
@@ -2539,14 +2561,8 @@ fn browser_security_from_config(config: &PlatformConfig) -> BrowserSecurityServi
             },
             idle_timeout: Duration::from_secs(config.http.session.idle_timeout_secs),
             absolute_timeout: Duration::from_secs(config.http.session.absolute_timeout_secs),
-            session_cookie: CookiePolicy::from_config(
-                &config.http.session_cookie,
-                CookieProtection::Signed,
-            ),
-            flash_cookie: CookiePolicy::from_config(
-                &config.http.flash_cookie,
-                CookieProtection::Signed,
-            ),
+            session_cookie: CookiePolicy::from_config(&config.http.session_cookie),
+            flash_cookie: CookiePolicy::from_config(&config.http.flash_cookie),
         },
         csrf: CsrfProtection::from_config(&config.http.csrf),
     }

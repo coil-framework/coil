@@ -6,7 +6,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
-use davenda_core::{BrowserSecurityError, CookieSigner};
+use davenda_core::BrowserSecurityError;
 
 const FLASH_COOKIE_MAX_AGE_SECS: u64 = 300;
 static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -217,10 +217,7 @@ impl DistributedSessionStoreClient {
     }
 
     pub fn shared(kind: SessionStoreBackendKind) -> Self {
-        Self::new(
-            kind,
-            Arc::new(SharedDistributedSessionStoreRuntime::new()),
-        )
+        Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
     }
 
     pub fn kind(&self) -> SessionStoreBackendKind {
@@ -639,8 +636,11 @@ impl BrowserHost {
         }
 
         let payload = serialize_flash_messages(messages)?;
-        let value = CookieSigner::new(self.services.sessions.flash_cookie.clone())
-            .sign(cookie_secret, &payload)
+        let value = self
+            .services
+            .sessions
+            .flash_cookie
+            .protect(cookie_secret, &payload)
             .map_err(map_flash_cookie_error)?;
         Ok(self
             .services
@@ -718,8 +718,11 @@ impl BrowserHost {
         record: BrowserSessionRecord,
         cookie_secret: &[u8],
     ) -> Result<IssuedBrowserSession, RuntimeBrowserError> {
-        let cookie_value = CookieSigner::new(self.services.sessions.session_cookie.clone())
-            .sign(cookie_secret, &record.session_id)
+        let cookie_value = self
+            .services
+            .sessions
+            .session_cookie
+            .protect(cookie_secret, &record.session_id)
             .map_err(map_session_cookie_error)?;
         let set_cookie_header = self
             .services
@@ -738,8 +741,10 @@ impl BrowserHost {
         cookie_secret: &[u8],
         cookie: &str,
     ) -> Result<String, RuntimeBrowserError> {
-        CookieSigner::new(self.services.sessions.session_cookie.clone())
-            .verify(cookie_secret, cookie)
+        self.services
+            .sessions
+            .session_cookie
+            .unprotect(cookie_secret, cookie)
             .map_err(map_session_cookie_error)
     }
 
@@ -748,8 +753,11 @@ impl BrowserHost {
         cookie_secret: &[u8],
         cookie: &str,
     ) -> Result<Vec<FlashMessage>, RuntimeBrowserError> {
-        let payload = CookieSigner::new(self.services.sessions.flash_cookie.clone())
-            .verify(cookie_secret, cookie)
+        let payload = self
+            .services
+            .sessions
+            .flash_cookie
+            .unprotect(cookie_secret, cookie)
             .map_err(map_flash_cookie_error)?;
         deserialize_flash_messages(&payload)
     }
@@ -765,8 +773,11 @@ impl BrowserHost {
             self.services.sessions.idle_timeout,
             now,
         )?;
-        let cookie_value = CookieSigner::new(self.services.sessions.session_cookie.clone())
-            .sign(cookie_secret, session_id)
+        let cookie_value = self
+            .services
+            .sessions
+            .session_cookie
+            .protect(cookie_secret, session_id)
             .map_err(map_session_cookie_error)?;
         let cookie_header = self
             .services

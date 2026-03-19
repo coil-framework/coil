@@ -272,9 +272,10 @@ impl RuntimePlan {
         cookie_secret: &[u8],
         cookie: &str,
     ) -> Result<String, RequestExecutionError> {
-        let signer = CookieSigner::new(self.browser.sessions.session_cookie.clone());
-        signer
-            .verify(cookie_secret, cookie)
+        self.browser
+            .sessions
+            .session_cookie
+            .unprotect(cookie_secret, cookie)
             .map_err(|error| RequestExecutionError::InvalidSessionCookie(error.to_string()))
     }
 

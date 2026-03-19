@@ -19,6 +19,7 @@ use davenda_config::{
 use tower::ServiceExt;
 
 use super::*;
+use crate::backends::RuntimeBackendMaterializer;
 
 #[derive(Debug, Error)]
 pub enum RuntimeServerError {
@@ -206,6 +207,7 @@ pub(crate) trait LiveRouteCapabilityAuthorizer: Send + Sync {
 
 struct DeferredPostgresRouteCapabilityAuthorizer {
     data: DataRuntimeServices,
+    database_url: Option<String>,
     auth_package_name: String,
     authorizer: OnceLock<Result<PostgresRouteCapabilityAuthorizer, String>>,
 }
@@ -213,9 +215,10 @@ struct DeferredPostgresRouteCapabilityAuthorizer {
 impl DeferredPostgresRouteCapabilityAuthorizer {
     const TENANT_ID: i64 = 1;
 
-    fn new(data: DataRuntimeServices, auth_package_name: String) -> Self {
+    fn new(data: DataRuntimeServices, database_url: Option<String>, auth_package_name: String) -> Self {
         Self {
             data,
+            database_url,
             auth_package_name,
             authorizer: OnceLock::new(),
         }
@@ -238,8 +241,12 @@ impl DeferredPostgresRouteCapabilityAuthorizer {
                 }
                 other => other.to_string(),
             })?;
-        let client = self
-            .data
+        let runtime = self
+            .database_url
+            .as_ref()
+            .map(|url| self.data.with_resolved_connection_url(url.clone()))
+            .unwrap_or_else(|| self.data.clone());
+        let client = runtime
             .connect_lazy_postgres()
             .map_err(|error| error.to_string())?;
         let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
@@ -488,6 +495,7 @@ impl HttpServerHost {
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
+                backends.database.url.clone(),
                 plan.auth_package_name.clone(),
             ));
         let browser = materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone());
@@ -513,6 +521,7 @@ impl HttpServerHost {
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
+                backends.database.url.clone(),
                 plan.auth_package_name.clone(),
             ));
         Self::new_with_browser_and_authorizer(
@@ -745,14 +754,21 @@ fn execution_response(
     let receipts = LiveExecutionReceipts::collect(plan, &execution)?;
 
     let mut response = match &execution.response {
-        HandlerResponse::Page(page) => html_response(
-            StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK),
-            plan.render_page_response(&execution, &page)?,
-        ),
-        HandlerResponse::Fragment(fragment) => html_response(
-            StatusCode::OK,
-            plan.render_fragment_response(&execution, &fragment)?,
-        ),
+        HandlerResponse::Page(page) => {
+            let html = plan.render_page_response(
+                &execution,
+                page,
+                receipts.merged_metadata().as_ref(),
+            )?;
+            html_response(
+                receipts.response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK)),
+                receipts.merge_page_html(html),
+            )
+        }
+        HandlerResponse::Fragment(fragment) => {
+            let html = plan.render_fragment_response(&execution, fragment)?;
+            html_response(StatusCode::OK, receipts.merge_fragment_html(html))
+        }
         HandlerResponse::Redirect(redirect) => {
             let mut response = Response::new(Body::empty());
             *response.status_mut() =
@@ -767,8 +783,9 @@ fn execution_response(
             response
         }
         HandlerResponse::Json(json) => {
+            let payload = receipts.merge_json_payload(json.payload.clone());
             let mut parts = Vec::new();
-            for (key, value) in &json.payload {
+            for (key, value) in &payload {
                 parts.push(format!(
                     "\"{}\":\"{}\"",
                     escape_json(key),
@@ -776,7 +793,7 @@ fn execution_response(
                 ));
             }
             let mut response = text_response(
-                StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK),
+                receipts.response_status(StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK)),
                 format!("{{{}}}", parts.join(",")),
             );
             response.headers_mut().insert(

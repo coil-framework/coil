@@ -62,8 +62,18 @@ impl DataRuntime {
             Some(secret_ref) => Err(DataModelError::UnsupportedSecretRef {
                 secret_ref: secret_ref.redacted(),
             }),
-            None => Err(DataModelError::MissingConnectionSecret),
+            None => self
+                .connection_secret
+                .clone()
+                .ok_or(DataModelError::MissingConnectionSecret),
         }
+    }
+
+    pub fn with_resolved_connection_url(&self, connection_url: impl Into<String>) -> Self {
+        let mut runtime = self.clone();
+        runtime.connection_secret_ref = None;
+        runtime.connection_secret = Some(connection_url.into());
+        runtime
     }
 
     pub fn connect_lazy_postgres(&self) -> Result<PostgresDataClient, DataModelError> {

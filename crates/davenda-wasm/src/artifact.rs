@@ -26,18 +26,11 @@ impl InstalledArtifact {
                 publisher.into(),
             )?,
             source,
-            sha256: crate::validation::validate_sha256(
-                "extension_artifact_sha256",
-                sha256.into(),
-            )?,
+            sha256: crate::validation::validate_sha256("extension_artifact_sha256", sha256.into())?,
         })
     }
 
-    pub fn resolve_path(
-        &self,
-        base_dir: impl AsRef<Path>,
-        extension_id: &ExtensionId,
-    ) -> PathBuf {
+    pub fn resolve_path(&self, base_dir: impl AsRef<Path>, extension_id: &ExtensionId) -> PathBuf {
         self.source.resolve_path(base_dir, extension_id)
     }
 
@@ -57,11 +50,7 @@ impl InstalledArtifact {
 }
 
 impl ExtensionArtifactSource {
-    pub fn resolve_path(
-        &self,
-        base_dir: impl AsRef<Path>,
-        _extension_id: &ExtensionId,
-    ) -> PathBuf {
+    pub fn resolve_path(&self, base_dir: impl AsRef<Path>, _extension_id: &ExtensionId) -> PathBuf {
         let base_dir = base_dir.as_ref();
         match self {
             Self::LocalPath(path) => {
@@ -72,12 +61,10 @@ impl ExtensionArtifactSource {
                     base_dir.join(path)
                 }
             }
-            Self::RegistryPackage { registry, package } => {
-                base_dir
-                    .join("registry")
-                    .join(registry)
-                    .join(format!("{package}.wasm"))
-            }
+            Self::RegistryPackage { registry, package } => base_dir
+                .join("registry")
+                .join(registry)
+                .join(format!("{package}.wasm")),
             Self::FirstPartyCatalog { package } => {
                 base_dir.join("catalog").join(format!("{package}.wasm"))
             }
@@ -85,11 +72,7 @@ impl ExtensionArtifactSource {
     }
 }
 
-fn verify_checksum(
-    expected: &str,
-    path: &Path,
-    bytes: &[u8],
-) -> Result<(), WasmModelError> {
+fn verify_checksum(expected: &str, path: &Path, bytes: &[u8]) -> Result<(), WasmModelError> {
     let actual = hex::encode(Sha256::digest(bytes));
     if actual == expected {
         Ok(())

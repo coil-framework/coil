@@ -607,6 +607,7 @@ dependencies = [
 name = "davenda-config"
 version = "0.1.0"
 dependencies = [
+ "ipnet",
  "serde",
  "thiserror 1.0.69",
  "toml",
@@ -736,18 +737,24 @@ dependencies = [
  "davenda-core",
  "davenda-data",
  "davenda-events",
+ "davenda-i18n",
  "davenda-jobs",
  "davenda-media",
  "davenda-memberships",
  "davenda-observability",
  "davenda-ops",
+ "davenda-seo",
  "davenda-storage",
  "davenda-template",
  "davenda-tls",
  "davenda-wasm",
+ "ipnet",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tower",
+ "wat",
+ "zanzibar",
 ]
 
 [[package]]
@@ -781,6 +788,8 @@ dependencies = [
 name = "davenda-wasm"
 version = "0.1.0"
 dependencies = [
+ "hex",
+ "sha2",
  "wasmtime",
 ]
 
@@ -1446,6 +1455,12 @@ checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
 ]
+
+[[package]]
+name = "ipnet"
+version = "2.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 
 [[package]]
 name = "itertools"

@@ -46,6 +46,16 @@ pub enum WasmModelError {
         key: String,
         reason: String,
     },
+    DuplicateJsonLdProperty {
+        property: String,
+    },
+    InvalidJsonLdProperty {
+        property: String,
+    },
+    InvalidJsonLdNumber {
+        property: String,
+        value: String,
+    },
     InvalidRoute {
         field: &'static str,
         route: String,
@@ -163,6 +173,17 @@ pub enum WasmModelError {
         handler_id: String,
         code: i32,
     },
+    InvalidTypedReturn {
+        reason: String,
+    },
+    TypedReturnPointMismatch {
+        expected: ExtensionPointKind,
+        actual: ExtensionPointKind,
+    },
+    TypedReturnBodyMismatch {
+        point: ExtensionPointKind,
+        body: crate::output::TypedResponseBodyKind,
+    },
 }
 
 impl fmt::Display for WasmModelError {
@@ -212,6 +233,18 @@ impl fmt::Display for WasmModelError {
             ),
             Self::InvalidConfigValue { key, reason } => {
                 write!(f, "extension config field `{key}` is invalid: {reason}")
+            }
+            Self::DuplicateJsonLdProperty { property } => {
+                write!(f, "JSON-LD property `{property}` is duplicated")
+            }
+            Self::InvalidJsonLdProperty { property } => {
+                write!(f, "JSON-LD property `{property}` is invalid")
+            }
+            Self::InvalidJsonLdNumber { property, value } => {
+                write!(
+                    f,
+                    "JSON-LD property `{property}` expects a finite number, got `{value}`"
+                )
             }
             Self::InvalidRoute { field, route } => {
                 write!(f, "`{field}` must start with `/`, got `{route}`")
@@ -358,6 +391,17 @@ impl fmt::Display for WasmModelError {
             Self::InvalidOutcomeCode { handler_id, code } => write!(
                 f,
                 "handler `{handler_id}` returned unknown wasm outcome code `{code}`"
+            ),
+            Self::InvalidTypedReturn { reason } => {
+                write!(f, "typed return payload is invalid: {reason}")
+            }
+            Self::TypedReturnPointMismatch { expected, actual } => write!(
+                f,
+                "typed return payload targets `{actual}` but invocation point is `{expected}`"
+            ),
+            Self::TypedReturnBodyMismatch { point, body } => write!(
+                f,
+                "typed return payload body `{body}` is not valid for `{point}` invocations"
             ),
         }
     }

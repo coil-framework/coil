@@ -5,6 +5,7 @@ use wasmtime::{Caller, Config, Engine, Linker, Module, Store, StoreLimits, Store
 use crate::error::WasmModelError;
 use crate::grants::HostCapabilityGrant;
 use crate::invocation::{ExecutionReceipt, HostCall, InvocationOutcome, WasmExecutionSession};
+use crate::output::TypedExecutionOutput;
 
 #[derive(Debug, Clone)]
 pub struct WasmEngine {
@@ -169,6 +170,7 @@ impl CompiledWasmModule {
             }
         })?;
         let runtime = start.elapsed();
+        let typed_output = read_typed_output(&mut store, &instance, &handler_id)?;
 
         let state = store.into_data();
         if let Some(host_error) = state.last_error {
@@ -179,8 +181,54 @@ impl CompiledWasmModule {
             outcome_code,
             state.session.plan().handler_id.to_string(),
         )?;
-        state.session.finish(runtime, outcome)
+        state.session.finish(runtime, outcome, typed_output)
     }
+}
+
+fn read_typed_output(
+    store: &mut Store<EngineHostState>,
+    instance: &wasmtime::Instance,
+    handler_id: &str,
+) -> Result<Option<TypedExecutionOutput>, WasmModelError> {
+    let Some(export) = instance.get_func(&mut *store, TypedExecutionOutput::ABI_EXPORT) else {
+        return Ok(None);
+    };
+    let func = export.typed::<(), i64>(&mut *store).map_err(|error| {
+        WasmModelError::EngineInstantiate {
+            handler_id: handler_id.to_string(),
+            reason: format!(
+                "typed return export `{}` has unexpected signature: {error}",
+                TypedExecutionOutput::ABI_EXPORT
+            ),
+        }
+    })?;
+    let packed = func
+        .call(&mut *store, ())
+        .map_err(|error| WasmModelError::EngineTrap {
+            handler_id: handler_id.to_string(),
+            reason: error.to_string(),
+        })?;
+    let packed = packed as u64;
+    let ptr = (packed & 0xffff_ffff) as u32 as usize;
+    let len = (packed >> 32) as u32 as usize;
+
+    let memory = instance.get_memory(&mut *store, "memory").ok_or_else(|| {
+        WasmModelError::InvalidTypedReturn {
+            reason: format!(
+                "typed return export `{}` is present but no `memory` export exists",
+                TypedExecutionOutput::ABI_EXPORT
+            ),
+        }
+    })?;
+
+    let mut bytes = vec![0u8; len];
+    memory.read(&mut *store, ptr, &mut bytes).map_err(|error| {
+        WasmModelError::InvalidTypedReturn {
+            reason: format!("failed to read typed return payload: {error}"),
+        }
+    })?;
+
+    TypedExecutionOutput::decode(&bytes).map(Some)
 }
 
 fn host_call_for_grant(

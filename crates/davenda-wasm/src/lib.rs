@@ -62,6 +62,24 @@ pub enum WasmModelError {
     ReplayUnsafeWebhook {
         handler_id: String,
     },
+    HostGrantDenied {
+        handler_id: String,
+        grant: HostCapabilityGrant,
+    },
+    ResourceLimitExceeded {
+        handler_id: String,
+        field: &'static str,
+    },
+    InvalidOutcomeForPoint {
+        handler_id: String,
+        point: ExtensionPointKind,
+        outcome: &'static str,
+    },
+    RuntimeBudgetExceeded {
+        handler_id: String,
+        max_runtime: Duration,
+        actual_runtime: Duration,
+    },
 }
 
 impl fmt::Display for WasmModelError {
@@ -133,6 +151,31 @@ impl fmt::Display for WasmModelError {
             Self::ReplayUnsafeWebhook { handler_id } => write!(
                 f,
                 "handler `{handler_id}` cannot run until replay protection has been applied"
+            ),
+            Self::HostGrantDenied { handler_id, grant } => write!(
+                f,
+                "handler `{handler_id}` attempted host call `{grant}` without a granted capability"
+            ),
+            Self::ResourceLimitExceeded { handler_id, field } => write!(
+                f,
+                "handler `{handler_id}` exceeded its `{field}` resource limit"
+            ),
+            Self::InvalidOutcomeForPoint {
+                handler_id,
+                point,
+                outcome,
+            } => write!(
+                f,
+                "handler `{handler_id}` for `{point}` returned invalid outcome `{outcome}`"
+            ),
+            Self::RuntimeBudgetExceeded {
+                handler_id,
+                max_runtime,
+                actual_runtime,
+            } => write!(
+                f,
+                "handler `{handler_id}` exceeded runtime budget {:?} with {:?}",
+                max_runtime, actual_runtime
             ),
         }
     }
@@ -1289,6 +1332,247 @@ pub struct InvocationPlan {
     pub context: InvocationContext,
 }
 
+impl InvocationPlan {
+    pub fn begin_execution(self) -> WasmExecutionSession {
+        WasmExecutionSession::new(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostCall {
+    DataRead { resource: String },
+    DataWrite { resource: String },
+    AuthCheck,
+    AuthList,
+    AuthLookup,
+    AuthTupleWrite,
+    StorageRead { class: StorageClassGrant },
+    StorageWrite { class: StorageClassGrant, bytes: u64 },
+    RenderFragment { slot: String },
+    MetadataWrite { kind: MetadataGrant },
+    CacheHintWrite,
+    OutboundHttp {
+        integration: String,
+        response_bytes: u64,
+    },
+    SecretRead { secret: String },
+    EnqueueJob { queue: String },
+}
+
+impl HostCall {
+    fn required_grant(&self) -> HostCapabilityGrant {
+        match self {
+            Self::DataRead { resource } => HostCapabilityGrant::DataRead {
+                resource: resource.clone(),
+            },
+            Self::DataWrite { resource } => HostCapabilityGrant::DataWrite {
+                resource: resource.clone(),
+            },
+            Self::AuthCheck => HostCapabilityGrant::AuthCheck,
+            Self::AuthList => HostCapabilityGrant::AuthList,
+            Self::AuthLookup => HostCapabilityGrant::AuthLookup,
+            Self::AuthTupleWrite => HostCapabilityGrant::AuthTupleWrite,
+            Self::StorageRead { class } => HostCapabilityGrant::StorageRead { class: *class },
+            Self::StorageWrite { class, .. } => HostCapabilityGrant::StorageWrite { class: *class },
+            Self::RenderFragment { slot } => HostCapabilityGrant::RenderFragment { slot: slot.clone() },
+            Self::MetadataWrite { kind } => HostCapabilityGrant::MetadataWrite { kind: *kind },
+            Self::CacheHintWrite => HostCapabilityGrant::CacheHintWrite,
+            Self::OutboundHttp { integration, .. } => HostCapabilityGrant::OutboundHttp {
+                integration: integration.clone(),
+            },
+            Self::SecretRead { secret } => HostCapabilityGrant::SecretRead {
+                secret: secret.clone(),
+            },
+            Self::EnqueueJob { queue } => HostCapabilityGrant::EnqueueJob {
+                queue: queue.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvocationOutcome {
+    Page,
+    ApiJson,
+    JobCompleted,
+    ScheduledJobCompleted,
+    WebhookAccepted,
+    AdminWidget,
+    RenderHook,
+}
+
+impl InvocationOutcome {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::ApiJson => "api_json",
+            Self::JobCompleted => "job_completed",
+            Self::ScheduledJobCompleted => "scheduled_job_completed",
+            Self::WebhookAccepted => "webhook_accepted",
+            Self::AdminWidget => "admin_widget",
+            Self::RenderHook => "render_hook",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ExecutionUsage {
+    pub outbound_requests: u32,
+    pub outbound_response_bytes: u64,
+    pub storage_writes: u32,
+    pub storage_bytes: u64,
+    pub peak_concurrency: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionReceipt {
+    pub extension_id: ExtensionId,
+    pub handler_id: HandlerId,
+    pub point: ExtensionPointKind,
+    pub runtime: Duration,
+    pub usage: ExecutionUsage,
+    pub outcome: InvocationOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmExecutionSession {
+    plan: InvocationPlan,
+    usage: ExecutionUsage,
+    active_concurrency: u16,
+}
+
+impl WasmExecutionSession {
+    pub fn new(plan: InvocationPlan) -> Self {
+        Self {
+            plan,
+            usage: ExecutionUsage::default(),
+            active_concurrency: 0,
+        }
+    }
+
+    pub fn plan(&self) -> &InvocationPlan {
+        &self.plan
+    }
+
+    pub fn usage(&self) -> &ExecutionUsage {
+        &self.usage
+    }
+
+    pub fn record_host_call(&mut self, call: HostCall) -> Result<(), WasmModelError> {
+        let grant = call.required_grant();
+        if !self.plan.granted_capabilities.contains(&grant) {
+            return Err(WasmModelError::HostGrantDenied {
+                handler_id: self.plan.handler_id.to_string(),
+                grant,
+            });
+        }
+
+        match call {
+            HostCall::StorageWrite { bytes, .. } => {
+                self.usage.storage_writes = self.usage.storage_writes.saturating_add(1);
+                self.usage.storage_bytes = self.usage.storage_bytes.saturating_add(bytes);
+                if self.usage.storage_writes > self.plan.limits.max_storage_writes {
+                    return Err(WasmModelError::ResourceLimitExceeded {
+                        handler_id: self.plan.handler_id.to_string(),
+                        field: "max_storage_writes",
+                    });
+                }
+                if self.usage.storage_bytes > self.plan.limits.max_storage_bytes {
+                    return Err(WasmModelError::ResourceLimitExceeded {
+                        handler_id: self.plan.handler_id.to_string(),
+                        field: "max_storage_bytes",
+                    });
+                }
+            }
+            HostCall::OutboundHttp { response_bytes, .. } => {
+                self.usage.outbound_requests = self.usage.outbound_requests.saturating_add(1);
+                self.usage.outbound_response_bytes = self
+                    .usage
+                    .outbound_response_bytes
+                    .saturating_add(response_bytes);
+                if self.usage.outbound_requests > self.plan.limits.max_outbound_requests {
+                    return Err(WasmModelError::ResourceLimitExceeded {
+                        handler_id: self.plan.handler_id.to_string(),
+                        field: "max_outbound_requests",
+                    });
+                }
+                if self.usage.outbound_response_bytes
+                    > self.plan.limits.max_outbound_response_bytes
+                {
+                    return Err(WasmModelError::ResourceLimitExceeded {
+                        handler_id: self.plan.handler_id.to_string(),
+                        field: "max_outbound_response_bytes",
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn reserve_concurrency(&mut self, units: u16) -> Result<(), WasmModelError> {
+        self.active_concurrency = self.active_concurrency.saturating_add(units);
+        self.usage.peak_concurrency = self.usage.peak_concurrency.max(self.active_concurrency);
+        if self.usage.peak_concurrency > self.plan.limits.max_concurrency {
+            return Err(WasmModelError::ResourceLimitExceeded {
+                handler_id: self.plan.handler_id.to_string(),
+                field: "max_concurrency",
+            });
+        }
+        Ok(())
+    }
+
+    pub fn release_concurrency(&mut self, units: u16) {
+        self.active_concurrency = self.active_concurrency.saturating_sub(units);
+    }
+
+    pub fn finish(
+        self,
+        runtime: Duration,
+        outcome: InvocationOutcome,
+    ) -> Result<ExecutionReceipt, WasmModelError> {
+        if runtime > self.plan.limits.max_runtime {
+            return Err(WasmModelError::RuntimeBudgetExceeded {
+                handler_id: self.plan.handler_id.to_string(),
+                max_runtime: self.plan.limits.max_runtime,
+                actual_runtime: runtime,
+            });
+        }
+
+        let valid = matches!(
+            (self.plan.point, &outcome),
+            (ExtensionPointKind::Page, InvocationOutcome::Page)
+                | (ExtensionPointKind::Api, InvocationOutcome::ApiJson)
+                | (ExtensionPointKind::Job, InvocationOutcome::JobCompleted)
+                | (
+                    ExtensionPointKind::ScheduledJob,
+                    InvocationOutcome::ScheduledJobCompleted
+                )
+                | (ExtensionPointKind::Webhook, InvocationOutcome::WebhookAccepted)
+                | (ExtensionPointKind::AdminWidget, InvocationOutcome::AdminWidget)
+                | (ExtensionPointKind::RenderHook, InvocationOutcome::RenderHook)
+        );
+
+        if !valid {
+            return Err(WasmModelError::InvalidOutcomeForPoint {
+                handler_id: self.plan.handler_id.to_string(),
+                point: self.plan.point,
+                outcome: outcome.label(),
+            });
+        }
+
+        Ok(ExecutionReceipt {
+            extension_id: self.plan.extension_id,
+            handler_id: self.plan.handler_id,
+            point: self.plan.point,
+            runtime,
+            usage: self.usage,
+            outcome,
+        })
+    }
+}
+
 fn validate_invocation_target(
     handler_id: &HandlerId,
     point: &ExtensionPoint,
@@ -1747,6 +2031,229 @@ mod tests {
             error,
             WasmModelError::DuplicateHandlerId {
                 handler_id: "shared-id".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn execution_session_enforces_host_grants_and_resource_limits() {
+        let manifest = ExtensionManifest::new(
+            ExtensionId::new("events.waitlist.exec").unwrap(),
+            "Events Waitlist Execution",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            default_limits(),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("waitlist-page").unwrap(),
+                    "exports.page_waitlist",
+                    ExtensionPoint::Page(
+                        PageExtensionPoint::new(
+                            "/events/waitlist",
+                            [HttpMethod::Get, HttpMethod::Post],
+                        )
+                        .unwrap(),
+                    ),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::OutboundHttp {
+                            integration: "crm".to_string(),
+                        },
+                        HostCapabilityGrant::StorageWrite {
+                            class: StorageClassGrant::PrivateShared,
+                        },
+                    ]),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let plan = InstalledExtension::install(
+            manifest,
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-page").unwrap(),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::OutboundHttp {
+                            integration: "crm".to_string(),
+                        },
+                        HostCapabilityGrant::StorageWrite {
+                            class: StorageClassGrant::PrivateShared,
+                        },
+                    ]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .prepare_invocation(
+            &HandlerId::new("waitlist-page").unwrap(),
+            InvocationContext::new(
+                CustomerAppContext::new("customer-app").unwrap(),
+                PrincipalRef::user("user-42").unwrap(),
+                TraceContext::new("trace-1").unwrap(),
+                InvocationInput::Page(
+                    PageInvocation::new("/events/waitlist", HttpMethod::Get).unwrap(),
+                ),
+            ),
+        )
+        .unwrap();
+
+        let mut session = plan.begin_execution();
+        session.record_host_call(HostCall::AuthCheck).unwrap();
+        session
+            .record_host_call(HostCall::OutboundHttp {
+                integration: "crm".to_string(),
+                response_bytes: 512,
+            })
+            .unwrap();
+        session
+            .record_host_call(HostCall::StorageWrite {
+                class: StorageClassGrant::PrivateShared,
+                bytes: 1_024,
+            })
+            .unwrap();
+        let denied = session
+            .record_host_call(HostCall::SecretRead {
+                secret: "tls-account".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(
+            denied,
+            WasmModelError::HostGrantDenied {
+                handler_id: "waitlist-page".to_string(),
+                grant: HostCapabilityGrant::SecretRead {
+                    secret: "tls-account".to_string(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn execution_session_rejects_invalid_outcomes_and_runtime_overruns() {
+        let manifest = ExtensionManifest::new(
+            ExtensionId::new("jobs.reconcile").unwrap(),
+            "Reconcile Jobs",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::Job),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("reconcile-job").unwrap(),
+                    "exports.reconcile",
+                    ExtensionPoint::Job(JobExtensionPoint::new("reconcile", "jobs.work").unwrap()),
+                    HostGrantSet::from_grants([HostCapabilityGrant::DataWrite {
+                        resource: "billing.invoice".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let plan = InstalledExtension::install(
+            manifest,
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("reconcile-job").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::DataWrite {
+                        resource: "billing.invoice".to_string(),
+                    }]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .prepare_invocation(
+            &HandlerId::new("reconcile-job").unwrap(),
+            InvocationContext::new(
+                CustomerAppContext::new("customer-app").unwrap(),
+                PrincipalRef::service_account("svc-jobs").unwrap(),
+                TraceContext::new("trace-job").unwrap(),
+                InvocationInput::Job(JobInvocation::new("reconcile", 1).unwrap()),
+            ),
+        )
+        .unwrap();
+
+        let invalid = plan
+            .clone()
+            .begin_execution()
+            .finish(Duration::from_secs(1), InvocationOutcome::ApiJson)
+            .unwrap_err();
+        assert_eq!(
+            invalid,
+            WasmModelError::InvalidOutcomeForPoint {
+                handler_id: "reconcile-job".to_string(),
+                point: ExtensionPointKind::Job,
+                outcome: "api_json",
+            }
+        );
+
+        let over_budget = plan
+            .begin_execution()
+            .finish(Duration::from_secs(31), InvocationOutcome::JobCompleted)
+            .unwrap_err();
+        assert!(matches!(
+            over_budget,
+            WasmModelError::RuntimeBudgetExceeded { .. }
+        ));
+    }
+
+    #[test]
+    fn execution_session_tracks_peak_concurrency() {
+        let manifest = page_manifest();
+        let plan = InstalledExtension::install(
+            manifest,
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![
+                    HandlerInstallation::new(
+                        HandlerId::new("waitlist-page").unwrap(),
+                        HostGrantSet::from_grants([
+                            HostCapabilityGrant::AuthCheck,
+                            HostCapabilityGrant::DataRead {
+                                resource: "events.waitlist".to_string(),
+                            },
+                        ]),
+                    )
+                    .with_limit_override(ResourceLimits::new(
+                        Duration::from_secs(2),
+                        64 * 1024 * 1024,
+                        4,
+                        4 * 1024 * 1024,
+                        2,
+                        8 * 1024 * 1024,
+                        2,
+                    )),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .prepare_invocation(
+            &HandlerId::new("waitlist-page").unwrap(),
+            InvocationContext::new(
+                CustomerAppContext::new("customer-app").unwrap(),
+                PrincipalRef::user("user-7").unwrap(),
+                TraceContext::new("trace-2").unwrap(),
+                InvocationInput::Page(
+                    PageInvocation::new("/events/waitlist", HttpMethod::Post).unwrap(),
+                ),
+            ),
+        )
+        .unwrap();
+
+        let mut session = plan.begin_execution();
+        session.reserve_concurrency(1).unwrap();
+        session.reserve_concurrency(1).unwrap();
+        let err = session.reserve_concurrency(1).unwrap_err();
+        assert_eq!(
+            err,
+            WasmModelError::ResourceLimitExceeded {
+                handler_id: "waitlist-page".to_string(),
+                field: "max_concurrency",
             }
         );
     }

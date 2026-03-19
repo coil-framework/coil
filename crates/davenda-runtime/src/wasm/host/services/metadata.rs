@@ -1,12 +1,12 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    Mutex,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use davenda_data::{DataRuntime, PostgresDataClient};
 use davenda_wasm::{MetadataExecution, MetadataGrant};
 use rusqlite::{Connection, params};
+use sqlx::Row;
 
 use super::super::*;
 
@@ -15,24 +15,41 @@ pub(super) struct RuntimeMetadataBackend {
     store: MetadataAuditStore,
 }
 
-impl RuntimeMetadataBackend {
-    #[cfg(test)]
-    pub(super) fn open_for_test(namespace: impl Into<String>) -> Self {
-        let namespace = namespace.into();
-        Self {
-            store: MetadataAuditStore::open(test_shared_state_root(&namespace), namespace),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MetadataAuditBackendKind {
+    Sqlite,
+    Postgres,
+}
+
+impl MetadataAuditBackendKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite",
+            Self::Postgres => "postgres",
         }
     }
+}
 
-    pub(super) fn open(root: impl Into<PathBuf>, namespace: impl Into<String>) -> Self {
-        Self {
-            store: MetadataAuditStore::open(root.into(), namespace.into()),
-        }
+impl RuntimeMetadataBackend {
+    pub(super) fn open(plan: &RuntimePlan) -> Self {
+        let store = match plan.config.storage.deployment {
+            davenda_config::StorageDeployment::Distributed => {
+                MetadataAuditStore::postgres(plan.data.clone())
+            }
+            davenda_config::StorageDeployment::SingleNode => MetadataAuditStore::sqlite(
+                PathBuf::from(&plan.config.storage.local_root),
+                plan.shared_backend_namespace(),
+            ),
+        };
+
+        Self { store }
     }
 
     #[cfg(test)]
     pub(super) fn with_root(root: impl Into<PathBuf>, namespace: impl Into<String>) -> Self {
-        Self::open(root, namespace)
+        Self {
+            store: MetadataAuditStore::sqlite(root.into(), namespace.into()),
+        }
     }
 
     pub(super) fn record(
@@ -53,7 +70,9 @@ impl RuntimeMetadataBackend {
 
     pub(super) fn snapshot(&self, limit: usize) -> Result<MetadataAuditSnapshot, String> {
         Ok(MetadataAuditSnapshot {
-            path: self.store.path().to_path_buf(),
+            backend: self.store.kind(),
+            location: self.store.location_label(),
+            path: self.store.path().map(Path::to_path_buf),
             entry_count: self.store.count()?,
             recent_records: self.store.recent(limit)?,
         })
@@ -62,11 +81,21 @@ impl RuntimeMetadataBackend {
     pub(super) fn recent_records(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
         self.store.recent(limit)
     }
+
+    pub(super) fn backend_kind(&self) -> MetadataAuditBackendKind {
+        self.store.kind()
+    }
+
+    pub(super) fn location_label(&self) -> String {
+        self.store.location_label()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MetadataAuditSnapshot {
-    pub path: PathBuf,
+    pub backend: MetadataAuditBackendKind,
+    pub location: String,
+    pub path: Option<PathBuf>,
     pub entry_count: usize,
     pub recent_records: Vec<MetadataAuditRecord>,
 }
@@ -99,12 +128,70 @@ impl MetadataAuditRecord {
 }
 
 #[derive(Debug, Clone)]
-struct MetadataAuditStore {
+enum MetadataAuditStore {
+    Sqlite(SqliteMetadataAuditStore),
+    Postgres(PostgresMetadataAuditStore),
+}
+
+impl MetadataAuditStore {
+    fn sqlite(root: PathBuf, namespace: String) -> Self {
+        Self::Sqlite(SqliteMetadataAuditStore::open(root, namespace))
+    }
+
+    fn postgres(runtime: DataRuntime) -> Self {
+        Self::Postgres(PostgresMetadataAuditStore::open(runtime))
+    }
+
+    fn kind(&self) -> MetadataAuditBackendKind {
+        match self {
+            Self::Sqlite(_) => MetadataAuditBackendKind::Sqlite,
+            Self::Postgres(_) => MetadataAuditBackendKind::Postgres,
+        }
+    }
+
+    fn location_label(&self) -> String {
+        match self {
+            Self::Sqlite(store) => store.path.display().to_string(),
+            Self::Postgres(store) => store.location_label(),
+        }
+    }
+
+    fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Sqlite(store) => Some(store.path.as_path()),
+            Self::Postgres(_) => None,
+        }
+    }
+
+    fn insert(&self, record: &MetadataAuditRecord) -> Result<(), String> {
+        match self {
+            Self::Sqlite(store) => store.insert(record),
+            Self::Postgres(store) => store.insert(record),
+        }
+    }
+
+    fn count(&self) -> Result<usize, String> {
+        match self {
+            Self::Sqlite(store) => store.count(),
+            Self::Postgres(store) => store.count(),
+        }
+    }
+
+    fn recent(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
+        match self {
+            Self::Sqlite(store) => store.recent(limit),
+            Self::Postgres(store) => store.recent(limit),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SqliteMetadataAuditStore {
     path: PathBuf,
     connection: std::sync::Arc<Mutex<Connection>>,
 }
 
-impl MetadataAuditStore {
+impl SqliteMetadataAuditStore {
     fn open(root: PathBuf, namespace: String) -> Self {
         let path = database_path(&root, &namespace);
         if let Some(parent) = path.parent() {
@@ -152,10 +239,6 @@ impl MetadataAuditStore {
             path,
             connection: std::sync::Arc::new(Mutex::new(connection)),
         }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
     }
 
     fn insert(&self, record: &MetadataAuditRecord) -> Result<(), String> {
@@ -257,6 +340,177 @@ impl MetadataAuditStore {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PostgresMetadataAuditStore {
+    runtime: DataRuntime,
+    client: OnceLock<Result<PostgresDataClient, String>>,
+    schema: String,
+    initialized: OnceLock<Result<(), String>>,
+}
+
+impl PostgresMetadataAuditStore {
+    fn open(runtime: DataRuntime) -> Self {
+        let schema = runtime.schema.clone();
+        Self {
+            runtime,
+            client: OnceLock::new(),
+            schema,
+            initialized: OnceLock::new(),
+        }
+    }
+
+    fn location_label(&self) -> String {
+        format!("{}.metadata_audit_entries", self.schema)
+    }
+
+    fn insert(&self, record: &MetadataAuditRecord) -> Result<(), String> {
+        self.ensure_initialized()?;
+        let client = self.client()?.clone();
+        let table = self.qualified_table();
+        run_blocking(async move {
+            sqlx::query(&format!(
+                "INSERT INTO {} (recorded_at_unix_seconds, app_id, trace_id, request_id, principal_kind, principal_id, kind) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                table
+            ))
+            .bind(record.recorded_at_unix_seconds)
+            .bind(&record.app_id)
+            .bind(&record.trace_id)
+            .bind(&record.request_id)
+            .bind(&record.principal_kind)
+            .bind(&record.principal_id)
+            .bind(&record.kind)
+            .execute(&client.pool)
+            .await
+            .map_err(|error| format!("failed to write metadata audit entry: {error}"))?;
+            Ok(())
+        })
+    }
+
+    fn count(&self) -> Result<usize, String> {
+        self.ensure_initialized()?;
+        let client = self.client()?.clone();
+        let table = self.qualified_table();
+        run_blocking(async move {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", table))
+            .fetch_one(&client.pool)
+            .await
+            .map_err(|error| format!("failed to count metadata audit entries: {error}"))?;
+            usize::try_from(count)
+                .map_err(|_| "metadata audit entry count overflowed usize".to_string())
+        })
+    }
+
+    fn recent(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        self.ensure_initialized()?;
+        let client = self.client()?.clone();
+        let table = self.qualified_table();
+        run_blocking(async move {
+            let rows = sqlx::query(&format!(
+                "SELECT id, recorded_at_unix_seconds, app_id, trace_id, request_id, principal_kind, principal_id, kind FROM {} ORDER BY recorded_at_unix_seconds DESC, id DESC LIMIT $1",
+                table
+            ))
+            .bind(limit as i64)
+            .fetch_all(&client.pool)
+            .await
+            .map_err(|error| format!("failed to query metadata audit entries: {error}"))?;
+
+            let mut records = rows
+                .into_iter()
+                .map(|row| {
+                    Ok(MetadataAuditRecord {
+                        id: row
+                            .try_get(0)
+                            .map_err(|error| format!("failed to decode metadata audit entry id: {error}"))?,
+                        recorded_at_unix_seconds: row
+                            .try_get(1)
+                            .map_err(|error| format!("failed to decode metadata audit timestamp: {error}"))?,
+                        app_id: row
+                            .try_get(2)
+                            .map_err(|error| format!("failed to decode metadata audit app id: {error}"))?,
+                        trace_id: row
+                            .try_get(3)
+                            .map_err(|error| format!("failed to decode metadata audit trace id: {error}"))?,
+                        request_id: row
+                            .try_get(4)
+                            .map_err(|error| format!("failed to decode metadata audit request id: {error}"))?,
+                        principal_kind: row
+                            .try_get(5)
+                            .map_err(|error| format!("failed to decode metadata audit principal kind: {error}"))?,
+                        principal_id: row
+                            .try_get(6)
+                            .map_err(|error| format!("failed to decode metadata audit principal id: {error}"))?,
+                        kind: row
+                            .try_get(7)
+                            .map_err(|error| format!("failed to decode metadata audit kind: {error}"))?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            records.reverse();
+            Ok(records)
+        })
+    }
+
+    fn client(&self) -> Result<&PostgresDataClient, String> {
+        self.client
+            .get_or_init(|| self.runtime.connect_lazy_postgres().map_err(|error| error.to_string()))
+            .as_ref()
+            .map_err(|error| error.clone())
+    }
+
+    fn ensure_initialized(&self) -> Result<(), String> {
+        let schema_ident = quote_identifier(&self.schema);
+        self.initialized
+            .get_or_init(|| {
+                let client = self.client()?.clone();
+                run_blocking(async move {
+                    sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {schema_ident}"))
+                        .execute(&client.pool)
+                        .await
+                        .map_err(|error| format!("failed to initialize metadata schema: {error}"))?;
+
+                    sqlx::query(&format!(
+                        "CREATE TABLE IF NOT EXISTS {schema_ident}.metadata_audit_entries (
+                            id BIGSERIAL PRIMARY KEY,
+                            recorded_at_unix_seconds BIGINT NOT NULL,
+                            app_id TEXT NOT NULL,
+                            trace_id TEXT NOT NULL,
+                            request_id TEXT,
+                            principal_kind TEXT NOT NULL,
+                            principal_id TEXT,
+                            kind TEXT NOT NULL
+                        )"
+                    ))
+                    .execute(&client.pool)
+                    .await
+                    .map_err(|error| format!("failed to initialize metadata audit table: {error}"))?;
+
+                    sqlx::query(&format!(
+                        "CREATE INDEX IF NOT EXISTS metadata_audit_entries_recent
+                            ON {schema_ident}.metadata_audit_entries (recorded_at_unix_seconds DESC, id DESC)"
+                    ))
+                    .execute(&client.pool)
+                    .await
+                    .map_err(|error| format!("failed to initialize metadata audit index: {error}"))?;
+
+                    Ok(())
+                })
+            })
+            .clone()
+    }
+
+    fn qualified_table(&self) -> String {
+        format!(
+            "{}.{}",
+            quote_identifier(&self.schema),
+            quote_identifier("metadata_audit_entries")
+        )
+    }
+}
+
 fn database_path(root: &Path, namespace: &str) -> PathBuf {
     root.join("wasm")
         .join("metadata")
@@ -283,20 +537,23 @@ fn unix_seconds_now() -> i64 {
         .as_secs() as i64
 }
 
-#[cfg(test)]
-static TEST_SHARED_STATE_COUNTER: AtomicU64 = AtomicU64::new(0);
+fn quote_identifier(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
 
-#[cfg(test)]
-fn test_shared_state_root(namespace: &str) -> PathBuf {
-    let root = std::env::temp_dir().join("davenda-shared").join(format!(
-        "wasm-metadata-{}-{}-{}",
-        sanitize_namespace(namespace),
-        std::process::id(),
-        TEST_SHARED_STATE_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).unwrap();
-    root
+fn run_blocking<T, F>(future: F) -> Result<T, String>
+where
+    F: Future<Output = Result<T, String>>,
+{
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(future))
+    } else {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        runtime.block_on(future)
+    }
 }
 
 #[cfg(test)]
@@ -362,7 +619,7 @@ mod audit_tests {
         let reopened = RuntimeMetadataBackend::with_root(root, "audit-suite");
         let snapshot = reopened.snapshot(10).unwrap();
         assert_eq!(snapshot.entry_count, 2);
-        assert!(snapshot.path.exists());
+        assert!(snapshot.path.as_ref().unwrap().exists());
         let records = reopened.recent_records(10).unwrap();
 
         assert_eq!(records.len(), 2);

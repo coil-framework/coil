@@ -1,5 +1,4 @@
 use super::*;
-use std::path::PathBuf;
 use url::Url;
 
 mod execution;
@@ -239,26 +238,4 @@ impl RuntimePlan {
         )
     }
 
-    pub(crate) fn metadata_audit_path(&self) -> PathBuf {
-        PathBuf::from(&self.config.storage.local_root)
-            .join("wasm")
-            .join("metadata")
-            .join(format!(
-                "{}.sqlite3",
-                sanitize_namespace(&self.shared_backend_namespace())
-            ))
-    }
-}
-
-fn sanitize_namespace(namespace: &str) -> String {
-    namespace
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }

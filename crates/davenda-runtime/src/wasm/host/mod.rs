@@ -123,6 +123,14 @@ impl WasmHost {
         self.host_services.metadata_snapshot(limit)
     }
 
+    pub(crate) fn metadata_audit_backend_kind(&self) -> &'static str {
+        self.host_services.metadata_backend_kind().as_str()
+    }
+
+    pub(crate) fn metadata_audit_location(&self) -> String {
+        self.host_services.metadata_location()
+    }
+
     pub fn compile_module(&self, bytes: &[u8]) -> Result<CompiledWasmModule, WasmModelError> {
         self.engine.compile_module(bytes)
     }

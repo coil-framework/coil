@@ -5,6 +5,7 @@ use axum::http::{HeaderValue, StatusCode, header::CONTENT_TYPE};
 use axum::response::Response;
 use serde_json::json;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) async fn serve_health_probe(
     State(state): State<Arc<RuntimeServerState>>,
@@ -84,13 +85,77 @@ pub(crate) async fn serve_metrics_probe(
 
 pub(crate) async fn serve_diagnostics_probe(
     State(state): State<Arc<RuntimeServerState>>,
+    request: axum::http::Request<Body>,
 ) -> Response<Body> {
+    match diagnose_request(state, request).await {
+        Ok(response) => response,
+        Err(error) => error_response(error),
+    }
+}
+
+async fn diagnose_request(
+    state: Arc<RuntimeServerState>,
+    request: axum::http::Request<Body>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let live_request = LiveHttpRequest::from_request(
+        &request,
+        &state.plan.browser,
+        &state.plan.config.server,
+        None,
+    )?;
+    let request = live_request.into_request_input()?;
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let resolved = {
+        let mut browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        browser
+            .resolve_request(&request, &state.cookie_secret, now)
+            .map_err(RequestExecutionError::from_browser_error)?
+    };
+
+    let Some(principal_id) = resolved.principal_id.as_deref() else {
+        return Err(RuntimeServerError::Execution(
+            RequestExecutionError::SessionRequired {
+                route: "diagnostics".to_string(),
+            },
+        ));
+    };
+
+    let subject =
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(principal_id.to_string()));
+    let object = davenda_auth::Entity::admin_module(state.plan.config.app.name.clone());
+    let allowed = state
+        .route_authorizer
+        .check_capability(
+            &subject,
+            davenda_auth::Capability::AdminAuditRead,
+            &object,
+        )
+        .await?;
+
+    if !allowed {
+        return Err(RuntimeServerError::Execution(
+            RequestExecutionError::CapabilityRequired {
+                route: "diagnostics".to_string(),
+                capability: davenda_auth::Capability::AdminAuditRead,
+            },
+        ));
+    }
+
     let backends = &state.backends;
     let metadata_audit = match state.wasm_host.metadata_audit_snapshot(25) {
         Ok(snapshot) => json!({
-            "backend": "sqlite",
+            "backend": snapshot.backend.as_str(),
             "shared_namespace": state.plan.shared_backend_namespace(),
-            "path": snapshot.path.display().to_string(),
+            "location": snapshot.location,
+            "path": snapshot.path.map(|path| path.display().to_string()),
             "entry_count": snapshot.entry_count,
             "recent_records": snapshot
                 .recent_records
@@ -108,14 +173,14 @@ pub(crate) async fn serve_diagnostics_probe(
                 .collect::<Vec<_>>(),
         }),
         Err(error) => json!({
-            "backend": "sqlite",
+            "backend": state.wasm_host.metadata_audit_backend_kind(),
             "shared_namespace": state.plan.shared_backend_namespace(),
-            "path": state.plan.metadata_audit_path().display().to_string(),
+            "location": state.wasm_host.metadata_audit_location(),
             "error": error,
         }),
     };
 
-    observability_response(
+    let mut response = observability_response(
         StatusCode::OK,
         json!({
             "customer_app": state.plan.config.app.name,
@@ -167,7 +232,18 @@ pub(crate) async fn serve_diagnostics_probe(
             },
             "metadata": metadata_audit,
         }),
-    )
+    );
+
+    for cookie in resolved.response_cookies {
+        response.headers_mut().append(
+            axum::http::header::SET_COOKIE,
+            HeaderValue::from_str(&cookie).map_err(|_| RuntimeServerError::InvalidHeaderValue {
+                header: "set-cookie",
+            })?,
+        );
+    }
+
+    Ok(response)
 }
 
 fn observability_response(status: StatusCode, value: serde_json::Value) -> Response<Body> {

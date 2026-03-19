@@ -24,14 +24,7 @@ pub(crate) struct RuntimeWasmHostServices {
 impl RuntimeWasmHostServices {
     pub(crate) fn new(plan: RuntimePlan) -> Self {
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
-        #[cfg(test)]
-        let metadata =
-            metadata::RuntimeMetadataBackend::open_for_test(plan.shared_backend_namespace());
-        #[cfg(not(test))]
-        let metadata = metadata::RuntimeMetadataBackend::open(
-            plan.config.storage.local_root.clone(),
-            plan.shared_backend_namespace(),
-        );
+        let metadata = metadata::RuntimeMetadataBackend::open(&plan);
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
                 plan.wasm.allow_network,
@@ -48,14 +41,7 @@ impl RuntimeWasmHostServices {
         secrets: BTreeMap<String, String>,
     ) -> Self {
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
-        #[cfg(test)]
-        let metadata =
-            metadata::RuntimeMetadataBackend::open_for_test(plan.shared_backend_namespace());
-        #[cfg(not(test))]
-        let metadata = metadata::RuntimeMetadataBackend::open(
-            plan.config.storage.local_root.clone(),
-            plan.shared_backend_namespace(),
-        );
+        let metadata = metadata::RuntimeMetadataBackend::open(&plan);
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
                 plan.wasm.allow_network,
@@ -129,5 +115,13 @@ impl RuntimeWasmHostServices {
         limit: usize,
     ) -> Result<metadata::MetadataAuditSnapshot, String> {
         self.metadata.snapshot(limit)
+    }
+
+    pub(crate) fn metadata_backend_kind(&self) -> metadata::MetadataAuditBackendKind {
+        self.metadata.backend_kind()
+    }
+
+    pub(crate) fn metadata_location(&self) -> String {
+        self.metadata.location_label()
     }
 }

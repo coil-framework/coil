@@ -16,7 +16,7 @@ use davenda_cache::{
 };
 use davenda_cms::CmsModule;
 use davenda_commerce::CommerceModule;
-use davenda_config::{PlatformConfig, StorageClass};
+use davenda_config::{PlatformConfig, StorageClass, StorageDeployment};
 use davenda_core::CookieSigner;
 use davenda_core::{ExtensionSlotDescriptor, ExtensionSlotKind};
 use davenda_events::EventsModule;
@@ -2089,11 +2089,73 @@ async fn server_router_exposes_health_readiness_metrics_and_diagnostics_probes()
             Request::builder()
                 .method("GET")
                 .uri("/diagnostics")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
+    assert_eq!(diagnostics.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1")),
+        Capability::AdminAuditRead,
+        davenda_auth::Entity::admin_module("showcase-events"),
+    ));
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        authorizer,
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let diagnostics = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/diagnostics")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = diagnostics.status();
     let diagnostics_body = String::from_utf8(
         to_bytes(diagnostics.into_body(), usize::MAX)
             .await
@@ -2101,11 +2163,26 @@ async fn server_router_exposes_health_readiness_metrics_and_diagnostics_probes()
             .to_vec(),
     )
     .unwrap();
+    assert_eq!(status, StatusCode::OK);
     assert!(diagnostics_body.contains("\"customer_app\""));
     assert!(diagnostics_body.contains("\"database\""));
     assert!(diagnostics_body.contains("\"metadata\""));
     assert!(diagnostics_body.contains("\"backend\":\"sqlite\""));
     assert!(diagnostics_body.contains("\"path\""));
+}
+
+#[test]
+fn runtime_plan_uses_shared_postgres_metadata_audit_backend_in_distributed_mode() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.storage.deployment = StorageDeployment::Distributed;
+    config.storage.single_node_escape_hatch = davenda_config::SingleNodeStorageMode::Disabled;
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let host = plan.wasm_host();
+
+    assert_eq!(host.metadata_audit_backend_kind(), "postgres");
+    assert!(host.metadata_audit_location().contains("metadata_audit_entries"));
 }
 
 #[tokio::test]

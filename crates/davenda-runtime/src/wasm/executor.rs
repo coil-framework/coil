@@ -644,7 +644,7 @@ publish_manifest = false
         let snapshot = reopened.metadata_snapshot(10).unwrap();
         assert_eq!(snapshot.entry_count, 2);
         assert_eq!(snapshot.recent_records.len(), 2);
-        assert!(snapshot.path.exists());
+        assert!(snapshot.path.as_ref().unwrap().exists());
         assert_eq!(snapshot.recent_records[0].kind, "json_ld");
         assert_eq!(snapshot.recent_records[0].trace_id, "trace-1");
         assert_eq!(snapshot.recent_records[0].app_id, "customer-app");

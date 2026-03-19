@@ -1,6 +1,6 @@
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
 use davenda_template::{TemplateDefinition, TemplateModelError, TemplateRuntime};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 static RUNTIME_PLAN_SCOPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 

@@ -37,12 +37,16 @@ fn cms_module_manifest_declares_expected_capabilities_and_registers_services() {
             Capability::CmsNavigationEdit,
         ]
     );
-    assert!(manifest
-        .optional_capabilities
-        .contains(&Capability::AdminShellAccess));
-    assert!(manifest
-        .optional_capabilities
-        .contains(&Capability::AssetRead));
+    assert!(
+        manifest
+            .optional_capabilities
+            .contains(&Capability::AdminShellAccess)
+    );
+    assert!(
+        manifest
+            .optional_capabilities
+            .contains(&Capability::AssetRead)
+    );
     assert_eq!(manifest.migrations.len(), 3);
     assert_eq!(manifest.route_surfaces.len(), 5);
     assert_eq!(manifest.http_surfaces.len(), 5);
@@ -50,24 +54,34 @@ fn cms_module_manifest_declares_expected_capabilities_and_registers_services() {
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 1);
     assert_eq!(manifest.bulk_operations.len(), 2);
-    assert!(manifest
-        .module_dependencies
-        .iter()
-        .any(|dependency| dependency.module == "media"));
-    assert!(manifest
-        .core_service_dependencies
-        .contains(&CoreServiceDependency::Seo));
-    assert!(manifest
-        .extension_slots
-        .iter()
-        .any(|slot| slot.kind == ExtensionSlotKind::RenderHook));
+    assert!(
+        manifest
+            .module_dependencies
+            .iter()
+            .any(|dependency| dependency.module == "media")
+    );
+    assert!(
+        manifest
+            .core_service_dependencies
+            .contains(&CoreServiceDependency::Seo)
+    );
+    assert!(
+        manifest
+            .extension_slots
+            .iter()
+            .any(|slot| slot.kind == ExtensionSlotKind::RenderHook)
+    );
     assert_eq!(manifest.admin_resources.len(), 3);
-    assert!(registry
-        .services()
-        .any(|service| service.id == "module.cms.pages"));
-    assert!(registry
-        .services()
-        .any(|service| service.id == "module.cms.media_refs"));
+    assert!(
+        registry
+            .services()
+            .any(|service| service.id == "module.cms.pages")
+    );
+    assert!(
+        registry
+            .services()
+            .any(|service| service.id == "module.cms.media_refs")
+    );
     assert_eq!(module.admin_resources().len(), 3);
 }
 
@@ -235,22 +249,28 @@ fn cms_module_exposes_queries_migrations_and_transaction_plans() {
 
     let publish = page.publish_transaction_plan().unwrap();
     assert_eq!(publish.isolation, TransactionIsolation::Serializable);
-    assert!(publish
-        .writes
-        .iter()
-        .any(|write| write.resource == "sitemap_entry"));
+    assert!(
+        publish
+            .writes
+            .iter()
+            .any(|write| write.resource == "sitemap_entry")
+    );
 
     let schedule = page.schedule_transaction_plan().unwrap();
-    assert!(schedule
-        .after_commit_jobs
-        .iter()
-        .any(|job| job == "cms.jobs.publication_schedule.enqueue:page-home"));
+    assert!(
+        schedule
+            .after_commit_jobs
+            .iter()
+            .any(|job| job == "cms.jobs.publication_schedule.enqueue:page-home")
+    );
 
     let unpublish = page.unpublish_transaction_plan().unwrap();
-    assert!(unpublish
-        .writes
-        .iter()
-        .any(|write| write.action == "delete"));
+    assert!(
+        unpublish
+            .writes
+            .iter()
+            .any(|write| write.action == "delete")
+    );
 
     let module = CmsModule::new();
     let live_query = module.live_pages_query(Some("en-GB")).unwrap();

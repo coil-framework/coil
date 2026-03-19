@@ -1,9 +1,11 @@
 use crate::CliModelError;
 use crate::cli::args::{CliInput, parse};
-use crate::cli::auth::execute_live_auth_explain;
+use crate::cli::auth::AuthExplainResult;
+use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
 use crate::cli::error::CliRunError;
 use crate::cli::render::render_auth_explain;
 use crate::registry::CliRuntime;
+use davenda_config::PlatformConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliApplication {
@@ -30,8 +32,27 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             output_mode,
             invocation,
         } => {
-            // Auth explain is resolved from deployment config and must hit the live backend.
-            let result = execute_live_auth_explain(invocation)?;
+            // Auth explain is deployment-configured and always goes through the live backend.
+            let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to load platform config from `{}`: {error}",
+                    invocation.config_path.display()
+                ))
+            })?;
+            let backend = LiveAuthExplainBackend::from_config(&config)?;
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to start the CLI async runtime: {error}"
+                    ))
+                })?;
+            let explanation = runtime.block_on(async { backend.explain(&invocation).await })?;
+            let result = AuthExplainResult {
+                invocation,
+                explanation,
+            };
             render_auth_explain(&result, output_mode)
         }
     }
@@ -159,6 +180,35 @@ publish_manifest = false
     fn run_from_args_reports_disabled_auth_explain_from_live_config() {
         let config_path = PathBuf::from("/tmp/davenda-cli-disabled.toml");
         fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
+
+        let error = run_from_args([
+            "auth".to_string(),
+            "explain".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--subject".to_string(),
+            "user:alice".to_string(),
+            "--capability".to_string(),
+            "cms.page.read".to_string(),
+            "--resource".to_string(),
+            "page:homepage".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 1);
+    }
+
+    #[test]
+    fn run_from_args_uses_the_live_backend_when_deployment_enables_auth_explain() {
+        let config_path = PathBuf::from("/tmp/davenda-cli-enabled.toml");
+        let enabled_config = DISABLED_EXPLAIN_CONFIG
+            .replace("explain_api = false", "explain_api = true")
+            .replace("[modules]\nenabled = []", "[modules]\nenabled = [\"cms\"]")
+            .replace(
+                "[cache]\nl1 = \"moka\"",
+                "[cache]\nl1 = \"moka\"\nl2 = \"redis\"",
+            );
+        fs::write(&config_path, enabled_config).unwrap();
 
         let error = run_from_args([
             "auth".to_string(),

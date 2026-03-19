@@ -51,9 +51,11 @@ impl RuntimeOutboundHttpBackend {
         }
     }
 
-    /// Execute an approved outbound HTTP integration without running the
-    /// network call on the runtime worker lane.
-    pub(super) fn execute_via_blocking_pool(
+    /// Submit an approved outbound HTTP integration to the blocking pool.
+    ///
+    /// This returns only after the offloaded request completes, but the actual
+    /// network call and response body read do not run on the core worker lane.
+    pub(super) fn submit_outbound_http_to_blocking_pool(
         &self,
         integration: &str,
         response_bytes_hint: u64,
@@ -69,7 +71,7 @@ impl RuntimeOutboundHttpBackend {
         let endpoint_string = endpoint.to_string();
         let client = self.client.clone();
         let request_timeout = self.request_timeout;
-        execute_outbound_http_on_blocking_pool(move || {
+        offload_outbound_http_to_blocking_pool(move || {
             perform_request(
                 client,
                 endpoint,
@@ -151,7 +153,7 @@ fn perform_request(
 /// The request thread only waits at the boundary; the actual network call and
 /// body read run off the core worker lane when a multi-thread runtime is
 /// present.
-fn execute_outbound_http_on_blocking_pool<T, F>(operation: F) -> Result<T, String>
+fn offload_outbound_http_to_blocking_pool<T, F>(operation: F) -> Result<T, String>
 where
     F: FnOnce() -> Result<T, String> + Send + 'static,
     T: Send + 'static,
@@ -252,7 +254,11 @@ mod tests {
         );
 
         let error = backend
-            .execute_via_blocking_pool("http://127.0.0.1:8080", 64, &execution_context())
+            .submit_outbound_http_to_blocking_pool(
+                "http://127.0.0.1:8080",
+                64,
+                &execution_context(),
+            )
             .unwrap_err();
 
         assert!(error.contains("not mapped"), "unexpected error: {error}");
@@ -278,7 +284,7 @@ mod tests {
         );
 
         let error = backend
-            .execute_via_blocking_pool("no-fallback", 64, &execution_context())
+            .submit_outbound_http_to_blocking_pool("no-fallback", 64, &execution_context())
             .unwrap_err();
 
         assert!(error.contains("not mapped"), "unexpected error: {error}");
@@ -293,7 +299,7 @@ mod tests {
         let backend =
             RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
         let execution = backend
-            .execute_via_blocking_pool("crm", 64, &execution_context())
+            .submit_outbound_http_to_blocking_pool("crm", 64, &execution_context())
             .expect("mapped endpoint should succeed");
 
         assert_eq!(execution.integration, "crm");
@@ -316,7 +322,7 @@ mod tests {
         let backend =
             RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
         let error = backend
-            .execute_via_blocking_pool("search", 4, &execution_context())
+            .submit_outbound_http_to_blocking_pool("search", 4, &execution_context())
             .unwrap_err();
 
         assert!(
@@ -341,7 +347,7 @@ mod tests {
             1024,
         );
         let error = backend
-            .execute_via_blocking_pool("billing", 64, &execution_context())
+            .submit_outbound_http_to_blocking_pool("billing", 64, &execution_context())
             .unwrap_err();
 
         assert!(error.contains("timed out"), "unexpected error: {error}");
@@ -388,8 +394,11 @@ mod tests {
                     progress_probe.fetch_add(1, Ordering::SeqCst);
                 });
 
-                let result =
-                    backend.execute_via_blocking_pool("billing", 64, &execution_context());
+                let result = backend.submit_outbound_http_to_blocking_pool(
+                    "billing",
+                    64,
+                    &execution_context(),
+                );
                 assert!(result.is_ok(), "unexpected error: {result:?}");
                 probe.await.unwrap();
             });

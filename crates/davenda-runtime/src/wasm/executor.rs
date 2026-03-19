@@ -208,7 +208,7 @@ impl RuntimeHostServiceExecutor {
         })
     }
 
-    fn execute_outbound_http_via_blocking_pool(
+    fn dispatch_outbound_http_to_blocking_pool(
         &self,
         call: &HostServiceCall,
         context: &InvocationContext,
@@ -216,10 +216,10 @@ impl RuntimeHostServiceExecutor {
         response_bytes: u64,
     ) -> Result<HostServiceExecution, WasmModelError> {
         // This method is intentionally just a dispatcher. The outbound HTTP
-        // backend offloads the actual network I/O to the blocking pool.
+        // backend submits the actual network I/O to the blocking pool.
         let execution = self
             .services
-            .execute_http_via_blocking_pool(integration, response_bytes, context)
+            .submit_outbound_http_to_blocking_pool(integration, response_bytes, context)
             .map_err(|reason| {
                 runtime_host_service_error(context, HostServiceDomain::Network, reason)
             })?;
@@ -383,7 +383,7 @@ impl HostServiceExecutor for RuntimeHostServiceExecutor {
             HostServiceRequest::OutboundHttp {
                 integration,
                 response_bytes,
-            } => self.execute_outbound_http_via_blocking_pool(
+            } => self.dispatch_outbound_http_to_blocking_pool(
                 call,
                 context,
                 integration,

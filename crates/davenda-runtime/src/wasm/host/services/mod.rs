@@ -79,14 +79,14 @@ impl RuntimeWasmHostServices {
         }
     }
 
-    pub(crate) fn execute_http_via_blocking_pool(
+    pub(crate) fn submit_outbound_http_to_blocking_pool(
         &self,
         integration: &str,
         response_bytes_hint: u64,
         context: &InvocationContext,
     ) -> Result<NetworkExecution, String> {
         self.http
-            .execute_via_blocking_pool(integration, response_bytes_hint, context)
+            .submit_outbound_http_to_blocking_pool(integration, response_bytes_hint, context)
     }
 
     pub(crate) fn read_secret(

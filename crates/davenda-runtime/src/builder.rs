@@ -1,10 +1,12 @@
 use super::*;
+use davenda_template::{TemplateDefinition, TemplateModelError, TemplateRuntime};
 
 pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
     auth_package: P,
     modules: Vec<Box<dyn PlatformModule>>,
     extensions: Vec<InstalledExtension>,
+    templates: Vec<TemplateDefinition>,
     storage_policies: StoragePolicySet,
     routes: Vec<RouteDefinition>,
     handlers: Vec<HandlerDefinition>,
@@ -22,6 +24,7 @@ where
             auth_package,
             modules: Vec::new(),
             extensions: Vec::new(),
+            templates: Vec::new(),
             storage_policies: StoragePolicySet::default(),
             routes: Vec::new(),
             handlers: Vec::new(),
@@ -45,6 +48,19 @@ where
 
     pub fn with_installed_extension(mut self, extension: InstalledExtension) -> Self {
         self.extensions.push(extension);
+        self
+    }
+
+    pub fn with_template(mut self, template: TemplateDefinition) -> Self {
+        self.templates.push(template);
+        self
+    }
+
+    pub fn with_templates<I>(mut self, templates: I) -> Self
+    where
+        I: IntoIterator<Item = TemplateDefinition>,
+    {
+        self.templates.extend(templates);
         self
     }
 
@@ -94,6 +110,7 @@ where
             self.storage_policies.clone(),
         );
         let mut registry = bootstrap.registry;
+        let mut template = bootstrap.template;
         let mut observability = bootstrap.observability;
         let mut module_manifests = Vec::new();
         let mut install_migrations = MigrationPlan::new();
@@ -147,6 +164,11 @@ where
             }
             module.register(&mut registry)?;
         }
+
+        for definition in self.templates {
+            template.registry.register(definition)?;
+        }
+        template.runtime = TemplateRuntime::new(template.registry.clone());
 
         let mut module_jobs = module_manifests
             .iter()
@@ -248,6 +270,8 @@ where
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
             cache_planner: bootstrap.cache.planner,
+            i18n: bootstrap.i18n,
+            seo: bootstrap.seo,
             browser: bootstrap.browser,
             cli: bootstrap.cli,
             data: bootstrap.data,
@@ -256,7 +280,7 @@ where
             http,
             handlers,
             storage_planner,
-            template: bootstrap.template,
+            template,
             tls: bootstrap.tls,
             wasm: bootstrap.wasm,
             services: registry.services().cloned().collect(),
@@ -413,6 +437,8 @@ pub enum RuntimeBuildError {
     Jobs(#[from] JobsModelError),
     #[error(transparent)]
     Ops(#[from] OpsModelError),
+    #[error(transparent)]
+    Template(#[from] TemplateModelError),
     #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
     AuthPackageMismatch { configured: String, actual: String },
     #[error(

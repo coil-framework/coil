@@ -6,6 +6,8 @@ pub struct RuntimePlan {
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
     pub cache_planner: CachePlanner,
+    pub i18n: I18nRuntimeServices,
+    pub seo: SeoRuntimeServices,
     pub browser: BrowserSecurityServices,
     pub cli: CliRuntimeServices,
     pub data: DataRuntimeServices,

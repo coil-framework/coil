@@ -31,7 +31,6 @@ use davenda_storage::{
 };
 use davenda_template::{
     AttributeNode, ElementNode, Node, TemplateDefinition, TemplateName, TemplateNamespace,
-    TemplateRuntime,
 };
 use davenda_tls::{
     CertificateFingerprint, CertificateId, CertificateProviderKind, CertificateRecord,
@@ -388,12 +387,7 @@ fn guest_module(export: &str, host_calls: &[(i32, i64)], outcome: InvocationOutc
     )
 }
 
-fn register_template(plan: &mut RuntimePlan, template: TemplateDefinition) {
-    plan.template.registry.register(template).unwrap();
-    plan.template.runtime = TemplateRuntime::new(plan.template.registry.clone());
-}
-
-fn register_page_template(plan: &mut RuntimePlan, name: &str) {
+fn page_template(namespace: TemplateNamespace, name: &str) -> TemplateDefinition {
     let title = ElementNode::new("title", vec![Node::value("route_name").unwrap()]).unwrap();
     let head = ElementNode::new("head", vec![Node::Element(title)]).unwrap();
     let main = ElementNode::new("main", vec![Node::value("path").unwrap()])
@@ -405,31 +399,25 @@ fn register_page_template(plan: &mut RuntimePlan, name: &str) {
         .unwrap()
         .with_attribute(AttributeNode::dynamic_text("lang", "locale").unwrap());
 
-    register_template(
-        plan,
-        TemplateDefinition::layout(
-            plan.template.customer_app_namespace.clone(),
-            TemplateName::new(name).unwrap(),
-            vec![Node::static_text("<!DOCTYPE html>"), Node::Element(html)],
-        ),
-    );
+    TemplateDefinition::layout(
+        namespace,
+        TemplateName::new(name).unwrap(),
+        vec![Node::static_text("<!DOCTYPE html>"), Node::Element(html)],
+    )
 }
 
-fn register_fragment_template(plan: &mut RuntimePlan, name: &str) {
+fn fragment_template(namespace: TemplateNamespace, name: &str) -> TemplateDefinition {
     let fragment = ElementNode::new("div", vec![Node::value("path").unwrap()])
         .unwrap()
         .with_attribute(AttributeNode::dynamic_text("id", "surface_id").unwrap())
         .with_attribute(AttributeNode::dynamic_text("data-route", "route_name").unwrap())
         .with_attribute(AttributeNode::dynamic_text("data-template", "template_name").unwrap());
 
-    register_template(
-        plan,
-        TemplateDefinition::fragment(
-            plan.template.customer_app_namespace.clone(),
-            TemplateName::new(name).unwrap(),
-            vec![Node::Element(fragment)],
-        ),
-    );
+    TemplateDefinition::fragment(
+        namespace,
+        TemplateName::new(name).unwrap(),
+        vec![Node::Element(fragment)],
+    )
 }
 
 fn unique_temp_extension_dir(label: &str) -> PathBuf {
@@ -1783,7 +1771,8 @@ async fn server_host_authorizes_capability_routes_through_live_authorizer() {
 #[tokio::test]
 async fn server_host_renders_page_templates_as_html() {
     let config = config_with_app_name("showcase-events-render-page");
-    let mut plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_route(
             RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
                 .unwrap()
@@ -1791,9 +1780,9 @@ async fn server_host_renders_page_templates_as_html() {
                 .requiring_session(),
         )
         .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .with_template(page_template(customer_namespace, "account/dashboard"))
         .build()
         .unwrap();
-    register_page_template(&mut plan, "account/dashboard");
 
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
@@ -1849,13 +1838,70 @@ async fn server_host_renders_page_templates_as_html() {
     );
     assert!(body.contains("<main data-route=\"account.dashboard\""));
     assert!(body.contains("/account"));
+    assert!(body.contains("rel=\"canonical\""));
+    assert!(body.contains("application/ld+json"));
+    assert!(body.contains("\"@type\":\"WebPage\""));
     assert!(!body.contains("render:account/dashboard"));
+}
+
+#[tokio::test]
+async fn server_host_emits_hreflang_links_for_localized_page_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("events.list", HttpMethod::Get, "/events")
+                .unwrap()
+                .localized(),
+        )
+        .with_handler(HandlerDefinition::page("events.list", "events/list").unwrap())
+        .with_template(page_template(customer_namespace, "events/list"))
+        .build()
+        .unwrap();
+
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/fr-FR/events")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert!(body.contains("hreflang=\"fr-FR\""));
+    assert!(body.contains("https://www.example.com/fr-FR/events"));
+    assert!(body.contains("hreflang=\"en-GB\""));
+    assert!(body.contains("https://www.example.com/en-GB/events"));
 }
 
 #[tokio::test]
 async fn server_host_renders_fragment_templates_as_html() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
-    let mut plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_route(
             RouteDefinition::new("cms.preview", HttpMethod::Get, "/fragments/preview")
                 .unwrap()
@@ -1864,9 +1910,9 @@ async fn server_host_renders_fragment_templates_as_html() {
         .with_handler(
             HandlerDefinition::fragment("cms.preview", "cms/preview", "preview-pane").unwrap(),
         )
+        .with_template(fragment_template(customer_namespace, "cms/preview"))
         .build()
         .unwrap();
-    register_fragment_template(&mut plan, "cms/preview");
 
     let resolver = StaticSecretResolver::new()
         .with_secret(

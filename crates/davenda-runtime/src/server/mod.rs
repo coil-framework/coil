@@ -9,11 +9,12 @@ use crate::wasm::RuntimeWasmHostServices;
 use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
-use axum::routing::{any, get};
+use axum::routing::any;
 use axum::{Router, serve};
 
 mod auth;
 mod backend;
+mod diagnostics;
 mod observability;
 mod request;
 
@@ -24,9 +25,8 @@ pub use backend::{
     SecretResolutionError, SecretResolver, SessionStoreClientTarget, SharedBackendClients,
     StaticSecretResolver,
 };
-use observability::{
-    serve_diagnostics_probe, serve_health_probe, serve_metrics_probe, serve_readiness_probe,
-};
+use diagnostics::privileged_router as diagnostics_router;
+use observability::public_router as observability_router;
 pub use request::LiveHttpRequest;
 use request::{error_response, execute_live_request, serve_runtime_request};
 
@@ -190,11 +190,8 @@ impl HttpServerHost {
             route_authorizer,
         });
         let router = Router::new()
-            .route("/health", any(serve_health_probe))
-            .route("/ready", any(serve_readiness_probe))
-            .route("/readiness", any(serve_readiness_probe))
-            .route("/metrics", get(serve_metrics_probe))
-            .route("/diagnostics", get(serve_diagnostics_probe))
+            .merge(observability_router())
+            .merge(diagnostics_router())
             .route("/", any(serve_runtime_request))
             .fallback(any(serve_runtime_request))
             .with_state(state.clone());

@@ -2007,7 +2007,7 @@ async fn server_host_ignores_forwarded_metadata_from_untrusted_peers() {
 }
 
 #[tokio::test]
-async fn server_router_exposes_health_readiness_metrics_and_diagnostics_probes() {
+async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()

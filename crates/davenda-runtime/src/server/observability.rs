@@ -1,11 +1,21 @@
 use super::*;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, header::CONTENT_TYPE};
 use axum::response::Response;
+use axum::routing::{any, get};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+pub(crate) fn public_router() -> Router<Arc<RuntimeServerState>> {
+    Router::new()
+        .route("/health", any(serve_health_probe))
+        .route("/ready", any(serve_readiness_probe))
+        .route("/readiness", any(serve_readiness_probe))
+        .route("/metrics", get(serve_metrics_probe))
+}
 
 pub(crate) async fn serve_health_probe(
     State(state): State<Arc<RuntimeServerState>>,
@@ -133,11 +143,7 @@ async fn diagnose_request(
     let object = davenda_auth::Entity::admin_module(state.plan.config.app.name.clone());
     let allowed = state
         .route_authorizer
-        .check_capability(
-            &subject,
-            davenda_auth::Capability::AdminAuditRead,
-            &object,
-        )
+        .check_capability(&subject, davenda_auth::Capability::AdminAuditRead, &object)
         .await?;
 
     if !allowed {

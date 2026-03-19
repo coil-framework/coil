@@ -807,7 +807,7 @@ where
             module.register(&mut registry)?;
         }
 
-        let module_jobs = module_manifests
+        let mut module_jobs = module_manifests
             .iter()
             .flat_map(|manifest| {
                 manifest
@@ -872,8 +872,6 @@ where
                 })
                 .collect::<Vec<_>>();
         let ops_catalog = OpsCatalog::from_manifests(&module_manifests)?;
-        let (registered_runtime_jobs, registered_runtime_event_subscriptions, jobs_domain) =
-            build_runtime_jobs_domain(&bootstrap.jobs, &module_jobs, &module_event_subscriptions)?;
         let registered_extension_slots = collect_extension_slots(&module_manifests)?;
         let mut extension_registry = ExtensionRegistry::new(ContractVersion::new(1, 0, 0));
         let mut installed_extensions = Vec::new();
@@ -899,6 +897,10 @@ where
         for handler in extension_registry.registered_handlers() {
             validate_extension_handler_slot(handler, &registered_extension_slots)?;
         }
+
+        module_jobs.extend(collect_extension_runtime_jobs(&extension_registry)?);
+        let (registered_runtime_jobs, registered_runtime_event_subscriptions, jobs_domain) =
+            build_runtime_jobs_domain(&bootstrap.jobs, &module_jobs, &module_event_subscriptions)?;
 
         Ok(RuntimePlan {
             config: self.config,
@@ -1695,6 +1697,7 @@ pub struct WasmHost {
     pub runtime: WasmRuntimeServices,
     registry: ExtensionRegistry,
     default_locale: String,
+    registered_jobs: Vec<RuntimeJobDefinition>,
 }
 
 impl WasmHost {
@@ -1735,6 +1738,41 @@ impl WasmHost {
     ) -> Result<Option<WasmExecutionSession>, WasmModelError> {
         Ok(self
             .prepare_api_invocation(execution)?
+            .map(InvocationPlan::begin_execution))
+    }
+
+    pub fn prepare_leased_job_invocation(
+        &self,
+        lease: &JobLease,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        let trace_id = format!("job:{}", lease.record.spec.job_id.as_str());
+        let principal = ExtensionPrincipal::service_account("runtime.jobs");
+        let attempts = lease.record.attempts.saturating_add(1);
+        let job_name = lease.record.spec.job_name.as_str();
+
+        if let Some(declared_job) = job_name.strip_prefix("event-handler:") {
+            return self.prepare_job_invocation(declared_job, attempts, trace_id, principal);
+        }
+
+        match self
+            .registered_jobs
+            .iter()
+            .find(|definition| definition.contract.name == job_name)
+            .map(|definition| definition.contract.trigger)
+        {
+            Some(JobTriggerKind::Scheduled) => {
+                self.prepare_scheduled_job_invocation(job_name, trace_id, principal)
+            }
+            _ => self.prepare_job_invocation(job_name, attempts, trace_id, principal),
+        }
+    }
+
+    pub fn begin_leased_job_invocation(
+        &self,
+        lease: &JobLease,
+    ) -> Result<Option<WasmExecutionSession>, WasmModelError> {
+        Ok(self
+            .prepare_leased_job_invocation(lease)?
             .map(InvocationPlan::begin_execution))
     }
 
@@ -1979,6 +2017,7 @@ impl RuntimePlan {
             runtime: self.wasm.clone(),
             registry: self.extension_registry.clone(),
             default_locale: self.config.i18n.default_locale.clone(),
+            registered_jobs: self.registered_runtime_jobs.clone(),
         }
     }
 
@@ -2707,6 +2746,65 @@ pub enum RuntimeBuildError {
     },
 }
 
+fn collect_extension_runtime_jobs(
+    extension_registry: &ExtensionRegistry,
+) -> Result<Vec<RegisteredModuleJob>, RuntimeBuildError> {
+    let mut extensions_by_id = BTreeMap::new();
+    for extension in extension_registry.extensions() {
+        extensions_by_id.insert(extension.manifest().id.to_string(), extension);
+    }
+
+    let mut jobs = Vec::new();
+    for handler in extension_registry.registered_handlers() {
+        if !matches!(
+            handler.point,
+            ExtensionPointKind::Job | ExtensionPointKind::ScheduledJob
+        ) {
+            continue;
+        }
+
+        let extension = extensions_by_id
+            .get(&handler.extension_id.to_string())
+            .expect("registered handlers always belong to an installed extension");
+        let manifest_handler = extension
+            .manifest()
+            .handler(&handler.handler_id)
+            .expect("registered handlers always belong to a manifest handler");
+
+        let contract = match &manifest_handler.point {
+            davenda_wasm::ExtensionPoint::Job(job) => JobContract::new(
+                job.job_name.clone(),
+                JobTriggerKind::Operator,
+                false,
+                format!(
+                    "WASM extension job `{}` from `{}`",
+                    handler.handler_id,
+                    extension.manifest().id
+                ),
+            ),
+            davenda_wasm::ExtensionPoint::ScheduledJob(job) => JobContract::new(
+                job.job_name.clone(),
+                JobTriggerKind::Scheduled,
+                false,
+                format!(
+                    "WASM scheduled job `{}` from `{}` on `{}`",
+                    handler.handler_id,
+                    extension.manifest().id,
+                    job.schedule
+                ),
+            ),
+            _ => continue,
+        };
+
+        jobs.push(RegisteredModuleJob {
+            module: format!("extension:{}", extension.manifest().id),
+            job: contract,
+        });
+    }
+
+    Ok(jobs)
+}
+
 fn build_runtime_jobs_domain(
     runtime: &JobsRuntimeServices,
     module_jobs: &[RegisteredModuleJob],
@@ -2983,6 +3081,7 @@ mod tests {
     use davenda_commerce::CommerceModule;
     use davenda_config::{PlatformConfig, StorageClass};
     use davenda_core::CookieSigner;
+    use davenda_core::{ExtensionSlotDescriptor, ExtensionSlotKind};
     use davenda_events::EventsModule;
     use davenda_media::MediaModule;
     use davenda_memberships::MembershipsModule;
@@ -3007,7 +3106,7 @@ mod tests {
         ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest,
         HostCapabilityGrant, HostGrantSet, HostCall, InstalledExtension, InvocationInput,
         InvocationOutcome, JobExtensionPoint, PrincipalKind, RenderHookExtensionPoint,
-        ResourceLimits, WasmModelError, WebhookExtensionPoint,
+        ResourceLimits, ScheduledJobExtensionPoint, WasmModelError, WebhookExtensionPoint,
     };
     use std::time::Duration;
 
@@ -3240,6 +3339,44 @@ cdn_base_url = "https://cdn.example.com"
                 "showcase-events",
                 vec![HandlerInstallation::new(
                     HandlerId::new("payment-authorized").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn installed_scheduled_job_extension() -> InstalledExtension {
+        InstalledExtension::install(
+            ExtensionManifest::new(
+                davenda_wasm::ExtensionId::new("ops.search.nightly").unwrap(),
+                "Ops Search Nightly",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::ScheduledJob),
+                vec![
+                    HandlerManifest::new(
+                        HandlerId::new("nightly-rebuild").unwrap(),
+                        "exports.nightly_rebuild",
+                        ExtensionPoint::ScheduledJob(
+                            ScheduledJobExtensionPoint::new("ops.search.nightly", "0 3 * * *")
+                                .unwrap(),
+                        ),
+                        HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                            queue: "jobs.work".to_string(),
+                        }]),
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "showcase-events",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("nightly-rebuild").unwrap(),
                     HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
                         queue: "jobs.work".to_string(),
                     }]),
@@ -4595,6 +4732,146 @@ cdn_base_url = "https://cdn.example.com"
             .finish(Duration::from_millis(15), InvocationOutcome::WebhookAccepted)
             .unwrap();
         assert_eq!(webhook_receipt.point, ExtensionPointKind::Webhook);
+    }
+
+    #[test]
+    fn wasm_host_prepares_leased_job_invocations_for_extension_jobs() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_module(OpsModule::new())
+            .with_installed_extension(installed_job_extension())
+            .build()
+            .unwrap();
+
+        assert!(plan.registered_runtime_jobs.iter().any(|job| {
+            job.module == "extension:ops.search.worker"
+                && job.contract.name == "ops.search.adapter"
+        }));
+
+        let mut jobs = plan.jobs_host("scheduler-a").unwrap();
+        let now = JobInstant::from_unix_seconds(50);
+        jobs.enqueue_job(
+            JobDispatchRequest::new("ops.search.adapter", "rebuild search indexes").unwrap(),
+            now,
+        )
+        .unwrap();
+
+        let work_queue = jobs.queue_topology.work_queue.clone();
+        let leases = jobs
+            .lease_ready_jobs(
+                &work_queue,
+                "worker-1",
+                JobInstant::from_unix_seconds(51),
+                Duration::from_secs(30),
+                1,
+            )
+            .unwrap();
+        let mut session = plan
+            .wasm_host()
+            .begin_leased_job_invocation(&leases[0])
+            .unwrap()
+            .expect("leased extension job should be executable");
+
+        assert_eq!(session.plan().point, ExtensionPointKind::Job);
+        assert_eq!(
+            session.plan().context.principal.kind,
+            PrincipalKind::ServiceAccount
+        );
+        assert_eq!(
+            session.plan().context.principal.id.as_deref(),
+            Some("runtime.jobs")
+        );
+        assert!(matches!(
+            session.plan().context.input,
+            InvocationInput::Job(ref job)
+                if job.job_name == "ops.search.adapter" && job.attempt == 1
+        ));
+
+        session
+            .record_host_call(HostCall::EnqueueJob {
+                queue: "jobs.work".to_string(),
+            })
+            .unwrap();
+        let receipt = session
+            .finish(Duration::from_millis(12), InvocationOutcome::JobCompleted)
+            .unwrap();
+        assert_eq!(receipt.extension_id.to_string(), "ops.search.worker");
+    }
+
+    #[test]
+    fn wasm_host_prepares_leased_scheduled_job_invocations_for_extensions() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let scheduled_slots = StaticManifestModule::new(
+            ModuleManifest::new("scheduler.slots").with_extension_slots(vec![
+                ExtensionSlotDescriptor::new(
+                    ExtensionSlotKind::ScheduledJob,
+                    "ops.search.nightly",
+                    "Allows scheduled search extension workflows",
+                ),
+            ]),
+        );
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(scheduled_slots)
+            .with_installed_extension(installed_scheduled_job_extension())
+            .build()
+            .unwrap();
+
+        assert!(plan.registered_runtime_jobs.iter().any(|job| {
+            job.module == "extension:ops.search.nightly"
+                && job.contract.name == "ops.search.nightly"
+                && job.contract.trigger == JobTriggerKind::Scheduled
+        }));
+
+        let mut jobs = plan.jobs_host("scheduler-a").unwrap();
+        let scheduled_for = JobInstant::from_unix_seconds(100);
+        jobs.enqueue_job(
+            JobDispatchRequest::new("ops.search.nightly", "nightly search refresh")
+                .unwrap()
+                .scheduled_for(scheduled_for),
+            JobInstant::from_unix_seconds(10),
+        )
+        .unwrap();
+        jobs.acquire_scheduler_leadership(
+            JobInstant::from_unix_seconds(150),
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        jobs.promote_due_jobs(JobInstant::from_unix_seconds(150)).unwrap();
+
+        let scheduled_queue = jobs.queue_topology.scheduled_queue.clone();
+        let leases = jobs
+            .lease_ready_jobs(
+                &scheduled_queue,
+                "worker-1",
+                JobInstant::from_unix_seconds(151),
+                Duration::from_secs(30),
+                1,
+            )
+            .unwrap();
+        let mut session = plan
+            .wasm_host()
+            .begin_leased_job_invocation(&leases[0])
+            .unwrap()
+            .expect("leased scheduled extension job should be executable");
+
+        assert_eq!(session.plan().point, ExtensionPointKind::ScheduledJob);
+        assert!(matches!(
+            session.plan().context.input,
+            InvocationInput::ScheduledJob(ref job) if job.job_name == "ops.search.nightly"
+        ));
+        session
+            .record_host_call(HostCall::EnqueueJob {
+                queue: "jobs.work".to_string(),
+            })
+            .unwrap();
+        let receipt = session
+            .finish(
+                Duration::from_millis(20),
+                InvocationOutcome::ScheduledJobCompleted,
+            )
+            .unwrap();
+        assert_eq!(receipt.extension_id.to_string(), "ops.search.nightly");
     }
 
     #[test]

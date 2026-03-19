@@ -135,7 +135,7 @@ fn object_store_policies_plan_write_through_storage() {
 }
 
 #[test]
-fn local_only_override_keeps_sensitive_files_on_server() {
+fn single_node_escape_hatch_override_keeps_sensitive_files_on_server() {
     let planner = StoragePlanner::from_config(&test_config());
 
     let plan = planner
@@ -161,7 +161,7 @@ fn local_only_override_keeps_sensitive_files_on_server() {
 }
 
 #[test]
-fn local_only_override_is_rejected_for_distributed_deployments() {
+fn single_node_escape_hatch_override_is_rejected_for_distributed_deployments() {
     let mut config = test_config();
     config.storage.deployment = davenda_config::StorageDeployment::Distributed;
     let planner = StoragePlanner::from_config(&config);
@@ -180,7 +180,7 @@ fn local_only_override_is_rejected_for_distributed_deployments() {
             logical_path: "secure/reports/march.csv".to_string(),
             policy: StoragePolicy::single_node_sensitive(),
             deployment: davenda_config::StorageDeployment::Distributed,
-            single_node_escape_hatch: davenda_config::LocalOnlyStorageMode::ExplicitSingleNode,
+            single_node_escape_hatch: davenda_config::SingleNodeStorageMode::ExplicitSingleNode,
         }
     );
 }

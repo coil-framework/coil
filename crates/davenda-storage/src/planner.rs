@@ -240,6 +240,6 @@ pub enum StoragePlanningError {
         logical_path: String,
         policy: StoragePolicy,
         deployment: davenda_config::StorageDeployment,
-        single_node_escape_hatch: davenda_config::LocalOnlyStorageMode,
+        single_node_escape_hatch: davenda_config::SingleNodeStorageMode,
     },
 }

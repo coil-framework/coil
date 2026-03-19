@@ -1,7 +1,7 @@
 use std::fmt;
 
 use davenda_config::{
-    LocalOnlyStorageMode, ObjectStoreKind, PlatformConfig, StorageClass, StorageDeployment,
+    ObjectStoreKind, PlatformConfig, SingleNodeStorageMode, StorageClass, StorageDeployment,
 };
 use thiserror::Error;
 
@@ -131,10 +131,6 @@ impl StoragePolicy {
         )
     }
 
-    pub const fn local_only_sensitive() -> Self {
-        Self::single_node_sensitive()
-    }
-
     pub fn validate(&self) -> Result<(), StoragePolicyError> {
         match (self.delivery_mode, self.sync_mode, self.sensitivity) {
             (DeliveryMode::PublicCdn, SyncMode::LocalOnly, _) => {
@@ -210,10 +206,6 @@ impl StoragePolicyOverride {
         }
     }
 
-    pub fn force_local_only() -> Self {
-        Self::force_single_node_escape_hatch()
-    }
-
     pub fn force_single_node_escape_hatch() -> Self {
         Self {
             delivery_mode: Some(DeliveryMode::LocalOnly),
@@ -241,7 +233,7 @@ pub struct StorageTopology {
     pub local_root: String,
     pub default_class: StorageClass,
     pub deployment: StorageDeployment,
-    pub single_node_escape_hatch: LocalOnlyStorageMode,
+    pub single_node_escape_hatch: SingleNodeStorageMode,
     pub object_store: Option<ObjectStoreTarget>,
 }
 
@@ -267,7 +259,7 @@ impl StorageTopology {
         matches!(self.deployment, StorageDeployment::SingleNode)
             && matches!(
                 self.single_node_escape_hatch,
-                LocalOnlyStorageMode::ExplicitSingleNode
+                SingleNodeStorageMode::ExplicitSingleNode
             )
     }
 }

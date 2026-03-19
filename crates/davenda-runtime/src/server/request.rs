@@ -1,8 +1,8 @@
 use super::auth::authorize_live_request;
 use super::*;
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
 use axum::extract::{ConnectInfo, State};
-use axum::http::header::{COOKIE, HOST};
+use axum::http::header::{CONTENT_LENGTH, COOKIE, HOST};
 use axum::http::{HeaderMap, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
 use std::collections::BTreeMap;
@@ -102,6 +102,8 @@ pub(super) async fn execute_live_request(
     request: Request<Body>,
     remote_addr: Option<SocketAddr>,
 ) -> Result<Response<Body>, RuntimeServerError> {
+    let request = enforce_request_body_limit(request, state.plan.config.server.max_body_bytes)
+        .await?;
     let mut request = LiveHttpRequest::from_request(
         &request,
         &state.plan.browser,
@@ -187,6 +189,9 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
         RuntimeServerError::Execution(RequestExecutionError::FeatureFlagDisabled { .. }) => {
             (StatusCode::NOT_FOUND, "feature disabled").into_response()
         }
+        RuntimeServerError::RequestBodyTooLarge { .. } => {
+            (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
+        }
         RuntimeServerError::MissingHost | RuntimeServerError::InvalidHeaderValue { .. } => {
             (StatusCode::BAD_REQUEST, error.to_string()).into_response()
         }
@@ -249,4 +254,29 @@ fn header_value(
             })?
             .to_string(),
     ))
+}
+
+async fn enforce_request_body_limit(
+    request: Request<Body>,
+    max_body_bytes: Option<usize>,
+) -> Result<Request<Body>, RuntimeServerError> {
+    let Some(limit) = max_body_bytes else {
+        return Ok(request);
+    };
+
+    let (parts, body) = request.into_parts();
+    if let Some(content_length) = parts
+        .headers
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        && content_length > limit
+    {
+        return Err(RuntimeServerError::RequestBodyTooLarge { limit });
+    }
+
+    let bytes = to_bytes(body, limit)
+        .await
+        .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit })?;
+    Ok(Request::from_parts(parts, Body::from(bytes)))
 }

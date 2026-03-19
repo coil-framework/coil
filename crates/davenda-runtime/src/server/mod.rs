@@ -7,11 +7,12 @@ use crate::backends::RuntimeBackendMaterializer;
 use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
-use axum::routing::any;
+use axum::routing::{any, get};
 use axum::{Router, serve};
 
 mod auth;
 mod backend;
+mod observability;
 mod request;
 
 use auth::DeferredPostgresRouteCapabilityAuthorizer;
@@ -22,6 +23,9 @@ pub use backend::{
     StaticSecretResolver,
 };
 pub use request::LiveHttpRequest;
+use observability::{
+    serve_diagnostics_probe, serve_health_probe, serve_metrics_probe, serve_readiness_probe,
+};
 use request::{error_response, execute_live_request, serve_runtime_request};
 
 #[cfg(test)]
@@ -47,6 +51,8 @@ pub enum RuntimeServerError {
     WasmExecution(#[from] LiveWasmExecutionError),
     #[error(transparent)]
     BrowserHostBuild(#[from] BrowserHostBuildError),
+    #[error("request body exceeds configured maximum of {limit} bytes")]
+    RequestBodyTooLarge { limit: usize },
     #[error("live request authorization does not support auth package `{package}`")]
     UnsupportedAuthPackage { package: String },
     #[error("live request authorization failed: {reason}")]
@@ -166,6 +172,10 @@ impl HttpServerHost {
             route_authorizer,
         });
         let router = Router::new()
+            .route("/health", any(serve_health_probe))
+            .route("/ready", any(serve_readiness_probe))
+            .route("/metrics", get(serve_metrics_probe))
+            .route("/diagnostics", get(serve_diagnostics_probe))
             .route("/", any(serve_runtime_request))
             .fallback(any(serve_runtime_request))
             .with_state(state.clone());

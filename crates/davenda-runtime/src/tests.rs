@@ -1,6 +1,7 @@
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
+use tower::util::ServiceExt;
 use davenda_admin::AdminModule;
 use davenda_assets::{
     AssetDeliveryTarget, AssetId, ContentFingerprint, DeliveryAudience, DeploymentArtifact,
@@ -1875,6 +1876,153 @@ async fn server_host_ignores_forwarded_metadata_from_untrusted_peers() {
 
     assert_eq!(live.forwarded_proto, None);
     assert_eq!(live.scheme, "http");
+}
+
+#[tokio::test]
+async fn server_router_exposes_health_readiness_metrics_and_diagnostics_probes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let health = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let health_body = String::from_utf8(
+        to_bytes(health.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(health_body.contains("\"liveness\""), true);
+    assert_eq!(health_body.contains("\"readiness\""), true);
+
+    let readiness = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/ready")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(readiness.status(), StatusCode::OK);
+
+    let metrics = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let metrics_body = String::from_utf8(
+        to_bytes(metrics.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(metrics_body.contains("davenda.http.request.latency_ms"));
+    assert!(metrics_body.contains("\"metrics_enabled\":true"));
+
+    let diagnostics = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let diagnostics_body = String::from_utf8(
+        to_bytes(diagnostics.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(diagnostics_body.contains("\"customer_app\""));
+    assert!(diagnostics_body.contains("\"database\""));
+}
+
+#[tokio::test]
+async fn server_host_rejects_request_bodies_over_the_configured_limit_before_handling() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.server.max_body_bytes = Some(8);
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Post, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(HandlerDefinition::json(
+            "account.dashboard",
+            std::collections::BTreeMap::new(),
+        )
+        .unwrap())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/account")
+                .body(Body::from(vec![b'x'; 16]))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
 #[tokio::test]
@@ -4069,9 +4217,9 @@ fn storage_host_applies_path_rules_for_sensitive_files() {
 
     let storage_plan = plan
         .storage_host()
-        .planner
-        .single_node_escape_hatch()
-        .plan_write(StoragePlanRequest::new("secure/reports/march.csv"))
+        .plan_single_node_escape_hatch_write(
+            StoragePlanRequest::new("secure/reports/march.csv"),
+        )
         .unwrap();
 
     assert_eq!(storage_plan.storage_class, StorageClass::LocalOnlySensitive);
@@ -4181,14 +4329,11 @@ fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
             ))
     );
 
-    let restricted_storage_plan = host
-        .planner
-        .single_node_escape_hatch()
-        .plan_write(StoragePlanRequest::new("secure/docs/orders.csv"))
-        .unwrap();
-    let restricted_revision = ManagedAssetRevision::new(
+    let restricted_revision = host
+        .plan_managed_revision_with_single_node_escape_hatch(
         RevisionId::new("rev-secret-1").unwrap(),
-        restricted_storage_plan,
+        "secure/docs/orders.csv",
+        Some(StoragePolicyOverride::force_single_node_escape_hatch()),
         "text/csv",
         256,
         content_fingerprint('c'),

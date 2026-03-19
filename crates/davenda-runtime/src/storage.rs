@@ -67,6 +67,7 @@ impl ManagedAssetPublicationGate {
 pub struct StorageHost {
     pub customer_app: String,
     pub planner: StoragePlanner,
+    single_node_escape_hatch: SingleNodeEscapeHatchPlanner,
     cdn_base_url: Option<String>,
 }
 
@@ -78,6 +79,7 @@ impl StorageHost {
     ) -> Self {
         Self {
             customer_app,
+            single_node_escape_hatch: planner.single_node_escape_hatch(),
             planner,
             cdn_base_url,
         }
@@ -87,7 +89,14 @@ impl StorageHost {
         &self,
         request: StoragePlanRequest,
     ) -> Result<StoragePlan, RuntimeStorageError> {
-        Ok(self.planner.plan_write(request)?)
+        Ok(self.planner.plan_scalable_write(request)?)
+    }
+
+    pub fn plan_single_node_escape_hatch_write(
+        &self,
+        request: StoragePlanRequest,
+    ) -> Result<StoragePlan, RuntimeStorageError> {
+        Ok(self.single_node_escape_hatch.plan_write(request)?)
     }
 
     pub fn publish_deployment_release(
@@ -113,6 +122,26 @@ impl StorageHost {
         Ok(ManagedAssetRevision::plan(
             revision_id,
             &self.planner,
+            logical_path,
+            override_policy,
+            content_type,
+            byte_length,
+            fingerprint,
+        )?)
+    }
+
+    pub fn plan_managed_revision_with_single_node_escape_hatch(
+        &self,
+        revision_id: RevisionId,
+        logical_path: impl Into<String>,
+        override_policy: Option<StoragePolicyOverride>,
+        content_type: impl Into<String>,
+        byte_length: u64,
+        fingerprint: ContentFingerprint,
+    ) -> Result<ManagedAssetRevision, RuntimeStorageError> {
+        Ok(ManagedAssetRevision::plan_with_single_node_escape_hatch(
+            revision_id,
+            &self.single_node_escape_hatch,
             logical_path,
             override_policy,
             content_type,

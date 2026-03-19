@@ -161,8 +161,13 @@ impl CachePlanner {
         )
     }
 
-    pub fn local_runtime(&self) -> crate::CacheRuntime {
+    pub fn local_for_testing(&self) -> crate::CacheRuntime {
         crate::CacheRuntime::local_for_testing(self.topology)
+    }
+
+    #[doc(hidden)]
+    pub fn local_runtime(&self) -> crate::CacheRuntime {
+        self.local_for_testing()
     }
 
     pub fn shared_runtime(&self) -> crate::CacheRuntime {

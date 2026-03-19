@@ -92,7 +92,10 @@ impl CacheRuntime {
 
     #[allow(dead_code)]
     pub fn local_for_testing(topology: CacheTopology) -> Self {
-        Self::with_backend(topology, crate::CacheBackendAdapter::local_for_testing(topology))
+        Self::with_backend(
+            topology,
+            crate::CacheBackendAdapter::local_for_testing(topology),
+        )
     }
 
     pub fn with_backend(topology: CacheTopology, backend: crate::CacheBackendAdapter) -> Self {

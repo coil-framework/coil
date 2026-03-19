@@ -247,7 +247,7 @@ fn planner_respects_explicit_coalescing_override() {
 #[test]
 fn local_cache_runtime_clones_do_not_share_state() {
     let planner = CachePlanner::new(CacheTopology::moka_only());
-    let mut left = planner.local_runtime();
+    let mut left = planner.local_for_testing();
     let mut right = left.clone();
 
     assert_eq!(left.backend_kind(), CacheBackendKind::Local);
@@ -341,7 +341,7 @@ fn distributed_planner_runtimes_share_backend_by_default() {
 #[test]
 fn distributed_planner_local_runtimes_do_not_share_state_without_explicit_client_wiring() {
     let planner = CachePlanner::new(CacheTopology::with_valkey());
-    let mut left = planner.local_runtime();
+    let mut left = planner.local_for_testing();
     let mut right = left.clone();
 
     assert_eq!(left.backend_kind(), CacheBackendKind::Valkey);
@@ -757,8 +757,8 @@ fn distributed_planner_runtimes_do_not_share_backend_without_explicit_client_wir
         )
         .unwrap();
 
-    let mut left = planner.local_runtime();
-    let mut right = planner.local_runtime();
+    let mut left = planner.local_for_testing();
+    let mut right = planner.local_for_testing();
     left.insert(
         plan.application().unwrap(),
         "<html>shared-across-handles</html>",

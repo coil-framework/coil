@@ -332,4 +332,3 @@ fn validate_declared_capability(
 fn package_capability_is_required(manifest: &ModuleManifest, capability: Capability) -> bool {
     manifest.required_capabilities.contains(&capability)
 }
-

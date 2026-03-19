@@ -291,7 +291,6 @@ pub enum BrowserSecurityError {
     InvalidCsrfTokenFormat,
 }
 
-
 fn sign_payload(secret: &[u8], payload: &[u8]) -> Result<String, BrowserSecurityError> {
     if secret.is_empty() {
         return Err(BrowserSecurityError::EmptySecret);

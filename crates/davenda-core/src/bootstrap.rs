@@ -48,7 +48,6 @@ impl WasmLimitsProfile {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateRuntimeServices {
     pub customer_app_namespace: TemplateNamespace,
@@ -348,7 +347,6 @@ pub fn bootstrap_core_services(
         wasm,
     })
 }
-
 
 fn cache_topology_from_config(config: &PlatformConfig) -> CacheTopology {
     match config.cache.l2 {

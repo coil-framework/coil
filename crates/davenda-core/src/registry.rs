@@ -111,4 +111,3 @@ pub enum RegistrationError {
     #[error("module `{name}` is already registered")]
     DuplicateModule { name: String },
 }
-

@@ -999,4 +999,3 @@ impl HttpSurfaceContribution {
         self
     }
 }
-

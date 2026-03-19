@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use davenda_a11y::{NavigationContract, ThemeAccessibilityContract};
 use davenda_auth::{AuthModelPackage, Capability};
 use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
@@ -31,22 +31,22 @@ use davenda_template::{TemplateNamespace, TemplateRegistry, TemplateRuntime};
 use davenda_tls::TlsRuntime;
 use davenda_wasm::{ExtensionPointKind, ResourceLimits};
 use hmac::{Hmac, Mac};
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 type HmacSha256 = Hmac<Sha256>;
 
-mod browser;
 mod bootstrap;
+mod browser;
 mod manifest;
 mod registry;
-mod validation;
 #[cfg(test)]
 mod tests;
+mod validation;
 
-pub use browser::*;
 pub use bootstrap::*;
+pub use browser::*;
 pub use manifest::*;
 pub use registry::*;
 pub use validation::*;

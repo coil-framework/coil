@@ -791,6 +791,13 @@ fn config_with_backend_secrets() -> String {
     )
 }
 
+fn config_with_wasm_secret_bindings() -> String {
+    VALID_CONFIG.replace(
+        "allow_network = false",
+        "allow_network = false\nsecret_bindings = { api_token = { kind = \"env\", var = \"WASM_API_TOKEN\" } }",
+    )
+}
+
 fn cookie_value(set_cookie_header: &str) -> String {
     set_cookie_header
         .split(';')
@@ -1850,6 +1857,45 @@ fn runtime_plan_materializes_shared_backend_clients_from_config_secrets() {
             .and_then(|store| store.credential_reference.as_deref()),
         Some("https://s3.internal/runtime")
     );
+}
+
+#[test]
+fn runtime_plan_resolves_wasm_secret_bindings_from_config_secrets() {
+    let config = PlatformConfig::from_toml_str(&config_with_wasm_secret_bindings()).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "WASM_API_TOKEN".to_string(),
+            },
+            "runtime-secret",
+        )
+        .unwrap();
+
+    let secrets = plan.wasm_secret_values(&resolver).unwrap();
+
+    assert_eq!(secrets.get("api_token"), Some(&"runtime-secret".to_string()));
+}
+
+#[test]
+fn runtime_plan_rejects_missing_wasm_secret_bindings() {
+    let config = PlatformConfig::from_toml_str(&config_with_wasm_secret_bindings()).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+
+    let error = plan
+        .wasm_secret_values(&crate::server::StaticSecretResolver::new())
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeServerError::Secret(crate::server::SecretResolutionError::MissingSecret {
+            reference,
+        }) if reference == "env:WASM_API_TOKEN"
+    ));
 }
 
 #[test]

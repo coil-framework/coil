@@ -177,6 +177,23 @@ impl RuntimePlan {
         )
     }
 
+    pub fn wasm_secret_values<R: SecretResolver>(
+        &self,
+        resolver: &R,
+    ) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+        self.config
+            .wasm
+            .secret_bindings
+            .iter()
+            .map(|(name, secret)| {
+                resolver
+                    .resolve(secret)
+                    .map(|value| (name.clone(), value))
+                    .map_err(|error| RuntimeServerError::Secret(error))
+            })
+            .collect()
+    }
+
     pub fn shared_backend_clients<R: SecretResolver>(
         &self,
         resolver: &R,
@@ -194,9 +211,11 @@ impl RuntimePlan {
             return Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost.into());
         }
 
+        let wasm_secrets = self.wasm_secret_values(resolver)?;
         HttpServerHost::new(
             self.clone(),
             self.shared_backend_clients(resolver)?,
+            wasm_secrets,
             cookie_secret.to_vec(),
             csrf_secret.to_vec(),
         )

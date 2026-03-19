@@ -13,10 +13,10 @@ pub(crate) struct LiveExecutionReceipts {
 impl LiveExecutionReceipts {
     pub(crate) fn collect(
         plan: &RuntimePlan,
+        wasm_host: &WasmHost,
         execution: &RequestExecution,
     ) -> Result<Self, RuntimeServerError> {
-        let wasm = plan.wasm_host();
-        let request_surface = wasm.execute_request_surface(execution)?;
+        let request_surface = wasm_host.execute_request_surface(execution)?;
 
         let render_hooks = if matches!(
             execution.response,
@@ -24,7 +24,7 @@ impl LiveExecutionReceipts {
         ) {
             let mut receipts = Vec::new();
             for slot in render_hook_slots_for_execution(plan, execution) {
-                receipts.extend(wasm.execute_render_hook_slot(slot.as_str(), execution)?);
+                receipts.extend(wasm_host.execute_render_hook_slot(slot.as_str(), execution)?);
             }
             receipts
         } else {
@@ -34,7 +34,7 @@ impl LiveExecutionReceipts {
         let admin_widgets = if execution.route_area == RouteArea::Admin {
             let mut receipts = Vec::new();
             for slot in admin_widget_slots_for_execution(plan, execution) {
-                receipts.extend(wasm.execute_admin_widget_slot(slot.as_str(), execution)?);
+                receipts.extend(wasm_host.execute_admin_widget_slot(slot.as_str(), execution)?);
             }
             receipts
         } else {

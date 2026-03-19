@@ -102,8 +102,8 @@ pub(super) async fn execute_live_request(
     request: Request<Body>,
     remote_addr: Option<SocketAddr>,
 ) -> Result<Response<Body>, RuntimeServerError> {
-    let request = enforce_request_body_limit(request, state.plan.config.server.max_body_bytes)
-        .await?;
+    let request =
+        enforce_request_body_limit(request, state.plan.config.server.max_body_bytes).await?;
     let mut request = LiveHttpRequest::from_request(
         &request,
         &state.plan.browser,
@@ -156,14 +156,15 @@ pub(super) async fn execute_live_request(
             .execute_request(request, &state.cookie_secret, &state.csrf_secret)?
     };
 
-    execution_response(&state.plan, execution)
+    execution_response(&state.plan, &state.wasm_host, execution)
 }
 
 fn execution_response(
     plan: &RuntimePlan,
+    wasm_host: &WasmHost,
     execution: RequestExecution,
 ) -> Result<Response<Body>, RuntimeServerError> {
-    let receipts = LiveExecutionReceipts::collect(plan, &execution)?;
+    let receipts = LiveExecutionReceipts::collect(plan, wasm_host, &execution)?;
     Ok(receipts.compose_response(plan, &execution)?.into_response())
 }
 

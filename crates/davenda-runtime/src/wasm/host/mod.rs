@@ -83,6 +83,32 @@ impl WasmHost {
         }
     }
 
+    pub(crate) fn with_host_services(
+        plan: RuntimePlan,
+        customer_app: String,
+        runtime: WasmRuntimeServices,
+        registry: ExtensionRegistry,
+        default_locale: String,
+        registered_jobs: Vec<RuntimeJobDefinition>,
+        services: RuntimeWasmHostServices,
+    ) -> Self {
+        let host_service_executor = Arc::new(RuntimeHostServiceExecutor::with_services(
+            plan.clone(),
+            services,
+        ));
+        Self {
+            customer_app,
+            runtime,
+            registry,
+            engine: WasmEngine::new(),
+            tenant_id: plan.tenant_id(),
+            default_locale,
+            registered_jobs,
+            host_service_executor,
+            compiled_modules: Arc::new(cache::CompiledModuleCache::default()),
+        }
+    }
+
     pub fn compile_module(&self, bytes: &[u8]) -> Result<CompiledWasmModule, WasmModelError> {
         self.engine.compile_module(bytes)
     }

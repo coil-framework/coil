@@ -1,12 +1,13 @@
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     AppConfig, AssetsConfig, CacheConfig, ConfigValidationErrors, DatabaseConfig, HttpConfig,
-    JobsConfig, ObservabilityConfig, ServerConfig, StorageConfig, TlsConfig,
+    JobsConfig, ObservabilityConfig, SecretRef, ServerConfig, StorageConfig, TlsConfig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -110,6 +111,8 @@ pub struct WasmConfig {
     pub directory: String,
     pub default_time_limit_ms: u64,
     pub allow_network: bool,
+    #[serde(default)]
+    pub secret_bindings: BTreeMap<String, SecretRef>,
 }
 
 #[derive(Debug, thiserror::Error)]

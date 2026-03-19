@@ -1,6 +1,9 @@
 use super::*;
 use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
-use davenda_storage::{StoragePlan, StoragePlanRequest, StoragePlanner, StoragePolicyOverride};
+use davenda_storage::{
+    SingleNodeEscapeHatchPlanner, StoragePlan, StoragePlanRequest, StoragePlanner,
+    StoragePolicyOverride,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedAssetRevision {
@@ -15,6 +18,26 @@ impl ManagedAssetRevision {
     pub fn plan(
         id: RevisionId,
         planner: &StoragePlanner,
+        logical_path: impl Into<String>,
+        override_policy: Option<StoragePolicyOverride>,
+        content_type: impl Into<String>,
+        byte_length: u64,
+        fingerprint: ContentFingerprint,
+    ) -> Result<Self, AssetModelError> {
+        let mut request = StoragePlanRequest::new(logical_path);
+        if let Some(override_policy) = override_policy {
+            request = request.with_override(override_policy);
+        }
+
+        let storage_plan = planner
+            .plan_scalable_write(request)
+            .map_err(AssetModelError::Storage)?;
+        Self::new(id, storage_plan, content_type, byte_length, fingerprint)
+    }
+
+    pub fn plan_with_single_node_escape_hatch(
+        id: RevisionId,
+        planner: &SingleNodeEscapeHatchPlanner,
         logical_path: impl Into<String>,
         override_policy: Option<StoragePolicyOverride>,
         content_type: impl Into<String>,

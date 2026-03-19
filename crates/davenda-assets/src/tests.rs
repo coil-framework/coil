@@ -1,6 +1,8 @@
 use super::*;
 use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
-use davenda_config::ObjectStoreKind;
+use davenda_config::{
+    ObjectStoreKind, SingleNodeStorageMode, StorageClass, StorageDeployment,
+};
 use davenda_storage::{
     DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind, StoragePlanner,
     StoragePolicyOverride, StoragePolicySet, StorageTopology, SyncMode,
@@ -10,7 +12,9 @@ fn object_store_planner() -> StoragePlanner {
     StoragePlanner::new(
         StorageTopology {
             local_root: "/srv/davenda".to_string(),
-            default_class: davenda_config::StorageClass::PublicUpload,
+            default_class: StorageClass::PublicUpload,
+            deployment: StorageDeployment::Distributed,
+            single_node_escape_hatch: SingleNodeStorageMode::Disabled,
             object_store: Some(ObjectStoreTarget {
                 kind: ObjectStoreKind::S3,
             }),
@@ -23,7 +27,9 @@ fn local_only_planner() -> StoragePlanner {
     StoragePlanner::new(
         StorageTopology {
             local_root: "/srv/davenda".to_string(),
-            default_class: davenda_config::StorageClass::LocalOnlySensitive,
+            default_class: StorageClass::LocalOnlySensitive,
+            deployment: StorageDeployment::SingleNode,
+            single_node_escape_hatch: SingleNodeStorageMode::ExplicitSingleNode,
             object_store: None,
         },
         StoragePolicySet::default(),
@@ -270,11 +276,11 @@ fn managed_asset_auth_updates_track_public_publication_state() {
 #[test]
 fn private_assets_plan_authorized_delivery_from_storage_policy() {
     let planner = local_only_planner();
-    let revision = ManagedAssetRevision::plan(
+    let revision = ManagedAssetRevision::plan_with_single_node_escape_hatch(
         RevisionId::new("rev-local").unwrap(),
-        &planner,
+        &planner.single_node_escape_hatch(),
         "staff/exports/orders.csv",
-        Some(StoragePolicyOverride::force_local_only()),
+        Some(StoragePolicyOverride::force_single_node_escape_hatch()),
         "text/csv",
         512,
         fingerprint("orders1"),

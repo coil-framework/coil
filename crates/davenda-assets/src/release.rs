@@ -144,7 +144,7 @@ impl DeploymentRelease {
 
         for artifact in &self.artifacts {
             let storage_plan = planner
-                .plan_write(
+                .plan_scalable_write(
                     StoragePlanRequest::new(artifact.hashed_path())
                         .with_override(public_deployment_override()),
                 )

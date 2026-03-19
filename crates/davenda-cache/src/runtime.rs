@@ -2,9 +2,10 @@ use crate::{
     CacheKey, CacheLayerPlan, CacheModelError, CacheTopology, FreshnessPolicy, InvalidationSet,
     RequestCoalescingMode,
 };
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheEntry {
     pub key: CacheKey,
     pub value: String,
@@ -42,21 +43,21 @@ impl CacheEntry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CacheLookupState {
     Miss,
     Fresh,
     Stale,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheLookup {
     pub state: CacheLookupState,
     pub entry: Option<CacheEntry>,
     pub needs_revalidation: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CacheMetrics {
     pub hits: u64,
     pub stale_hits: u64,
@@ -67,14 +68,14 @@ pub struct CacheMetrics {
     pub fills_completed: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FillDecision {
     Start(FillLease),
     Coalesced { key: CacheKey, holder: String },
     Uncoalesced,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FillLease {
     pub key: CacheKey,
     pub holder: String,

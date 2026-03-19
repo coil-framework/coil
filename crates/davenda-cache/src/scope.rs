@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use crate::types::validate_token;
 use crate::{CacheModelError, VariationKey};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CacheVisibility {
     Public,
     Private,
@@ -22,7 +23,7 @@ impl fmt::Display for CacheVisibility {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheScope {
     visibility: CacheVisibility,
     tenant: Option<String>,
@@ -188,7 +189,7 @@ impl CacheScope {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct InvalidationSet {
     tags: BTreeSet<crate::InvalidationTag>,
 }
@@ -237,7 +238,7 @@ impl InvalidationSet {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FreshnessPolicy {
     ttl: Duration,
     stale_while_revalidate: Option<Duration>,
@@ -281,7 +282,7 @@ impl FreshnessPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ResponseValidators {
     pub etag: Option<crate::EntityTag>,
     pub last_modified_unix_seconds: Option<u64>,

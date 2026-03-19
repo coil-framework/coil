@@ -2,11 +2,12 @@ use crate::error::JobsModelError;
 use crate::identifiers::{DeadLetterId, JobQueueName};
 use crate::validation::require_non_empty;
 use davenda_config::JobBackend;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct JobInstant(u64);
 
 impl JobInstant {
@@ -34,7 +35,7 @@ impl fmt::Display for JobInstant {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum QueueKind {
     Work,
     Scheduled,
@@ -53,13 +54,13 @@ impl fmt::Display for QueueKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BackoffStrategy {
     Fixed,
     Exponential,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetryPolicy {
     pub max_attempts: u32,
     pub initial_delay: Duration,
@@ -141,7 +142,7 @@ impl Default for RetryPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeadLetterReason {
     ExhaustedRetries,
     DeserializationFailure,
@@ -150,7 +151,7 @@ pub enum DeadLetterReason {
     PolicyViolation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeadLetterOutcome {
     pub dead_letter_id: DeadLetterId,
     pub job_id: crate::identifiers::JobId,
@@ -183,7 +184,7 @@ impl DeadLetterOutcome {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueDefinition {
     pub name: JobQueueName,
     pub kind: QueueKind,
@@ -220,7 +221,7 @@ impl QueueDefinition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueTopology {
     pub backend: JobBackend,
     pub work_queue: JobQueueName,

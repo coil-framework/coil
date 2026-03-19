@@ -6,6 +6,22 @@ fn tag(value: &str) -> InvalidationTag {
     InvalidationTag::new(value).unwrap()
 }
 
+fn persistent_namespace(prefix: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!(
+        "{prefix}-{}-{timestamp}-{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 #[derive(Clone)]
 struct SharedCacheRuntimeHarness {
     runtime: Arc<dyn DistributedCacheRuntime>,
@@ -500,6 +516,69 @@ fn distributed_planner_runtimes_share_backend_when_reusing_an_explicit_handle() 
         CacheInstant::from_unix_seconds(110),
     );
     assert_eq!(lookup.state, CacheLookupState::Fresh);
+}
+
+#[test]
+fn persistent_shared_cache_runtime_shares_state_across_independent_clients() {
+    let topology = CacheTopology::with_redis();
+    let planner = CachePlanner::new(topology);
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:persistent",
+                HttpCachePolicy::new(
+                    CacheScope::public()
+                        .with_site("main")
+                        .unwrap()
+                        .with_locale("en-GB")
+                        .unwrap(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public()
+                        .with_site("main")
+                        .unwrap()
+                        .with_locale("en-GB")
+                        .unwrap(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    let namespace = persistent_namespace("cache");
+    let left_runtime = DistributedCacheClient::persistent_shared_runtime(
+        CacheBackendKind::Redis,
+        namespace.clone(),
+    );
+    let right_runtime =
+        DistributedCacheClient::persistent_shared_runtime(CacheBackendKind::Redis, namespace);
+    let left_adapter = CacheBackendAdapter::with_shared_runtime(topology, left_runtime);
+    let right_adapter = CacheBackendAdapter::with_shared_runtime(topology, right_runtime);
+    let mut left = CacheRuntime::with_backend(topology, left_adapter);
+    let mut right = CacheRuntime::with_backend(topology, right_adapter);
+
+    left.insert(
+        plan.application().unwrap(),
+        "<html>persistent</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Fresh);
+    assert!(right.backend_is_shared());
 }
 
 #[test]

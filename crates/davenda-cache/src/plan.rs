@@ -44,7 +44,7 @@ impl CachePlanRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CacheLayerPlan {
     pub l1: crate::LocalCacheBackend,
     pub l2: Option<DistributedCacheBackend>,

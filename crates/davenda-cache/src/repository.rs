@@ -4,8 +4,9 @@ use crate::{
     CacheEntry, CacheKey, CacheModelError, FillDecision, FillLease, InvalidationSet,
     RequestCoalescingMode,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct CacheRepository {
     entries: BTreeMap<CacheKey, CacheEntry>,
     tag_index: BTreeMap<crate::InvalidationTag, BTreeSet<CacheKey>>,

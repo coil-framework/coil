@@ -10,6 +10,22 @@ fn config(backend: JobBackend) -> davenda_config::JobsConfig {
     }
 }
 
+fn persistent_namespace(prefix: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!(
+        "{prefix}-{}-{timestamp}-{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 #[derive(Clone)]
 struct SharedJobsRuntimeHarness {
     runtime: Arc<dyn JobsCoordinationRuntime>,
@@ -500,6 +516,45 @@ fn explicit_shared_runtime_constructors_report_shared_state_honestly() {
     assert!(shared.is_shared());
     assert!(!local.is_shared());
     assert!(!explicit_emulated.is_shared());
+}
+
+#[test]
+fn persistent_shared_runtime_shares_state_across_independent_coordinators() {
+    let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+    let namespace = persistent_namespace("jobs");
+    let left_runtime = JobsBackendAdapter::persistent_shared_runtime(&runtime, namespace.clone());
+    let right_runtime = JobsBackendAdapter::persistent_shared_runtime(&runtime, namespace);
+    let left_adapter = JobsBackendAdapter::with_shared_runtime(
+        runtime.backend,
+        runtime.topology.clone(),
+        left_runtime,
+    );
+    let right_adapter = JobsBackendAdapter::with_shared_runtime(
+        runtime.backend,
+        runtime.topology.clone(),
+        right_runtime,
+    );
+    assert!(left_adapter.is_shared());
+    assert!(right_adapter.is_shared());
+    let mut left = JobsCoordinator::with_backend(runtime.clone(), left_adapter);
+    let mut right = JobsCoordinator::with_backend(runtime.clone(), right_adapter);
+
+    left.enqueue(
+        JobSpec::new(
+            JobId::new("job-persistent").unwrap(),
+            JobName::new("persistent-work").unwrap(),
+            runtime.describe().work_queue.clone(),
+            "persistent shared backend work item",
+        )
+        .unwrap()
+        .with_idempotency_key(IdempotencyKey::new("persistent-work:v1").unwrap()),
+        JobInstant::from_unix_seconds(10),
+    )
+    .unwrap();
+
+    right.refresh();
+    assert_eq!(right.ready_jobs().len(), 1);
+    assert_eq!(right.ready_jobs()[0].spec.job_id.as_str(), "job-persistent");
 }
 
 #[test]

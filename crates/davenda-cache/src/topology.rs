@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LocalCacheBackend {
     Moka,
 }
@@ -11,7 +13,7 @@ impl std::fmt::Display for LocalCacheBackend {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DistributedCacheBackend {
     Redis,
     Valkey,
@@ -26,14 +28,14 @@ impl std::fmt::Display for DistributedCacheBackend {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RequestCoalescingMode {
     Disabled,
     Local,
     Cluster,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheTopology {
     l1: LocalCacheBackend,
     l2: Option<DistributedCacheBackend>,

@@ -1,10 +1,11 @@
 use crate::JobsModelError;
 use crate::validation::validate_token;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub struct $name(String);
 
         impl $name {

@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::CacheModelError;
+use serde::{Deserialize, Serialize};
 
 pub(crate) fn require_non_empty(
     field: &'static str,
@@ -32,7 +33,7 @@ pub(crate) fn validate_token(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct VariationKey(String);
 
 impl VariationKey {
@@ -51,7 +52,7 @@ impl fmt::Display for VariationKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct InvalidationTag(String);
 
 impl InvalidationTag {
@@ -70,7 +71,7 @@ impl fmt::Display for InvalidationTag {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CacheNamespace(String);
 
 impl CacheNamespace {
@@ -89,7 +90,7 @@ impl fmt::Display for CacheNamespace {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CacheKey {
     namespace: CacheNamespace,
     resource: String,
@@ -131,7 +132,7 @@ impl fmt::Display for CacheKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EntityTag(String);
 
 impl EntityTag {
@@ -150,7 +151,7 @@ impl fmt::Display for EntityTag {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CacheInstant(u64);
 
 impl CacheInstant {

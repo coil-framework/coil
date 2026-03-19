@@ -5,6 +5,7 @@ use crate::identifiers::{IdempotencyKey, JobId, JobName, JobQueueName};
 use crate::model::{JobInstant, QueueTopology, RetryPolicy};
 use crate::validation::require_non_empty;
 use davenda_config::{JobBackend, JobsConfig};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -125,13 +126,13 @@ impl PartialEq for JobsRuntime {
 
 impl Eq for JobsRuntime {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeadLetterOutcomeKind {
     RouteToQueue(JobQueueName),
     Drop,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {
     pub job_id: JobId,
     pub job_name: JobName,
@@ -179,7 +180,7 @@ impl JobSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlannedJob {
     pub job_id: JobId,
     pub job_name: JobName,

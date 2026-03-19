@@ -2,11 +2,16 @@ use crate::error::JobsModelError;
 use crate::identifiers::{DeadLetterId, IdempotencyKey, JobId, JobQueueName};
 use crate::model::{DeadLetterOutcome, DeadLetterReason, JobInstant, QueueTopology};
 use crate::runtime::{JobSpec, JobsRuntime};
+use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 use std::time::Duration;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+mod shared;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobExecutionContext {
     pub job_id: JobId,
     pub queue: JobQueueName,
@@ -14,14 +19,14 @@ pub struct JobExecutionContext {
     pub idempotency_key: Option<IdempotencyKey>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueuedJobRecord {
     pub spec: JobSpec,
     pub attempts: u32,
     pub enqueued_at: JobInstant,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobLease {
     pub record: QueuedJobRecord,
     pub worker_id: String,
@@ -29,7 +34,7 @@ pub struct JobLease {
     pub lease_until: JobInstant,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SchedulerLeadership {
     pub node_id: String,
     pub acquired_at: JobInstant,
@@ -42,7 +47,7 @@ impl SchedulerLeadership {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JobFailureDisposition {
     Retried {
         job_id: JobId,
@@ -52,7 +57,7 @@ pub enum JobFailureDisposition {
     DeadLettered(DeadLetterOutcome),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct JobsCoordinatorSnapshot {
     pub ready: Vec<QueuedJobRecord>,
     pub scheduled: Vec<QueuedJobRecord>,
@@ -100,11 +105,13 @@ pub trait JobsCoordinationRuntime: Send + Sync + 'static {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct EmulatedJobsCoordinationRuntime {
     state: Mutex<JobsBackendState>,
 }
 
+#[cfg(test)]
 impl EmulatedJobsCoordinationRuntime {
     fn new(runtime: JobsRuntime) -> Self {
         Self {
@@ -113,6 +120,7 @@ impl EmulatedJobsCoordinationRuntime {
     }
 }
 
+#[cfg(test)]
 impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         let guard = self.state.lock().expect("jobs backend mutex poisoned");
@@ -219,7 +227,16 @@ impl JobsBackendAdapter {
     }
 
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-        Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
+        shared::shared_runtime(runtime)
+    }
+
+    #[allow(dead_code)]
+    #[doc(hidden)]
+    pub fn persistent_shared_runtime(
+        runtime: &JobsRuntime,
+        namespace: impl Into<String>,
+    ) -> Arc<dyn JobsCoordinationRuntime> {
+        shared::persistent_runtime(runtime, namespace.into())
     }
 
     #[doc(hidden)]
@@ -329,33 +346,21 @@ impl fmt::Debug for JobsBackendAdapter {
 #[derive(Debug, Clone)]
 struct JobsBackendState {
     runtime: JobsRuntime,
-    ready: Vec<QueuedJobRecord>,
-    scheduled: Vec<QueuedJobRecord>,
-    in_flight: Vec<JobLease>,
-    dead_letters: Vec<DeadLetterOutcome>,
-    leadership: Option<SchedulerLeadership>,
+    snapshot: JobsCoordinatorSnapshot,
 }
 
 impl JobsBackendState {
+    #[cfg(test)]
     fn new(runtime: JobsRuntime) -> Self {
         Self {
             runtime,
-            ready: Vec::new(),
-            scheduled: Vec::new(),
-            in_flight: Vec::new(),
-            dead_letters: Vec::new(),
-            leadership: None,
+            snapshot: JobsCoordinatorSnapshot::default(),
         }
     }
 
+    #[cfg(test)]
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
-        JobsCoordinatorSnapshot {
-            ready: self.ready.clone(),
-            scheduled: self.scheduled.clone(),
-            in_flight: self.in_flight.clone(),
-            dead_letters: self.dead_letters.clone(),
-            leadership: self.leadership.clone(),
-        }
+        self.snapshot.clone()
     }
 
     fn enqueue(&mut self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
@@ -373,9 +378,9 @@ impl JobsBackendState {
         };
 
         if record.spec.scheduled_for.is_some() {
-            self.scheduled.push(record);
+            self.snapshot.scheduled.push(record);
         } else {
-            self.ready.push(record);
+            self.snapshot.ready.push(record);
         }
 
         Ok(())
@@ -388,7 +393,7 @@ impl JobsBackendState {
         lease_ttl: Duration,
     ) -> Result<SchedulerLeadership, JobsModelError> {
         let node_id = crate::validation::require_non_empty("node_id", node_id.into())?;
-        if let Some(current) = self.leadership.as_ref() {
+        if let Some(current) = self.snapshot.leadership.as_ref() {
             if current.is_active(now) && current.node_id != node_id {
                 return Err(JobsModelError::LeadershipConflict {
                     current_holder: current.node_id.clone(),
@@ -402,7 +407,7 @@ impl JobsBackendState {
             acquired_at: now,
             lease_until: now.checked_add(lease_ttl)?,
         };
-        self.leadership = Some(leadership.clone());
+        self.snapshot.leadership = Some(leadership.clone());
         Ok(leadership)
     }
 
@@ -415,7 +420,7 @@ impl JobsBackendState {
 
         let mut promoted_ids = Vec::new();
         let mut remaining = Vec::new();
-        for mut job in self.scheduled.drain(..) {
+        for mut job in self.snapshot.scheduled.drain(..) {
             if job
                 .spec
                 .scheduled_for
@@ -423,12 +428,12 @@ impl JobsBackendState {
             {
                 promoted_ids.push(job.spec.job_id.clone());
                 job.spec.scheduled_for = None;
-                self.ready.push(job);
+                self.snapshot.ready.push(job);
             } else {
                 remaining.push(job);
             }
         }
-        self.scheduled = remaining;
+        self.snapshot.scheduled = remaining;
         Ok(promoted_ids)
     }
 
@@ -452,7 +457,7 @@ impl JobsBackendState {
         let mut leased = Vec::new();
         let mut remaining = Vec::new();
 
-        for job in self.ready.drain(..) {
+        for job in self.snapshot.ready.drain(..) {
             if leased.len() < max_jobs && &job.spec.queue == queue {
                 let lease = JobLease {
                     record: job,
@@ -460,14 +465,14 @@ impl JobsBackendState {
                     leased_at: now,
                     lease_until,
                 };
-                self.in_flight.push(lease.clone());
+                self.snapshot.in_flight.push(lease.clone());
                 leased.push(lease);
             } else {
                 remaining.push(job);
             }
         }
 
-        self.ready = remaining;
+        self.snapshot.ready = remaining;
         Ok(leased)
     }
 
@@ -499,10 +504,10 @@ impl JobsBackendState {
             let next_attempt_at = now.checked_add(delay)?;
             if delay.is_zero() {
                 record.spec.scheduled_for = None;
-                self.ready.push(record.clone());
+                self.snapshot.ready.push(record.clone());
             } else {
                 record.spec.scheduled_for = Some(next_attempt_at);
-                self.scheduled.push(record.clone());
+                self.snapshot.scheduled.push(record.clone());
             }
 
             Ok(JobFailureDisposition::Retried {
@@ -531,7 +536,7 @@ impl JobsBackendState {
                 error_message,
                 routed_to,
             )?;
-            self.dead_letters.push(outcome.clone());
+            self.snapshot.dead_letters.push(outcome.clone());
             Ok(JobFailureDisposition::DeadLettered(outcome))
         }
     }
@@ -541,7 +546,7 @@ impl JobsBackendState {
         node_id: &str,
         now: JobInstant,
     ) -> Result<(), JobsModelError> {
-        match self.leadership.as_ref() {
+        match self.snapshot.leadership.as_ref() {
             Some(leadership) if leadership.node_id == node_id && leadership.is_active(now) => {
                 Ok(())
             }
@@ -567,7 +572,8 @@ impl JobsBackendState {
             });
         }
 
-        self.in_flight
+        self.snapshot
+            .in_flight
             .iter()
             .find(|current| current.record.spec.job_id == lease.record.spec.job_id)
             .ok_or_else(|| JobsModelError::UnknownInFlightJob {
@@ -579,12 +585,13 @@ impl JobsBackendState {
 
     fn remove_in_flight(&mut self, job_id: &JobId) -> Result<QueuedJobRecord, JobsModelError> {
         let index = self
+            .snapshot
             .in_flight
             .iter()
             .position(|lease| &lease.record.spec.job_id == job_id)
             .ok_or_else(|| JobsModelError::UnknownInFlightJob {
                 job_id: job_id.to_string(),
             })?;
-        Ok(self.in_flight.remove(index).record)
+        Ok(self.snapshot.in_flight.remove(index).record)
     }
 }

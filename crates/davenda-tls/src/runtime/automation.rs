@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use super::backend::{
-    FileTlsAutomationBackend, MemoryTlsAutomationBackend, TlsAutomationBackend, default_state_path,
+    FileTlsAutomationBackend, MemoryTlsAutomationBackend, SharedTlsAutomationBackend,
+    TlsAutomationBackend, default_state_path,
 };
 use super::planning::TlsRuntime;
 use super::state::{CertificateInventory, TlsAutomationState};
@@ -9,6 +10,7 @@ use crate::{
     CertificateId, CertificateRecord, ChallengeTicket, HotReloadEvent, RenewalPlan, TlsInstant,
     TlsModelError,
 };
+use davenda_data::DataRuntime;
 
 #[derive(Debug, Clone)]
 pub struct TlsAutomationRuntime {
@@ -32,6 +34,17 @@ impl TlsAutomationRuntime {
                 scope.into(),
             ))),
         )
+    }
+
+    pub fn with_shared_backend(
+        runtime: TlsRuntime,
+        data_runtime: &DataRuntime,
+        namespace: impl Into<String>,
+    ) -> Result<Self, TlsModelError> {
+        Ok(Self::with_backend(
+            runtime,
+            Arc::new(SharedTlsAutomationBackend::new(data_runtime, namespace)?),
+        ))
     }
 
     pub fn with_backend(runtime: TlsRuntime, backend: Arc<dyn TlsAutomationBackend>) -> Self {

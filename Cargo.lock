@@ -804,9 +804,12 @@ name = "davenda-tls"
 version = "0.1.0"
 dependencies = [
  "davenda-config",
+ "davenda-data",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

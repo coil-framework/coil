@@ -41,4 +41,8 @@ pub enum TlsModelError {
     CorruptAutomationState { path: String, reason: String },
     #[error("failed to persist tls automation state `{path}`: {reason}")]
     AutomationStatePersistence { path: String, reason: String },
+    #[error("tls automation state namespace `{namespace}` is invalid: {reason}")]
+    CorruptSharedAutomationState { namespace: String, reason: String },
+    #[error("failed to persist shared tls automation state `{namespace}`: {reason}")]
+    SharedAutomationStatePersistence { namespace: String, reason: String },
 }

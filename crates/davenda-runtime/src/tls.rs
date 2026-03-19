@@ -29,20 +29,26 @@ impl TlsHost {
     pub(crate) fn new(
         customer_app: String,
         runtime: TlsRuntimeServices,
+        _data: DataRuntimeServices,
         _shared_backend_scope: String,
-    ) -> Self {
+    ) -> Result<Self, RuntimeTlsError> {
         #[cfg(test)]
         let automation = TlsAutomationRuntime::ephemeral(runtime.clone());
         #[cfg(not(test))]
-        let automation = TlsAutomationRuntime::with_persistent_backend(
+        let automation = TlsAutomationRuntime::with_shared_backend(
             runtime.clone(),
-            format!("{}:{}", customer_app, _shared_backend_scope),
-        );
-        Self {
+            &_data,
+            format!(
+                "customer-app:{}:{}",
+                customer_app,
+                runtime.control_plane_scope()
+            ),
+        )?;
+        Ok(Self {
             customer_app,
             runtime,
             automation,
-        }
+        })
     }
 
     pub fn status(&self) -> TlsStatusSnapshot {

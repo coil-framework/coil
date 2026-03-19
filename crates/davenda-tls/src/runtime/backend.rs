@@ -7,9 +7,11 @@ use crate::{CertificateId, CertificateRecord, TlsInstant, TlsModelError};
 
 mod file;
 mod memory;
+mod shared;
 
 pub use file::FileTlsAutomationBackend;
 pub use memory::MemoryTlsAutomationBackend;
+pub use shared::SharedTlsAutomationBackend;
 
 pub trait TlsAutomationBackend: fmt::Debug + Send + Sync {
     fn snapshot(&self) -> TlsAutomationState;

@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use super::*;
-use davenda_config::{AcmeChallenge, SecretRef, TlsConfig, TlsMode, TlsProvider};
+use davenda_config::{
+    AcmeChallenge, DatabaseConfig, DatabaseDriver, SecretRef, TlsConfig, TlsMode, TlsProvider,
+};
+use davenda_data::DataRuntime;
 
 fn acme_config(challenge: AcmeChallenge, provider: Option<TlsProvider>) -> TlsConfig {
     TlsConfig {
@@ -355,6 +358,72 @@ fn persistence_backend_persists_tls_state_between_instances() {
     );
 }
 
+#[test]
+fn postgres_shared_backend_persists_state_between_instances_when_database_url_is_available() {
+    let Some(database_url) = std::env::var("DATABASE_URL").ok() else {
+        eprintln!("skipping postgres TLS shared-backend test: DATABASE_URL is not set");
+        return;
+    };
+
+    let data_runtime = DataRuntime::from_config(&DatabaseConfig {
+        driver: DatabaseDriver::Postgres,
+        url: Some(SecretRef::Env {
+            var: "DATABASE_URL".to_string(),
+        }),
+        schema: unique_tls_shared_state_namespace("tls_shared"),
+        migrations_table: "_migrations".to_string(),
+        ..DatabaseConfig::default()
+    })
+    .unwrap()
+    .with_resolved_connection_url(database_url);
+
+    let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
+    let namespace = unique_tls_shared_state_namespace("tls_shared_backend");
+    let automation_one = TlsAutomationRuntime::with_postgres_shared_backend(
+        runtime.clone(),
+        &data_runtime,
+        namespace.clone(),
+    )
+    .unwrap();
+    let automation_two =
+        TlsAutomationRuntime::with_postgres_shared_backend(runtime, &data_runtime, namespace)
+            .unwrap();
+    let certificate_id = CertificateId::new("cert-shared").unwrap();
+
+    automation_one
+        .import_certificate(
+            CertificateRecord::new(
+                certificate_id.clone(),
+                CertificateProviderKind::Acme,
+                CertificateStatus::Active,
+                CertificateFingerprint::new("sha256:shared").unwrap(),
+                TlsInstant::from_unix_seconds(1_000),
+                TlsInstant::from_unix_seconds(4_000_000),
+                SecretMaterialRef::new("secrets/tls/cert-shared").unwrap(),
+                CertificateStateStore::SharedSecrets,
+            )
+            .with_binding(HostnameBinding::new(
+                Hostname::new("shared.example.com").unwrap(),
+                CustomerAppId::new("storefront").unwrap(),
+            )),
+        )
+        .unwrap();
+
+    automation_one
+        .queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+        .unwrap();
+
+    assert_eq!(
+        automation_two
+            .inventory()
+            .record(&certificate_id)
+            .unwrap()
+            .status,
+        CertificateStatus::RenewalDue
+    );
+    assert_eq!(automation_two.renewal_queue().len(), 1);
+}
+
 fn temp_tls_state_path() -> PathBuf {
     let mut path = std::env::temp_dir();
     path.push(format!(
@@ -369,4 +438,20 @@ fn temp_tls_state_path() -> PathBuf {
     ));
     path.push("state.json");
     path
+}
+
+fn unique_tls_shared_state_namespace(prefix: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!(
+        "{prefix}-{}-{timestamp}-{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
 }

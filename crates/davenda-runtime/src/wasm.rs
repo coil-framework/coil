@@ -192,10 +192,16 @@ impl WasmHost {
         execution: &RequestExecution,
     ) -> Result<Option<InvocationPlan>, WasmModelError> {
         let method = http_method_to_wasm(execution.method);
-        let input = InvocationInput::Page(PageInvocation::new(execution.path.clone(), method)?);
+        let input = InvocationInput::Page(PageInvocation::new(
+            invocation_surface_path(execution),
+            method,
+        )?);
         let context = self.request_context(execution, input)?;
-        self.registry
-            .prepare_page_invocation(&execution.path, method, context)
+        self.registry.prepare_page_invocation(
+            invocation_surface_path(execution).as_str(),
+            method,
+            context,
+        )
     }
 
     pub fn begin_page_invocation(
@@ -212,10 +218,16 @@ impl WasmHost {
         execution: &RequestExecution,
     ) -> Result<Option<InvocationPlan>, WasmModelError> {
         let method = http_method_to_wasm(execution.method);
-        let input = InvocationInput::Api(ApiInvocation::new(execution.path.clone(), method)?);
+        let input = InvocationInput::Api(ApiInvocation::new(
+            invocation_surface_path(execution),
+            method,
+        )?);
         let context = self.request_context(execution, input)?;
-        self.registry
-            .prepare_api_invocation(&execution.path, method, context)
+        self.registry.prepare_api_invocation(
+            invocation_surface_path(execution).as_str(),
+            method,
+            context,
+        )
     }
 
     pub fn begin_api_invocation(
@@ -1053,6 +1065,20 @@ fn http_method_to_wasm(method: HttpMethod) -> WasmHttpMethod {
         HttpMethod::Put => WasmHttpMethod::Put,
         HttpMethod::Patch => WasmHttpMethod::Patch,
         HttpMethod::Delete => WasmHttpMethod::Delete,
+    }
+}
+
+fn invocation_surface_path(execution: &RequestExecution) -> String {
+    let Some(locale) = execution.route.locale.as_deref() else {
+        return execution.path.clone();
+    };
+    let prefix = format!("/{locale}");
+    if execution.path == prefix {
+        "/".to_string()
+    } else if let Some(rest) = execution.path.strip_prefix(&(prefix.clone() + "/")) {
+        format!("/{rest}")
+    } else {
+        execution.path.clone()
     }
 }
 

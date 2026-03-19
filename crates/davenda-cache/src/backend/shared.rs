@@ -9,13 +9,9 @@ use crate::{
 use bincode::{deserialize, serialize};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
-#[cfg(not(test))]
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
-#[cfg(not(test))]
-static LOCAL_NAMESPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn persistent_runtime(
     kind: CacheBackendKind,
@@ -25,26 +21,6 @@ pub(crate) fn persistent_runtime(
         kind,
         namespace.into(),
     ))
-}
-
-#[cfg(not(test))]
-pub(crate) fn local_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
-    persistent_runtime(kind, default_namespace("cache", kind))
-}
-
-#[cfg(not(test))]
-pub(crate) fn default_namespace(prefix: &str, kind: CacheBackendKind) -> String {
-    if let Ok(namespace) = std::env::var("DAVENDA_SHARED_BACKEND_NAMESPACE") {
-        return namespace;
-    }
-
-    format!(
-        "{}:{}:{}:{}",
-        prefix,
-        cache_kind_slug(kind),
-        std::process::id(),
-        LOCAL_NAMESPACE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    )
 }
 
 fn cache_kind_slug(kind: CacheBackendKind) -> &'static str {

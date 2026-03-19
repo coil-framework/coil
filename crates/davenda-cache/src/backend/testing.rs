@@ -63,7 +63,6 @@ impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn test_scope_namespace() -> String {
     std::thread::current()
         .name()
@@ -71,7 +70,6 @@ pub(crate) fn test_scope_namespace() -> String {
         .to_string()
 }
 
-#[cfg(test)]
 pub(crate) fn shared_test_runtime(
     kind: CacheBackendKind,
     namespace: String,

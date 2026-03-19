@@ -52,7 +52,7 @@ impl DistributedCacheClient {
         }
     }
 
-    #[cfg(test)]
+    #[doc(hidden)]
     pub fn emulated_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
         let _ = kind;
         super::testing::shared_test_runtime(kind, super::testing::test_scope_namespace())

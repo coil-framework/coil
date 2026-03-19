@@ -4,6 +4,7 @@ use axum::body::Body;
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 
+use crate::FileDeliveryMode;
 use davenda_wasm::{CacheVisibility, ExecutionReceipt, TypedCacheHint, TypedMetadata};
 
 use super::LiveHtmlResponseGraph;
@@ -67,7 +68,7 @@ impl LiveHeader {
 }
 
 impl LiveResponseGraph {
-    pub(crate) fn new(status: StatusCode, body: LiveResponseBodyGraph) -> Self {
+    fn new(status: StatusCode, body: LiveResponseBodyGraph) -> Self {
         Self {
             status,
             body,

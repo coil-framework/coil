@@ -10,7 +10,6 @@ mod client;
 mod local;
 mod shared;
 mod state;
-#[cfg(test)]
 mod testing;
 
 pub use client::{DistributedCacheClient, DistributedCacheRuntime};

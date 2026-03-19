@@ -855,7 +855,7 @@ fn execution_response(
         }
     };
 
-    for (name, value) in execution.cache_plan.headers {
+    for (name, value) in receipts.compose_cache_headers(execution.cache_plan.headers) {
         if let Ok(header_name) = axum::http::HeaderName::try_from(name.as_str()) {
             if let Ok(header_value) = value.parse() {
                 response.headers_mut().insert(header_name, header_value);

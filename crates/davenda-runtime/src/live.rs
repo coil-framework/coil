@@ -155,6 +155,36 @@ impl LiveExecutionReceipts {
         payload
     }
 
+    pub(crate) fn compose_cache_headers(
+        &self,
+        mut headers: BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        if let Some(cache_hint) = self.merged_cache_hint() {
+            let merged_cache_control = headers
+                .get("Cache-Control")
+                .map(|value| merge_cache_control_value(value, &cache_hint))
+                .unwrap_or_else(|| render_cache_control(&cache_hint));
+            headers.insert("Cache-Control".to_string(), merged_cache_control);
+
+            let merged_surrogate_tags = headers
+                .get("Surrogate-Key")
+                .map(|value| merge_surrogate_tags(value, &cache_hint))
+                .unwrap_or_else(|| {
+                    cache_hint
+                        .tags
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                });
+            if !merged_surrogate_tags.is_empty() {
+                headers.insert("Surrogate-Key".to_string(), merged_surrogate_tags);
+            }
+        }
+
+        headers
+    }
+
     pub(crate) fn decorate_response_headers(&self, headers: &mut HeaderMap) {
         if let Some(receipt) = &self.request_surface {
             append_receipt_headers(headers, "request", receipt);
@@ -258,7 +288,6 @@ impl LiveExecutionReceipts {
         }
 
         if let Some(cache_hint) = self.merged_cache_hint() {
-            apply_typed_cache_policy(headers, &cache_hint);
             insert_header(
                 headers,
                 "x-davenda-wasm-cache-visibility",
@@ -355,40 +384,6 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: String) {
         if let Ok(header_value) = HeaderValue::from_str(&value) {
             headers.insert(header_name, header_value);
         }
-    }
-}
-
-fn apply_typed_cache_policy(headers: &mut HeaderMap, cache_hint: &TypedCacheHint) {
-    let merged_cache_control = headers
-        .get(axum::http::header::CACHE_CONTROL)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| merge_cache_control_value(value, cache_hint))
-        .unwrap_or_else(|| render_cache_control(cache_hint));
-    insert_header(
-        headers,
-        axum::http::header::CACHE_CONTROL.as_str(),
-        merged_cache_control,
-    );
-
-    if let Some(surrogate_key) = headers
-        .get(axum::http::header::HeaderName::from_static("surrogate-key"))
-        .and_then(|value| value.to_str().ok())
-    {
-        let merged = merge_surrogate_tags(surrogate_key, cache_hint);
-        if !merged.is_empty() {
-            insert_header(headers, "surrogate-key", merged);
-        }
-    } else if !cache_hint.tags.is_empty() {
-        insert_header(
-            headers,
-            "surrogate-key",
-            cache_hint
-                .tags
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" "),
-        );
     }
 }
 

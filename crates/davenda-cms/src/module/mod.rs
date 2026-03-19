@@ -4,14 +4,7 @@ use std::time::Duration;
 use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    BulkOperationDefinition, BulkOperationKind, BulkOperationScope, CapabilityContract,
-    CoreServiceDependency, DataRepositoryContribution, DataRepositoryQueryProfile,
-    EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind, HttpSurfaceArea,
-    HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
-    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
-    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
+    DataRepositoryContribution, DataRepositoryQueryProfile,
 };
 use davenda_data::{
     FilterOperator, MigrationId, MigrationOwner, MigrationPlan, MigrationStep, PageRequest,

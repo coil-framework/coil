@@ -5,48 +5,57 @@ use davenda_wasm::{MetadataExecution, MetadataGrant};
 
 use super::super::*;
 
-mod postgres;
-mod sqlite;
+mod local;
+mod shared;
 
 #[derive(Debug, Clone)]
 pub(super) struct RuntimeMetadataBackend {
-    store: MetadataAuditStore,
+    backend: MetadataAuditBackend,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MetadataAuditBackendKind {
-    Sqlite,
-    Postgres,
+    LocalSqlite,
+    SharedPostgres,
 }
 
 impl MetadataAuditBackendKind {
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Sqlite => "sqlite",
-            Self::Postgres => "postgres",
+            Self::LocalSqlite => "local-sqlite",
+            Self::SharedPostgres => "shared-postgres",
         }
     }
 }
 
 impl RuntimeMetadataBackend {
     pub(super) fn open(plan: &RuntimePlan) -> Self {
-        let store = match plan.config.storage.deployment {
-            davenda_config::StorageDeployment::Distributed => {
-                MetadataAuditStore::postgres(plan.data.clone())
+        let backend = match plan.metadata_audit_backend_selection() {
+            crate::plan::MetadataAuditBackendSelection::SharedPostgres { runtime } => {
+                MetadataAuditBackend::shared(shared::SharedMetadataAuditStore::open(runtime))
             }
-            davenda_config::StorageDeployment::SingleNode => MetadataAuditStore::sqlite(
-                PathBuf::from(&plan.config.storage.local_root),
-                plan.shared_backend_namespace(),
-            ),
+            crate::plan::MetadataAuditBackendSelection::LocalSqlite { root, namespace } => {
+                MetadataAuditBackend::local(local::LocalMetadataAuditStore::open(root, namespace))
+            }
         };
 
-        Self { store }
+        Self { backend }
     }
 
     #[cfg(test)]
-    pub(super) fn with_root(root: impl Into<PathBuf>, namespace: impl Into<String>) -> Self {
+    pub(super) fn with_local_root(root: impl Into<PathBuf>, namespace: impl Into<String>) -> Self {
         Self {
-            store: MetadataAuditStore::sqlite(root.into(), namespace.into()),
+            backend: MetadataAuditBackend::local(local::LocalMetadataAuditStore::open(
+                root.into(),
+                namespace.into(),
+            )),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_shared_runtime(runtime: DataRuntime) -> Self {
+        Self {
+            backend: MetadataAuditBackend::shared(shared::SharedMetadataAuditStore::open(runtime)),
         }
     }
 
@@ -56,8 +65,8 @@ impl RuntimeMetadataBackend {
         context: &InvocationContext,
     ) -> Result<MetadataExecution, String> {
         let record = MetadataAuditRecord::from_context(kind, context);
-        self.store.insert(&record)?;
-        let journal_entries = self.store.count()?;
+        self.backend.insert(&record)?;
+        let journal_entries = self.backend.count()?;
 
         Ok(MetadataExecution {
             kind,
@@ -68,20 +77,20 @@ impl RuntimeMetadataBackend {
 
     pub(super) fn snapshot(&self, limit: usize) -> Result<MetadataAuditSnapshot, String> {
         Ok(MetadataAuditSnapshot {
-            backend: self.store.kind(),
-            location: self.store.location_label(),
-            path: self.store.path().map(Path::to_path_buf),
-            entry_count: self.store.count()?,
-            recent_records: self.store.recent(limit)?,
+            backend: self.backend.kind(),
+            location: self.backend.location_label(),
+            path: self.backend.path().map(Path::to_path_buf),
+            entry_count: self.backend.count()?,
+            recent_records: self.backend.recent(limit)?,
         })
     }
 
     pub(super) fn backend_kind(&self) -> MetadataAuditBackendKind {
-        self.store.kind()
+        self.backend.kind()
     }
 
     pub(super) fn location_label(&self) -> String {
-        self.store.location_label()
+        self.backend.location_label()
     }
 }
 
@@ -122,59 +131,59 @@ impl MetadataAuditRecord {
 }
 
 #[derive(Debug, Clone)]
-enum MetadataAuditStore {
-    Sqlite(sqlite::SqliteMetadataAuditStore),
-    Postgres(postgres::PostgresMetadataAuditStore),
+enum MetadataAuditBackend {
+    Local(local::LocalMetadataAuditStore),
+    Shared(shared::SharedMetadataAuditStore),
 }
 
-impl MetadataAuditStore {
-    fn sqlite(root: PathBuf, namespace: String) -> Self {
-        Self::Sqlite(sqlite::SqliteMetadataAuditStore::open(root, namespace))
+impl MetadataAuditBackend {
+    fn local(store: local::LocalMetadataAuditStore) -> Self {
+        Self::Local(store)
     }
 
-    fn postgres(runtime: DataRuntime) -> Self {
-        Self::Postgres(postgres::PostgresMetadataAuditStore::open(runtime))
+    fn shared(store: shared::SharedMetadataAuditStore) -> Self {
+        Self::Shared(store)
     }
 
     fn kind(&self) -> MetadataAuditBackendKind {
         match self {
-            Self::Sqlite(_) => MetadataAuditBackendKind::Sqlite,
-            Self::Postgres(_) => MetadataAuditBackendKind::Postgres,
+            Self::Local(_) => MetadataAuditBackendKind::LocalSqlite,
+            Self::Shared(_) => MetadataAuditBackendKind::SharedPostgres,
         }
     }
 
     fn location_label(&self) -> String {
         match self {
-            Self::Sqlite(store) => store.location_label(),
-            Self::Postgres(store) => store.location_label(),
+            Self::Local(store) => store.location_label(),
+            Self::Shared(store) => store.location_label(),
         }
     }
 
     fn path(&self) -> Option<&Path> {
         match self {
-            Self::Sqlite(store) => Some(store.path()),
-            Self::Postgres(_) => None,
+            Self::Local(store) => Some(store.path()),
+            Self::Shared(_) => None,
         }
     }
 
     fn insert(&self, record: &MetadataAuditRecord) -> Result<(), String> {
         match self {
-            Self::Sqlite(store) => store.insert(record),
-            Self::Postgres(store) => store.insert(record),
+            Self::Local(store) => store.insert(record),
+            Self::Shared(store) => store.insert(record),
         }
     }
 
     fn count(&self) -> Result<usize, String> {
         match self {
-            Self::Sqlite(store) => store.count(),
-            Self::Postgres(store) => store.count(),
+            Self::Local(store) => store.count(),
+            Self::Shared(store) => store.count(),
         }
     }
 
     fn recent(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
         match self {
-            Self::Sqlite(store) => store.recent(limit),
-            Self::Postgres(store) => store.recent(limit),
+            Self::Local(store) => store.recent(limit),
+            Self::Shared(store) => store.recent(limit),
         }
     }
 }
@@ -193,7 +202,7 @@ mod tests {
     use super::*;
     use crate::RuntimeBuilder;
     use davenda_auth::DefaultAuthModelPackage;
-    use davenda_config::PlatformConfig;
+    use davenda_config::{PlatformConfig, StorageDeployment};
 
     const TEST_CONFIG: &str = r#"
 [app]
@@ -275,7 +284,7 @@ publish_manifest = false
 "#;
 
     #[test]
-    fn runtime_metadata_backend_reports_sqlite_in_single_node_mode() {
+    fn runtime_metadata_backend_reports_local_sqlite_in_single_node_mode() {
         let plan = RuntimeBuilder::new(
             PlatformConfig::from_toml_str(TEST_CONFIG).unwrap(),
             DefaultAuthModelPackage::default(),
@@ -285,7 +294,30 @@ publish_manifest = false
 
         let backend = RuntimeMetadataBackend::open(&plan);
 
-        assert_eq!(backend.backend_kind(), MetadataAuditBackendKind::Sqlite);
-        assert!(backend.location_label().starts_with("sqlite:"));
+        assert_eq!(
+            backend.backend_kind(),
+            MetadataAuditBackendKind::LocalSqlite
+        );
+        assert!(backend.location_label().starts_with("local-sqlite:"));
+    }
+
+    #[test]
+    fn runtime_metadata_backend_reports_shared_postgres_in_distributed_mode() {
+        let mut config = PlatformConfig::from_toml_str(TEST_CONFIG).unwrap();
+        config.storage.deployment = StorageDeployment::Distributed;
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+
+        let backend = RuntimeMetadataBackend::open(&plan);
+
+        assert_eq!(
+            backend.backend_kind(),
+            MetadataAuditBackendKind::SharedPostgres
+        );
+        assert_eq!(
+            backend.location_label(),
+            "shared-postgres:public.metadata_audit_entries"
+        );
     }
 }

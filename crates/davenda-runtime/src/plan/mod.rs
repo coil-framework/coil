@@ -48,9 +48,36 @@ pub struct RuntimePlan {
     pub ops_catalog: OpsCatalog,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum MetadataAuditBackendSelection {
+    LocalSqlite {
+        root: std::path::PathBuf,
+        namespace: String,
+    },
+    SharedPostgres {
+        runtime: davenda_data::DataRuntime,
+    },
+}
+
 impl RuntimePlan {
     pub fn auth_package(&self) -> &dyn AuthModelPackage {
         self.auth_package.package()
+    }
+
+    pub fn metadata_audit_backend_selection(&self) -> MetadataAuditBackendSelection {
+        match self.config.storage.deployment {
+            davenda_config::StorageDeployment::Distributed => {
+                MetadataAuditBackendSelection::SharedPostgres {
+                    runtime: self.data.clone(),
+                }
+            }
+            davenda_config::StorageDeployment::SingleNode => {
+                MetadataAuditBackendSelection::LocalSqlite {
+                    root: std::path::PathBuf::from(&self.config.storage.local_root),
+                    namespace: self.shared_backend_namespace(),
+                }
+            }
+        }
     }
 
     pub fn approved_outbound_http_endpoints(&self) -> &BTreeMap<String, Url> {
@@ -237,5 +264,4 @@ impl RuntimePlan {
             self.config.app.name, self.shared_backend_scope
         )
     }
-
 }

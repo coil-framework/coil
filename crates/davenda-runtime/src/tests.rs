@@ -2096,6 +2096,21 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
     assert!(metrics_body.contains("davenda.http.request.latency_ms"));
     assert!(metrics_body.contains("\"metrics_enabled\":true"));
 
+    let public_diagnostics = server
+        .public_router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/diagnostics")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(public_diagnostics.status(), StatusCode::NOT_FOUND);
+
     let diagnostics = server
         .router()
         .oneshot(
@@ -2150,7 +2165,7 @@ async fn server_router_denies_diagnostics_probe_for_authenticated_sessions_witho
         )
         .unwrap();
     let diagnostics = server
-        .router()
+        .privileged_router()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -2209,7 +2224,7 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
         )
         .unwrap();
     let diagnostics = server
-        .router()
+        .privileged_router()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -2234,8 +2249,26 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
     assert!(diagnostics_body.contains("\"customer_app\""));
     assert!(diagnostics_body.contains("\"database\""));
     assert!(diagnostics_body.contains("\"metadata\""));
-    assert!(diagnostics_body.contains("\"backend\":\"sqlite\""));
+    assert!(diagnostics_body.contains("\"backend\":\"local-sqlite\""));
     assert!(diagnostics_body.contains("\"path\""));
+}
+
+#[test]
+fn runtime_plan_selects_local_sqlite_metadata_audit_backend_in_single_node_mode() {
+    let plan = RuntimeBuilder::new(
+        PlatformConfig::from_toml_str(VALID_CONFIG).unwrap(),
+        DefaultAuthModelPackage::default(),
+    )
+    .build()
+    .unwrap();
+
+    match plan.metadata_audit_backend_selection() {
+        crate::plan::MetadataAuditBackendSelection::LocalSqlite { root, namespace } => {
+            assert_eq!(root, std::path::PathBuf::from("/tmp/davenda-runtime-tests"));
+            assert_eq!(namespace, plan.shared_backend_namespace());
+        }
+        other => panic!("expected local sqlite metadata backend, got {other:?}"),
+    }
 }
 
 #[test]
@@ -2248,10 +2281,16 @@ fn runtime_plan_uses_shared_postgres_metadata_audit_backend_in_distributed_mode(
         .unwrap();
     let host = plan.wasm_host();
 
-    assert_eq!(host.metadata_audit_backend_kind(), "postgres");
+    match plan.metadata_audit_backend_selection() {
+        crate::plan::MetadataAuditBackendSelection::SharedPostgres { runtime } => {
+            assert_eq!(runtime.schema, plan.data.schema);
+        }
+        other => panic!("expected shared postgres metadata backend, got {other:?}"),
+    }
+    assert_eq!(host.metadata_audit_backend_kind(), "shared-postgres");
     assert_eq!(
         host.metadata_audit_location(),
-        "postgres:public.metadata_audit_entries"
+        "shared-postgres:public.metadata_audit_entries"
     );
 }
 

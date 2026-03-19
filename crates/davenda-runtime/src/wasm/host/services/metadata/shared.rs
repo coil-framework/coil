@@ -6,14 +6,14 @@ use sqlx::Row;
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(super) struct PostgresMetadataAuditStore {
+pub(super) struct SharedMetadataAuditStore {
     runtime: DataRuntime,
     client: OnceLock<Result<PostgresDataClient, String>>,
     schema: String,
     initialized: OnceLock<Result<(), String>>,
 }
 
-impl PostgresMetadataAuditStore {
+impl SharedMetadataAuditStore {
     pub(super) fn open(runtime: DataRuntime) -> Self {
         let schema = runtime.schema.clone();
         Self {
@@ -25,7 +25,7 @@ impl PostgresMetadataAuditStore {
     }
 
     pub(super) fn location_label(&self) -> String {
-        format!("postgres:{}.metadata_audit_entries", self.schema)
+        format!("shared-postgres:{}.metadata_audit_entries", self.schema)
     }
 
     pub(super) fn insert(&self, record: &MetadataAuditRecord) -> Result<(), String> {
@@ -46,7 +46,7 @@ impl PostgresMetadataAuditStore {
             .bind(&record.kind)
             .execute(&client.pool)
             .await
-            .map_err(|error| format!("failed to write metadata audit entry: {error}"))?;
+            .map_err(|error| format!("failed to write shared metadata audit entry: {error}"))?;
             Ok(())
         })
     }
@@ -59,9 +59,11 @@ impl PostgresMetadataAuditStore {
             let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", table))
                 .fetch_one(&client.pool)
                 .await
-                .map_err(|error| format!("failed to count metadata audit entries: {error}"))?;
+                .map_err(|error| {
+                    format!("failed to count shared metadata audit entries: {error}")
+                })?;
             usize::try_from(count)
-                .map_err(|_| "metadata audit entry count overflowed usize".to_string())
+                .map_err(|_| "shared metadata audit entry count overflowed usize".to_string())
         })
     }
 
@@ -81,35 +83,37 @@ impl PostgresMetadataAuditStore {
             .bind(limit as i64)
             .fetch_all(&client.pool)
             .await
-            .map_err(|error| format!("failed to query metadata audit entries: {error}"))?;
+            .map_err(|error| format!("failed to query shared metadata audit entries: {error}"))?;
 
             let mut records = rows
                 .into_iter()
                 .map(|row| {
                     Ok(MetadataAuditRecord {
                         id: row.try_get(0).map_err(|error| {
-                            format!("failed to decode metadata audit entry id: {error}")
+                            format!("failed to decode shared metadata audit entry id: {error}")
                         })?,
                         recorded_at_unix_seconds: row.try_get(1).map_err(|error| {
-                            format!("failed to decode metadata audit timestamp: {error}")
+                            format!("failed to decode shared metadata audit timestamp: {error}")
                         })?,
                         app_id: row.try_get(2).map_err(|error| {
-                            format!("failed to decode metadata audit app id: {error}")
+                            format!("failed to decode shared metadata audit app id: {error}")
                         })?,
                         trace_id: row.try_get(3).map_err(|error| {
-                            format!("failed to decode metadata audit trace id: {error}")
+                            format!("failed to decode shared metadata audit trace id: {error}")
                         })?,
                         request_id: row.try_get(4).map_err(|error| {
-                            format!("failed to decode metadata audit request id: {error}")
+                            format!("failed to decode shared metadata audit request id: {error}")
                         })?,
                         principal_kind: row.try_get(5).map_err(|error| {
-                            format!("failed to decode metadata audit principal kind: {error}")
+                            format!(
+                                "failed to decode shared metadata audit principal kind: {error}"
+                            )
                         })?,
                         principal_id: row.try_get(6).map_err(|error| {
-                            format!("failed to decode metadata audit principal id: {error}")
+                            format!("failed to decode shared metadata audit principal id: {error}")
                         })?,
                         kind: row.try_get(7).map_err(|error| {
-                            format!("failed to decode metadata audit kind: {error}")
+                            format!("failed to decode shared metadata audit kind: {error}")
                         })?,
                     })
                 })
@@ -139,7 +143,7 @@ impl PostgresMetadataAuditStore {
                     sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {schema_ident}"))
                         .execute(&client.pool)
                         .await
-                        .map_err(|error| format!("failed to initialize metadata schema: {error}"))?;
+                        .map_err(|error| format!("failed to initialize shared metadata schema: {error}"))?;
 
                     sqlx::query(&format!(
                         "CREATE TABLE IF NOT EXISTS {schema_ident}.metadata_audit_entries (
@@ -155,7 +159,7 @@ impl PostgresMetadataAuditStore {
                     ))
                     .execute(&client.pool)
                     .await
-                    .map_err(|error| format!("failed to initialize metadata audit table: {error}"))?;
+                    .map_err(|error| format!("failed to initialize shared metadata audit table: {error}"))?;
 
                     sqlx::query(&format!(
                         "CREATE INDEX IF NOT EXISTS metadata_audit_entries_recent
@@ -163,7 +167,7 @@ impl PostgresMetadataAuditStore {
                     ))
                     .execute(&client.pool)
                     .await
-                    .map_err(|error| format!("failed to initialize metadata audit index: {error}"))?;
+                    .map_err(|error| format!("failed to initialize shared metadata audit index: {error}"))?;
 
                     Ok(())
                 })
@@ -205,7 +209,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn runtime_metadata_backend_labels_the_selected_backend_and_location() {
+    fn shared_metadata_backend_labels_the_selected_backend_and_location() {
         let runtime = DataRuntime {
             driver: davenda_config::DatabaseDriver::Postgres,
             connection_secret_ref: None,
@@ -218,8 +222,11 @@ mod tests {
                 statement_timeout: Duration::from_secs(30),
             },
         };
-        let backend = PostgresMetadataAuditStore::open(runtime);
+        let backend = SharedMetadataAuditStore::open(runtime);
 
-        assert_eq!(backend.location_label(), "postgres:public.metadata_audit_entries");
+        assert_eq!(
+            backend.location_label(),
+            "shared-postgres:public.metadata_audit_entries"
+        );
     }
 }

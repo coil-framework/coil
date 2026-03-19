@@ -64,8 +64,10 @@ impl RuntimeWasmHostServices {
         secrets: BTreeMap<String, String>,
     ) -> Self {
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
-        let metadata =
-            metadata::RuntimeMetadataBackend::with_root(root, plan.shared_backend_namespace());
+        let metadata = metadata::RuntimeMetadataBackend::with_local_root(
+            root,
+            plan.shared_backend_namespace(),
+        );
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
                 plan.wasm.allow_network,

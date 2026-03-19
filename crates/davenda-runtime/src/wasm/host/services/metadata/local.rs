@@ -6,12 +6,12 @@ use rusqlite::{Connection, params};
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(super) struct SqliteMetadataAuditStore {
+pub(super) struct LocalMetadataAuditStore {
     path: PathBuf,
     connection: Arc<Mutex<Connection>>,
 }
 
-impl SqliteMetadataAuditStore {
+impl LocalMetadataAuditStore {
     pub(super) fn open(root: PathBuf, namespace: String) -> Self {
         let path = database_path(&root, &namespace);
         if let Some(parent) = path.parent() {
@@ -25,7 +25,7 @@ impl SqliteMetadataAuditStore {
 
         let connection = Connection::open(&path).unwrap_or_else(|error| {
             panic!(
-                "failed to open metadata audit store `{}`: {error}",
+                "failed to open local metadata audit store `{}`: {error}",
                 path.display()
             )
         });
@@ -50,7 +50,7 @@ impl SqliteMetadataAuditStore {
             )
             .unwrap_or_else(|error| {
                 panic!(
-                    "failed to initialize metadata audit store `{}`: {error}",
+                    "failed to initialize local metadata audit store `{}`: {error}",
                     path.display()
                 )
             });
@@ -62,7 +62,7 @@ impl SqliteMetadataAuditStore {
     }
 
     pub(super) fn location_label(&self) -> String {
-        format!("sqlite:{}", self.path.display())
+        format!("local-sqlite:{}", self.path.display())
     }
 
     pub(super) fn path(&self) -> &Path {
@@ -74,9 +74,9 @@ impl SqliteMetadataAuditStore {
             .connection
             .lock()
             .map_err(|_| "metadata audit store is poisoned".to_string())?;
-        let tx = connection
-            .transaction()
-            .map_err(|error| format!("failed to start metadata audit transaction: {error}"))?;
+        let tx = connection.transaction().map_err(|error| {
+            format!("failed to start local metadata audit transaction: {error}")
+        })?;
         tx.execute(
             r#"
             INSERT INTO metadata_audit_entries (
@@ -99,9 +99,9 @@ impl SqliteMetadataAuditStore {
                 record.kind,
             ],
         )
-        .map_err(|error| format!("failed to write metadata audit entry: {error}"))?;
+        .map_err(|error| format!("failed to write local metadata audit entry: {error}"))?;
         tx.commit()
-            .map_err(|error| format!("failed to commit metadata audit entry: {error}"))?;
+            .map_err(|error| format!("failed to commit local metadata audit entry: {error}"))?;
         Ok(())
     }
 
@@ -114,9 +114,9 @@ impl SqliteMetadataAuditStore {
             .query_row("SELECT COUNT(*) FROM metadata_audit_entries", [], |row| {
                 row.get(0)
             })
-            .map_err(|error| format!("failed to count metadata audit entries: {error}"))?;
+            .map_err(|error| format!("failed to count local metadata audit entries: {error}"))?;
         usize::try_from(count)
-            .map_err(|_| "metadata audit entry count overflowed usize".to_string())
+            .map_err(|_| "local metadata audit entry count overflowed usize".to_string())
     }
 
     pub(super) fn recent(&self, limit: usize) -> Result<Vec<MetadataAuditRecord>, String> {
@@ -145,7 +145,7 @@ impl SqliteMetadataAuditStore {
                 LIMIT ?1
                 "#,
             )
-            .map_err(|error| format!("failed to query metadata audit entries: {error}"))?;
+            .map_err(|error| format!("failed to query local metadata audit entries: {error}"))?;
 
         let mut records = statement
             .query_map(params![limit as i64], |row| {
@@ -160,9 +160,9 @@ impl SqliteMetadataAuditStore {
                     kind: row.get(7)?,
                 })
             })
-            .map_err(|error| format!("failed to map metadata audit entries: {error}"))?
+            .map_err(|error| format!("failed to map local metadata audit entries: {error}"))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("failed to collect metadata audit entries: {error}"))?;
+            .map_err(|error| format!("failed to collect local metadata audit entries: {error}"))?;
         records.reverse();
         Ok(records)
     }
@@ -204,9 +204,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_metadata_backend_persists_and_queries_audit_records() {
+    fn local_metadata_backend_persists_and_queries_audit_records() {
         let root = shared_state_root("persistence");
-        let backend = SqliteMetadataAuditStore::open(root.clone(), "audit-suite".to_string());
+        let backend = LocalMetadataAuditStore::open(root.clone(), "audit-suite".to_string());
 
         backend
             .insert(&MetadataAuditRecord {
@@ -220,7 +220,6 @@ mod tests {
                 principal_id: Some("alice".to_string()),
             })
             .unwrap();
-        assert_eq!(backend.count().unwrap(), 1);
 
         backend
             .insert(&MetadataAuditRecord {
@@ -231,27 +230,27 @@ mod tests {
                 trace_id: "trace-2".to_string(),
                 request_id: Some("req-2".to_string()),
                 principal_kind: "user".to_string(),
-                principal_id: Some("alice".to_string()),
+                principal_id: Some("bob".to_string()),
             })
             .unwrap();
-        assert_eq!(backend.count().unwrap(), 2);
 
+        assert_eq!(backend.count().unwrap(), 2);
         let records = backend.recent(10).unwrap();
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].kind, "json_ld");
-        assert_eq!(records[1].kind, "seo_head");
+        assert_eq!(records[0].trace_id, "trace-1");
+        assert_eq!(records[1].trace_id, "trace-2");
 
         let last_only = backend.recent(1).unwrap();
         assert_eq!(last_only.len(), 1);
-        assert_eq!(last_only[0].kind, "seo_head");
+        assert_eq!(last_only[0].trace_id, "trace-2");
     }
 
     #[test]
-    fn runtime_metadata_backend_labels_the_selected_backend_and_location() {
+    fn local_metadata_backend_labels_the_selected_backend_and_location() {
         let root = shared_state_root("labels");
-        let backend = SqliteMetadataAuditStore::open(root.clone(), "audit-suite".to_string());
+        let backend = LocalMetadataAuditStore::open(root.clone(), "audit-suite".to_string());
 
-        assert!(backend.location_label().starts_with("sqlite:"));
+        assert!(backend.location_label().starts_with("local-sqlite:"));
         assert!(backend.path().starts_with(&root));
     }
 }

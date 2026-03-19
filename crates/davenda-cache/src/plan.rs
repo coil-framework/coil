@@ -162,7 +162,7 @@ impl CachePlanner {
     }
 
     pub fn local_runtime(&self) -> crate::CacheRuntime {
-        crate::CacheRuntime::in_memory(self.topology)
+        crate::CacheRuntime::local_for_testing(self.topology)
     }
 
     pub fn shared_runtime(&self) -> crate::CacheRuntime {

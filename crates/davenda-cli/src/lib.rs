@@ -130,6 +130,123 @@ pub struct CommandExecutionPlan {
     pub dry_run: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportStatus {
+    Ok,
+    Warning,
+    Unsafe,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticRecord {
+    pub severity: DiagnosticSeverity,
+    pub code: String,
+    pub message: String,
+}
+
+impl DiagnosticRecord {
+    pub fn new(
+        severity: DiagnosticSeverity,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Result<Self, CliModelError> {
+        Ok(Self {
+            severity,
+            code: validate_token("diagnostic_code", code.into())?,
+            message: require_non_empty("diagnostic_message", message.into())?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReportRow {
+    pub cells: BTreeMap<String, String>,
+}
+
+impl ReportRow {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_cell(
+        mut self,
+        column: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, CliModelError> {
+        let column = validate_token("report_column", column.into())?;
+        let value = require_non_empty("report_value", value.into())?;
+        self.cells.insert(column, value);
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandReport {
+    pub command: Vec<String>,
+    pub status: ReportStatus,
+    pub summary: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<ReportRow>,
+    pub diagnostics: Vec<DiagnosticRecord>,
+}
+
+impl CommandReport {
+    pub fn new(
+        command: impl IntoIterator<Item = impl Into<String>>,
+        summary: impl Into<String>,
+    ) -> Result<Self, CliModelError> {
+        let command = command
+            .into_iter()
+            .map(|segment| validate_token("command_segment", segment.into()))
+            .collect::<Result<Vec<_>, _>>()?;
+        if command.is_empty() {
+            return Err(CliModelError::EmptyField {
+                field: "command_path",
+            });
+        }
+
+        Ok(Self {
+            command,
+            status: ReportStatus::Ok,
+            summary: require_non_empty("report_summary", summary.into())?,
+            columns: Vec::new(),
+            rows: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+    }
+
+    pub fn with_status(mut self, status: ReportStatus) -> Self {
+        self.status = status;
+        self
+    }
+
+    pub fn with_columns(
+        mut self,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, CliModelError> {
+        self.columns = columns
+            .into_iter()
+            .map(|column| validate_token("report_column", column.into()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(self)
+    }
+
+    pub fn push_row(&mut self, row: ReportRow) {
+        self.rows.push(row);
+    }
+
+    pub fn push_diagnostic(&mut self, diagnostic: DiagnosticRecord) {
+        self.diagnostics.push(diagnostic);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CommandRegistry {
     commands: BTreeMap<Vec<String>, CommandDescriptor>,
@@ -237,9 +354,24 @@ fn baseline_commands(customer_app: &str) -> Result<Vec<CommandDescriptor>, CliMo
             "Run the local development server",
         )?,
         CommandDescriptor::new(
+            ["dev", "stack"],
+            CommandOwner::Core,
+            "Boot the full local platform stack with workers, scheduler, storage, and TLS",
+        )?,
+        CommandDescriptor::new(
             ["config", "validate"],
             CommandOwner::Core,
             "Validate effective platform configuration",
+        )?,
+        CommandDescriptor::new(
+            ["config", "render"],
+            CommandOwner::Core,
+            "Render effective platform configuration after overlays",
+        )?,
+        CommandDescriptor::new(
+            ["config", "diff"],
+            CommandOwner::Core,
+            "Diff effective platform configuration between environments or revisions",
         )?,
         CommandDescriptor::new(
             ["migrate", "plan"],
@@ -260,10 +392,22 @@ fn baseline_commands(customer_app: &str) -> Result<Vec<CommandDescriptor>, CliMo
             "Explain why a subject can or cannot exercise a capability",
         )?,
         CommandDescriptor::new(
+            ["auth", "package", "validate"],
+            CommandOwner::Core,
+            "Validate an auth package before deployment",
+        )?,
+        CommandDescriptor::new(
             ["module", "list"],
             CommandOwner::Core,
             "List installed official modules for the current customer app",
         )?,
+        CommandDescriptor::new(
+            ["module", "install"],
+            CommandOwner::Core,
+            "Install or enable an official module for the current customer app",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
         CommandDescriptor::new(
             ["cache", "warm"],
             CommandOwner::Core,
@@ -271,11 +415,25 @@ fn baseline_commands(customer_app: &str) -> Result<Vec<CommandDescriptor>, CliMo
         )?
         .with_dry_run(),
         CommandDescriptor::new(
+            ["cache", "invalidate"],
+            CommandOwner::Core,
+            "Invalidate cache by scope, route, or tag",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["storage", "verify"],
             CommandOwner::Core,
             "Verify storage policy and object-store state",
         )?
         .with_dry_run(),
+        CommandDescriptor::new(
+            ["storage", "sync"],
+            CommandOwner::Core,
+            "Reconcile managed assets and uploads with object storage",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
         CommandDescriptor::new(
             ["assets", "publish"],
             CommandOwner::CustomerApp(customer_app.to_string()),
@@ -284,6 +442,11 @@ fn baseline_commands(customer_app: &str) -> Result<Vec<CommandDescriptor>, CliMo
         .with_dry_run()
         .requiring_confirmation(),
         CommandDescriptor::new(
+            ["assets", "verify"],
+            CommandOwner::CustomerApp(customer_app.to_string()),
+            "Verify published asset manifests and CDN-targeted outputs",
+        )?,
+        CommandDescriptor::new(
             ["tls", "renew"],
             CommandOwner::Core,
             "Renew certificates and validate issuance state",
@@ -291,15 +454,40 @@ fn baseline_commands(customer_app: &str) -> Result<Vec<CommandDescriptor>, CliMo
         .with_dry_run()
         .requiring_confirmation(),
         CommandDescriptor::new(
+            ["tls", "status"],
+            CommandOwner::Core,
+            "Inspect certificate health, challenge status, and active provider state",
+        )?,
+        CommandDescriptor::new(
             ["jobs", "worker"],
             CommandOwner::Core,
             "Run background workers and inspect queue health",
         )?,
         CommandDescriptor::new(
+            ["jobs", "retry"],
+            CommandOwner::Core,
+            "Retry failed or dead-lettered jobs after inspection",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
+            ["import", "run"],
+            CommandOwner::Core,
+            "Run a staged content or data import into the current customer app",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["release", "doctor"],
             CommandOwner::Core,
             "Check upgrade compatibility across core, modules, auth, and extensions",
         )?,
+        CommandDescriptor::new(
+            ["release", "plan"],
+            CommandOwner::Core,
+            "Produce an upgrade and rollout plan for the current customer app",
+        )?
+        .with_dry_run(),
     ])
 }
 
@@ -347,6 +535,8 @@ mod tests {
         assert!(paths.contains(&"config validate".to_string()));
         assert!(paths.contains(&"migrate plan".to_string()));
         assert!(paths.contains(&"assets publish".to_string()));
+        assert!(paths.contains(&"import run".to_string()));
+        assert!(paths.contains(&"release plan".to_string()));
         assert!(paths.contains(&"tls renew".to_string()));
     }
 
@@ -410,5 +600,42 @@ mod tests {
             .plan(CommandInvocation::new(["tls", "renew"]).unwrap().confirm())
             .unwrap();
         assert_eq!(confirmed.descriptor.path.join(" "), "tls renew");
+    }
+
+    #[test]
+    fn command_reports_capture_rows_and_diagnostics() {
+        let mut report = CommandReport::new(
+            ["release", "doctor"],
+            "Checked upgrade compatibility for the current customer app",
+        )
+        .unwrap()
+        .with_status(ReportStatus::Warning)
+        .with_columns(["severity", "code", "message"])
+        .unwrap();
+        report.push_row(
+            ReportRow::new()
+                .with_cell("severity", "warning")
+                .unwrap()
+                .with_cell("code", "module.version.unpinned")
+                .unwrap()
+                .with_cell("message", "cms is not version pinned")
+                .unwrap(),
+        );
+        report.push_diagnostic(
+            DiagnosticRecord::new(
+                DiagnosticSeverity::Warning,
+                "module.version.unpinned",
+                "cms is not version pinned",
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            report.command,
+            vec!["release".to_string(), "doctor".to_string()]
+        );
+        assert_eq!(report.status, ReportStatus::Warning);
+        assert_eq!(report.rows.len(), 1);
+        assert_eq!(report.diagnostics.len(), 1);
     }
 }

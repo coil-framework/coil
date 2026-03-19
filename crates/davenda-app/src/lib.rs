@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use davenda_auth::AuthModelPackage;
+use davenda_cli::{
+    CliModelError, CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus,
+};
 use davenda_config::PlatformConfig;
 use davenda_core::{
     validate_module_capabilities, AdminResourceContribution, BulkOperationDefinition,
@@ -132,6 +135,8 @@ pub enum AppModelError {
     },
     #[error("{0}")]
     ModuleCapabilityValidation(#[from] CapabilityValidationError),
+    #[error("{0}")]
+    Cli(#[from] CliModelError),
     #[error("{0}")]
     Wasm(#[from] WasmModelError),
     #[error("{message}")]
@@ -998,6 +1003,36 @@ impl MigrationPlanSummary {
     pub fn entries(&self) -> &[MigrationPlanEntry] {
         &self.entries
     }
+
+    pub fn command_report(&self) -> Result<CommandReport, AppModelError> {
+        let mut report = CommandReport::new(
+            ["migrate", "plan"],
+            "Composed module, auth-package, and customer-app migration plan",
+        )?
+        .with_columns(["owner", "step", "order", "online_safe", "description"])?;
+        if self.entries.iter().any(|entry| !entry.online_safe) {
+            report = report.with_status(ReportStatus::Warning);
+        }
+
+        for entry in &self.entries {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("owner", migration_owner_label(&entry.owner))?
+                    .with_cell(
+                        "step",
+                        entry
+                            .step_id
+                            .clone()
+                            .unwrap_or_else(|| "version-check".to_string()),
+                    )?
+                    .with_cell("order", entry.order.to_string())?
+                    .with_cell("online_safe", entry.online_safe.to_string())?
+                    .with_cell("description", entry.description.clone())?,
+            );
+        }
+
+        Ok(report)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1046,6 +1081,49 @@ impl ReleaseDoctorReport {
         self.findings
             .iter()
             .filter(|finding| finding.severity == ReleaseDoctorSeverity::Blocking)
+    }
+
+    pub fn command_report(&self) -> Result<CommandReport, AppModelError> {
+        let mut report = CommandReport::new(
+            ["release", "doctor"],
+            format!(
+                "Checked upgrade compatibility for customer app `{}`",
+                self.app_id
+            ),
+        )?
+        .with_columns(["severity", "code", "message"])?;
+        report = report.with_status(
+            match self
+                .findings
+                .iter()
+                .map(|finding| finding.severity)
+                .max_by_key(|severity| release_doctor_rank(*severity))
+            {
+                Some(ReleaseDoctorSeverity::Blocking) => ReportStatus::Unsafe,
+                Some(ReleaseDoctorSeverity::Warning) => ReportStatus::Warning,
+                _ => ReportStatus::Ok,
+            },
+        );
+
+        for finding in &self.findings {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("severity", release_doctor_label(finding.severity))?
+                    .with_cell("code", finding.code.clone())?
+                    .with_cell("message", finding.message.clone())?,
+            );
+            report.push_diagnostic(DiagnosticRecord::new(
+                match finding.severity {
+                    ReleaseDoctorSeverity::Info => DiagnosticSeverity::Info,
+                    ReleaseDoctorSeverity::Warning => DiagnosticSeverity::Warning,
+                    ReleaseDoctorSeverity::Blocking => DiagnosticSeverity::Error,
+                },
+                finding.code.clone(),
+                finding.message.clone(),
+            )?);
+        }
+
+        Ok(report)
     }
 }
 
@@ -1128,6 +1206,71 @@ impl CustomerAppComposition {
             app_id: self.app_id.clone(),
             findings,
         }
+    }
+
+    pub fn module_list_report(&self) -> Result<CommandReport, AppModelError> {
+        let mut report = CommandReport::new(
+            ["module", "list"],
+            format!("Installed modules for customer app `{}`", self.app_id),
+        )?
+        .with_columns([
+            "module",
+            "version",
+            "core_services",
+            "module_dependencies",
+            "routes",
+            "jobs",
+            "admin_resources",
+        ])?;
+
+        if self
+            .module_inventory
+            .iter()
+            .any(|module| module.version_req.is_none())
+        {
+            report = report.with_status(ReportStatus::Warning);
+        }
+
+        for module in &self.module_inventory {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("module", module.id.to_string())?
+                    .with_cell(
+                        "version",
+                        module
+                            .version_req
+                            .clone()
+                            .unwrap_or_else(|| "unpinned".to_string()),
+                    )?
+                    .with_cell(
+                        "core_services",
+                        join_display(
+                            module
+                                .core_service_dependencies
+                                .iter()
+                                .map(|dependency| format!("{dependency:?}")),
+                        ),
+                    )?
+                    .with_cell(
+                        "module_dependencies",
+                        if module.module_dependencies.is_empty() {
+                            "none".to_string()
+                        } else {
+                            module
+                                .module_dependencies
+                                .iter()
+                                .map(|dependency| dependency.module.clone())
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        },
+                    )?
+                    .with_cell("routes", module.route_surfaces.len().to_string())?
+                    .with_cell("jobs", module.jobs.len().to_string())?
+                    .with_cell("admin_resources", module.admin_resources.len().to_string())?,
+            );
+        }
+
+        Ok(report)
     }
 }
 
@@ -1377,6 +1520,45 @@ fn difference(left: &[String], right: &[String]) -> Vec<String> {
         .filter(|value| !right.contains(value))
         .cloned()
         .collect()
+}
+
+fn join_display<T>(values: impl IntoIterator<Item = T>) -> String
+where
+    T: fmt::Display,
+{
+    let rendered = values
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
+    if rendered.is_empty() {
+        "none".to_string()
+    } else {
+        rendered.join(",")
+    }
+}
+
+fn migration_owner_label(owner: &MigrationPlanOwner) -> String {
+    match owner {
+        MigrationPlanOwner::Module(module) => format!("module:{module}"),
+        MigrationPlanOwner::AuthPackage(package) => format!("auth:{package}"),
+        MigrationPlanOwner::CustomerApp(app_id) => format!("customer_app:{app_id}"),
+    }
+}
+
+fn release_doctor_rank(severity: ReleaseDoctorSeverity) -> u8 {
+    match severity {
+        ReleaseDoctorSeverity::Info => 0,
+        ReleaseDoctorSeverity::Warning => 1,
+        ReleaseDoctorSeverity::Blocking => 2,
+    }
+}
+
+fn release_doctor_label(severity: ReleaseDoctorSeverity) -> &'static str {
+    match severity {
+        ReleaseDoctorSeverity::Info => "info",
+        ReleaseDoctorSeverity::Warning => "warning",
+        ReleaseDoctorSeverity::Blocking => "blocking",
+    }
 }
 
 #[cfg(test)]
@@ -2098,5 +2280,45 @@ cdn_base_url = "https://cdn.example.com"
             .findings
             .iter()
             .any(|finding| finding.code == "extension.checksum.mismatch"));
+    }
+
+    #[test]
+    fn customer_app_reports_render_into_cli_surfaces() {
+        let runtime = app()
+            .build_runtime_plan_with_extensions(
+                runtime_config("harbor-shop"),
+                DefaultAuthModelPackage::default(),
+                module_manifests()
+                    .into_iter()
+                    .map(StaticModule::new)
+                    .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+                    .collect(),
+                vec![extension_package()],
+            )
+            .unwrap();
+
+        let modules = runtime.composition.module_list_report().unwrap();
+        assert_eq!(
+            modules.command,
+            vec!["module".to_string(), "list".to_string()]
+        );
+        assert_eq!(modules.rows.len(), 2);
+
+        let migrations = runtime.migration_summary.command_report().unwrap();
+        assert_eq!(
+            migrations.command,
+            vec!["migrate".to_string(), "plan".to_string()]
+        );
+        assert!(migrations.rows.len() >= 4);
+
+        let release = runtime.release_doctor.command_report().unwrap();
+        assert_eq!(
+            release.command,
+            vec!["release".to_string(), "doctor".to_string()]
+        );
+        assert!(release
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "module.ops.missing"));
     }
 }

@@ -387,6 +387,7 @@ name = "davenda-app"
 version = "0.1.0"
 dependencies = [
  "davenda-auth",
+ "davenda-cli",
  "davenda-config",
  "davenda-core",
  "davenda-data",

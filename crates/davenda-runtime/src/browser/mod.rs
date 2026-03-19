@@ -8,6 +8,8 @@ mod shared;
 mod support;
 #[cfg(test)]
 mod testing;
+#[cfg(test)]
+pub(crate) use testing::test_only_shared_runtime;
 
 pub use flash::{FlashLevel, FlashMessage};
 pub use host::{BrowserHost, BrowserHostBuildError, ResolvedBrowserRequest, RuntimeBrowserError};
@@ -187,9 +189,9 @@ mod tests {
     #[test]
     fn live_browser_rejects_session_clients_without_explicit_shared_support() {
         #[derive(Debug)]
-        struct UnconfiguredSessionStoreRuntime;
+        struct UnconfiguredLiveSessionStoreRuntime;
 
-        impl DistributedSessionStoreRuntime for UnconfiguredSessionStoreRuntime {
+        impl DistributedSessionStoreRuntime for UnconfiguredLiveSessionStoreRuntime {
             fn issue(&self, _record: BrowserSessionRecord) {}
 
             fn session(&self, _session_id: &str) -> Option<BrowserSessionRecord> {
@@ -223,7 +225,7 @@ mod tests {
         let services = services(SessionStoreTopology::Database);
         let client = DistributedSessionStoreClient::new(
             SessionStoreBackendKind::Database,
-            Arc::new(UnconfiguredSessionStoreRuntime),
+            Arc::new(UnconfiguredLiveSessionStoreRuntime),
         );
 
         let error =

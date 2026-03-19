@@ -67,12 +67,12 @@ impl SessionStoreState {
 
 #[cfg(test)]
 #[derive(Debug, Default)]
-struct SharedDistributedSessionStoreRuntime {
+struct TestOnlySharedDistributedSessionStoreRuntime {
     state: Mutex<SessionStoreState>,
 }
 
 #[cfg(test)]
-impl SharedDistributedSessionStoreRuntime {
+impl TestOnlySharedDistributedSessionStoreRuntime {
     fn new() -> Self {
         Self {
             state: Mutex::new(SessionStoreState::default()),
@@ -81,7 +81,7 @@ impl SharedDistributedSessionStoreRuntime {
 }
 
 #[cfg(test)]
-impl DistributedSessionStoreRuntime for SharedDistributedSessionStoreRuntime {
+impl DistributedSessionStoreRuntime for TestOnlySharedDistributedSessionStoreRuntime {
     fn issue(&self, record: BrowserSessionRecord) {
         let mut guard = self.state.lock().expect("session backend mutex poisoned");
         guard.issue(record);
@@ -122,7 +122,7 @@ impl DistributedSessionStoreRuntime for SharedDistributedSessionStoreRuntime {
 }
 
 #[cfg(test)]
-pub(crate) fn shared_test_runtime(
+pub(crate) fn test_only_shared_runtime(
     kind: SessionStoreBackendKind,
     scope: String,
 ) -> Arc<dyn DistributedSessionStoreRuntime> {
@@ -136,7 +136,7 @@ pub(crate) fn shared_test_runtime(
         .expect("test session store registry mutex poisoned");
     guard
         .entry(key)
-        .or_insert_with(|| Arc::new(SharedDistributedSessionStoreRuntime::new()))
+        .or_insert_with(|| Arc::new(TestOnlySharedDistributedSessionStoreRuntime::new()))
         .clone()
 }
 
@@ -151,14 +151,10 @@ fn test_scope() -> String {
 #[cfg(test)]
 impl DistributedSessionStoreClient {
     pub(crate) fn local_for_testing(kind: SessionStoreBackendKind) -> Self {
-        Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
-    }
-
-    pub(crate) fn shared_runtime(
-        kind: SessionStoreBackendKind,
-        scope: impl Into<String>,
-    ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        shared_test_runtime(kind, scope.into())
+        Self::new(
+            kind,
+            Arc::new(TestOnlySharedDistributedSessionStoreRuntime::new()),
+        )
     }
 }
 

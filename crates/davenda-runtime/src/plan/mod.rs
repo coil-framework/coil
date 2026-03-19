@@ -98,7 +98,8 @@ impl RuntimePlan {
         #[cfg(test)]
         let shared_runtime = shared_jobs_runtime_for_test(&self.jobs, namespace.clone());
         #[cfg(not(test))]
-        let shared_runtime = davenda_jobs::JobsBackendAdapter::persistent_shared_runtime(
+        // Live builds never fall back to local/shared-volume jobs state.
+        let shared_runtime = davenda_jobs::JobsBackendAdapter::unconfigured_live_shared_runtime(
             &self.jobs,
             namespace.clone(),
         );
@@ -161,7 +162,8 @@ impl RuntimePlan {
             #[cfg(test)]
             let runtime = shared_cache_runtime_for_test(backend, shared_namespace.clone());
             #[cfg(not(test))]
-            let runtime = davenda_cache::DistributedCacheClient::persistent_shared_runtime(
+            // Live builds never fall back to local/shared-volume cache state.
+            let runtime = davenda_cache::DistributedCacheClient::unconfigured_live_shared_runtime(
                 backend,
                 shared_namespace.clone(),
             );

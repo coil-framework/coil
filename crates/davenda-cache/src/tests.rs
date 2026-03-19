@@ -556,12 +556,14 @@ fn persistent_shared_cache_runtime_shares_state_across_independent_clients() {
         .unwrap();
 
     let namespace = persistent_namespace("cache");
-    let left_runtime = DistributedCacheClient::persistent_shared_runtime(
+    let left_runtime = DistributedCacheClient::test_only_persistent_shared_runtime(
         CacheBackendKind::Redis,
         namespace.clone(),
     );
-    let right_runtime =
-        DistributedCacheClient::persistent_shared_runtime(CacheBackendKind::Redis, namespace);
+    let right_runtime = DistributedCacheClient::test_only_persistent_shared_runtime(
+        CacheBackendKind::Redis,
+        namespace,
+    );
     let left_adapter = CacheBackendAdapter::with_shared_runtime(topology, left_runtime);
     let right_adapter = CacheBackendAdapter::with_shared_runtime(topology, right_runtime);
     let mut left = CacheRuntime::with_backend(topology, left_adapter);
@@ -618,11 +620,11 @@ fn persistent_shared_cache_runtime_isolated_across_namespaces() {
         )
         .unwrap();
 
-    let left_runtime = DistributedCacheClient::persistent_shared_runtime(
+    let left_runtime = DistributedCacheClient::test_only_persistent_shared_runtime(
         CacheBackendKind::Redis,
         persistent_namespace("cache-left"),
     );
-    let right_runtime = DistributedCacheClient::persistent_shared_runtime(
+    let right_runtime = DistributedCacheClient::test_only_persistent_shared_runtime(
         CacheBackendKind::Redis,
         persistent_namespace("cache-right"),
     );

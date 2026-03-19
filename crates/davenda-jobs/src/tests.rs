@@ -522,8 +522,10 @@ fn explicit_shared_runtime_constructors_report_shared_state_honestly() {
 fn persistent_shared_runtime_shares_state_across_independent_coordinators() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
     let namespace = persistent_namespace("jobs");
-    let left_runtime = JobsBackendAdapter::persistent_shared_runtime(&runtime, namespace.clone());
-    let right_runtime = JobsBackendAdapter::persistent_shared_runtime(&runtime, namespace);
+    let left_runtime =
+        JobsBackendAdapter::test_only_persistent_shared_runtime(&runtime, namespace.clone());
+    let right_runtime =
+        JobsBackendAdapter::test_only_persistent_shared_runtime(&runtime, namespace);
     let left_adapter = JobsBackendAdapter::with_shared_runtime(
         runtime.backend,
         runtime.topology.clone(),
@@ -560,10 +562,14 @@ fn persistent_shared_runtime_shares_state_across_independent_coordinators() {
 #[test]
 fn persistent_shared_runtime_isolated_across_namespaces() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-    let left_runtime =
-        JobsBackendAdapter::persistent_shared_runtime(&runtime, persistent_namespace("jobs-left"));
-    let right_runtime =
-        JobsBackendAdapter::persistent_shared_runtime(&runtime, persistent_namespace("jobs-right"));
+    let left_runtime = JobsBackendAdapter::test_only_persistent_shared_runtime(
+        &runtime,
+        persistent_namespace("jobs-left"),
+    );
+    let right_runtime = JobsBackendAdapter::test_only_persistent_shared_runtime(
+        &runtime,
+        persistent_namespace("jobs-right"),
+    );
     let left_adapter = JobsBackendAdapter::with_shared_runtime(
         runtime.backend,
         runtime.topology.clone(),

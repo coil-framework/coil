@@ -1,11 +1,12 @@
 #![allow(dead_code)]
+//! Test-only SQLite persistence used by browser session tests.
 
 use super::{
     BrowserInstant, BrowserSessionRecord, DistributedSessionStoreRuntime, RuntimeBrowserError,
     SessionStoreBackendKind,
 };
 #[cfg(test)]
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 #[cfg(test)]
 use std::collections::BTreeMap;
 #[cfg(test)]
@@ -20,11 +21,11 @@ const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
 const SHARED_STATE_NAMESPACE_ENV: &str = "DAVENDA_SHARED_BACKEND_NAMESPACE";
 
 #[cfg(test)]
-pub(crate) fn persistent_runtime(
+pub(crate) fn test_only_persistent_runtime(
     kind: SessionStoreBackendKind,
     namespace: impl Into<String>,
 ) -> Arc<dyn DistributedSessionStoreRuntime> {
-    Arc::new(PersistentDistributedSessionStoreRuntime::new(
+    Arc::new(TestOnlyPersistentDistributedSessionStoreRuntime::new(
         kind,
         namespace.into(),
     ))
@@ -32,11 +33,13 @@ pub(crate) fn persistent_runtime(
 
 #[cfg(not(test))]
 #[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn persistent_runtime(
+pub(crate) fn unconfigured_live_runtime(
     kind: SessionStoreBackendKind,
     namespace: impl Into<String>,
 ) -> Arc<dyn DistributedSessionStoreRuntime> {
-    Arc::new(UnconfiguredDistributedSessionStoreRuntime::new(
+    // Live browser sessions must be configured explicitly; this is the
+    // rejection backend for non-test builds.
+    Arc::new(UnconfiguredLiveDistributedSessionStoreRuntime::new(
         kind,
         namespace.into(),
     ))
@@ -44,21 +47,21 @@ pub(crate) fn persistent_runtime(
 
 #[cfg(test)]
 #[derive(Debug)]
-struct PersistentDistributedSessionStoreRuntime {
-    store: SharedSessionStore,
+struct TestOnlyPersistentDistributedSessionStoreRuntime {
+    store: TestOnlySharedSessionStore,
 }
 
 #[cfg(test)]
-impl PersistentDistributedSessionStoreRuntime {
+impl TestOnlyPersistentDistributedSessionStoreRuntime {
     fn new(kind: SessionStoreBackendKind, namespace: String) -> Self {
         Self {
-            store: SharedSessionStore::open(kind, namespace),
+            store: TestOnlySharedSessionStore::open(kind, namespace),
         }
     }
 }
 
 #[cfg(test)]
-impl DistributedSessionStoreRuntime for PersistentDistributedSessionStoreRuntime {
+impl DistributedSessionStoreRuntime for TestOnlyPersistentDistributedSessionStoreRuntime {
     fn issue(&self, record: BrowserSessionRecord) {
         self.store
             .with_state_mut(|state| {
@@ -108,18 +111,16 @@ impl DistributedSessionStoreRuntime for PersistentDistributedSessionStoreRuntime
 }
 
 #[cfg(not(test))]
-#[cfg(not(test))]
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
-struct UnconfiguredDistributedSessionStoreRuntime {
+struct UnconfiguredLiveDistributedSessionStoreRuntime {
     kind: SessionStoreBackendKind,
     namespace: String,
 }
 
 #[cfg(not(test))]
-#[cfg(not(test))]
 #[cfg_attr(not(test), allow(dead_code))]
-impl UnconfiguredDistributedSessionStoreRuntime {
+impl UnconfiguredLiveDistributedSessionStoreRuntime {
     fn new(kind: SessionStoreBackendKind, namespace: String) -> Self {
         Self { kind, namespace }
     }
@@ -134,8 +135,7 @@ impl UnconfiguredDistributedSessionStoreRuntime {
 }
 
 #[cfg(not(test))]
-#[cfg(not(test))]
-impl DistributedSessionStoreRuntime for UnconfiguredDistributedSessionStoreRuntime {
+impl DistributedSessionStoreRuntime for UnconfiguredLiveDistributedSessionStoreRuntime {
     fn issue(&self, _record: BrowserSessionRecord) {
         panic!("{}", self.unsupported_message());
     }
@@ -230,16 +230,16 @@ impl SessionStoreSnapshot {
 
 #[cfg(test)]
 #[derive(Debug)]
-struct SharedSessionStore {
+struct TestOnlySharedSessionStore {
     connection: Mutex<Connection>,
     namespace: String,
 }
 
 #[cfg(test)]
-impl SharedSessionStore {
+impl TestOnlySharedSessionStore {
     fn open(kind: SessionStoreBackendKind, namespace: String) -> Self {
         let namespace = std::env::var(SHARED_STATE_NAMESPACE_ENV).unwrap_or(namespace);
-        let path = database_path(kind, &namespace);
+        let path = test_only_database_path(kind, &namespace);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|error| {
                 panic!(
@@ -353,7 +353,11 @@ impl SharedSessionStore {
         };
 
         let outcome = op(&mut state);
-        if outcome.is_ok() {
+        let should_persist = matches!(
+            outcome.as_ref(),
+            Ok(_) | Err(RuntimeBrowserError::ExpiredSession { .. })
+        );
+        if should_persist {
             let payload = serde_json::to_string(&state).unwrap_or_else(|error| {
                 panic!(
                     "failed to serialize persistent session backend state for `{}`: {error}",
@@ -384,15 +388,15 @@ impl SharedSessionStore {
 }
 
 #[cfg(test)]
-fn database_path(kind: SessionStoreBackendKind, namespace: &str) -> PathBuf {
-    shared_state_root()
+fn test_only_database_path(kind: SessionStoreBackendKind, namespace: &str) -> PathBuf {
+    test_only_shared_state_root()
         .join("browser")
         .join(session_backend_slug(kind))
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
 #[cfg(test)]
-fn shared_state_root() -> PathBuf {
+fn test_only_shared_state_root() -> PathBuf {
     std::env::var_os(SHARED_STATE_DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))

@@ -1,4 +1,4 @@
-use super::store::SharedJobsStore;
+use super::store::TestOnlySharedJobsStore;
 use super::*;
 use crate::backend::{JobFailureDisposition, JobLease, SchedulerLeadership};
 use crate::error::JobsModelError;
@@ -8,21 +8,21 @@ use crate::runtime::JobSpec;
 use std::time::Duration;
 
 #[derive(Debug)]
-pub(super) struct PersistentJobsCoordinationRuntime {
+pub(super) struct TestOnlyPersistentJobsCoordinationRuntime {
     runtime: JobsRuntime,
-    store: SharedJobsStore,
+    store: TestOnlySharedJobsStore,
 }
 
-impl PersistentJobsCoordinationRuntime {
+impl TestOnlyPersistentJobsCoordinationRuntime {
     pub(super) fn new(runtime: JobsRuntime, namespace: String) -> Self {
         Self {
-            store: SharedJobsStore::open(&runtime, namespace),
+            store: TestOnlySharedJobsStore::open(&runtime, namespace),
             runtime,
         }
     }
 }
 
-impl JobsCoordinationRuntime for PersistentJobsCoordinationRuntime {
+impl JobsCoordinationRuntime for TestOnlyPersistentJobsCoordinationRuntime {
     fn snapshot(&self) -> crate::JobsCoordinatorSnapshot {
         self.store
             .read_snapshot(|snapshot| snapshot.clone())

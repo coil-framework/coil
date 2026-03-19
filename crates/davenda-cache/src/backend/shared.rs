@@ -1,4 +1,5 @@
 #![cfg_attr(test, allow(dead_code))]
+//! Test-only SQLite persistence used for shared backend tests.
 
 #[cfg(test)]
 use super::state::CacheBackendState;
@@ -10,7 +11,7 @@ use crate::{
 #[cfg(test)]
 use bincode::{deserialize, serialize};
 #[cfg(test)]
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,22 +22,24 @@ use std::sync::Mutex;
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
 
 #[cfg(test)]
-pub(crate) fn persistent_runtime(
+pub(crate) fn test_only_persistent_runtime(
     kind: CacheBackendKind,
     namespace: impl Into<String>,
 ) -> Arc<dyn DistributedCacheRuntime> {
-    Arc::new(PersistentDistributedCacheRuntime::new(
+    Arc::new(TestOnlyPersistentDistributedCacheRuntime::new(
         kind,
         namespace.into(),
     ))
 }
 
 #[cfg(not(test))]
-pub(crate) fn persistent_runtime(
+pub(crate) fn unconfigured_live_runtime(
     kind: CacheBackendKind,
     namespace: impl Into<String>,
 ) -> Arc<dyn DistributedCacheRuntime> {
-    Arc::new(UnconfiguredDistributedCacheRuntime::new(
+    // Live cache coordination must be configured explicitly; this is the
+    // rejection backend for non-test builds.
+    Arc::new(UnconfiguredLiveDistributedCacheRuntime::new(
         kind,
         namespace.into(),
     ))
@@ -52,15 +55,15 @@ fn cache_kind_slug(kind: CacheBackendKind) -> &'static str {
 }
 
 #[cfg(test)]
-fn shared_state_root() -> PathBuf {
+fn test_only_shared_state_root() -> PathBuf {
     std::env::var_os(SHARED_STATE_DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
 }
 
 #[cfg(test)]
-fn database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
-    shared_state_root()
+fn test_only_database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
+    test_only_shared_state_root()
         .join("cache")
         .join(cache_kind_slug(kind))
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
@@ -68,12 +71,12 @@ fn database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
 
 #[cfg(test)]
 #[derive(Debug)]
-struct PersistentDistributedCacheRuntime {
+struct TestOnlyPersistentDistributedCacheRuntime {
     store: SharedCacheStore,
 }
 
 #[cfg(test)]
-impl PersistentDistributedCacheRuntime {
+impl TestOnlyPersistentDistributedCacheRuntime {
     fn new(kind: CacheBackendKind, namespace: String) -> Self {
         Self {
             store: SharedCacheStore::open(kind, namespace),
@@ -82,7 +85,7 @@ impl PersistentDistributedCacheRuntime {
 }
 
 #[cfg(test)]
-impl DistributedCacheRuntime for PersistentDistributedCacheRuntime {
+impl DistributedCacheRuntime for TestOnlyPersistentDistributedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         self.store
             .with_state_mut(|state| {
@@ -137,13 +140,13 @@ impl DistributedCacheRuntime for PersistentDistributedCacheRuntime {
 
 #[cfg(not(test))]
 #[derive(Debug)]
-struct UnconfiguredDistributedCacheRuntime {
+struct UnconfiguredLiveDistributedCacheRuntime {
     kind: CacheBackendKind,
     namespace: String,
 }
 
 #[cfg(not(test))]
-impl UnconfiguredDistributedCacheRuntime {
+impl UnconfiguredLiveDistributedCacheRuntime {
     fn new(kind: CacheBackendKind, namespace: String) -> Self {
         Self { kind, namespace }
     }
@@ -158,7 +161,7 @@ impl UnconfiguredDistributedCacheRuntime {
 }
 
 #[cfg(not(test))]
-impl DistributedCacheRuntime for UnconfiguredDistributedCacheRuntime {
+impl DistributedCacheRuntime for UnconfiguredLiveDistributedCacheRuntime {
     fn insert(&self, _entry: CacheEntry) {
         panic!("{}", self.unsupported_message());
     }
@@ -207,7 +210,7 @@ struct SharedCacheStore {
 #[cfg(test)]
 impl SharedCacheStore {
     fn open(kind: CacheBackendKind, namespace: String) -> Self {
-        let path = database_path(kind, &namespace);
+        let path = test_only_database_path(kind, &namespace);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|error| {
                 panic!(

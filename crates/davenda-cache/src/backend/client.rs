@@ -6,7 +6,7 @@ use crate::{
     FillLease, InvalidationSet, RequestCoalescingMode,
 };
 
-use super::{CacheBackendKind, shared};
+use super::{shared, CacheBackendKind};
 
 pub trait DistributedCacheRuntime: Send + Sync + 'static {
     fn insert(&self, entry: CacheEntry);
@@ -61,11 +61,20 @@ impl DistributedCacheClient {
         super::testing::shared_test_runtime(kind, super::testing::test_scope_namespace())
     }
 
-    pub fn persistent_shared_runtime(
+    #[cfg(test)]
+    pub fn test_only_persistent_shared_runtime(
         kind: CacheBackendKind,
         namespace: impl Into<String>,
     ) -> Arc<dyn DistributedCacheRuntime> {
-        shared::persistent_runtime(kind, namespace.into())
+        shared::test_only_persistent_runtime(kind, namespace.into())
+    }
+
+    #[cfg(not(test))]
+    pub fn unconfigured_live_shared_runtime(
+        kind: CacheBackendKind,
+        namespace: impl Into<String>,
+    ) -> Arc<dyn DistributedCacheRuntime> {
+        shared::unconfigured_live_runtime(kind, namespace.into())
     }
 
     #[cfg(test)]

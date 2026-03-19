@@ -124,12 +124,32 @@ impl DistributedSessionStoreClient {
         Self { kind, runtime }
     }
 
-    #[cfg(not(test))]
-    pub(crate) fn shared_runtime(
+    #[allow(dead_code)]
+    pub(crate) fn test_only_shared_runtime(
         kind: SessionStoreBackendKind,
         scope: impl Into<String>,
     ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        Arc::new(UnconfiguredDistributedSessionStoreRuntime::new(
+        #[cfg(test)]
+        {
+            return super::shared::test_only_persistent_runtime(kind, scope.into());
+        }
+
+        #[cfg(not(test))]
+        {
+            let _ = kind;
+            let _ = scope;
+            panic!("test_only_shared_runtime is only available in test builds");
+        }
+    }
+
+    #[cfg(not(test))]
+    pub(crate) fn unconfigured_live_shared_runtime(
+        kind: SessionStoreBackendKind,
+        scope: impl Into<String>,
+    ) -> Arc<dyn DistributedSessionStoreRuntime> {
+        // Live browser sessions must be configured explicitly; this is the
+        // rejection backend for non-test builds.
+        Arc::new(UnconfiguredLiveDistributedSessionStoreRuntime::new(
             kind,
             scope.into(),
         ))
@@ -188,13 +208,13 @@ impl std::fmt::Debug for DistributedSessionStoreClient {
 
 #[cfg(not(test))]
 #[derive(Debug)]
-pub(super) struct UnconfiguredDistributedSessionStoreRuntime {
+pub(super) struct UnconfiguredLiveDistributedSessionStoreRuntime {
     kind: SessionStoreBackendKind,
     scope: String,
 }
 
 #[cfg(not(test))]
-impl UnconfiguredDistributedSessionStoreRuntime {
+impl UnconfiguredLiveDistributedSessionStoreRuntime {
     pub(super) fn new(kind: SessionStoreBackendKind, scope: String) -> Self {
         Self { kind, scope }
     }
@@ -209,7 +229,7 @@ impl UnconfiguredDistributedSessionStoreRuntime {
 }
 
 #[cfg(not(test))]
-impl DistributedSessionStoreRuntime for UnconfiguredDistributedSessionStoreRuntime {
+impl DistributedSessionStoreRuntime for UnconfiguredLiveDistributedSessionStoreRuntime {
     fn issue(&self, _record: BrowserSessionRecord) {
         panic!("{}", self.unsupported_message());
     }
@@ -266,7 +286,7 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Database,
                 Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Database,
-                    DistributedSessionStoreClient::shared_runtime(
+                    DistributedSessionStoreClient::test_only_shared_runtime(
                         SessionStoreBackendKind::Database,
                         format!("{backend_scope}:{customer_app}"),
                     ),
@@ -276,7 +296,7 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Redis,
                 Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Redis,
-                    DistributedSessionStoreClient::shared_runtime(
+                    DistributedSessionStoreClient::test_only_shared_runtime(
                         SessionStoreBackendKind::Redis,
                         format!("{backend_scope}:{customer_app}"),
                     ),
@@ -286,7 +306,7 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Valkey,
                 Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Valkey,
-                    DistributedSessionStoreClient::shared_runtime(
+                    DistributedSessionStoreClient::test_only_shared_runtime(
                         SessionStoreBackendKind::Valkey,
                         format!("{backend_scope}:{customer_app}"),
                     ),

@@ -8,9 +8,9 @@ use crate::{
     DeadLetterReason, JobFailureDisposition, JobId, JobInstant, JobLease, JobQueueName, JobSpec,
     JobsCoordinatorSnapshot, JobsModelError, SchedulerLeadership,
 };
-use std::sync::Arc;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 #[cfg(not(test))]
@@ -31,7 +31,7 @@ use harness::SharedJobsRuntimeHarness;
 static LOCAL_NAMESPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
-pub(crate) fn persistent_runtime(
+pub(crate) fn test_only_persistent_runtime(
     runtime: &JobsRuntime,
     namespace: impl Into<String>,
 ) -> Arc<dyn JobsCoordinationRuntime> {
@@ -39,7 +39,7 @@ pub(crate) fn persistent_runtime(
 }
 
 #[cfg(not(test))]
-pub(crate) fn persistent_runtime(
+pub(crate) fn unconfigured_live_runtime(
     runtime: &JobsRuntime,
     namespace: impl Into<String>,
 ) -> Arc<dyn JobsCoordinationRuntime> {
@@ -51,7 +51,9 @@ pub(crate) fn persistent_runtime(
 
 #[cfg(not(test))]
 pub(crate) fn local_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-    persistent_runtime(runtime, default_namespace(runtime))
+    // Live jobs coordination must be configured explicitly; this path only
+    // constructs the rejection backend for non-test builds.
+    unconfigured_live_runtime(runtime, default_namespace(runtime))
 }
 
 #[cfg(test)]

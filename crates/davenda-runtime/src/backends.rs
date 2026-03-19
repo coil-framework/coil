@@ -39,17 +39,25 @@ impl RuntimeBackendMaterializer {
         services: BrowserSecurityServices,
     ) -> Result<BrowserHost, BrowserHostBuildError> {
         match self.plans.session_store.as_ref() {
-            Some(target) => BrowserHost::with_session_store_client(
-                customer_app.clone(),
-                services.clone(),
-                DistributedSessionStoreClient::new(
+            Some(target) => {
+                #[cfg(test)]
+                let session_runtime = crate::browser::test_only_shared_runtime(
                     target.kind,
-                    DistributedSessionStoreClient::shared_runtime(
+                    format!("{}:{customer_app}", self.namespace),
+                );
+                #[cfg(not(test))]
+                let session_runtime =
+                    DistributedSessionStoreClient::unconfigured_live_shared_runtime(
                         target.kind,
                         format!("{}:{customer_app}", self.namespace),
-                    ),
-                ),
-            ),
+                    );
+
+                BrowserHost::with_session_store_client(
+                    customer_app.clone(),
+                    services.clone(),
+                    DistributedSessionStoreClient::new(target.kind, session_runtime),
+                )
+            }
             None => Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost),
         }
     }

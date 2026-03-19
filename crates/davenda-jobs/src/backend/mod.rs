@@ -153,13 +153,22 @@ impl JobsBackendAdapter {
         Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     #[doc(hidden)]
-    pub fn persistent_shared_runtime(
+    pub fn test_only_persistent_shared_runtime(
         runtime: &JobsRuntime,
         namespace: impl Into<String>,
     ) -> Arc<dyn JobsCoordinationRuntime> {
-        shared::persistent_runtime(runtime, namespace.into())
+        shared::test_only_persistent_runtime(runtime, namespace.into())
+    }
+
+    #[cfg(not(test))]
+    pub fn unconfigured_live_shared_runtime(
+        runtime: &JobsRuntime,
+        namespace: impl Into<String>,
+    ) -> Arc<dyn JobsCoordinationRuntime> {
+        shared::unconfigured_live_runtime(runtime, namespace.into())
     }
 
     #[doc(hidden)]

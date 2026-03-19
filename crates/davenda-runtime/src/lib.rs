@@ -5,9 +5,10 @@ use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     BrowserSecurityServices, CapabilityValidationError, CliRuntimeServices, CookieSigner,
-    DataRuntimeServices, JobsRuntimeServices, ModuleManifest, ObservabilityRuntimeServices,
-    PlatformModule, RegistrationError, ServiceDescriptor, TemplateRuntimeServices,
-    TlsRuntimeServices, WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
+    DataRuntimeServices, JobsRuntimeServices, ModuleInstallationError, ModuleManifest,
+    ObservabilityRuntimeServices, PlatformModule, RegistrationError, ServiceDescriptor,
+    TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices, bootstrap_core_services,
+    validate_module_capabilities, validate_module_installation,
 };
 use davenda_observability::{
     CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
@@ -612,12 +613,33 @@ where
             observability.maintenance = maintenance_mode;
         }
 
+        let mut installed_modules = Vec::new();
+        let mut collected_modules = Vec::new();
+
         for module in self.modules {
             let manifest = module.manifest();
             validate_module_capabilities(&self.auth_package, &manifest)?;
+            installed_modules.push(manifest.name.clone());
+            collected_modules.push((module, manifest));
+        }
+
+        let core_service_id_storage = registry
+            .services()
+            .map(|service| service.id.clone())
+            .collect::<Vec<_>>();
+        let core_service_ids = core_service_id_storage
+            .iter()
+            .map(|service_id| service_id.as_str())
+            .collect::<Vec<_>>();
+
+        for (_, manifest) in &collected_modules {
+            validate_module_installation(manifest, &installed_modules, &core_service_ids)?;
             registry.register_module_manifest(manifest.clone())?;
+            module_manifests.push(manifest.clone());
+        }
+
+        for (module, _) in collected_modules {
             module.register(&mut registry)?;
-            module_manifests.push(manifest);
         }
 
         Ok(RuntimePlan {
@@ -912,6 +934,8 @@ pub enum RuntimeBuildError {
     Registration(#[from] RegistrationError),
     #[error(transparent)]
     Capability(#[from] CapabilityValidationError),
+    #[error(transparent)]
+    ModuleInstallation(#[from] ModuleInstallationError),
     #[error(transparent)]
     Route(#[from] RouteBuildError),
     #[error(transparent)]
@@ -1498,6 +1522,23 @@ cdn_base_url = "https://cdn.example.com"
                 payload: BTreeMap::from([("status".to_string(), "queued".to_string())]),
             })
         );
+    }
+
+    #[test]
+    fn runtime_builder_rejects_missing_required_module_dependencies() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(MembershipsModule::new())
+            .build()
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            RuntimeBuildError::ModuleInstallation(ModuleInstallationError::MissingModuleDependency {
+                module,
+                dependency,
+            }) if module == "memberships" && dependency == "commerce"
+        ));
     }
 }
 

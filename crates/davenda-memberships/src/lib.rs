@@ -5,7 +5,12 @@ use std::time::Duration;
 
 use davenda_auth::Capability;
 use davenda_commerce::{EntitlementKey, OrderId, OrderOutcome};
-use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_core::{
+    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
+    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
+    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+};
 
 const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 
@@ -940,6 +945,137 @@ impl PlatformModule for MembershipsModule {
                 Capability::AssetRead,
             ])
             .with_config_namespace(self.config_namespace.clone())
+            .with_capability_contracts(vec![
+                CapabilityContract::required(
+                    Capability::MembershipSubscriptionManage,
+                    ["subscription"],
+                ),
+                CapabilityContract::required(
+                    Capability::MembershipTierEdit,
+                    ["membership_tier"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AdminShellAccess,
+                    ["admin_module"],
+                ),
+                CapabilityContract::optional(Capability::OrderRead, ["order"]),
+                CapabilityContract::optional(
+                    Capability::I18nTranslationEdit,
+                    ["membership_tier"],
+                ),
+                CapabilityContract::optional(Capability::AssetRead, ["asset", "media"]),
+            ])
+            .with_module_dependencies(vec![
+                ModuleDependency::required(
+                    "commerce",
+                    "Membership subscriptions are provisioned from order outcomes and billing lifecycles",
+                ),
+                ModuleDependency::optional(
+                    "admin",
+                    "Memberships contributes operator resources into the shared admin shell when installed",
+                ),
+                ModuleDependency::optional(
+                    "events",
+                    "Membership tiers can influence event eligibility and member-only booking workflows",
+                ),
+            ])
+            .with_core_service_dependencies(vec![
+                CoreServiceDependency::Auth,
+                CoreServiceDependency::Data,
+                CoreServiceDependency::Jobs,
+                CoreServiceDependency::Observability,
+                CoreServiceDependency::I18n,
+            ])
+            .with_migrations(vec![
+                MigrationContract::new(
+                    "memberships.tiers",
+                    10,
+                    "Creates membership tier, benefit, and merchandising policy tables",
+                ),
+                MigrationContract::new(
+                    "memberships.subscriptions",
+                    20,
+                    "Creates subscription lifecycle state, term, and grace-period tables",
+                ),
+                MigrationContract::new(
+                    "memberships.entitlements",
+                    30,
+                    "Creates entitlement grants and revocation audit rows linked to active subscriptions",
+                ),
+            ])
+            .with_route_surfaces(vec![
+                RouteSurface::new(
+                    "memberships.account",
+                    RouteSurfaceKind::FrontendPage,
+                    "/account/memberships",
+                )
+                .gated_by(Capability::MembershipSubscriptionManage),
+                RouteSurface::new(
+                    "memberships.tiers",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/memberships/tiers",
+                )
+                .gated_by(Capability::MembershipTierEdit),
+                RouteSurface::new(
+                    "memberships.subscriptions",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/memberships/subscriptions",
+                )
+                .gated_by(Capability::MembershipSubscriptionManage),
+            ])
+            .with_jobs(vec![
+                JobContract::new(
+                    "memberships.renewals",
+                    JobTriggerKind::Scheduled,
+                    true,
+                    "Processes scheduled renewals, grace-period transitions, and retry windows",
+                ),
+                JobContract::new(
+                    "memberships.entitlements.sync",
+                    JobTriggerKind::DomainEvent,
+                    true,
+                    "Reconciles auth-backed entitlements after subscription lifecycle changes",
+                ),
+            ])
+            .with_event_subscriptions(vec![
+                EventSubscription::new(
+                    "commerce.order.paid",
+                    Some("memberships.entitlements.sync"),
+                    "Creates or extends subscription access after qualifying membership purchases complete",
+                ),
+                EventSubscription::new(
+                    "membership.subscription.renewal-due",
+                    Some("memberships.renewals"),
+                    "Schedules renewal and grace-period maintenance work for active subscriptions",
+                ),
+            ])
+            .with_integration_points(vec![
+                IntegrationPoint::new(
+                    IntegrationKind::AdminNavigation,
+                    "admin.memberships",
+                    "Adds tier and subscription management resources to the shared operator shell",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::CommerceBridge,
+                    "commerce.orders",
+                    "Projects order outcomes into recurring membership state and entitlement grants",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::FrontendRendering,
+                    "account.memberships",
+                    "Provides the member account experience and entitlement visibility surface",
+                ),
+            ])
+            .with_behaviors(vec![
+                ModuleBehavior::AccessibleAdminUi,
+                ModuleBehavior::AsyncJobs,
+                ModuleBehavior::AuditedBulkActions,
+            ])
+            .with_extension_slots(vec![ExtensionSlotDescriptor::new(
+                ExtensionSlotKind::AdminWidget,
+                "memberships.subscription.summary",
+                "Allows customer app widgets to augment subscription detail views with bounded insights",
+            )])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1276,6 +1412,17 @@ mod tests {
                 .optional_capabilities
                 .contains(&Capability::AdminShellAccess)
         );
+        assert!(manifest
+            .module_dependencies
+            .iter()
+            .any(|dependency| dependency.module == "commerce"));
+        assert!(manifest
+            .core_service_dependencies
+            .contains(&CoreServiceDependency::Jobs));
+        assert_eq!(manifest.migrations.len(), 3);
+        assert_eq!(manifest.route_surfaces.len(), 3);
+        assert_eq!(manifest.jobs.len(), 2);
+        assert_eq!(manifest.event_subscriptions.len(), 2);
 
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).unwrap();

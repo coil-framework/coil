@@ -401,6 +401,16 @@ pub struct ModuleManifest {
     pub required_capabilities: Vec<Capability>,
     pub optional_capabilities: Vec<Capability>,
     pub config_namespace: Option<String>,
+    pub capability_contracts: Vec<CapabilityContract>,
+    pub module_dependencies: Vec<ModuleDependency>,
+    pub core_service_dependencies: Vec<CoreServiceDependency>,
+    pub migrations: Vec<MigrationContract>,
+    pub route_surfaces: Vec<RouteSurface>,
+    pub jobs: Vec<JobContract>,
+    pub event_subscriptions: Vec<EventSubscription>,
+    pub integration_points: Vec<IntegrationPoint>,
+    pub behaviors: Vec<ModuleBehavior>,
+    pub extension_slots: Vec<ExtensionSlotDescriptor>,
 }
 
 impl ModuleManifest {
@@ -410,6 +420,16 @@ impl ModuleManifest {
             required_capabilities: Vec::new(),
             optional_capabilities: Vec::new(),
             config_namespace: None,
+            capability_contracts: Vec::new(),
+            module_dependencies: Vec::new(),
+            core_service_dependencies: Vec::new(),
+            migrations: Vec::new(),
+            route_surfaces: Vec::new(),
+            jobs: Vec::new(),
+            event_subscriptions: Vec::new(),
+            integration_points: Vec::new(),
+            behaviors: Vec::new(),
+            extension_slots: Vec::new(),
         }
     }
 
@@ -426,6 +446,380 @@ impl ModuleManifest {
     pub fn with_config_namespace(mut self, config_namespace: impl Into<String>) -> Self {
         self.config_namespace = Some(config_namespace.into());
         self
+    }
+
+    pub fn with_capability_contracts(mut self, contracts: Vec<CapabilityContract>) -> Self {
+        self.capability_contracts = contracts;
+        self
+    }
+
+    pub fn with_module_dependencies(mut self, dependencies: Vec<ModuleDependency>) -> Self {
+        self.module_dependencies = dependencies;
+        self
+    }
+
+    pub fn with_core_service_dependencies(
+        mut self,
+        dependencies: Vec<CoreServiceDependency>,
+    ) -> Self {
+        self.core_service_dependencies = dependencies;
+        self
+    }
+
+    pub fn with_migrations(mut self, migrations: Vec<MigrationContract>) -> Self {
+        self.migrations = migrations;
+        self
+    }
+
+    pub fn with_route_surfaces(mut self, routes: Vec<RouteSurface>) -> Self {
+        self.route_surfaces = routes;
+        self
+    }
+
+    pub fn with_jobs(mut self, jobs: Vec<JobContract>) -> Self {
+        self.jobs = jobs;
+        self
+    }
+
+    pub fn with_event_subscriptions(
+        mut self,
+        subscriptions: Vec<EventSubscription>,
+    ) -> Self {
+        self.event_subscriptions = subscriptions;
+        self
+    }
+
+    pub fn with_integration_points(mut self, integrations: Vec<IntegrationPoint>) -> Self {
+        self.integration_points = integrations;
+        self
+    }
+
+    pub fn with_behaviors(mut self, behaviors: Vec<ModuleBehavior>) -> Self {
+        self.behaviors = behaviors;
+        self
+    }
+
+    pub fn with_extension_slots(mut self, extension_slots: Vec<ExtensionSlotDescriptor>) -> Self {
+        self.extension_slots = extension_slots;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityContract {
+    pub capability: Capability,
+    pub required: bool,
+    pub resource_kinds: Vec<String>,
+}
+
+impl CapabilityContract {
+    pub fn required(
+        capability: Capability,
+        resource_kinds: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self::new(capability, true, resource_kinds)
+    }
+
+    pub fn optional(
+        capability: Capability,
+        resource_kinds: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self::new(capability, false, resource_kinds)
+    }
+
+    fn new(
+        capability: Capability,
+        required: bool,
+        resource_kinds: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            capability,
+            required,
+            resource_kinds: resource_kinds.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleDependencyKind {
+    Required,
+    Optional,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleDependency {
+    pub module: String,
+    pub kind: ModuleDependencyKind,
+    pub reason: String,
+}
+
+impl ModuleDependency {
+    pub fn required(
+        module: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            module: module.into(),
+            kind: ModuleDependencyKind::Required,
+            reason: reason.into(),
+        }
+    }
+
+    pub fn optional(
+        module: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            module: module.into(),
+            kind: ModuleDependencyKind::Optional,
+            reason: reason.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreServiceDependency {
+    Auth,
+    Data,
+    Cache,
+    Jobs,
+    Storage,
+    Assets,
+    I18n,
+    Seo,
+    A11y,
+    Template,
+    Wasm,
+    Observability,
+    BrowserSecurity,
+    Http,
+    Tls,
+}
+
+impl CoreServiceDependency {
+    pub fn required_service_ids(self) -> &'static [&'static str] {
+        match self {
+            Self::Auth => &["core.auth"],
+            Self::Data => &["core.data", "core.data.migrations"],
+            Self::Cache => &["core.cache.l1", "core.cache.http"],
+            Self::Jobs => &["core.jobs"],
+            Self::Storage => &["core.storage"],
+            Self::Assets => &["core.assets"],
+            Self::I18n => &["core.i18n"],
+            Self::Seo => &["core.seo"],
+            Self::A11y => &["core.a11y"],
+            Self::Template => &["core.template", "core.template.fragments"],
+            Self::Wasm => &["core.wasm", "core.wasm.limits"],
+            Self::Observability => &["core.health", "core.maintenance", "core.flags"],
+            Self::BrowserSecurity => {
+                &["core.http.sessions", "core.http.cookies", "core.http.csrf"]
+            }
+            Self::Http => &["core.http"],
+            Self::Tls => &["core.tls.reload"],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationContract {
+    pub owner: String,
+    pub order: u32,
+    pub description: String,
+}
+
+impl MigrationContract {
+    pub fn new(
+        owner: impl Into<String>,
+        order: u32,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            owner: owner.into(),
+            order,
+            description: description.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteSurfaceKind {
+    FrontendPage,
+    FrontendAction,
+    AdminPage,
+    AdminAction,
+    Api,
+    Fragment,
+    Asset,
+    Webhook,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteSurface {
+    pub name: String,
+    pub kind: RouteSurfaceKind,
+    pub path: String,
+    pub localized: bool,
+    pub capability: Option<Capability>,
+}
+
+impl RouteSurface {
+    pub fn new(
+        name: impl Into<String>,
+        kind: RouteSurfaceKind,
+        path: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            kind,
+            path: path.into(),
+            localized: false,
+            capability: None,
+        }
+    }
+
+    pub fn localized(mut self) -> Self {
+        self.localized = true;
+        self
+    }
+
+    pub fn gated_by(mut self, capability: Capability) -> Self {
+        self.capability = Some(capability);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobTriggerKind {
+    Scheduled,
+    DomainEvent,
+    Operator,
+    Webhook,
+    InlineFollowup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobContract {
+    pub name: String,
+    pub trigger: JobTriggerKind,
+    pub idempotent: bool,
+    pub description: String,
+}
+
+impl JobContract {
+    pub fn new(
+        name: impl Into<String>,
+        trigger: JobTriggerKind,
+        idempotent: bool,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            trigger,
+            idempotent,
+            description: description.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventSubscription {
+    pub event: String,
+    pub job: Option<String>,
+    pub description: String,
+}
+
+impl EventSubscription {
+    pub fn new(
+        event: impl Into<String>,
+        job: Option<impl Into<String>>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            event: event.into(),
+            job: job.map(Into::into),
+            description: description.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntegrationKind {
+    AdminNavigation,
+    AdminWorkflow,
+    FrontendRendering,
+    SearchIndex,
+    SeoMetadata,
+    JsonLd,
+    LocalizedContent,
+    CacheInvalidation,
+    StoragePolicy,
+    CommerceBridge,
+    AuthPublication,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntegrationPoint {
+    pub kind: IntegrationKind,
+    pub surface: String,
+    pub description: String,
+}
+
+impl IntegrationPoint {
+    pub fn new(
+        kind: IntegrationKind,
+        surface: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            surface: surface.into(),
+            description: description.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleBehavior {
+    CacheInvalidation,
+    LocalizedContent,
+    SeoMetadata,
+    JsonLd,
+    AccessibleAdminUi,
+    StoragePolicyAware,
+    AuthGovernedPublication,
+    AsyncJobs,
+    AuditedBulkActions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionSlotKind {
+    Page,
+    Api,
+    Job,
+    ScheduledJob,
+    Webhook,
+    AdminWidget,
+    RenderHook,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionSlotDescriptor {
+    pub kind: ExtensionSlotKind,
+    pub surface: String,
+    pub description: String,
+}
+
+impl ExtensionSlotDescriptor {
+    pub fn new(
+        kind: ExtensionSlotKind,
+        surface: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            surface: surface.into(),
+            description: description.into(),
+        }
     }
 }
 
@@ -532,6 +926,53 @@ pub enum CapabilityValidationError {
     MissingCapability {
         module: String,
         capability: Capability,
+    },
+    #[error(
+        "module `{module}` does not declare a capability contract for `{capability}`"
+    )]
+    MissingCapabilityContract {
+        module: String,
+        capability: Capability,
+    },
+    #[error(
+        "module `{module}` declares capability `{capability}` as {actual} but {expected} was required"
+    )]
+    CapabilityContractRoleMismatch {
+        module: String,
+        capability: Capability,
+        expected: &'static str,
+        actual: &'static str,
+    },
+    #[error(
+        "module `{module}` declares capability `{capability}` without any resource kinds"
+    )]
+    EmptyCapabilityResourceKinds {
+        module: String,
+        capability: Capability,
+    },
+    #[error(
+        "module `{module}` declares a capability contract for `{capability}` without listing it as required or optional"
+    )]
+    UndeclaredCapabilityContract {
+        module: String,
+        capability: Capability,
+    },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ModuleInstallationError {
+    #[error("module `{module}` requires module dependency `{dependency}`")]
+    MissingModuleDependency {
+        module: String,
+        dependency: String,
+    },
+    #[error(
+        "module `{module}` requires core dependency `{dependency:?}` but service `{service_id}` is not available"
+    )]
+    MissingCoreServiceDependency {
+        module: String,
+        dependency: CoreServiceDependency,
+        service_id: String,
     },
 }
 
@@ -746,6 +1187,93 @@ where
                 capability: *capability,
             });
         }
+
+        validate_capability_contract(manifest, *capability, true)?;
+    }
+
+    for capability in &manifest.optional_capabilities {
+        validate_capability_contract(manifest, *capability, false)?;
+    }
+
+    for contract in &manifest.capability_contracts {
+        let declared = manifest.required_capabilities.contains(&contract.capability)
+            || manifest.optional_capabilities.contains(&contract.capability);
+        if !declared {
+            return Err(CapabilityValidationError::UndeclaredCapabilityContract {
+                module: manifest.name.clone(),
+                capability: contract.capability,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+pub fn validate_module_installation(
+    manifest: &ModuleManifest,
+    installed_modules: &[String],
+    core_service_ids: &[&str],
+) -> Result<(), ModuleInstallationError> {
+    for dependency in &manifest.module_dependencies {
+        if dependency.kind == ModuleDependencyKind::Required
+            && !installed_modules.contains(&dependency.module)
+        {
+            return Err(ModuleInstallationError::MissingModuleDependency {
+                module: manifest.name.clone(),
+                dependency: dependency.module.clone(),
+            });
+        }
+    }
+
+    for dependency in &manifest.core_service_dependencies {
+        for service_id in dependency.required_service_ids() {
+            if !core_service_ids.contains(service_id) {
+                return Err(ModuleInstallationError::MissingCoreServiceDependency {
+                    module: manifest.name.clone(),
+                    dependency: *dependency,
+                    service_id: (*service_id).to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_capability_contract(
+    manifest: &ModuleManifest,
+    capability: Capability,
+    required: bool,
+) -> Result<(), CapabilityValidationError> {
+    let Some(contract) = manifest
+        .capability_contracts
+        .iter()
+        .find(|contract| contract.capability == capability)
+    else {
+        return Err(CapabilityValidationError::MissingCapabilityContract {
+            module: manifest.name.clone(),
+            capability,
+        });
+    };
+
+    if contract.required != required {
+        return Err(CapabilityValidationError::CapabilityContractRoleMismatch {
+            module: manifest.name.clone(),
+            capability,
+            expected: if required { "required" } else { "optional" },
+            actual: if contract.required {
+                "required"
+            } else {
+                "optional"
+            },
+        });
+    }
+
+    if contract.resource_kinds.is_empty() {
+        return Err(CapabilityValidationError::EmptyCapabilityResourceKinds {
+            module: manifest.name.clone(),
+            capability,
+        });
     }
 
     Ok(())
@@ -1024,9 +1552,48 @@ cdn_base_url = "https://cdn.example.com"
     fn validates_module_capabilities_against_auth_package() {
         let package = DefaultAuthModelPackage::default();
         let manifest = ModuleManifest::new("cms-pages")
-            .with_required_capabilities(vec![Capability::CmsPageRead, Capability::CmsPagePublish]);
+            .with_required_capabilities(vec![Capability::CmsPageRead, Capability::CmsPagePublish])
+            .with_capability_contracts(vec![
+                CapabilityContract::required(Capability::CmsPageRead, ["page"]),
+                CapabilityContract::required(Capability::CmsPagePublish, ["page"]),
+            ]);
 
         assert!(validate_module_capabilities(&package, &manifest).is_ok());
+    }
+
+    #[test]
+    fn validates_module_installation_dependencies_against_installed_modules_and_core_services() {
+        let manifest = ModuleManifest::new("memberships")
+            .with_module_dependencies(vec![ModuleDependency::required(
+                "commerce",
+                "subscription purchases depend on order outcomes",
+            )])
+            .with_core_service_dependencies(vec![
+                CoreServiceDependency::Auth,
+                CoreServiceDependency::Data,
+                CoreServiceDependency::Jobs,
+            ]);
+
+        let missing_dependency = validate_module_installation(
+            &manifest,
+            &["cms".to_string()],
+            &["core.auth", "core.data", "core.data.migrations", "core.jobs"],
+        )
+        .unwrap_err();
+        assert_eq!(
+            missing_dependency,
+            ModuleInstallationError::MissingModuleDependency {
+                module: "memberships".to_string(),
+                dependency: "commerce".to_string(),
+            }
+        );
+
+        assert!(validate_module_installation(
+            &manifest,
+            &["commerce".to_string(), "memberships".to_string()],
+            &["core.auth", "core.data", "core.data.migrations", "core.jobs"],
+        )
+        .is_ok());
     }
 
     #[test]

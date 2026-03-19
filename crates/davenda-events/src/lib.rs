@@ -7,7 +7,12 @@ use davenda_auth::{
     Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
 };
 use davenda_commerce::OrderId;
-use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_core::{
+    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
+    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
+    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+};
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, PageRequest, PublicationVisibility,
     QueryCacheScope, QueryContext, QueryFilter, QuerySort, QuerySpec, TransactionIsolation,
@@ -1906,6 +1911,210 @@ impl PlatformModule for EventsModule {
                 Capability::OrderRead,
             ])
             .with_config_namespace(self.config_namespace.clone())
+            .with_capability_contracts(vec![
+                CapabilityContract::required(
+                    Capability::EventsEventPublish,
+                    ["event"],
+                ),
+                CapabilityContract::required(
+                    Capability::EventsSlotManage,
+                    ["event_slot"],
+                ),
+                CapabilityContract::required(
+                    Capability::EventsBookingCreate,
+                    ["booking", "event_slot"],
+                ),
+                CapabilityContract::required(
+                    Capability::EventsBookingCheckIn,
+                    ["booking"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AdminShellAccess,
+                    ["admin_module"],
+                ),
+                CapabilityContract::optional(Capability::CmsPageRead, ["page"]),
+                CapabilityContract::optional(
+                    Capability::SeoMetadataEdit,
+                    ["event"],
+                ),
+                CapabilityContract::optional(
+                    Capability::I18nTranslationEdit,
+                    ["event"],
+                ),
+                CapabilityContract::optional(
+                    Capability::MembershipSubscriptionManage,
+                    ["subscription", "membership_tier"],
+                ),
+                CapabilityContract::optional(Capability::AssetRead, ["asset", "media"]),
+                CapabilityContract::optional(
+                    Capability::CheckoutSessionCreate,
+                    ["storefront"],
+                ),
+                CapabilityContract::optional(Capability::OrderRead, ["order"]),
+            ])
+            .with_module_dependencies(vec![
+                ModuleDependency::optional(
+                    "admin",
+                    "Events contributes booking, slot, and check-in resources to the shared admin shell when installed",
+                ),
+                ModuleDependency::optional(
+                    "cms",
+                    "Event pages and discoverability can compose into CMS-driven storefront content",
+                ),
+                ModuleDependency::optional(
+                    "commerce",
+                    "Paid bookings can bridge into checkout and order workflows when commerce is installed",
+                ),
+                ModuleDependency::optional(
+                    "memberships",
+                    "Membership tiers can gate event eligibility and booking access rules",
+                ),
+            ])
+            .with_core_service_dependencies(vec![
+                CoreServiceDependency::Auth,
+                CoreServiceDependency::Data,
+                CoreServiceDependency::Cache,
+                CoreServiceDependency::Jobs,
+                CoreServiceDependency::I18n,
+                CoreServiceDependency::Seo,
+                CoreServiceDependency::Template,
+                CoreServiceDependency::Observability,
+            ])
+            .with_migrations(vec![
+                MigrationContract::new(
+                    "events.catalog",
+                    10,
+                    "Creates event content, discoverability, and publication state tables",
+                ),
+                MigrationContract::new(
+                    "events.slots",
+                    20,
+                    "Creates event-slot capacity, timing, and reservation state tables",
+                ),
+                MigrationContract::new(
+                    "events.bookings",
+                    30,
+                    "Creates booking, waitlist, and check-in lifecycle tables",
+                ),
+            ])
+            .with_route_surfaces(vec![
+                RouteSurface::new("events.list", RouteSurfaceKind::FrontendPage, "/events")
+                    .localized(),
+                RouteSurface::new(
+                    "events.detail",
+                    RouteSurfaceKind::FrontendPage,
+                    "/events/{event_slug}",
+                )
+                .localized(),
+                RouteSurface::new(
+                    "events.book",
+                    RouteSurfaceKind::FrontendAction,
+                    "/events/{event_slug}/book",
+                )
+                .gated_by(Capability::EventsBookingCreate),
+                RouteSurface::new(
+                    "events.admin.index",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/events",
+                )
+                .gated_by(Capability::EventsEventPublish),
+                RouteSurface::new(
+                    "events.admin.bookings",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/events/bookings",
+                )
+                .gated_by(Capability::EventsBookingCreate),
+                RouteSurface::new(
+                    "events.admin.check-in",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/events/check-in",
+                )
+                .gated_by(Capability::EventsBookingCheckIn),
+            ])
+            .with_jobs(vec![
+                JobContract::new(
+                    "events.reservation-expiry",
+                    JobTriggerKind::Scheduled,
+                    true,
+                    "Releases expired reservation holds and promotes waitlisted attendees when capacity returns",
+                ),
+                JobContract::new(
+                    "events.waitlist-promotion",
+                    JobTriggerKind::DomainEvent,
+                    true,
+                    "Promotes waitlist entries after cancellations or released holds",
+                ),
+                JobContract::new(
+                    "events.reminders",
+                    JobTriggerKind::Scheduled,
+                    true,
+                    "Schedules reminder and attendance preparation notifications for upcoming bookings",
+                ),
+            ])
+            .with_event_subscriptions(vec![
+                EventSubscription::new(
+                    "commerce.order.paid",
+                    Some("events.waitlist-promotion"),
+                    "Allows paid-booking confirmation flows to reconcile held reservations into confirmed bookings",
+                ),
+                EventSubscription::new(
+                    "membership.subscription.activated",
+                    Some("events.reminders"),
+                    "Refreshes member-only eligibility and upcoming-event communication windows after subscription changes",
+                ),
+            ])
+            .with_integration_points(vec![
+                IntegrationPoint::new(
+                    IntegrationKind::FrontendRendering,
+                    "events.pages",
+                    "Provides public event discovery, detail pages, and booking entry points",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::AdminWorkflow,
+                    "events.check-in",
+                    "Adds check-in, booking review, and slot operations to the shared admin shell",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::SeoMetadata,
+                    "events.head",
+                    "Emits event metadata and rich-result schema for discoverable event pages",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::JsonLd,
+                    "events.schema",
+                    "Supplies JSON-LD for event pages and schedule-rich discovery surfaces",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::SearchIndex,
+                    "events.index",
+                    "Publishes searchable public event and operator booking visibility data",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::CommerceBridge,
+                    "events.paid-bookings",
+                    "Bridges optional paid-booking flows into checkout and order outcomes",
+                ),
+            ])
+            .with_behaviors(vec![
+                ModuleBehavior::CacheInvalidation,
+                ModuleBehavior::LocalizedContent,
+                ModuleBehavior::SeoMetadata,
+                ModuleBehavior::JsonLd,
+                ModuleBehavior::AccessibleAdminUi,
+                ModuleBehavior::AsyncJobs,
+            ])
+            .with_extension_slots(vec![
+                ExtensionSlotDescriptor::new(
+                    ExtensionSlotKind::AdminWidget,
+                    "events.booking.summary",
+                    "Allows bounded widgets to enrich booking and attendance operations",
+                ),
+                ExtensionSlotDescriptor::new(
+                    ExtensionSlotKind::RenderHook,
+                    "events.page.render",
+                    "Allows controlled customer embellishments around event page rendering",
+                ),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -2238,6 +2447,21 @@ mod tests {
                 .optional_capabilities
                 .contains(&Capability::MembershipSubscriptionManage)
         );
+        assert_eq!(manifest.migrations.len(), 3);
+        assert_eq!(manifest.route_surfaces.len(), 6);
+        assert_eq!(manifest.jobs.len(), 3);
+        assert_eq!(manifest.event_subscriptions.len(), 2);
+        assert!(manifest
+            .module_dependencies
+            .iter()
+            .any(|dependency| dependency.module == "commerce"));
+        assert!(manifest
+            .core_service_dependencies
+            .contains(&CoreServiceDependency::Jobs));
+        assert!(manifest
+            .extension_slots
+            .iter()
+            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
         assert!(
             registry
                 .services()

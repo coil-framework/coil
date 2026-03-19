@@ -3,7 +3,12 @@ use std::error::Error;
 use std::fmt;
 
 use davenda_auth::Capability;
-use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_core::{
+    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
+    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleManifest, PlatformModule, RegistrationError,
+    RouteSurface, RouteSurfaceKind, ServiceRegistry,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminModelError {
@@ -485,6 +490,83 @@ impl PlatformModule for AdminModule {
                 Capability::SystemConfigWrite,
             ])
             .with_config_namespace(self.config_namespace.clone())
+            .with_capability_contracts(vec![
+                CapabilityContract::required(
+                    Capability::AdminShellAccess,
+                    ["admin_module"],
+                ),
+                CapabilityContract::required(
+                    Capability::AdminAuditRead,
+                    ["audit_entry"],
+                ),
+                CapabilityContract::optional(
+                    Capability::SystemModuleManage,
+                    ["admin_module"],
+                ),
+                CapabilityContract::optional(
+                    Capability::SystemConfigRead,
+                    ["admin_module"],
+                ),
+                CapabilityContract::optional(
+                    Capability::SystemConfigWrite,
+                    ["admin_module"],
+                ),
+            ])
+            .with_core_service_dependencies(vec![
+                CoreServiceDependency::Auth,
+                CoreServiceDependency::A11y,
+                CoreServiceDependency::Template,
+                CoreServiceDependency::I18n,
+                CoreServiceDependency::Observability,
+                CoreServiceDependency::Http,
+            ])
+            .with_migrations(vec![MigrationContract::new(
+                "admin.audit_log",
+                10,
+                "Creates audit-log storage for operator actions and workflow traces",
+            )])
+            .with_route_surfaces(vec![
+                RouteSurface::new("admin.dashboard", RouteSurfaceKind::AdminPage, "/admin")
+                    .gated_by(Capability::AdminShellAccess),
+                RouteSurface::new(
+                    "admin.audit",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/audit",
+                )
+                .gated_by(Capability::AdminAuditRead),
+            ])
+            .with_jobs(vec![JobContract::new(
+                "admin.audit.export",
+                JobTriggerKind::Operator,
+                true,
+                "Exports audit history and operator traces without blocking request handling",
+            )])
+            .with_event_subscriptions(vec![EventSubscription::new(
+                "system.audit.entry-recorded",
+                Some("admin.audit.export"),
+                "Allows downstream audit export and retention workflows to react to recorded operator actions",
+            )])
+            .with_integration_points(vec![
+                IntegrationPoint::new(
+                    IntegrationKind::AdminNavigation,
+                    "admin.shell",
+                    "Provides the shared back-office frame, navigation, and operator session entry points",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::AdminWorkflow,
+                    "admin.audit",
+                    "Centralizes audit visibility for actions performed by official modules and customer apps",
+                ),
+            ])
+            .with_behaviors(vec![
+                ModuleBehavior::AccessibleAdminUi,
+                ModuleBehavior::AuditedBulkActions,
+            ])
+            .with_extension_slots(vec![ExtensionSlotDescriptor::new(
+                ExtensionSlotKind::AdminWidget,
+                "admin.dashboard.summary",
+                "Allows bounded customer widgets to participate in the shared admin dashboard",
+            )])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -668,6 +750,26 @@ mod tests {
             manifest
                 .optional_capabilities
                 .contains(&Capability::SystemModuleManage)
+        );
+        assert_eq!(
+            manifest.core_service_dependencies,
+            vec![
+                CoreServiceDependency::Auth,
+                CoreServiceDependency::A11y,
+                CoreServiceDependency::Template,
+                CoreServiceDependency::I18n,
+                CoreServiceDependency::Observability,
+                CoreServiceDependency::Http,
+            ]
+        );
+        assert_eq!(manifest.route_surfaces.len(), 2);
+        assert_eq!(manifest.jobs.len(), 1);
+        assert_eq!(manifest.event_subscriptions.len(), 1);
+        assert!(
+            manifest
+                .extension_slots
+                .iter()
+                .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget)
         );
 
         let accessibility = module.shell().accessibility();

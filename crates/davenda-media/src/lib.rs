@@ -6,7 +6,12 @@ use davenda_assets::{AssetId, ContentFingerprint};
 use davenda_auth::{
     Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
 };
-use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_core::{
+    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
+    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
+    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+};
 use davenda_storage::{
     DeliveryMode, Sensitivity, StoragePolicy, StoragePolicyError, StoragePolicyOverride,
 };
@@ -817,6 +822,168 @@ impl PlatformModule for MediaModule {
                 Capability::I18nTranslationEdit,
             ])
             .with_config_namespace(self.config_namespace.clone())
+            .with_capability_contracts(vec![
+                CapabilityContract::required(Capability::AssetRead, ["asset", "media"]),
+                CapabilityContract::required(
+                    Capability::AssetPublish,
+                    ["asset", "media"],
+                ),
+                CapabilityContract::required(
+                    Capability::AssetReplace,
+                    ["asset", "media"],
+                ),
+                CapabilityContract::required(
+                    Capability::AssetManageStorage,
+                    ["asset", "asset_folder", "media_library"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AssetReadPublic,
+                    ["asset", "media"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AdminShellAccess,
+                    ["admin_module"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AdminAuditRead,
+                    ["audit_entry"],
+                ),
+                CapabilityContract::optional(Capability::CmsPageRead, ["page"]),
+                CapabilityContract::optional(
+                    Capability::SeoMetadataEdit,
+                    ["asset", "media"],
+                ),
+                CapabilityContract::optional(
+                    Capability::I18nTranslationEdit,
+                    ["asset", "media"],
+                ),
+            ])
+            .with_module_dependencies(vec![
+                ModuleDependency::optional(
+                    "admin",
+                    "Media contributes library and storage-policy workflows to the shared admin shell when installed",
+                ),
+                ModuleDependency::optional(
+                    "cms",
+                    "Managed assets can be referenced from CMS pages and editorial workflows",
+                ),
+                ModuleDependency::optional(
+                    "events",
+                    "Managed assets can supply event media and downloadable resources",
+                ),
+                ModuleDependency::optional(
+                    "commerce",
+                    "Managed assets can supply product media and downloadable order assets",
+                ),
+            ])
+            .with_core_service_dependencies(vec![
+                CoreServiceDependency::Auth,
+                CoreServiceDependency::Data,
+                CoreServiceDependency::Storage,
+                CoreServiceDependency::Assets,
+                CoreServiceDependency::Jobs,
+                CoreServiceDependency::Seo,
+                CoreServiceDependency::I18n,
+                CoreServiceDependency::Observability,
+            ])
+            .with_migrations(vec![
+                MigrationContract::new(
+                    "media.libraries",
+                    10,
+                    "Creates media-library, folder, and inherited storage-policy tables",
+                ),
+                MigrationContract::new(
+                    "media.assets",
+                    20,
+                    "Creates managed asset, revision, and publication workflow tables",
+                ),
+                MigrationContract::new(
+                    "media.derivatives",
+                    30,
+                    "Creates derivative generation, sync backlog, and technical metadata tables",
+                ),
+            ])
+            .with_route_surfaces(vec![
+                RouteSurface::new(
+                    "media.library",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/media",
+                )
+                .gated_by(Capability::AssetRead),
+                RouteSurface::new(
+                    "media.delivery",
+                    RouteSurfaceKind::Asset,
+                    "/media/files/{asset_id}",
+                )
+                .gated_by(Capability::AssetRead),
+                RouteSurface::new(
+                    "media.storage",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/media/storage",
+                )
+                .gated_by(Capability::AssetManageStorage),
+            ])
+            .with_jobs(vec![
+                JobContract::new(
+                    "media.derivatives.generate",
+                    JobTriggerKind::InlineFollowup,
+                    true,
+                    "Generates thumbnails, previews, and responsive derivatives after asset ingest",
+                ),
+                JobContract::new(
+                    "media.storage.sync",
+                    JobTriggerKind::Scheduled,
+                    true,
+                    "Reconciles write-through object storage and tracks exceptional local-only assets",
+                ),
+            ])
+            .with_event_subscriptions(vec![
+                EventSubscription::new(
+                    "media.asset.published",
+                    Some("media.storage.sync"),
+                    "Ensures newly published assets are durably available across object storage and delivery surfaces",
+                ),
+                EventSubscription::new(
+                    "media.asset.replaced",
+                    Some("media.derivatives.generate"),
+                    "Regenerates derived media artifacts when a staged replacement goes live",
+                ),
+            ])
+            .with_integration_points(vec![
+                IntegrationPoint::new(
+                    IntegrationKind::StoragePolicy,
+                    "media.storage-policy",
+                    "Bridges folder defaults, per-upload overrides, and delivery modes onto the shared storage engine",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::AuthPublication,
+                    "media.publication",
+                    "Treats managed-asset publication as an auth-governed state transition instead of a file-copy side effect",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::SeoMetadata,
+                    "media.metadata",
+                    "Supplies alt text, dimensions, and canonical metadata for downstream consumers",
+                ),
+            ])
+            .with_behaviors(vec![
+                ModuleBehavior::StoragePolicyAware,
+                ModuleBehavior::AuthGovernedPublication,
+                ModuleBehavior::AsyncJobs,
+                ModuleBehavior::AccessibleAdminUi,
+            ])
+            .with_extension_slots(vec![
+                ExtensionSlotDescriptor::new(
+                    ExtensionSlotKind::AdminWidget,
+                    "media.asset.sidebar",
+                    "Allows bounded customer widgets to augment media detail views and review workflows",
+                ),
+                ExtensionSlotDescriptor::new(
+                    ExtensionSlotKind::RenderHook,
+                    "media.asset.metadata",
+                    "Allows controlled metadata enrichment without bypassing the shared storage and publication rules",
+                ),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1110,6 +1277,17 @@ mod tests {
         assert!(manifest
             .optional_capabilities
             .contains(&Capability::AdminShellAccess));
+        assert_eq!(manifest.migrations.len(), 3);
+        assert_eq!(manifest.route_surfaces.len(), 3);
+        assert_eq!(manifest.jobs.len(), 2);
+        assert_eq!(manifest.event_subscriptions.len(), 2);
+        assert!(manifest
+            .behaviors
+            .contains(&ModuleBehavior::AuthGovernedPublication));
+        assert!(manifest
+            .extension_slots
+            .iter()
+            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
 
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).unwrap();

@@ -3,7 +3,12 @@ use std::error::Error;
 use std::fmt;
 
 use davenda_auth::Capability;
-use davenda_core::{ModuleManifest, PlatformModule, RegistrationError, ServiceRegistry};
+use davenda_core::{
+    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
+    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
+    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+};
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
     MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
@@ -740,6 +745,181 @@ impl PlatformModule for CmsModule {
                 Capability::AssetReplace,
             ])
             .with_config_namespace(self.config_namespace.clone())
+            .with_capability_contracts(vec![
+                CapabilityContract::required(Capability::CmsPageRead, ["page"]),
+                CapabilityContract::required(Capability::CmsPageEdit, ["page"]),
+                CapabilityContract::required(Capability::CmsPagePublish, ["page"]),
+                CapabilityContract::required(
+                    Capability::CmsNavigationEdit,
+                    ["navigation"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AdminShellAccess,
+                    ["admin_module"],
+                ),
+                CapabilityContract::optional(
+                    Capability::SeoMetadataEdit,
+                    ["page", "navigation"],
+                ),
+                CapabilityContract::optional(
+                    Capability::I18nTranslationEdit,
+                    ["page", "navigation"],
+                ),
+                CapabilityContract::optional(Capability::AssetRead, ["asset", "media"]),
+                CapabilityContract::optional(
+                    Capability::AssetReadPublic,
+                    ["asset", "media"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AssetPublish,
+                    ["asset", "media"],
+                ),
+                CapabilityContract::optional(
+                    Capability::AssetReplace,
+                    ["asset", "media"],
+                ),
+            ])
+            .with_module_dependencies(vec![
+                ModuleDependency::optional(
+                    "admin",
+                    "CMS contributes editor and navigation resources into the shared admin shell when installed",
+                ),
+                ModuleDependency::optional(
+                    "media",
+                    "CMS pages can reference managed assets through the shared media library",
+                ),
+            ])
+            .with_core_service_dependencies(vec![
+                CoreServiceDependency::Auth,
+                CoreServiceDependency::Data,
+                CoreServiceDependency::Cache,
+                CoreServiceDependency::Jobs,
+                CoreServiceDependency::Storage,
+                CoreServiceDependency::I18n,
+                CoreServiceDependency::Seo,
+                CoreServiceDependency::Template,
+                CoreServiceDependency::A11y,
+                CoreServiceDependency::Observability,
+            ])
+            .with_migrations(vec![
+                MigrationContract::new(
+                    "cms.pages",
+                    10,
+                    "Creates localized page, revision, and publication workflow tables",
+                ),
+                MigrationContract::new(
+                    "cms.navigation",
+                    20,
+                    "Creates navigation trees and editorial route bindings",
+                ),
+                MigrationContract::new(
+                    "cms.redirects",
+                    30,
+                    "Creates redirect rules and route handoff metadata",
+                ),
+            ])
+            .with_route_surfaces(vec![
+                RouteSurface::new("cms.page", RouteSurfaceKind::FrontendPage, "/pages/{slug}")
+                    .localized(),
+                RouteSurface::new(
+                    "cms.preview",
+                    RouteSurfaceKind::Fragment,
+                    "/admin/pages/preview",
+                )
+                .gated_by(Capability::CmsPageRead),
+                RouteSurface::new(
+                    "cms.pages.index",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/pages",
+                )
+                .gated_by(Capability::CmsPageRead),
+                RouteSurface::new(
+                    "cms.navigation.index",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/navigation",
+                )
+                .gated_by(Capability::CmsNavigationEdit),
+                RouteSurface::new(
+                    "cms.redirects.index",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/redirects",
+                )
+                .gated_by(Capability::CmsPageEdit),
+            ])
+            .with_jobs(vec![
+                JobContract::new(
+                    "cms.publish-scheduled",
+                    JobTriggerKind::Scheduled,
+                    true,
+                    "Promotes scheduled revisions into the live site at their publish window",
+                ),
+                JobContract::new(
+                    "cms.cache.invalidate",
+                    JobTriggerKind::DomainEvent,
+                    true,
+                    "Invalidates navigation, sitemap, and page caches after editorial changes",
+                ),
+            ])
+            .with_event_subscriptions(vec![
+                EventSubscription::new(
+                    "cms.page.publish-requested",
+                    Some("cms.publish-scheduled"),
+                    "Schedules future publication work for editorial workflows",
+                ),
+                EventSubscription::new(
+                    "media.asset.published",
+                    Some("cms.cache.invalidate"),
+                    "Refreshes page fragments that depend on newly published managed assets",
+                ),
+            ])
+            .with_integration_points(vec![
+                IntegrationPoint::new(
+                    IntegrationKind::AdminNavigation,
+                    "admin.content",
+                    "Adds page, navigation, and redirect resources to the shared content section",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::FrontendRendering,
+                    "page.render",
+                    "Owns page composition on top of the shared HTML-first template engine",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::SeoMetadata,
+                    "page.head",
+                    "Emits localized canonical metadata, robots directives, and sitemap entries",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::JsonLd,
+                    "page.schema",
+                    "Supplies structured data fragments for page and navigation surfaces",
+                ),
+                IntegrationPoint::new(
+                    IntegrationKind::CacheInvalidation,
+                    "page.publish",
+                    "Invalidates route, navigation, sitemap, and metadata fragments when publication changes",
+                ),
+            ])
+            .with_behaviors(vec![
+                ModuleBehavior::CacheInvalidation,
+                ModuleBehavior::LocalizedContent,
+                ModuleBehavior::SeoMetadata,
+                ModuleBehavior::JsonLd,
+                ModuleBehavior::AccessibleAdminUi,
+                ModuleBehavior::AsyncJobs,
+                ModuleBehavior::AuthGovernedPublication,
+            ])
+            .with_extension_slots(vec![
+                ExtensionSlotDescriptor::new(
+                    ExtensionSlotKind::AdminWidget,
+                    "cms.page.editor.sidebar",
+                    "Allows customer app widgets to augment the page editor without owning the editor runtime",
+                ),
+                ExtensionSlotDescriptor::new(
+                    ExtensionSlotKind::RenderHook,
+                    "cms.page.render",
+                    "Allows bounded content embellishments during page rendering",
+                ),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -921,6 +1101,21 @@ mod tests {
                 .optional_capabilities
                 .contains(&Capability::AssetRead)
         );
+        assert_eq!(manifest.migrations.len(), 3);
+        assert_eq!(manifest.route_surfaces.len(), 5);
+        assert_eq!(manifest.jobs.len(), 2);
+        assert_eq!(manifest.event_subscriptions.len(), 2);
+        assert!(manifest
+            .module_dependencies
+            .iter()
+            .any(|dependency| dependency.module == "media"));
+        assert!(manifest
+            .core_service_dependencies
+            .contains(&CoreServiceDependency::Seo));
+        assert!(manifest
+            .extension_slots
+            .iter()
+            .any(|slot| slot.kind == ExtensionSlotKind::RenderHook));
         assert!(
             registry
                 .services()

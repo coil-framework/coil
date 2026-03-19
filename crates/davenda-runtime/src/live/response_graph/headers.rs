@@ -153,7 +153,12 @@ pub(super) fn cache_hint_headers(cache_hint: &TypedCacheHint) -> Vec<LiveHeader>
     if !cache_hint.tags.is_empty() {
         headers.push(header_value(
             "x-davenda-wasm-cache-tags",
-            cache_hint.tags.iter().cloned().collect::<Vec<_>>().join(","),
+            cache_hint
+                .tags
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(","),
             "cache tags are a valid header value",
         ));
     }

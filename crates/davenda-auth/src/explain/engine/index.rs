@@ -20,7 +20,10 @@ impl ExplainIndex {
                 object: tuple.object.clone(),
                 relation: Some(tuple.relation.clone()),
             };
-            tuples_by_node.entry(node).or_insert_with(Vec::new).push(tuple.clone());
+            tuples_by_node
+                .entry(node)
+                .or_insert_with(Vec::new)
+                .push(tuple.clone());
         }
 
         Self { tuples_by_node }

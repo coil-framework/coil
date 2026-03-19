@@ -1,7 +1,7 @@
 mod domain;
 mod errors;
-mod host;
 mod helpers;
+mod host;
 mod request;
 mod types;
 

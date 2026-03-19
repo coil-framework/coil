@@ -1,10 +1,10 @@
 use super::*;
+use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 use davenda_config::ObjectStoreKind;
 use davenda_storage::{
     DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind, StoragePlanner,
     StoragePolicyOverride, StoragePolicySet, StorageTopology, SyncMode,
 };
-use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 
 fn object_store_planner() -> StoragePlanner {
     StoragePlanner::new(
@@ -244,27 +244,27 @@ fn managed_asset_auth_updates_track_public_publication_state() {
         fingerprint("public"),
     )
     .unwrap();
-    let mut asset = ManagedAsset::new(
-        AssetId::new("asset-logo").unwrap(),
-        "Logo",
-        revision,
-    )
-    .unwrap();
+    let mut asset =
+        ManagedAsset::new(AssetId::new("asset-logo").unwrap(), "Logo", revision).unwrap();
 
     let draft_updates = asset.auth_updates();
-    assert!(draft_updates.contains(&DefaultTupleUpdate::Delete(DefaultTuple::new(
-        Entity::asset("asset-logo"),
-        Relation::ReadPublic,
-        DefaultSubject::entity(Entity::any_user()),
-    ))));
+    assert!(
+        draft_updates.contains(&DefaultTupleUpdate::Delete(DefaultTuple::new(
+            Entity::asset("asset-logo"),
+            Relation::ReadPublic,
+            DefaultSubject::entity(Entity::any_user()),
+        )))
+    );
 
     asset.publish_current();
     let published_updates = asset.auth_updates();
-    assert!(published_updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
-        Entity::asset("asset-logo"),
-        Relation::ReadPublic,
-        DefaultSubject::entity(Entity::any_user()),
-    ))));
+    assert!(
+        published_updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+            Entity::asset("asset-logo"),
+            Relation::ReadPublic,
+            DefaultSubject::entity(Entity::any_user()),
+        )))
+    );
 }
 
 #[test]

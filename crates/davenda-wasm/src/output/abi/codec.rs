@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::WasmModelError;
+use super::super::cache::{CacheVisibility, TypedCacheHint};
+use super::super::json_ld::{JsonLdNode, JsonLdValue};
+use super::super::metadata::TypedMetadata;
 use super::cursor::{
     ByteCursor, read_option_string, write_len_u32, write_option_string, write_string, write_u8,
     write_u16, write_u32, write_u64,
@@ -9,9 +11,7 @@ use super::mapping::{
     extension_point_kind_from_tag, extension_point_kind_tag, robot_from_tag, robot_tag,
 };
 use super::{ABI_MAGIC, ABI_VERSION, TypedExecutionOutput, TypedResponseBody};
-use super::super::cache::{CacheVisibility, TypedCacheHint};
-use super::super::json_ld::{JsonLdNode, JsonLdValue};
-use super::super::metadata::TypedMetadata;
+use crate::error::WasmModelError;
 
 pub(super) fn encode_output(output: &TypedExecutionOutput) -> Result<Vec<u8>, WasmModelError> {
     let mut bytes = Vec::new();

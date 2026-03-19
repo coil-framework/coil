@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use davenda_i18n::{LocaleTag, LocalizedUrls};
-use davenda_seo::{
-    HeadMetadata, OpenGraphData, OpenGraphType, RobotsDirective, page_node,
-};
+use davenda_seo::{HeadMetadata, OpenGraphData, OpenGraphType, RobotsDirective, page_node};
 use davenda_wasm::RobotsDirective as TypedRobotsDirective;
 
 impl RuntimePlan {

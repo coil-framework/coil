@@ -22,7 +22,9 @@ pub(crate) struct LiveResponseGraph {
 enum LiveResponseBodyGraph {
     Html(LiveHtmlResponseGraph),
     Json(BTreeMap<String, String>),
-    Redirect { location: String },
+    Redirect {
+        location: String,
+    },
     File {
         logical_path: String,
         content_type: String,

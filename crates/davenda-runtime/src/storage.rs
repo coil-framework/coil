@@ -1,6 +1,6 @@
 use super::*;
-use davenda_auth::{Capability, DavendaAuth, DefaultSubject};
 use davenda_assets::ManagedAsset;
+use davenda_auth::{Capability, DavendaAuth, DefaultSubject};
 use zanzibar::RebacEngine;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -25,7 +25,10 @@ pub struct ManagedAssetPublicationGate {
 
 impl ManagedAssetPublicationGate {
     pub fn can_publish_publicly(&self) -> bool {
-        self.can_publish && self.can_replace && self.can_manage_storage && self.public_delivery_enabled
+        self.can_publish
+            && self.can_replace
+            && self.can_manage_storage
+            && self.public_delivery_enabled
     }
 
     pub fn ensure_public_delivery_allowed(
@@ -173,12 +176,11 @@ impl StorageHost {
             can_publish,
             can_replace,
             can_manage_storage,
-            public_delivery_enabled: asset
-                .publication()
-                .is_published()
-                && asset.publication().live_revision().is_some_and(|revision| {
-                    revision.storage_plan().public_delivery_eligible()
-                }),
+            public_delivery_enabled: asset.publication().is_published()
+                && asset
+                    .publication()
+                    .live_revision()
+                    .is_some_and(|revision| revision.storage_plan().public_delivery_eligible()),
         })
     }
 }

@@ -1,8 +1,8 @@
 use crate::error::WasmModelError;
 use crate::ids::ExtensionPointKind;
 
-use super::TypedResponseBodyKind;
 use super::super::json_ld::RobotsDirective;
+use super::TypedResponseBodyKind;
 
 pub(super) fn robot_tag(directive: RobotsDirective) -> u8 {
     match directive {
@@ -27,9 +27,7 @@ pub(super) fn robot_from_tag(tag: u8) -> Result<RobotsDirective, WasmModelError>
     }
 }
 
-pub(super) fn extension_point_kind_from_tag(
-    tag: u8,
-) -> Result<ExtensionPointKind, WasmModelError> {
+pub(super) fn extension_point_kind_from_tag(tag: u8) -> Result<ExtensionPointKind, WasmModelError> {
     match tag {
         0 => Ok(ExtensionPointKind::Page),
         1 => Ok(ExtensionPointKind::Api),

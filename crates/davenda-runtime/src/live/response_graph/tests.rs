@@ -48,9 +48,16 @@ fn cache_headers_use_structured_cache_hint_over_raw_string_values() {
 
 #[test]
 fn response_composition_materializes_typed_annotations_once() {
-    let cache_hint =
-        TypedCacheHint::new(CacheVisibility::Public, 60, None, false, false, false, ["page-cache"])
-            .unwrap();
+    let cache_hint = TypedCacheHint::new(
+        CacheVisibility::Public,
+        60,
+        None,
+        false,
+        false,
+        false,
+        ["page-cache"],
+    )
+    .unwrap();
     let response = LiveResponseComposition::json(
         StatusCode::OK,
         BTreeMap::from([("ok".to_string(), "true".to_string())]),

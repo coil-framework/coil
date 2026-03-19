@@ -33,7 +33,8 @@ where
     }
 
     let bootstrap = bootstrap_core_services(&config)?;
-    let storage_planner = StoragePlanner::new(StorageTopology::from_config(&config), storage_policies);
+    let storage_planner =
+        StoragePlanner::new(StorageTopology::from_config(&config), storage_policies);
     let mut registry = bootstrap.registry;
     let mut template = bootstrap.template;
     let mut observability = bootstrap.observability;
@@ -151,12 +152,14 @@ where
     let module_bulk_operations = module_manifests
         .iter()
         .flat_map(|manifest| {
-            manifest.bulk_operations.iter().cloned().map(|definition| {
-                RegisteredBulkOperation {
+            manifest
+                .bulk_operations
+                .iter()
+                .cloned()
+                .map(|definition| RegisteredBulkOperation {
                     module: manifest.name.clone(),
                     definition,
-                }
-            })
+                })
         })
         .collect::<Vec<_>>();
     let ops_catalog = OpsCatalog::from_manifests(&module_manifests)?;

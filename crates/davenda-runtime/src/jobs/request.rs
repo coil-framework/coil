@@ -1,6 +1,6 @@
 use super::super::*;
-use super::helpers::validate_runtime_identifier;
 use super::RuntimeJobsError;
+use super::helpers::validate_runtime_identifier;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobDispatchRequest {

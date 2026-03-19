@@ -1,6 +1,6 @@
 use super::*;
-use davenda_template::TemplateDefinition;
 use crate::builder::assembly;
+use davenda_template::TemplateDefinition;
 
 pub struct RuntimeBuilder<P> {
     config: PlatformConfig,

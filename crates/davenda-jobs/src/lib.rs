@@ -39,6 +39,29 @@ pub enum JobsModelError {
     MissingDeadLetterQueue {
         queue: String,
     },
+    LeadershipConflict {
+        current_holder: String,
+        requested_holder: String,
+    },
+    MissingSchedulerLeadership {
+        node_id: String,
+    },
+    SchedulerLeadershipExpired {
+        node_id: String,
+        lease_until: JobInstant,
+        now: JobInstant,
+    },
+    UnknownInFlightJob {
+        job_id: String,
+    },
+    LeaseExpired {
+        job_id: String,
+        lease_until: JobInstant,
+        now: JobInstant,
+    },
+    MissingEventHandler {
+        handler_id: String,
+    },
 }
 
 impl fmt::Display for JobsModelError {
@@ -70,6 +93,38 @@ impl fmt::Display for JobsModelError {
             }
             Self::MissingDeadLetterQueue { queue } => {
                 write!(f, "queue `{queue}` requires a dead-letter queue")
+            }
+            Self::LeadershipConflict {
+                current_holder,
+                requested_holder,
+            } => write!(
+                f,
+                "scheduler leadership is held by `{current_holder}`, `{requested_holder}` cannot take it"
+            ),
+            Self::MissingSchedulerLeadership { node_id } => {
+                write!(f, "node `{node_id}` does not hold scheduler leadership")
+            }
+            Self::SchedulerLeadershipExpired {
+                node_id,
+                lease_until,
+                now,
+            } => write!(
+                f,
+                "scheduler leadership for `{node_id}` expired at `{lease_until}`, current time is `{now}`"
+            ),
+            Self::UnknownInFlightJob { job_id } => {
+                write!(f, "job `{job_id}` is not currently leased")
+            }
+            Self::LeaseExpired {
+                job_id,
+                lease_until,
+                now,
+            } => write!(
+                f,
+                "lease for job `{job_id}` expired at `{lease_until}`, current time is `{now}`"
+            ),
+            Self::MissingEventHandler { handler_id } => {
+                write!(f, "event handler `{handler_id}` is not registered")
             }
         }
     }
@@ -213,6 +268,24 @@ impl RetryPolicy {
 
     pub fn is_retrying(&self) -> bool {
         self.max_attempts > 1
+    }
+
+    pub fn delay_for_attempt(&self, attempt: u32) -> Duration {
+        if attempt <= 1 || self.initial_delay.is_zero() {
+            return self.initial_delay;
+        }
+
+        match self.backoff {
+            BackoffStrategy::Fixed => self.initial_delay,
+            BackoffStrategy::Exponential => {
+                let factor = 2u32.saturating_pow(attempt.saturating_sub(1));
+                let delay = self
+                    .initial_delay
+                    .checked_mul(factor)
+                    .unwrap_or(self.max_delay);
+                delay.min(self.max_delay)
+            }
+        }
     }
 }
 
@@ -433,6 +506,10 @@ impl JobsRuntime {
 
     pub fn planner(&self) -> JobsPlanner {
         JobsPlanner::new(self.clone())
+    }
+
+    pub fn coordinator(&self) -> JobsCoordinator {
+        JobsCoordinator::new(self.clone())
     }
 }
 
@@ -726,6 +803,365 @@ pub struct JobExecutionContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedJobRecord {
+    pub spec: JobSpec,
+    pub attempts: u32,
+    pub enqueued_at: JobInstant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobLease {
+    pub record: QueuedJobRecord,
+    pub worker_id: String,
+    pub leased_at: JobInstant,
+    pub lease_until: JobInstant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchedulerLeadership {
+    pub node_id: String,
+    pub acquired_at: JobInstant,
+    pub lease_until: JobInstant,
+}
+
+impl SchedulerLeadership {
+    pub fn is_active(&self, now: JobInstant) -> bool {
+        self.lease_until > now
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobFailureDisposition {
+    Retried {
+        job_id: JobId,
+        next_attempt_at: JobInstant,
+        queue: JobQueueName,
+    },
+    DeadLettered(DeadLetterOutcome),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobsCoordinator {
+    runtime: JobsRuntime,
+    ready: Vec<QueuedJobRecord>,
+    scheduled: Vec<QueuedJobRecord>,
+    in_flight: Vec<JobLease>,
+    dead_letters: Vec<DeadLetterOutcome>,
+    leadership: Option<SchedulerLeadership>,
+}
+
+impl JobsCoordinator {
+    pub fn new(runtime: JobsRuntime) -> Self {
+        Self {
+            runtime,
+            ready: Vec::new(),
+            scheduled: Vec::new(),
+            in_flight: Vec::new(),
+            dead_letters: Vec::new(),
+            leadership: None,
+        }
+    }
+
+    pub fn ready_jobs(&self) -> &[QueuedJobRecord] {
+        &self.ready
+    }
+
+    pub fn scheduled_jobs(&self) -> &[QueuedJobRecord] {
+        &self.scheduled
+    }
+
+    pub fn in_flight_jobs(&self) -> &[JobLease] {
+        &self.in_flight
+    }
+
+    pub fn dead_letters(&self) -> &[DeadLetterOutcome] {
+        &self.dead_letters
+    }
+
+    pub fn leadership(&self) -> Option<&SchedulerLeadership> {
+        self.leadership.as_ref()
+    }
+
+    pub fn enqueue(&mut self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
+        let planned = self.runtime.planner().plan_job(spec.clone(), now)?;
+        let record = QueuedJobRecord {
+            spec: JobSpec {
+                queue: planned.queue,
+                scheduled_for: planned.scheduled_for,
+                retry_policy: planned.retry_policy,
+                idempotency_key: planned.idempotency_key,
+                ..spec
+            },
+            attempts: 0,
+            enqueued_at: now,
+        };
+
+        if record.spec.scheduled_for.is_some() {
+            self.scheduled.push(record);
+        } else {
+            self.ready.push(record);
+        }
+
+        Ok(())
+    }
+
+    pub fn acquire_scheduler_leadership(
+        &mut self,
+        node_id: impl Into<String>,
+        now: JobInstant,
+        lease_ttl: Duration,
+    ) -> Result<SchedulerLeadership, JobsModelError> {
+        let node_id = require_non_empty("node_id", node_id.into())?;
+        if let Some(current) = self.leadership.as_ref() {
+            if current.is_active(now) && current.node_id != node_id {
+                return Err(JobsModelError::LeadershipConflict {
+                    current_holder: current.node_id.clone(),
+                    requested_holder: node_id,
+                });
+            }
+        }
+
+        let leadership = SchedulerLeadership {
+            node_id,
+            acquired_at: now,
+            lease_until: now.checked_add(lease_ttl)?,
+        };
+        self.leadership = Some(leadership.clone());
+        Ok(leadership)
+    }
+
+    pub fn promote_due_jobs(
+        &mut self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        self.require_active_leadership(node_id, now)?;
+
+        let mut promoted_ids = Vec::new();
+        let mut remaining = Vec::new();
+        for mut job in self.scheduled.drain(..) {
+            if job
+                .spec
+                .scheduled_for
+                .is_some_and(|scheduled_for| scheduled_for <= now)
+            {
+                promoted_ids.push(job.spec.job_id.clone());
+                job.spec.scheduled_for = None;
+                self.ready.push(job);
+            } else {
+                remaining.push(job);
+            }
+        }
+        self.scheduled = remaining;
+        Ok(promoted_ids)
+    }
+
+    pub fn lease_ready_jobs(
+        &mut self,
+        queue: &JobQueueName,
+        worker_id: impl Into<String>,
+        now: JobInstant,
+        lease_ttl: Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, JobsModelError> {
+        let worker_id = require_non_empty("worker_id", worker_id.into())?;
+        self.runtime
+            .topology
+            .queue(queue)
+            .ok_or_else(|| JobsModelError::UnknownQueue {
+                queue: queue.to_string(),
+            })?;
+
+        let lease_until = now.checked_add(lease_ttl)?;
+        let mut leased = Vec::new();
+        let mut remaining = Vec::new();
+
+        for job in self.ready.drain(..) {
+            if leased.len() < max_jobs && &job.spec.queue == queue {
+                let lease = JobLease {
+                    record: job,
+                    worker_id: worker_id.clone(),
+                    leased_at: now,
+                    lease_until,
+                };
+                self.in_flight.push(lease.clone());
+                leased.push(lease);
+            } else {
+                remaining.push(job);
+            }
+        }
+
+        self.ready = remaining;
+        Ok(leased)
+    }
+
+    pub fn acknowledge_completed(
+        &mut self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError> {
+        self.ensure_active_lease(lease, now)?;
+        self.remove_in_flight(&lease.record.spec.job_id)?;
+        Ok(())
+    }
+
+    pub fn acknowledge_failed(
+        &mut self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: impl Into<String>,
+    ) -> Result<JobFailureDisposition, JobsModelError> {
+        self.ensure_active_lease(lease, now)?;
+        let error_message = require_non_empty("job_error_message", error_message.into())?;
+        let mut record = self.remove_in_flight(&lease.record.spec.job_id)?;
+        record.attempts += 1;
+
+        if record.attempts < record.spec.retry_policy.max_attempts {
+            let delay = record.spec.retry_policy.delay_for_attempt(record.attempts);
+            let next_attempt_at = now.checked_add(delay)?;
+            if delay.is_zero() {
+                record.spec.scheduled_for = None;
+                self.ready.push(record.clone());
+            } else {
+                record.spec.scheduled_for = Some(next_attempt_at);
+                self.scheduled.push(record.clone());
+            }
+
+            Ok(JobFailureDisposition::Retried {
+                job_id: record.spec.job_id,
+                next_attempt_at,
+                queue: record.spec.queue,
+            })
+        } else {
+            let routed_to = record
+                .spec
+                .retry_policy
+                .dead_letter_queue
+                .clone()
+                .or_else(|| {
+                    self.runtime
+                        .topology
+                        .queue(&record.spec.queue)
+                        .and_then(|queue| queue.dead_letter_queue.clone())
+                });
+            let outcome = DeadLetterOutcome::new(
+                DeadLetterId::new(format!("dead-letter:{}", record.spec.job_id.as_str()))?,
+                record.spec.job_id.clone(),
+                record.spec.queue.clone(),
+                reason,
+                record.attempts,
+                error_message,
+                routed_to,
+            )?;
+            self.dead_letters.push(outcome.clone());
+            Ok(JobFailureDisposition::DeadLettered(outcome))
+        }
+    }
+
+    pub fn dispatch_event<P>(
+        &mut self,
+        domain: &JobsDomain,
+        event: &DomainEventEnvelope<P>,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        let mut planned = Vec::new();
+
+        for subscription in domain
+            .domain_event_subscriptions
+            .iter()
+            .filter(|subscription| subscription.event_type == event.event_type)
+        {
+            if !domain
+                .handlers
+                .iter()
+                .any(|handler| handler.id == subscription.handler)
+            {
+                return Err(JobsModelError::MissingEventHandler {
+                    handler_id: subscription.handler.to_string(),
+                });
+            }
+
+            let spec = JobSpec::new(
+                JobId::new(format!(
+                    "event:{}:{}",
+                    event.event_id.as_str(),
+                    subscription.id.as_str()
+                ))?,
+                JobName::new(format!("event-handler:{}", subscription.handler.as_str()))?,
+                subscription.queue.clone(),
+                format!(
+                    "dispatch {} for {}:{}",
+                    event.event_type, event.aggregate_kind, event.aggregate_id
+                ),
+            )?
+            .with_retry_policy(subscription.retry_policy.clone());
+            let spec = match subscription.idempotency_key.clone() {
+                Some(key) => spec.with_idempotency_key(key),
+                None => spec,
+            };
+            let job_id = spec.job_id.clone();
+            self.enqueue(spec, now)?;
+            planned.push(job_id);
+        }
+
+        Ok(planned)
+    }
+
+    fn require_active_leadership(
+        &self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError> {
+        match self.leadership.as_ref() {
+            Some(leadership) if leadership.node_id == node_id && leadership.is_active(now) => {
+                Ok(())
+            }
+            Some(leadership) if leadership.node_id == node_id => {
+                Err(JobsModelError::SchedulerLeadershipExpired {
+                    node_id: node_id.to_string(),
+                    lease_until: leadership.lease_until,
+                    now,
+                })
+            }
+            Some(_) | None => Err(JobsModelError::MissingSchedulerLeadership {
+                node_id: node_id.to_string(),
+            }),
+        }
+    }
+
+    fn ensure_active_lease(&self, lease: &JobLease, now: JobInstant) -> Result<(), JobsModelError> {
+        if lease.lease_until <= now {
+            return Err(JobsModelError::LeaseExpired {
+                job_id: lease.record.spec.job_id.to_string(),
+                lease_until: lease.lease_until,
+                now,
+            });
+        }
+
+        self.in_flight
+            .iter()
+            .find(|current| current.record.spec.job_id == lease.record.spec.job_id)
+            .ok_or_else(|| JobsModelError::UnknownInFlightJob {
+                job_id: lease.record.spec.job_id.to_string(),
+            })?;
+
+        Ok(())
+    }
+
+    fn remove_in_flight(&mut self, job_id: &JobId) -> Result<QueuedJobRecord, JobsModelError> {
+        let index = self
+            .in_flight
+            .iter()
+            .position(|lease| &lease.record.spec.job_id == job_id)
+            .ok_or_else(|| JobsModelError::UnknownInFlightJob {
+                job_id: job_id.to_string(),
+            })?;
+        Ok(self.in_flight.remove(index).record)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobsDomain {
     pub runtime: JobsRuntime,
     pub domain_event_subscriptions: Vec<EventSubscriptionMetadata>,
@@ -969,5 +1405,199 @@ mod tests {
         assert_eq!(envelope.correlation_id.as_deref(), Some("corr-1"));
         assert_eq!(envelope.causation_id.as_deref(), Some("cause-1"));
         assert_eq!(envelope.version, 1);
+    }
+
+    #[test]
+    fn scheduler_leadership_promotes_due_jobs_once() {
+        let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+        let mut coordinator = runtime.coordinator();
+        coordinator
+            .enqueue(
+                JobSpec::new(
+                    JobId::new("job-scheduled").unwrap(),
+                    JobName::new("sitemap-regeneration").unwrap(),
+                    runtime.describe().scheduled_queue.clone(),
+                    "regenerate sitemap",
+                )
+                .unwrap()
+                .scheduled_for(JobInstant::from_unix_seconds(20))
+                .with_retry_policy(
+                    RetryPolicy::new(2, Duration::from_secs(10), Duration::from_secs(30))
+                        .unwrap()
+                        .with_dead_letter_queue(runtime.describe().dead_letter_queue.clone()),
+                )
+                .with_idempotency_key(IdempotencyKey::new("sitemap-regeneration").unwrap()),
+                JobInstant::from_unix_seconds(10),
+            )
+            .unwrap();
+
+        let leader = coordinator
+            .acquire_scheduler_leadership(
+                "node-a",
+                JobInstant::from_unix_seconds(12),
+                Duration::from_secs(30),
+            )
+            .unwrap();
+        assert_eq!(leader.node_id, "node-a");
+        assert_eq!(coordinator.ready_jobs().len(), 0);
+        assert_eq!(coordinator.scheduled_jobs().len(), 1);
+
+        let promoted = coordinator
+            .promote_due_jobs("node-a", JobInstant::from_unix_seconds(20))
+            .unwrap();
+        assert_eq!(promoted, vec![JobId::new("job-scheduled").unwrap()]);
+        assert_eq!(coordinator.ready_jobs().len(), 1);
+        assert_eq!(coordinator.scheduled_jobs().len(), 0);
+
+        let err = coordinator
+            .acquire_scheduler_leadership(
+                "node-b",
+                JobInstant::from_unix_seconds(25),
+                Duration::from_secs(30),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            JobsModelError::LeadershipConflict {
+                current_holder,
+                requested_holder,
+            } if current_holder == "node-a" && requested_holder == "node-b"
+        ));
+    }
+
+    #[test]
+    fn failed_jobs_retry_then_dead_letter_after_exhaustion() {
+        let runtime = JobsRuntime::from_config(&config(JobBackend::Valkey)).unwrap();
+        let mut coordinator = runtime.coordinator();
+        coordinator
+            .enqueue(
+                JobSpec::new(
+                    JobId::new("job-retry").unwrap(),
+                    JobName::new("certificate-renewal").unwrap(),
+                    runtime.describe().work_queue.clone(),
+                    "renew certificate",
+                )
+                .unwrap()
+                .with_retry_policy(
+                    RetryPolicy::new(2, Duration::from_secs(15), Duration::from_secs(60))
+                        .unwrap()
+                        .with_dead_letter_queue(runtime.describe().dead_letter_queue.clone()),
+                )
+                .with_idempotency_key(IdempotencyKey::new("certificate-renewal:v1").unwrap()),
+                JobInstant::from_unix_seconds(100),
+            )
+            .unwrap();
+
+        let first_lease = coordinator
+            .lease_ready_jobs(
+                &runtime.describe().work_queue,
+                "worker-a",
+                JobInstant::from_unix_seconds(100),
+                Duration::from_secs(30),
+                1,
+            )
+            .unwrap()
+            .remove(0);
+
+        let retry = coordinator
+            .acknowledge_failed(
+                &first_lease,
+                JobInstant::from_unix_seconds(105),
+                DeadLetterReason::PolicyViolation,
+                "temporary upstream failure",
+            )
+            .unwrap();
+        assert!(matches!(
+            retry,
+            JobFailureDisposition::Retried { ref queue, .. } if queue.as_str() == "jobs.work"
+        ));
+        assert_eq!(coordinator.ready_jobs().len(), 0);
+        assert_eq!(coordinator.scheduled_jobs().len(), 1);
+
+        coordinator
+            .acquire_scheduler_leadership(
+                "node-a",
+                JobInstant::from_unix_seconds(110),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        coordinator
+            .promote_due_jobs("node-a", JobInstant::from_unix_seconds(120))
+            .unwrap();
+
+        let second_lease = coordinator
+            .lease_ready_jobs(
+                &runtime.describe().work_queue,
+                "worker-a",
+                JobInstant::from_unix_seconds(120),
+                Duration::from_secs(30),
+                1,
+            )
+            .unwrap()
+            .remove(0);
+        let dead_letter = coordinator
+            .acknowledge_failed(
+                &second_lease,
+                JobInstant::from_unix_seconds(125),
+                DeadLetterReason::ExhaustedRetries,
+                "permanent failure",
+            )
+            .unwrap();
+        assert!(matches!(
+            dead_letter,
+            JobFailureDisposition::DeadLettered(_)
+        ));
+        assert_eq!(coordinator.dead_letters().len(), 1);
+        assert_eq!(coordinator.dead_letters()[0].job_id.as_str(), "job-retry");
+    }
+
+    #[test]
+    fn domain_events_dispatch_into_subscription_jobs() {
+        let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+        let subscription = EventSubscriptionMetadata::new(
+            EventSubscriptionId::new("sub-booking-email").unwrap(),
+            DomainEventType::new("booking.confirmed").unwrap(),
+            runtime.describe().domain_events_queue.clone(),
+            EventHandlerId::new("handler-booking-email").unwrap(),
+            RetryPolicy::new(2, Duration::from_secs(5), Duration::from_secs(30))
+                .unwrap()
+                .with_dead_letter_queue(runtime.describe().dead_letter_queue.clone()),
+        )
+        .with_idempotency_key(IdempotencyKey::new("booking.confirmed.email").unwrap());
+        let handler = EventHandlerMetadata::new(
+            EventHandlerId::new("handler-booking-email").unwrap(),
+            "Booking email",
+            runtime.describe().domain_events_queue.clone(),
+            RetryPolicy::default(),
+        )
+        .unwrap()
+        .add_subscription(subscription.clone());
+        let domain = JobsDomain::new(runtime.clone())
+            .add_subscription(subscription)
+            .add_handler(handler);
+
+        let envelope = DomainEventEnvelope::new(
+            DomainEventId::new("evt-booking-1").unwrap(),
+            DomainEventType::new("booking.confirmed").unwrap(),
+            "booking",
+            "booking-1",
+            JobInstant::from_unix_seconds(200),
+            (),
+        )
+        .unwrap();
+
+        let mut coordinator = runtime.coordinator();
+        let job_ids = coordinator
+            .dispatch_event(&domain, &envelope, JobInstant::from_unix_seconds(200))
+            .unwrap();
+        assert_eq!(
+            job_ids,
+            vec![JobId::new("event:evt-booking-1:sub-booking-email").unwrap()]
+        );
+        assert_eq!(coordinator.ready_jobs().len(), 1);
+        assert_eq!(
+            coordinator.ready_jobs()[0].spec.queue,
+            runtime.describe().domain_events_queue
+        );
     }
 }

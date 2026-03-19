@@ -22,6 +22,25 @@ pub enum TlsModelError {
         "certificate `{certificate_id}` cannot be renewed because it is already replacing itself"
     )]
     RenewalAlreadyInProgress { certificate_id: String },
+    #[error("certificate `{certificate_id}` is not known to the TLS inventory")]
+    UnknownCertificate { certificate_id: String },
+    #[error(
+        "hostname `{hostname}` is already bound to active certificate `{certificate_id}`"
+    )]
+    DuplicateHostnameBinding {
+        hostname: String,
+        certificate_id: String,
+    },
+    #[error(
+        "certificate `{certificate_id}` cannot be renewed until `{renew_after}`, current time is `{now}`"
+    )]
+    RenewalNotDue {
+        certificate_id: String,
+        renew_after: TlsInstant,
+        now: TlsInstant,
+    },
+    #[error("certificate `{certificate_id}` has no pending replacement")]
+    MissingReplacementCertificate { certificate_id: String },
 }
 
 macro_rules! token_type {
@@ -103,6 +122,12 @@ impl TlsInstant {
     }
 }
 
+impl fmt::Display for TlsInstant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChallengeStrategy {
     Http01,
@@ -171,6 +196,7 @@ pub enum CertificateStatus {
     RenewalDue,
     Renewing,
     Failed,
+    Superseded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,6 +315,270 @@ pub struct RenewalPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChallengeTicket {
+    pub certificate_id: CertificateId,
+    pub replacement_certificate_id: Option<CertificateId>,
+    pub provider: CertificateProviderKind,
+    pub challenge: Option<ChallengeStrategy>,
+    pub bindings: Vec<HostnameBinding>,
+    pub account_secret_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotReloadEvent {
+    pub certificate_id: CertificateId,
+    pub bindings: Vec<HostnameBinding>,
+    pub reloaded_without_restart: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CertificateInventory {
+    certificates: Vec<CertificateRecord>,
+}
+
+impl CertificateInventory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn certificates(&self) -> &[CertificateRecord] {
+        &self.certificates
+    }
+
+    pub fn active_for_hostname(&self, hostname: &Hostname) -> Option<&CertificateRecord> {
+        self.certificates.iter().find(|record| {
+            record.bindings.iter().any(|binding| &binding.hostname == hostname)
+                && matches!(
+                    record.status,
+                    CertificateStatus::Active
+                        | CertificateStatus::RenewalDue
+                        | CertificateStatus::Renewing
+                )
+        })
+    }
+
+    pub fn record(&self, certificate_id: &CertificateId) -> Option<&CertificateRecord> {
+        self.certificates.iter().find(|record| &record.id == certificate_id)
+    }
+
+    pub fn record_mut(&mut self, certificate_id: &CertificateId) -> Option<&mut CertificateRecord> {
+        self.certificates
+            .iter_mut()
+            .find(|record| &record.id == certificate_id)
+    }
+
+    pub fn insert(&mut self, record: CertificateRecord) -> Result<(), TlsModelError> {
+        self.ensure_unique_bindings(&record, None)?;
+        self.certificates.push(record);
+        Ok(())
+    }
+
+    pub fn activate_replacement(
+        &mut self,
+        certificate_id: &CertificateId,
+        replacement: CertificateRecord,
+    ) -> Result<(), TlsModelError> {
+        let original = self
+            .record(certificate_id)
+            .ok_or_else(|| TlsModelError::UnknownCertificate {
+                certificate_id: certificate_id.to_string(),
+            })?;
+        if original.replacing_certificate.as_ref() != Some(&replacement.id) {
+            return Err(TlsModelError::MissingReplacementCertificate {
+                certificate_id: certificate_id.to_string(),
+            });
+        }
+
+        self.ensure_unique_bindings(&replacement, Some(certificate_id))?;
+        let original = self
+            .record_mut(certificate_id)
+            .ok_or_else(|| TlsModelError::UnknownCertificate {
+                certificate_id: certificate_id.to_string(),
+            })?;
+        original.status = CertificateStatus::Superseded;
+        original.replacing_certificate = None;
+
+        self.certificates.push(replacement);
+        Ok(())
+    }
+
+    fn ensure_unique_bindings(
+        &self,
+        candidate: &CertificateRecord,
+        allowing_replaced_certificate: Option<&CertificateId>,
+    ) -> Result<(), TlsModelError> {
+        for binding in &candidate.bindings {
+            if let Some(existing) = self.active_for_hostname(&binding.hostname) {
+                let allowed = allowing_replaced_certificate
+                    .is_some_and(|certificate_id| &existing.id == certificate_id);
+                if !allowed {
+                    return Err(TlsModelError::DuplicateHostnameBinding {
+                        hostname: binding.hostname.to_string(),
+                        certificate_id: existing.id.to_string(),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TlsAutomationRuntime {
+    runtime: TlsRuntime,
+    inventory: CertificateInventory,
+    renewal_queue: Vec<RenewalPlan>,
+    pending_challenges: Vec<ChallengeTicket>,
+    hot_reload_events: Vec<HotReloadEvent>,
+}
+
+impl TlsAutomationRuntime {
+    pub fn new(runtime: TlsRuntime) -> Self {
+        Self {
+            runtime,
+            inventory: CertificateInventory::new(),
+            renewal_queue: Vec::new(),
+            pending_challenges: Vec::new(),
+            hot_reload_events: Vec::new(),
+        }
+    }
+
+    pub fn inventory(&self) -> &CertificateInventory {
+        &self.inventory
+    }
+
+    pub fn renewal_queue(&self) -> &[RenewalPlan] {
+        &self.renewal_queue
+    }
+
+    pub fn pending_challenges(&self) -> &[ChallengeTicket] {
+        &self.pending_challenges
+    }
+
+    pub fn hot_reload_events(&self) -> &[HotReloadEvent] {
+        &self.hot_reload_events
+    }
+
+    pub fn import_certificate(&mut self, record: CertificateRecord) -> Result<(), TlsModelError> {
+        self.inventory.insert(record)
+    }
+
+    pub fn queue_renewal(
+        &mut self,
+        certificate_id: &CertificateId,
+        now: TlsInstant,
+    ) -> Result<RenewalPlan, TlsModelError> {
+        let record = self
+            .inventory
+            .record(certificate_id)
+            .cloned()
+            .ok_or_else(|| TlsModelError::UnknownCertificate {
+                certificate_id: certificate_id.to_string(),
+            })?;
+        let plan = self.runtime.planner().renewal_plan(&record, now)?;
+        if plan.renew_after > now {
+            return Err(TlsModelError::RenewalNotDue {
+                certificate_id: certificate_id.to_string(),
+                renew_after: plan.renew_after,
+                now,
+            });
+        }
+
+        if let Some(existing) = self
+            .renewal_queue
+            .iter()
+            .find(|plan| plan.certificate_id == *certificate_id)
+        {
+            return Err(TlsModelError::RenewalAlreadyInProgress {
+                certificate_id: existing.certificate_id.to_string(),
+            });
+        }
+
+        if let Some(record) = self.inventory.record_mut(certificate_id) {
+            record.status = CertificateStatus::RenewalDue;
+        }
+        self.renewal_queue.push(plan.clone());
+        Ok(plan)
+    }
+
+    pub fn begin_renewal(
+        &mut self,
+        certificate_id: &CertificateId,
+        replacement_certificate_id: CertificateId,
+    ) -> Result<ChallengeTicket, TlsModelError> {
+        let record = self
+            .inventory
+            .record_mut(certificate_id)
+            .ok_or_else(|| TlsModelError::UnknownCertificate {
+                certificate_id: certificate_id.to_string(),
+            })?;
+        if record.replacing_certificate.is_some() {
+            return Err(TlsModelError::RenewalAlreadyInProgress {
+                certificate_id: certificate_id.to_string(),
+            });
+        }
+
+        record.status = CertificateStatus::Renewing;
+        record.replacing_certificate = Some(replacement_certificate_id.clone());
+
+        let ticket = ChallengeTicket {
+            certificate_id: certificate_id.clone(),
+            replacement_certificate_id: Some(replacement_certificate_id),
+            provider: record.provider,
+            challenge: self.runtime.challenge,
+            bindings: record.bindings.clone(),
+            account_secret_ref: self.runtime.account_secret_ref.clone(),
+        };
+        self.pending_challenges.push(ticket.clone());
+        Ok(ticket)
+    }
+
+    pub fn fail_renewal(
+        &mut self,
+        certificate_id: &CertificateId,
+    ) -> Result<CertificateRecord, TlsModelError> {
+        let record = self
+            .inventory
+            .record_mut(certificate_id)
+            .ok_or_else(|| TlsModelError::UnknownCertificate {
+                certificate_id: certificate_id.to_string(),
+            })?;
+        record.status = CertificateStatus::RenewalDue;
+        record.replacing_certificate = None;
+        self.pending_challenges
+            .retain(|ticket| &ticket.certificate_id != certificate_id);
+        self.renewal_queue
+            .retain(|plan| &plan.certificate_id != certificate_id);
+        Ok(record.clone())
+    }
+
+    pub fn activate_replacement(
+        &mut self,
+        certificate_id: &CertificateId,
+        mut replacement: CertificateRecord,
+    ) -> Result<HotReloadEvent, TlsModelError> {
+        replacement.status = CertificateStatus::Active;
+        replacement.replacing_certificate = None;
+
+        self.inventory
+            .activate_replacement(certificate_id, replacement.clone())?;
+        self.pending_challenges
+            .retain(|ticket| &ticket.certificate_id != certificate_id);
+        self.renewal_queue
+            .retain(|plan| &plan.certificate_id != certificate_id);
+
+        let event = HotReloadEvent {
+            certificate_id: replacement.id.clone(),
+            bindings: replacement.bindings.clone(),
+            reloaded_without_restart: self.runtime.hot_reload_supported,
+        };
+        self.hot_reload_events.push(event.clone());
+        Ok(event)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TlsRuntime {
     pub mode: TlsMode,
     pub edge_mode: EdgeMode,
@@ -369,6 +659,10 @@ impl TlsRuntime {
         TlsPlanner {
             runtime: self.clone(),
         }
+    }
+
+    pub fn automation(&self) -> TlsAutomationRuntime {
+        TlsAutomationRuntime::new(self.clone())
     }
 }
 
@@ -617,5 +911,176 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error, TlsModelError::WildcardRequiresDns01);
+    }
+
+    #[test]
+    fn inventory_rejects_duplicate_active_hostname_bindings() {
+        let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
+        let mut automation = runtime.automation();
+        let binding = HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        );
+
+        automation
+            .import_certificate(
+                CertificateRecord::new(
+                    CertificateId::new("cert-1").unwrap(),
+                    CertificateProviderKind::Acme,
+                    CertificateStatus::Active,
+                    CertificateFingerprint::new("sha256:abc123").unwrap(),
+                    TlsInstant::from_unix_seconds(1_000),
+                    TlsInstant::from_unix_seconds(4_000_000),
+                    SecretMaterialRef::new("secrets/tls/cert-1").unwrap(),
+                    CertificateStateStore::SharedSecrets,
+                )
+                .with_binding(binding.clone()),
+            )
+            .unwrap();
+
+        let error = automation
+            .import_certificate(
+                CertificateRecord::new(
+                    CertificateId::new("cert-2").unwrap(),
+                    CertificateProviderKind::Acme,
+                    CertificateStatus::Active,
+                    CertificateFingerprint::new("sha256:def456").unwrap(),
+                    TlsInstant::from_unix_seconds(2_000),
+                    TlsInstant::from_unix_seconds(4_000_000),
+                    SecretMaterialRef::new("secrets/tls/cert-2").unwrap(),
+                    CertificateStateStore::SharedSecrets,
+                )
+                .with_binding(binding),
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            TlsModelError::DuplicateHostnameBinding {
+                hostname: "www.example.com".to_string(),
+                certificate_id: "cert-1".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn renewal_failure_keeps_current_certificate_bound() {
+        let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
+        let mut automation = runtime.automation();
+        let certificate_id = CertificateId::new("cert-active").unwrap();
+        let binding = HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        );
+        automation
+            .import_certificate(
+                CertificateRecord::new(
+                    certificate_id.clone(),
+                    CertificateProviderKind::Acme,
+                    CertificateStatus::Active,
+                    CertificateFingerprint::new("sha256:active").unwrap(),
+                    TlsInstant::from_unix_seconds(1_000),
+                    TlsInstant::from_unix_seconds(4_000_000),
+                    SecretMaterialRef::new("secrets/tls/cert-active").unwrap(),
+                    CertificateStateStore::SharedSecrets,
+                )
+                .with_binding(binding.clone()),
+            )
+            .unwrap();
+
+        let queued = automation
+            .queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+            .unwrap();
+        assert_eq!(queued.certificate_id, certificate_id);
+
+        let challenge = automation
+            .begin_renewal(&certificate_id, CertificateId::new("cert-replacement").unwrap())
+            .unwrap();
+        assert_eq!(
+            challenge.replacement_certificate_id,
+            Some(CertificateId::new("cert-replacement").unwrap())
+        );
+
+        let reverted = automation.fail_renewal(&certificate_id).unwrap();
+        assert_eq!(reverted.status, CertificateStatus::RenewalDue);
+        assert!(reverted.replacing_certificate.is_none());
+        assert_eq!(
+            automation
+                .inventory()
+                .active_for_hostname(&Hostname::new("www.example.com").unwrap())
+                .unwrap()
+                .id,
+            certificate_id
+        );
+    }
+
+    #[test]
+    fn activating_replacement_supersedes_old_certificate_and_emits_hot_reload() {
+        let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
+        let mut automation = runtime.automation();
+        let certificate_id = CertificateId::new("cert-live").unwrap();
+        let binding = HostnameBinding::new(
+            Hostname::new("shop.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        );
+        automation
+            .import_certificate(
+                CertificateRecord::new(
+                    certificate_id.clone(),
+                    CertificateProviderKind::Acme,
+                    CertificateStatus::Active,
+                    CertificateFingerprint::new("sha256:live").unwrap(),
+                    TlsInstant::from_unix_seconds(1_000),
+                    TlsInstant::from_unix_seconds(4_000_000),
+                    SecretMaterialRef::new("secrets/tls/cert-live").unwrap(),
+                    CertificateStateStore::SharedSecrets,
+                )
+                .with_binding(binding.clone()),
+            )
+            .unwrap();
+        automation
+            .queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+            .unwrap();
+        automation
+            .begin_renewal(&certificate_id, CertificateId::new("cert-next").unwrap())
+            .unwrap();
+
+        let event = automation
+            .activate_replacement(
+                &certificate_id,
+                CertificateRecord::new(
+                    CertificateId::new("cert-next").unwrap(),
+                    CertificateProviderKind::Acme,
+                    CertificateStatus::PendingIssuance,
+                    CertificateFingerprint::new("sha256:next").unwrap(),
+                    TlsInstant::from_unix_seconds(3_900_500),
+                    TlsInstant::from_unix_seconds(8_000_000),
+                    SecretMaterialRef::new("secrets/tls/cert-next").unwrap(),
+                    CertificateStateStore::SharedSecrets,
+                )
+                .with_binding(binding.clone()),
+            )
+            .unwrap();
+
+        assert_eq!(event.certificate_id.as_str(), "cert-next");
+        assert!(event.reloaded_without_restart);
+        assert_eq!(
+            automation
+                .inventory()
+                .active_for_hostname(&binding.hostname)
+                .unwrap()
+                .id
+                .as_str(),
+            "cert-next"
+        );
+        assert_eq!(
+            automation
+                .inventory()
+                .record(&certificate_id)
+                .unwrap()
+                .status,
+            CertificateStatus::Superseded
+        );
+        assert_eq!(automation.hot_reload_events().len(), 1);
     }
 }

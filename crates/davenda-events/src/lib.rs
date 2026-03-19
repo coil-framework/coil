@@ -1,14 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use davenda_a11y::{NavigationContract, ThemeAccessibilityContract};
-use davenda_auth::{Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
+use davenda_auth::{
+    Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
+};
 use davenda_commerce::OrderId;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,

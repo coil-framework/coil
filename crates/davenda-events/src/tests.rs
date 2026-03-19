@@ -15,9 +15,10 @@ fn published_event() -> Result<EventRecord, EventModelError> {
         "/events/spring-tasting",
         EventVisibility::MembersOnly,
         EventEligibilityRule::AnyOf(vec![
-            EventEligibilityRule::RequiresMembershipTierAny(vec![
-                MembershipTierId::new("tier-premium").unwrap(),
-            ]),
+            EventEligibilityRule::RequiresMembershipTierAny(vec![MembershipTierId::new(
+                "tier-premium",
+            )
+            .unwrap()]),
             EventEligibilityRule::RequiresCapability(Capability::EventsBookingCreate),
         ]),
     )?;
@@ -241,16 +242,12 @@ fn module_manifest_and_admin_resources_match_events_workloads() {
 
     assert_eq!(manifest.name, "events");
     assert_eq!(manifest.config_namespace.as_deref(), Some("events"));
-    assert!(
-        manifest
-            .required_capabilities
-            .contains(&Capability::EventsBookingCheckIn)
-    );
-    assert!(
-        manifest
-            .optional_capabilities
-            .contains(&Capability::MembershipSubscriptionManage)
-    );
+    assert!(manifest
+        .required_capabilities
+        .contains(&Capability::EventsBookingCheckIn));
+    assert!(manifest
+        .optional_capabilities
+        .contains(&Capability::MembershipSubscriptionManage));
     assert_eq!(manifest.migrations.len(), 3);
     assert_eq!(manifest.route_surfaces.len(), 6);
     assert_eq!(manifest.http_surfaces.len(), 6);
@@ -260,23 +257,17 @@ fn module_manifest_and_admin_resources_match_events_workloads() {
     assert_eq!(manifest.search_contributions.len(), 2);
     assert_eq!(manifest.report_definitions.len(), 1);
     assert_eq!(manifest.bulk_operations.len(), 1);
-    assert!(
-        manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "commerce")
-    );
-    assert!(
-        manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Jobs)
-    );
-    assert!(
-        manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget)
-    );
+    assert!(manifest
+        .module_dependencies
+        .iter()
+        .any(|dependency| dependency.module == "commerce"));
+    assert!(manifest
+        .core_service_dependencies
+        .contains(&CoreServiceDependency::Jobs));
+    assert!(manifest
+        .extension_slots
+        .iter()
+        .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
     assert_eq!(
         module
             .install_migration_plan()
@@ -285,11 +276,9 @@ fn module_manifest_and_admin_resources_match_events_workloads() {
             .len(),
         3
     );
-    assert!(
-        registry
-            .services()
-            .any(|service| service.id == "module.events.waitlists")
-    );
+    assert!(registry
+        .services()
+        .any(|service| service.id == "module.events.waitlists"));
     assert_eq!(module.admin_resources().len(), 4);
 }
 

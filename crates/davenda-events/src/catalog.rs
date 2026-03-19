@@ -200,10 +200,7 @@ impl EventCatalog {
                         capacity: slot.waitlist_capacity,
                     });
                 }
-                slot.waitlisted_count = slot
-                    .waitlisted_count
-                    .checked_add(1)
-                    .expect("waitlist count overflow is not practical");
+                slot.increment_waitlisted_count();
             }
 
             let entry = WaitlistEntry::new(
@@ -227,8 +224,8 @@ impl EventCatalog {
                 event_id: event_id.to_string(),
                 slot_id: slot_id.to_string(),
                 capacity: slot.capacity,
-                booked: slot.booked_count,
-                reserved: slot.reserved_count,
+                booked: slot.booked_count(),
+                reserved: slot.reserved_count(),
             })
         }
     }

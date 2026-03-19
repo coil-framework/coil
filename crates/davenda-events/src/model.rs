@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventModelError {
@@ -399,7 +400,6 @@ impl fmt::Display for WaitlistStatus {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventEligibilityRule {
     Public,
@@ -733,6 +733,13 @@ impl EventSlot {
         self.waitlisted_count
     }
 
+    pub(crate) fn increment_waitlisted_count(&mut self) {
+        self.waitlisted_count = self
+            .waitlisted_count
+            .checked_add(1)
+            .expect("waitlist count overflow is not practical");
+    }
+
     pub fn available_capacity(&self) -> u32 {
         self.capacity
             .saturating_sub(self.reserved_count + self.booked_count)
@@ -1002,8 +1009,6 @@ impl EventRecord {
         updates
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 
 fn validate_token(field: &'static str, value: String) -> Result<String, EventModelError> {
     let trimmed = require_non_empty(field, value)?;

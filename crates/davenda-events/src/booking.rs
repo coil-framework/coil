@@ -40,7 +40,7 @@ impl BookingSource {
     }
 }
 
-
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reservation {
     pub id: ReservationId,
     pub event_id: EventId,
@@ -55,7 +55,7 @@ pub struct Reservation {
 }
 
 impl Reservation {
-    fn held(
+    pub(crate) fn held(
         id: ReservationId,
         event_id: EventId,
         slot_id: EventSlotId,
@@ -78,7 +78,7 @@ impl Reservation {
         }
     }
 
-    fn from_waitlist(
+    pub(crate) fn from_waitlist(
         id: ReservationId,
         waitlist_entry_id: WaitlistEntryId,
         entry: &WaitlistEntry,
@@ -123,7 +123,11 @@ pub struct Booking {
 }
 
 impl Booking {
-    fn from_reservation(id: BookingId, reservation: &Reservation, booked_at: EventInstant) -> Self {
+    pub(crate) fn from_reservation(
+        id: BookingId,
+        reservation: &Reservation,
+        booked_at: EventInstant,
+    ) -> Self {
         Self {
             id,
             reservation_id: reservation.id.clone(),
@@ -159,7 +163,7 @@ pub struct WaitlistEntry {
 }
 
 impl WaitlistEntry {
-    fn new(
+    pub(crate) fn new(
         id: WaitlistEntryId,
         event_id: EventId,
         slot_id: EventSlotId,
@@ -198,5 +202,3 @@ pub struct ReservationExpirationOutcome {
     pub reservation: Reservation,
     pub promoted_reservations: Vec<Reservation>,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]

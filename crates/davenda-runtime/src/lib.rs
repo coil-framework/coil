@@ -55,7 +55,7 @@ use davenda_wasm::{
     HttpMethod as WasmHttpMethod, InstalledExtension, InvocationContext, InvocationInput,
     InvocationPlan, JobInvocation, PageInvocation, PrincipalRef, RenderHookInvocation,
     ScheduledJobInvocation, TraceContext, TypedCacheHint, TypedExecutionOutput, TypedMetadata,
-    TypedResponseBody, WasmEngine, WasmExecutionSession, WasmModelError, WebhookInvocation,
+    WasmEngine, WasmExecutionSession, WasmModelError, WebhookInvocation,
 };
 use thiserror::Error;
 

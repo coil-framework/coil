@@ -1,12 +1,17 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
 use davenda_core::BrowserSecurityError;
+
+mod shared;
+
+#[cfg(test)]
+use std::sync::OnceLock;
 
 const FLASH_COOKIE_MAX_AGE_SECS: u64 = 300;
 static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -30,7 +35,9 @@ fn session_store_backend_kind(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct BrowserInstant(u64);
 
 impl BrowserInstant {
@@ -74,7 +81,7 @@ pub enum BrowserSessionStatus {
     Revoked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BrowserSessionRecord {
     pub session_id: String,
     pub principal_id: Option<String>,
@@ -151,6 +158,7 @@ pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
         idle_timeout: Duration,
         now: BrowserInstant,
     ) -> Result<Option<String>, RuntimeBrowserError>;
+    fn is_shared_backend(&self) -> bool;
 }
 
 #[derive(Debug)]
@@ -196,6 +204,10 @@ impl DistributedSessionStoreRuntime for SharedDistributedSessionStoreRuntime {
         let mut guard = self.state.lock().expect("session backend mutex poisoned");
         guard.touch_active_session(session_id, idle_timeout, now)
     }
+
+    fn is_shared_backend(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone)]
@@ -224,10 +236,20 @@ impl DistributedSessionStoreClient {
         Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
     }
 
+    #[cfg(test)]
     pub(crate) fn shared_runtime(
-        _kind: SessionStoreBackendKind,
+        kind: SessionStoreBackendKind,
+        scope: impl Into<String>,
     ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        Arc::new(SharedDistributedSessionStoreRuntime::new())
+        shared_test_runtime(kind, scope.into())
+    }
+
+    #[cfg(not(test))]
+    pub(crate) fn shared_runtime(
+        kind: SessionStoreBackendKind,
+        scope: impl Into<String>,
+    ) -> Arc<dyn DistributedSessionStoreRuntime> {
+        shared::persistent_runtime(kind, scope.into())
     }
 
     pub fn kind(&self) -> SessionStoreBackendKind {
@@ -235,7 +257,7 @@ impl DistributedSessionStoreClient {
     }
 
     pub fn is_shared(&self) -> bool {
-        Arc::strong_count(&self.runtime) > 1
+        self.runtime.is_shared_backend()
     }
 
     fn issue(&self, record: BrowserSessionRecord) {
@@ -281,7 +303,7 @@ fn shared_test_runtime(
     static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn DistributedSessionStoreRuntime>>>> =
         OnceLock::new();
 
-    let key = format!("{kind:?}:{scope}");
+    let key = format!("{}:{kind:?}:{scope}", test_scope());
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
     let mut guard = registry
         .lock()
@@ -290,6 +312,14 @@ fn shared_test_runtime(
         .entry(key)
         .or_insert_with(|| Arc::new(SharedDistributedSessionStoreRuntime::new()))
         .clone()
+}
+
+#[cfg(test)]
+fn test_scope() -> String {
+    std::thread::current()
+        .name()
+        .unwrap_or("unnamed-test")
+        .to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -313,7 +343,7 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Database,
                 Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Database,
-                    shared_test_runtime(
+                    DistributedSessionStoreClient::shared_runtime(
                         SessionStoreBackendKind::Database,
                         format!("{backend_scope}:{customer_app}"),
                     ),
@@ -323,7 +353,7 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Redis,
                 Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Redis,
-                    shared_test_runtime(
+                    DistributedSessionStoreClient::shared_runtime(
                         SessionStoreBackendKind::Redis,
                         format!("{backend_scope}:{customer_app}"),
                     ),
@@ -333,7 +363,7 @@ impl SessionStoreBackend {
                 SessionStoreBackendKind::Valkey,
                 Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Valkey,
-                    shared_test_runtime(
+                    DistributedSessionStoreClient::shared_runtime(
                         SessionStoreBackendKind::Valkey,
                         format!("{backend_scope}:{customer_app}"),
                     ),
@@ -354,25 +384,20 @@ impl SessionStoreBackend {
             ),
             davenda_core::SessionStoreTopology::Database => (
                 SessionStoreBackendKind::Database,
-                Self::Distributed(DistributedSessionStoreClient::new(
+                Self::Distributed(DistributedSessionStoreClient::local_for_testing(
                     SessionStoreBackendKind::Database,
-                    DistributedSessionStoreClient::shared_runtime(
-                        SessionStoreBackendKind::Database,
-                    ),
                 )),
             ),
             davenda_core::SessionStoreTopology::Redis => (
                 SessionStoreBackendKind::Redis,
-                Self::Distributed(DistributedSessionStoreClient::new(
+                Self::Distributed(DistributedSessionStoreClient::local_for_testing(
                     SessionStoreBackendKind::Redis,
-                    DistributedSessionStoreClient::shared_runtime(SessionStoreBackendKind::Redis),
                 )),
             ),
             davenda_core::SessionStoreTopology::Valkey => (
                 SessionStoreBackendKind::Valkey,
-                Self::Distributed(DistributedSessionStoreClient::new(
+                Self::Distributed(DistributedSessionStoreClient::local_for_testing(
                     SessionStoreBackendKind::Valkey,
-                    DistributedSessionStoreClient::shared_runtime(SessionStoreBackendKind::Valkey),
                 )),
             ),
         }
@@ -1073,6 +1098,48 @@ mod tests {
     }
 
     #[test]
+    fn database_session_hosts_share_persistent_backend_across_independent_clients() {
+        let services = services(SessionStoreTopology::Database);
+        let namespace = persistent_namespace("browser-db-persistent");
+        let mut left = BrowserHost::with_session_store_client(
+            "browser-db-persistent".to_string(),
+            services.clone(),
+            DistributedSessionStoreClient::new(
+                SessionStoreBackendKind::Database,
+                shared::persistent_runtime(SessionStoreBackendKind::Database, namespace.clone()),
+            ),
+        )
+        .unwrap();
+        let right = BrowserHost::with_session_store_client(
+            "browser-db-persistent".to_string(),
+            services,
+            DistributedSessionStoreClient::new(
+                SessionStoreBackendKind::Database,
+                shared::persistent_runtime(SessionStoreBackendKind::Database, namespace),
+            ),
+        )
+        .unwrap();
+
+        let issued = left
+            .issue_session(
+                SessionIssueRequest::new()
+                    .for_principal("member-db")
+                    .unwrap(),
+                b"01234567012345670123456701234567",
+                BrowserInstant::from_unix_seconds(100),
+            )
+            .unwrap();
+
+        assert!(left.session_store_is_shared());
+        assert_eq!(
+            right
+                .session(&issued.record.session_id)
+                .and_then(|record| record.principal_id),
+            Some("member-db".to_string())
+        );
+    }
+
+    #[test]
     fn live_browser_rejects_memory_session_stores() {
         let services = services(SessionStoreTopology::Memory);
         let error =
@@ -1083,5 +1150,21 @@ mod tests {
             error,
             BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost
         );
+    }
+
+    fn persistent_namespace(prefix: &str) -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!(
+            "{prefix}-{}-{timestamp}-{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        )
     }
 }

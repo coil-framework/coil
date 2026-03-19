@@ -1,3 +1,5 @@
+#[cfg(test)]
+use super::EmulatedDistributedCacheRuntime;
 use super::{CacheBackendKind, CacheBackendState, DistributedCacheRuntime};
 use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheMetrics, CacheModelError, FillDecision,
@@ -6,10 +8,43 @@ use crate::{
 use bincode::{deserialize, serialize};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
+#[cfg(test)]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
 
+#[cfg(test)]
+pub(crate) fn persistent_runtime(
+    kind: CacheBackendKind,
+    namespace: impl Into<String>,
+) -> Arc<dyn DistributedCacheRuntime> {
+    shared_test_runtime(kind, namespace.into())
+}
+
+#[cfg(test)]
+fn shared_test_runtime(
+    kind: CacheBackendKind,
+    namespace: String,
+) -> Arc<dyn DistributedCacheRuntime> {
+    static REGISTRY: OnceLock<
+        Mutex<std::collections::BTreeMap<String, Arc<dyn DistributedCacheRuntime>>>,
+    > = OnceLock::new();
+
+    let key = format!("{}:{kind:?}:{namespace}", test_scope());
+    let registry = REGISTRY.get_or_init(|| Mutex::new(std::collections::BTreeMap::new()));
+    let mut guard = registry.lock().expect("test cache registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| {
+            Arc::new(SharedCacheRuntimeHarness::new(Arc::new(
+                EmulatedDistributedCacheRuntime::new(),
+            )))
+        })
+        .clone()
+}
+
+#[cfg(not(test))]
 pub(crate) fn persistent_runtime(
     kind: CacheBackendKind,
     namespace: impl Into<String>,
@@ -34,10 +69,11 @@ fn shared_state_root() -> PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
 }
 
-fn database_path(kind: CacheBackendKind) -> PathBuf {
+fn database_path(kind: CacheBackendKind, namespace: &str) -> PathBuf {
     shared_state_root()
         .join("cache")
-        .join(format!("{}.sqlite3", cache_kind_slug(kind)))
+        .join(cache_kind_slug(kind))
+        .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
 #[derive(Debug)]
@@ -110,7 +146,7 @@ struct SharedCacheStore {
 
 impl SharedCacheStore {
     fn open(kind: CacheBackendKind, namespace: String) -> Self {
-        let path = database_path(kind);
+        let path = database_path(kind, &namespace);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|error| {
                 panic!(
@@ -251,5 +287,75 @@ impl SharedCacheStore {
         }
 
         outcome
+    }
+}
+
+fn sanitize_namespace(namespace: &str) -> String {
+    namespace
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn test_scope() -> String {
+    std::thread::current()
+        .name()
+        .unwrap_or("unnamed-test")
+        .to_string()
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct SharedCacheRuntimeHarness {
+    runtime: Arc<dyn DistributedCacheRuntime>,
+}
+
+#[cfg(test)]
+impl SharedCacheRuntimeHarness {
+    fn new(runtime: Arc<dyn DistributedCacheRuntime>) -> Self {
+        Self { runtime }
+    }
+}
+
+#[cfg(test)]
+impl DistributedCacheRuntime for SharedCacheRuntimeHarness {
+    fn insert(&self, entry: CacheEntry) {
+        self.runtime.insert(entry);
+    }
+
+    fn lookup(&self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
+        self.runtime.lookup(key, now)
+    }
+
+    fn invalidate(&self, tags: &InvalidationSet) -> Vec<CacheKey> {
+        self.runtime.invalidate(tags)
+    }
+
+    fn begin_fill(
+        &self,
+        key: &CacheKey,
+        mode: RequestCoalescingMode,
+        holder: String,
+    ) -> FillDecision {
+        self.runtime.begin_fill(key, mode, holder)
+    }
+
+    fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
+        self.runtime.complete_fill(lease)
+    }
+
+    fn metrics(&self) -> CacheMetrics {
+        self.runtime.metrics()
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        true
     }
 }

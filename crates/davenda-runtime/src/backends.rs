@@ -7,14 +7,16 @@ use std::sync::{Arc, Mutex};
 pub(crate) struct RuntimeBackendMaterializer {
     namespace: String,
     plans: SharedBackendClients,
+    #[cfg(test)]
     cache_runtime: Option<Arc<dyn davenda_cache::DistributedCacheRuntime>>,
     jobs_runtime: Arc<Mutex<Option<Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>>,
 }
 
 impl RuntimeBackendMaterializer {
     pub(crate) fn new(namespace: String, plans: SharedBackendClients) -> Self {
+        #[cfg(test)]
         let cache_runtime = plans.distributed_cache.as_ref().map(|target| {
-            davenda_cache::DistributedCacheClient::persistent_shared_runtime(
+            crate::plan::shared_cache_runtime_for_test(
                 cache_backend_kind(target.backend),
                 namespace.clone(),
             )
@@ -23,6 +25,7 @@ impl RuntimeBackendMaterializer {
         Self {
             namespace,
             plans,
+            #[cfg(test)]
             cache_runtime,
             jobs_runtime: Arc::new(Mutex::new(None)),
         }
@@ -50,6 +53,7 @@ impl RuntimeBackendMaterializer {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn cache_runtime(&self, planner: CachePlanner) -> CacheRuntime {
         if planner.topology().supports_shared_invalidation() {
             self.cache_runtime
@@ -76,10 +80,7 @@ impl RuntimeBackendMaterializer {
                 .expect("shared jobs runtime mutex poisoned");
             guard
                 .get_or_insert_with(|| {
-                    davenda_jobs::JobsBackendAdapter::persistent_shared_runtime(
-                        runtime,
-                        self.namespace.clone(),
-                    )
+                    crate::plan::shared_jobs_runtime_for_test(runtime, self.namespace.clone())
                 })
                 .clone()
         };
@@ -90,18 +91,19 @@ impl RuntimeBackendMaterializer {
 
 impl fmt::Debug for RuntimeBackendMaterializer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RuntimeBackendMaterializer")
-            .field("namespace", &self.namespace)
-            .field("plans", &self.plans)
-            .field(
-                "cache_runtime",
-                &self.cache_runtime.as_ref().map(|_| "shared"),
-            )
-            .field(
-                "jobs_runtime",
-                &self.jobs_runtime.lock().ok().map(|guard| guard.is_some()),
-            )
-            .finish_non_exhaustive()
+        let mut debug = f.debug_struct("RuntimeBackendMaterializer");
+        debug.field("namespace", &self.namespace);
+        debug.field("plans", &self.plans);
+        #[cfg(test)]
+        debug.field(
+            "cache_runtime",
+            &self.cache_runtime.as_ref().map(|_| "shared"),
+        );
+        debug.field(
+            "jobs_runtime",
+            &self.jobs_runtime.lock().ok().map(|guard| guard.is_some()),
+        );
+        debug.finish_non_exhaustive()
     }
 }
 

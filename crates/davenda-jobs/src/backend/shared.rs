@@ -1,3 +1,5 @@
+#[cfg(test)]
+use super::EmulatedJobsCoordinationRuntime;
 use super::{JobsBackendState, JobsCoordinationRuntime, JobsRuntime};
 use crate::backend::{JobFailureDisposition, JobLease, SchedulerLeadership};
 use crate::error::JobsModelError;
@@ -7,11 +9,53 @@ use crate::runtime::JobSpec;
 use bincode::{deserialize, serialize};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
+#[cfg(test)]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
 
+#[cfg(test)]
+pub(crate) fn persistent_runtime(
+    runtime: &JobsRuntime,
+    namespace: impl Into<String>,
+) -> Arc<dyn JobsCoordinationRuntime> {
+    shared_test_runtime(runtime, namespace.into())
+}
+
+#[cfg(test)]
+fn shared_test_runtime(
+    runtime: &JobsRuntime,
+    namespace: String,
+) -> Arc<dyn JobsCoordinationRuntime> {
+    static REGISTRY: OnceLock<
+        Mutex<std::collections::BTreeMap<String, Arc<dyn JobsCoordinationRuntime>>>,
+    > = OnceLock::new();
+
+    let key = format!(
+        "{}:{:?}:{}:{}:{}:{}:{}",
+        test_scope(),
+        runtime.backend,
+        runtime.topology.work_queue.as_str(),
+        runtime.topology.scheduled_queue.as_str(),
+        runtime.topology.domain_events_queue.as_str(),
+        runtime.topology.dead_letter_queue.as_str(),
+        namespace
+    );
+    let registry = REGISTRY.get_or_init(|| Mutex::new(std::collections::BTreeMap::new()));
+    let mut guard = registry.lock().expect("test jobs registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| {
+            Arc::new(SharedJobsRuntimeHarness::new(Arc::new(
+                EmulatedJobsCoordinationRuntime::new(runtime.clone()),
+            )))
+        })
+        .clone()
+}
+
+#[cfg(not(test))]
 pub(crate) fn persistent_runtime(
     runtime: &JobsRuntime,
     namespace: impl Into<String>,
@@ -35,10 +79,11 @@ fn shared_state_root() -> PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
 }
 
-fn database_path(runtime: &JobsRuntime) -> PathBuf {
+fn database_path(runtime: &JobsRuntime, namespace: &str) -> PathBuf {
     shared_state_root()
         .join("jobs")
-        .join(format!("{}.sqlite3", job_backend_slug(runtime.backend)))
+        .join(job_backend_slug(runtime.backend))
+        .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
 #[derive(Debug)]
@@ -139,7 +184,7 @@ struct SharedJobsStore {
 
 impl SharedJobsStore {
     fn open(runtime: &JobsRuntime, namespace: String) -> Self {
-        let path = database_path(runtime);
+        let path = database_path(runtime, &namespace);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|error| {
                 panic!(
@@ -280,5 +325,103 @@ impl SharedJobsStore {
         }
 
         outcome
+    }
+}
+
+fn sanitize_namespace(namespace: &str) -> String {
+    namespace
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn test_scope() -> String {
+    std::thread::current()
+        .name()
+        .unwrap_or("unnamed-test")
+        .to_string()
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct SharedJobsRuntimeHarness {
+    runtime: Arc<dyn JobsCoordinationRuntime>,
+}
+
+#[cfg(test)]
+impl SharedJobsRuntimeHarness {
+    fn new(runtime: Arc<dyn JobsCoordinationRuntime>) -> Self {
+        Self { runtime }
+    }
+}
+
+#[cfg(test)]
+impl JobsCoordinationRuntime for SharedJobsRuntimeHarness {
+    fn snapshot(&self) -> crate::JobsCoordinatorSnapshot {
+        self.runtime.snapshot()
+    }
+
+    fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
+        self.runtime.enqueue(spec, now)
+    }
+
+    fn acquire_scheduler_leadership(
+        &self,
+        node_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+    ) -> Result<SchedulerLeadership, JobsModelError> {
+        self.runtime
+            .acquire_scheduler_leadership(node_id, now, lease_ttl)
+    }
+
+    fn promote_due_jobs(
+        &self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        self.runtime.promote_due_jobs(node_id, now)
+    }
+
+    fn lease_ready_jobs(
+        &self,
+        queue: &JobQueueName,
+        worker_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, JobsModelError> {
+        self.runtime
+            .lease_ready_jobs(queue, worker_id, now, lease_ttl, max_jobs)
+    }
+
+    fn acknowledge_completed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError> {
+        self.runtime.acknowledge_completed(lease, now)
+    }
+
+    fn acknowledge_failed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: String,
+    ) -> Result<JobFailureDisposition, JobsModelError> {
+        self.runtime
+            .acknowledge_failed(lease, now, reason, error_message)
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        true
     }
 }

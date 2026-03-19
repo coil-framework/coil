@@ -21,6 +21,9 @@ davenda-template = { path = "../davenda-template" }
 davenda-tls = { path = "../davenda-tls" }
 davenda-wasm = { path = "../davenda-wasm" }
 ipnet = "2"
+rusqlite = { version = "0.30", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "1.0"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }

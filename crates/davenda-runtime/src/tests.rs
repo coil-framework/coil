@@ -3042,7 +3042,7 @@ fn runtime_backend_materializer_reuses_explicit_session_runtime_for_browser_host
 }
 
 #[test]
-fn runtime_backend_materializer_keeps_session_state_local_to_each_instance() {
+fn runtime_backend_materializer_shares_session_state_across_instances() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
@@ -3091,7 +3091,12 @@ fn runtime_backend_materializer_keeps_session_state_local_to_each_instance() {
         )
         .unwrap();
 
-    assert!(right.session(&issued.record.session_id).is_none());
+    assert_eq!(
+        right
+            .session(&issued.record.session_id)
+            .and_then(|record| record.principal_id),
+        Some("member-isolated".to_string())
+    );
 }
 
 #[test]

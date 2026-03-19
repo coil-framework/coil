@@ -408,12 +408,25 @@ impl WasmHost {
         &self,
         extension_id: &davenda_wasm::ExtensionId,
     ) -> Result<CompiledWasmModule, LiveWasmExecutionError> {
-        let path = self.installed_module_path(extension_id);
-        let bytes = fs::read(&path).map_err(|error| LiveWasmExecutionError::ArtifactRead {
-            extension_id: extension_id.to_string(),
-            path: path.display().to_string(),
-            reason: error.to_string(),
-        })?;
+        let bytes = if let Some(installed) = self.registry.extension(extension_id) {
+            if let Some(artifact) = installed.artifact() {
+                artifact.load_bytes(&self.runtime.extension_directory, extension_id)?
+            } else {
+                let path = self.installed_module_path(extension_id);
+                fs::read(&path).map_err(|error| LiveWasmExecutionError::ArtifactRead {
+                    extension_id: extension_id.to_string(),
+                    path: path.display().to_string(),
+                    reason: error.to_string(),
+                })?
+            }
+        } else {
+            let path = self.installed_module_path(extension_id);
+            fs::read(&path).map_err(|error| LiveWasmExecutionError::ArtifactRead {
+                extension_id: extension_id.to_string(),
+                path: path.display().to_string(),
+                reason: error.to_string(),
+            })?
+        };
 
         self.compile_module(&bytes).map_err(Into::into)
     }

@@ -256,6 +256,10 @@ impl ExtensionRegistry {
         self.extensions.values()
     }
 
+    pub fn extension(&self, extension_id: &ExtensionId) -> Option<&InstalledExtension> {
+        self.extensions.get(extension_id)
+    }
+
     pub fn registered_handlers(&self) -> &[RegisteredExtensionHandler] {
         &self.registered_handlers
     }

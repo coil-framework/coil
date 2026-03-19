@@ -1,3 +1,4 @@
+mod artifact;
 mod engine;
 mod error;
 mod grants;
@@ -8,6 +9,7 @@ mod points;
 mod registry;
 mod validation;
 
+pub use artifact::*;
 pub use engine::*;
 pub use error::*;
 pub use grants::*;

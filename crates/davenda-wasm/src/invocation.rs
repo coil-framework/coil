@@ -503,6 +503,7 @@ pub struct ExecutionReceipt {
     pub runtime: Duration,
     pub usage: ExecutionUsage,
     pub outcome: InvocationOutcome,
+    pub host_calls: Vec<HostCall>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -510,6 +511,7 @@ pub struct WasmExecutionSession {
     plan: InvocationPlan,
     usage: ExecutionUsage,
     active_concurrency: u16,
+    host_calls: Vec<HostCall>,
 }
 
 impl WasmExecutionSession {
@@ -518,6 +520,7 @@ impl WasmExecutionSession {
             plan,
             usage: ExecutionUsage::default(),
             active_concurrency: 0,
+            host_calls: Vec::new(),
         }
     }
 
@@ -527,6 +530,10 @@ impl WasmExecutionSession {
 
     pub fn usage(&self) -> &ExecutionUsage {
         &self.usage
+    }
+
+    pub fn host_calls(&self) -> &[HostCall] {
+        &self.host_calls
     }
 
     pub fn grant_slots(&self) -> Vec<HostCapabilityGrant> {
@@ -581,6 +588,8 @@ impl WasmExecutionSession {
             }
             _ => {}
         }
+
+        self.host_calls.push(call);
 
         Ok(())
     }
@@ -652,6 +661,7 @@ impl WasmExecutionSession {
             runtime,
             usage: self.usage,
             outcome,
+            host_calls: self.host_calls,
         })
     }
 }

@@ -19,6 +19,15 @@ pub enum WasmModelError {
         field: &'static str,
         value: String,
     },
+    ArtifactRead {
+        path: String,
+        reason: String,
+    },
+    ArtifactChecksumMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
     DuplicateConfigField {
         key: String,
     },
@@ -166,6 +175,17 @@ impl fmt::Display for WasmModelError {
             Self::InvalidChecksum { field, value } => write!(
                 f,
                 "`{field}` must be a 64-character lowercase hex digest, got `{value}`"
+            ),
+            Self::ArtifactRead { path, reason } => {
+                write!(f, "failed to read artifact at `{path}`: {reason}")
+            }
+            Self::ArtifactChecksumMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "artifact at `{path}` failed checksum verification: expected `{expected}`, got `{actual}`"
             ),
             Self::DuplicateConfigField { key } => {
                 write!(f, "extension config schema declares duplicate key `{key}`")

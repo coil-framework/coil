@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::artifact::InstalledArtifact;
 use crate::error::WasmModelError;
 use crate::grants::{HostGrantSet, ResourceLimits};
 use crate::ids::{ContractVersion, ExtensionId, HandlerId};
@@ -353,6 +354,11 @@ impl ExtensionPackage {
     ) -> Result<InstalledExtension, WasmModelError> {
         let mut installed = InstalledExtension::install(self.manifest.clone(), installation)?;
         installed.config = self.config_schema.effective_values(configured_values)?;
+        installed.artifact = Some(InstalledArtifact::new(
+            self.publisher.clone(),
+            self.artifact_source.clone(),
+            self.artifact_sha256.clone(),
+        )?);
         Ok(installed)
     }
 
@@ -418,6 +424,7 @@ pub struct InstalledExtension {
     pub(crate) customer_app_id: String,
     pub(crate) config: BTreeMap<String, ExtensionConfigValue>,
     pub(crate) handlers: BTreeMap<HandlerId, InstalledHandler>,
+    pub(crate) artifact: Option<InstalledArtifact>,
 }
 
 impl InstalledExtension {
@@ -479,6 +486,7 @@ impl InstalledExtension {
             customer_app_id: installation.customer_app_id,
             config: BTreeMap::new(),
             handlers,
+            artifact: None,
         })
     }
 
@@ -496,6 +504,10 @@ impl InstalledExtension {
 
     pub fn config(&self) -> &BTreeMap<String, ExtensionConfigValue> {
         &self.config
+    }
+
+    pub fn artifact(&self) -> Option<&InstalledArtifact> {
+        self.artifact.as_ref()
     }
 
     pub fn prepare_invocation(

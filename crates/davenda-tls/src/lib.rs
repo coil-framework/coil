@@ -13,7 +13,7 @@ pub use model::{
     TlsInstant,
 };
 pub use runtime::{
-    CertificateInventory, ChallengeTicket, FileTlsAutomationBackend, HotReloadEvent, IssuancePlan,
-    MemoryTlsAutomationBackend, RenewalPlan, TlsAutomationBackend, TlsAutomationRuntime,
-    TlsAutomationState, TlsPlanner, TlsRuntime,
+    CertificateInventory, ChallengeTicket, HotReloadEvent, IssuancePlan, RenewalPlan,
+    SharedTlsAutomationBackend, TlsAutomationBackend, TlsAutomationRuntime, TlsAutomationState,
+    TlsPlanner, TlsRuntime,
 };

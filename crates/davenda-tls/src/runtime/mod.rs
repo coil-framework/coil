@@ -4,8 +4,7 @@ mod planning;
 mod state;
 
 pub use automation::TlsAutomationRuntime;
-#[allow(unused_imports)]
-pub use backend::{FileTlsAutomationBackend, MemoryTlsAutomationBackend, TlsAutomationBackend};
+pub use backend::{SharedTlsAutomationBackend, TlsAutomationBackend};
 pub use planning::{
     ChallengeTicket, HotReloadEvent, IssuancePlan, RenewalPlan, TlsPlanner, TlsRuntime,
 };

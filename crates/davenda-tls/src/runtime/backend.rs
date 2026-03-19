@@ -5,12 +5,18 @@ use super::planning::{ChallengeTicket, HotReloadEvent, RenewalPlan};
 use super::state::TlsAutomationState;
 use crate::{CertificateId, CertificateRecord, TlsInstant, TlsModelError};
 
+#[cfg(test)]
 mod file;
 mod memory;
 mod shared;
 
-pub use file::FileTlsAutomationBackend;
-pub use memory::MemoryTlsAutomationBackend;
+#[cfg(test)]
+pub(super) use file::FileTlsAutomationBackend;
+pub(super) use memory::MemoryTlsAutomationBackend;
+#[cfg(test)]
+pub(crate) fn test_state_path(scope: impl Into<String>) -> std::path::PathBuf {
+    file::test_state_path(scope)
+}
 pub use shared::SharedTlsAutomationBackend;
 
 pub trait TlsAutomationBackend: fmt::Debug + Send + Sync {
@@ -38,24 +44,4 @@ pub trait TlsAutomationBackend: fmt::Debug + Send + Sync {
         certificate_id: &CertificateId,
         replacement: CertificateRecord,
     ) -> Result<HotReloadEvent, TlsModelError>;
-}
-
-pub fn default_state_path(scope: impl Into<String>) -> std::path::PathBuf {
-    let base = std::env::var_os("DAVENDA_TLS_STATE_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("davenda/tls"));
-    base.join(format!("{}.json", sanitize_state_scope(scope.into())))
-}
-
-fn sanitize_state_scope(scope: String) -> String {
-    scope
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }

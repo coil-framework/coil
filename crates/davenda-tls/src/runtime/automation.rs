@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use super::backend::{
-    FileTlsAutomationBackend, MemoryTlsAutomationBackend, SharedTlsAutomationBackend,
-    TlsAutomationBackend, default_state_path,
-};
+use super::backend::{SharedTlsAutomationBackend, TlsAutomationBackend};
 use super::planning::TlsRuntime;
 use super::state::{CertificateInventory, TlsAutomationState};
 use crate::{
@@ -19,20 +16,25 @@ pub struct TlsAutomationRuntime {
 }
 
 impl TlsAutomationRuntime {
+    #[cfg(test)]
     pub fn new(runtime: TlsRuntime) -> Self {
-        Self::with_backend(runtime, Arc::new(MemoryTlsAutomationBackend::new()))
+        Self::ephemeral(runtime)
     }
 
     pub fn ephemeral(runtime: TlsRuntime) -> Self {
-        Self::with_backend(runtime, Arc::new(MemoryTlsAutomationBackend::new()))
-    }
-
-    pub fn with_persistent_backend(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
         Self::with_backend(
             runtime,
-            Arc::new(FileTlsAutomationBackend::new(default_state_path(
-                scope.into(),
-            ))),
+            Arc::new(super::backend::MemoryTlsAutomationBackend::new()),
+        )
+    }
+
+    #[cfg(test)]
+    pub fn with_file_backend_for_testing(runtime: TlsRuntime, scope: impl Into<String>) -> Self {
+        Self::with_backend(
+            runtime,
+            Arc::new(super::backend::FileTlsAutomationBackend::new(
+                super::backend::test_state_path(scope),
+            )),
         )
     }
 
@@ -47,7 +49,7 @@ impl TlsAutomationRuntime {
         ))
     }
 
-    pub fn with_backend(runtime: TlsRuntime, backend: Arc<dyn TlsAutomationBackend>) -> Self {
+    fn with_backend(runtime: TlsRuntime, backend: Arc<dyn TlsAutomationBackend>) -> Self {
         Self { runtime, backend }
     }
 

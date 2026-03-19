@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -220,4 +222,24 @@ fn current_nanos() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock is after unix epoch")
         .as_nanos()
+}
+
+pub(crate) fn test_state_path(scope: impl Into<String>) -> PathBuf {
+    let base = std::env::var_os("DAVENDA_TLS_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("davenda/tls"));
+    base.join(format!("{}.json", sanitize_state_scope(scope.into())))
+}
+
+fn sanitize_state_scope(scope: String) -> String {
+    scope
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }

@@ -3,7 +3,6 @@ use std::time::Duration;
 use davenda_config::{SecretRef, TlsConfig, TlsMode, TlsProvider};
 use serde::{Deserialize, Serialize};
 
-use super::automation::TlsAutomationRuntime;
 use crate::{
     CertificateId, CertificateProviderKind, CertificateRecord, CertificateStateStore,
     CertificateStatus, ChallengeStrategy, CloudflareEncryptionMode, EdgeMode, HostnameBinding,
@@ -151,8 +150,9 @@ impl TlsRuntime {
         )
     }
 
-    pub fn automation(&self) -> TlsAutomationRuntime {
-        TlsAutomationRuntime::new(self.clone())
+    #[cfg(test)]
+    pub fn automation(&self) -> super::automation::TlsAutomationRuntime {
+        super::automation::TlsAutomationRuntime::new(self.clone())
     }
 }
 

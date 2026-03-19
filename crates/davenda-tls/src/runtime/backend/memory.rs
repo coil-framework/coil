@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::sync::{Arc, Mutex};
 
 use super::super::planning::TlsRuntime;

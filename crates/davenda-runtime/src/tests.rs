@@ -1311,8 +1311,10 @@ fn browser_host_shares_distributed_sessions_when_reusing_an_explicit_client() {
 fn cache_runtime_shares_distributed_state_when_reusing_an_explicit_backend() {
     let topology = CacheTopology::with_redis();
     let planner = CachePlanner::new(topology);
-    let shared_runtime =
-        davenda_cache::DistributedCacheClient::emulated_shared_runtime(CacheBackendKind::Redis);
+    let shared_runtime = davenda_cache::DistributedCacheClient::persistent_shared_runtime(
+        CacheBackendKind::Redis,
+        "runtime-cache-shared-test",
+    );
     let adapter = CacheBackendAdapter::with_shared_runtime(topology, shared_runtime);
     let mut left = CacheRuntime::with_backend(topology, adapter.clone());
     let mut right = CacheRuntime::with_backend(topology, adapter);

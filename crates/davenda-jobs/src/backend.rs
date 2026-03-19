@@ -5,6 +5,7 @@ use crate::runtime::{JobSpec, JobsRuntime};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
+#[cfg(test)]
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -104,11 +105,13 @@ pub trait JobsCoordinationRuntime: Send + Sync + 'static {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct EmulatedJobsCoordinationRuntime {
     state: Mutex<JobsBackendState>,
 }
 
+#[cfg(test)]
 impl EmulatedJobsCoordinationRuntime {
     fn new(runtime: JobsRuntime) -> Self {
         Self {
@@ -117,6 +120,7 @@ impl EmulatedJobsCoordinationRuntime {
     }
 }
 
+#[cfg(test)]
 impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
     fn snapshot(&self) -> JobsCoordinatorSnapshot {
         let guard = self.state.lock().expect("jobs backend mutex poisoned");
@@ -223,7 +227,15 @@ impl JobsBackendAdapter {
     }
 
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-        Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
+        #[cfg(test)]
+        {
+            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
+        }
+
+        #[cfg(not(test))]
+        {
+            shared::persistent_runtime(runtime, shared::default_namespace(runtime))
+        }
     }
 
     #[allow(dead_code)]
@@ -242,11 +254,16 @@ impl JobsBackendAdapter {
 
     #[doc(hidden)]
     pub fn local_for_testing(runtime: &JobsRuntime) -> Self {
+        #[cfg(test)]
+        let runtime_backend = Self::emulated_shared_runtime(runtime);
+        #[cfg(not(test))]
+        let runtime_backend = shared::local_runtime(runtime);
+
         Self {
             backend: runtime.backend,
             queue_topology: runtime.topology.clone(),
             shared: false,
-            runtime: Self::emulated_shared_runtime(runtime),
+            runtime: runtime_backend,
         }
     }
 

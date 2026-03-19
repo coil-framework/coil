@@ -11,10 +11,14 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::OnceLock;
+#[cfg(not(test))]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
+#[cfg(not(test))]
+static LOCAL_NAMESPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
 pub(crate) fn persistent_runtime(
@@ -22,6 +26,11 @@ pub(crate) fn persistent_runtime(
     namespace: impl Into<String>,
 ) -> Arc<dyn JobsCoordinationRuntime> {
     shared_test_runtime(runtime, namespace.into())
+}
+
+#[cfg(not(test))]
+pub(crate) fn local_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
+    persistent_runtime(runtime, default_namespace(runtime))
 }
 
 #[cfg(test)]
@@ -64,6 +73,24 @@ pub(crate) fn persistent_runtime(
         runtime.clone(),
         namespace.into(),
     ))
+}
+
+#[cfg(not(test))]
+pub(crate) fn default_namespace(runtime: &JobsRuntime) -> String {
+    if let Ok(namespace) = std::env::var("DAVENDA_SHARED_BACKEND_NAMESPACE") {
+        return namespace;
+    }
+
+    format!(
+        "jobs:{:?}:{}:{}:{}:{}:{}:{}",
+        runtime.backend,
+        runtime.topology.work_queue.as_str(),
+        runtime.topology.scheduled_queue.as_str(),
+        runtime.topology.domain_events_queue.as_str(),
+        runtime.topology.dead_letter_queue.as_str(),
+        std::process::id(),
+        LOCAL_NAMESPACE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn job_backend_slug(backend: davenda_config::JobBackend) -> &'static str {

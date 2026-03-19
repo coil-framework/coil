@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
+#[cfg(test)]
 use std::sync::Mutex;
 
 use crate::{
@@ -122,11 +123,13 @@ pub trait DistributedCacheRuntime: Send + Sync + 'static {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct EmulatedDistributedCacheRuntime {
     state: Mutex<CacheBackendState>,
 }
 
+#[cfg(test)]
 impl EmulatedDistributedCacheRuntime {
     fn new() -> Self {
         Self {
@@ -135,6 +138,7 @@ impl EmulatedDistributedCacheRuntime {
     }
 }
 
+#[cfg(test)]
 impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         let mut guard = self.state.lock().expect("cache backend mutex poisoned");
@@ -204,8 +208,16 @@ impl DistributedCacheClient {
     }
 
     pub fn emulated_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
-        let _ = kind;
-        Arc::new(EmulatedDistributedCacheRuntime::new())
+        #[cfg(test)]
+        {
+            let _ = kind;
+            Arc::new(EmulatedDistributedCacheRuntime::new())
+        }
+
+        #[cfg(not(test))]
+        {
+            shared::persistent_runtime(kind, shared::default_namespace("cache", kind))
+        }
     }
 
     #[allow(dead_code)]
@@ -220,10 +232,15 @@ impl DistributedCacheClient {
     #[allow(dead_code)]
     #[doc(hidden)]
     pub fn local_for_testing(kind: CacheBackendKind) -> Self {
+        #[cfg(test)]
+        let runtime = Self::emulated_shared_runtime(kind);
+        #[cfg(not(test))]
+        let runtime = shared::local_runtime(kind);
+
         Self {
             kind,
             shared: false,
-            runtime: Self::emulated_shared_runtime(kind),
+            runtime,
         }
     }
 

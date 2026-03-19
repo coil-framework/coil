@@ -89,9 +89,13 @@ impl PostgresDataClient {
         &self,
         transaction: &CompiledTransaction,
     ) -> Result<TransactionExecution, DataModelError> {
-        let mut tx = self.pool.begin().await.map_err(|error| DataModelError::Sqlx {
-            reason: error.to_string(),
-        })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| DataModelError::Sqlx {
+                reason: error.to_string(),
+            })?;
 
         sqlx::query(&format!(
             "SET LOCAL statement_timeout = {}",
@@ -125,9 +129,13 @@ impl PostgresDataClient {
         &self,
         batch: &CompiledMigrationBatch,
     ) -> Result<MigrationBatchExecution, DataModelError> {
-        let mut tx = self.pool.begin().await.map_err(|error| DataModelError::Sqlx {
-            reason: error.to_string(),
-        })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| DataModelError::Sqlx {
+                reason: error.to_string(),
+            })?;
 
         sqlx::query(&format!(
             "SET LOCAL statement_timeout = {}",
@@ -180,10 +188,8 @@ pub(crate) fn bind_query<'q>(
             DataValue::String(value) => query.bind(value.clone()),
             DataValue::Int(value) => query.bind(*value),
             DataValue::UInt(value) => {
-                let value =
-                    i64::try_from(*value).map_err(|_| DataModelError::UnsupportedUnsignedBindValue {
-                        value: *value,
-                    })?;
+                let value = i64::try_from(*value)
+                    .map_err(|_| DataModelError::UnsupportedUnsignedBindValue { value: *value })?;
                 query.bind(value)
             }
             DataValue::Bool(value) => query.bind(*value),

@@ -59,10 +59,7 @@ impl fmt::Display for TableName {
     }
 }
 
-pub(crate) fn validate_token(
-    field: &'static str,
-    value: String,
-) -> Result<String, DataModelError> {
+pub(crate) fn validate_token(field: &'static str, value: String) -> Result<String, DataModelError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(DataModelError::EmptyField { field });

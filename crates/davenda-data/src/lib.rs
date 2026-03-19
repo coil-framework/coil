@@ -18,7 +18,9 @@ pub use runtime::*;
 pub use sqlx_postgres::*;
 
 pub(crate) use identifiers::require_non_empty;
-pub(crate) use sql::{compile_filters, ensure_repository_field, quote_identifier, render_placeholder};
+pub(crate) use sql::{
+    compile_filters, ensure_repository_field, quote_identifier, render_placeholder,
+};
 
 #[cfg(test)]
 mod tests;

@@ -26,7 +26,10 @@ fn data_runtime_maps_database_config_into_pool_profile() {
             var: "DATABASE_URL".to_string()
         })
     );
-    assert_eq!(runtime.connection_secret.as_deref(), Some("env:DATABASE_URL"));
+    assert_eq!(
+        runtime.connection_secret.as_deref(),
+        Some("env:DATABASE_URL")
+    );
     assert_eq!(runtime.schema, "davenda");
     assert_eq!(runtime.pool.max_connections, 16);
     assert_eq!(runtime.pool.statement_timeout, Duration::from_secs(15));
@@ -207,7 +210,10 @@ fn transaction_plans_keep_writes_separate_from_after_commit_work() {
         .unwrap();
 
     assert_eq!(plan.writes.len(), 2);
-    assert_eq!(plan.after_commit_jobs, vec!["send-booking-email".to_string()]);
+    assert_eq!(
+        plan.after_commit_jobs,
+        vec!["send-booking-email".to_string()]
+    );
     assert_eq!(
         plan.after_commit_events,
         vec!["booking.created".to_string()]

@@ -98,7 +98,11 @@ impl RepositorySpec {
             )?);
         }
 
-        if let (crate::PublicationVisibility::PublishedOnly, Some(publication_field), Some(published)) = (
+        if let (
+            crate::PublicationVisibility::PublishedOnly,
+            Some(publication_field),
+            Some(published),
+        ) = (
             spec.context.publication_visibility,
             self.context.publication_field.as_ref(),
             self.context.published_value.as_ref(),

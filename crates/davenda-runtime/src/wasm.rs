@@ -90,6 +90,7 @@ pub struct WasmHost {
     pub runtime: WasmRuntimeServices,
     registry: ExtensionRegistry,
     engine: WasmEngine,
+    tenant_id: i64,
     default_locale: String,
     registered_jobs: Vec<RuntimeJobDefinition>,
     host_service_executor: Arc<dyn HostServiceExecutor>,
@@ -110,6 +111,7 @@ impl WasmHost {
             runtime,
             registry,
             engine: WasmEngine::new(),
+            tenant_id: plan.tenant_id(),
             default_locale,
             registered_jobs,
             host_service_executor,
@@ -437,6 +439,7 @@ impl WasmHost {
         locale: Option<&str>,
     ) -> Result<CustomerAppContext, WasmModelError> {
         let mut customer_app = CustomerAppContext::new(self.customer_app.clone())?;
+        customer_app = customer_app.with_tenant_id(self.tenant_id.to_string())?;
         customer_app =
             customer_app.with_locale(locale.unwrap_or(self.default_locale.as_str()).to_string())?;
         Ok(customer_app)
@@ -856,10 +859,10 @@ impl RuntimeAuthBackend {
         tenant_id: i64,
     ) -> Result<AuthServiceExecution, WasmModelError> {
         let subject = subject_for_principal(context);
-        let tenant = tenant_object(context);
+        let tenant = tenant_object(context, tenant_id);
         let principal_id = context.principal.id.clone();
         let Some(auth) = self.auth.as_ref() else {
-            return Ok(synthetic_auth_execution(request, context));
+            return Ok(synthetic_auth_execution(request, context, tenant_id));
         };
 
         let auth = auth.clone();
@@ -1107,12 +1110,12 @@ fn subject_for_principal(context: &InvocationContext) -> DefaultSubject {
     }
 }
 
-fn tenant_object(context: &InvocationContext) -> Entity {
+fn tenant_object(context: &InvocationContext, tenant_id: i64) -> Entity {
     let object_id = context
         .customer_app
         .tenant_id
         .clone()
-        .unwrap_or_else(|| context.customer_app.app_id.clone());
+        .unwrap_or_else(|| tenant_id.to_string());
     Entity::tenant(object_id)
 }
 
@@ -1130,15 +1133,10 @@ fn auth_sequence(context: &InvocationContext) -> u32 {
 fn synthetic_auth_execution(
     request: &AuthServiceRequest,
     context: &InvocationContext,
+    tenant_id: i64,
 ) -> AuthServiceExecution {
     let principal_id = context.principal.id.clone();
-    let tenant = Entity::tenant(
-        context
-            .customer_app
-            .tenant_id
-            .clone()
-            .unwrap_or_else(|| context.customer_app.app_id.clone()),
-    );
+    let tenant = tenant_object(context, tenant_id);
     let subject = subject_for_principal(context);
     let decision = true;
     let sequence = auth_sequence(context);

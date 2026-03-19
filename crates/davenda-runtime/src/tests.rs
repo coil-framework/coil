@@ -3268,6 +3268,10 @@ fn wasm_host_prepares_admin_widget_invocations_from_request_execution() {
         Some("en-GB")
     );
     assert_eq!(
+        sessions[0].plan().context.customer_app.tenant_id.as_deref(),
+        Some("101")
+    );
+    assert_eq!(
         sessions[0].plan().context.principal.kind,
         PrincipalKind::User
     );
@@ -3281,6 +3285,13 @@ fn wasm_host_prepares_admin_widget_invocations_from_request_execution() {
     ));
 
     sessions[0].record_host_call(HostCall::AuthCheck).unwrap();
+    assert!(matches!(
+        &sessions[0].host_service_executions()[0].result,
+        davenda_wasm::HostServiceResult::Auth(davenda_wasm::AuthServiceExecution {
+            details: davenda_wasm::AuthServiceDetails::Check { object, .. },
+            ..
+        }) if object == "tenant:101"
+    ));
     sessions[0]
         .record_host_call(HostCall::DataRead {
             resource: "events.waitlist".to_string(),

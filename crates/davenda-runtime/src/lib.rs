@@ -1,7 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::time::Duration;
 
 use davenda_auth::AuthModelPackage;
-use davenda_cache::CacheTopology;
+use davenda_cache::{
+    ApplicationCachePolicy, CacheInstant, CacheKey, CacheLookup, CacheMetrics, CacheModelError,
+    CacheNamespace, CachePlan, CachePlanRequest, CachePlanner, CacheRuntime, CacheScope,
+    CacheTopology, EntityTag, FillDecision, FreshnessPolicy, HttpCachePolicy, InvalidationSet,
+    InvalidationTag, ResponseValidators,
+};
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
     BrowserSecurityServices, BulkOperationDefinition, CapabilityValidationError,
@@ -439,8 +445,15 @@ pub struct RequestExecution {
     pub session: SessionContext,
     pub principal: PrincipalContext,
     pub cache: CacheDisposition,
+    pub cache_plan: ExecutedCachePlan,
     pub middleware: Vec<MiddlewareStage>,
     pub response: HandlerResponse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutedCachePlan {
+    pub plan: CachePlan,
+    pub headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -616,6 +629,8 @@ pub enum RequestExecutionError {
     FeatureFlagDisabled { route: String, feature_flag: String },
     #[error("route `{route}` has no registered handler")]
     HandlerNotRegistered { route: String },
+    #[error(transparent)]
+    Cache(#[from] CacheModelError),
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -857,6 +872,7 @@ where
             config: self.config,
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
+            cache_planner: bootstrap.cache.planner,
             browser: bootstrap.browser,
             cli: bootstrap.cli,
             data: bootstrap.data,
@@ -891,6 +907,7 @@ pub struct RuntimePlan {
     pub config: PlatformConfig,
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
+    pub cache_planner: CachePlanner,
     pub browser: BrowserSecurityServices,
     pub cli: CliRuntimeServices,
     pub data: DataRuntimeServices,
@@ -1467,6 +1484,72 @@ impl TlsHost {
     }
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeCacheError {
+    #[error(transparent)]
+    Cache(#[from] CacheModelError),
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheHost {
+    pub customer_app: String,
+    pub namespace: CacheNamespace,
+    pub planner: CachePlanner,
+    runtime: CacheRuntime,
+}
+
+impl CacheHost {
+    pub fn lookup_execution(
+        &mut self,
+        execution: &RequestExecution,
+        now: CacheInstant,
+    ) -> Option<CacheLookup> {
+        execution
+            .cache_plan
+            .plan
+            .application()
+            .map(|plan| self.runtime.lookup(plan.key(), now))
+    }
+
+    pub fn begin_fill(
+        &mut self,
+        execution: &RequestExecution,
+        holder: impl Into<String>,
+    ) -> Option<FillDecision> {
+        execution.cache_plan.plan.application().map(|plan| {
+            self.runtime
+                .begin_fill(plan.key(), plan.coalescing(), holder)
+        })
+    }
+
+    pub fn complete_fill(&mut self, decision: &FillDecision) -> Result<(), RuntimeCacheError> {
+        match decision {
+            FillDecision::Start(lease) => Ok(self.runtime.complete_fill(lease)?),
+            FillDecision::Coalesced { .. } | FillDecision::Uncoalesced => Ok(()),
+        }
+    }
+
+    pub fn store_execution(
+        &mut self,
+        execution: &RequestExecution,
+        value: impl Into<String>,
+        now: CacheInstant,
+    ) -> Option<CacheKey> {
+        execution.cache_plan.plan.application().map(|plan| {
+            self.runtime.insert(plan, value, now);
+            plan.key().clone()
+        })
+    }
+
+    pub fn invalidate(&mut self, tags: &InvalidationSet) -> Vec<CacheKey> {
+        self.runtime.invalidate(tags)
+    }
+
+    pub fn metrics(&self) -> CacheMetrics {
+        self.runtime.metrics()
+    }
+}
+
 impl RuntimePlan {
     pub fn jobs_host(
         &self,
@@ -1499,12 +1582,26 @@ impl RuntimePlan {
         })
     }
 
+    pub fn cache_host(&self) -> Result<CacheHost, RuntimeCacheError> {
+        let namespace = self.cache_namespace()?;
+        Ok(CacheHost {
+            customer_app: self.config.app.name.clone(),
+            namespace,
+            planner: self.cache_planner,
+            runtime: self.cache_planner.runtime(),
+        })
+    }
+
     pub fn tls_host(&self) -> TlsHost {
         TlsHost {
             customer_app: self.config.app.name.clone(),
             runtime: self.tls.clone(),
             automation: self.tls.automation(),
         }
+    }
+
+    fn cache_namespace(&self) -> Result<CacheNamespace, CacheModelError> {
+        CacheNamespace::new(format!("customer-app:{}", self.config.app.name))
     }
 
     pub fn execute_request(
@@ -1574,6 +1671,16 @@ impl RuntimePlan {
             .ok_or_else(|| RequestExecutionError::HandlerNotRegistered {
                 route: matched.resolved.route_name.clone(),
             })?;
+        let cache = cache_disposition_for_route(request.method, &matched.resolved.auth, &session);
+        let cache_plan = build_execution_cache_plan(
+            self,
+            &request,
+            &matched.route,
+            &matched.resolved,
+            &session,
+            &principal,
+            cache,
+        )?;
 
         Ok(RequestExecution {
             customer_app: self.config.app.name.clone(),
@@ -1587,7 +1694,8 @@ impl RuntimePlan {
             trace,
             session: session.clone(),
             principal,
-            cache: cache_disposition_for_route(request.method, &matched.resolved.auth, &session),
+            cache,
+            cache_plan,
             middleware: self.http.middleware.clone(),
             response,
         })
@@ -1749,6 +1857,173 @@ fn cache_disposition_for_route(
         RouteAuthGate::Public if session.session_id.is_none() => CacheDisposition::Public,
         _ => CacheDisposition::Private,
     }
+}
+
+fn build_execution_cache_plan(
+    runtime: &RuntimePlan,
+    request: &RequestInput,
+    route: &RouteDefinition,
+    resolved: &ResolvedRoute,
+    session: &SessionContext,
+    principal: &PrincipalContext,
+    disposition: CacheDisposition,
+) -> Result<ExecutedCachePlan, CacheModelError> {
+    let scope = cache_scope_for_request(request, resolved, session, principal, disposition)?;
+    let tags = cache_tags_for_request(runtime, route, resolved, request)?;
+    let validators = cache_validators_for_request(request, resolved, session, principal)?;
+    let freshness = cache_freshness_for_request(route, request.method, disposition);
+    let http_policy = HttpCachePolicy::new(scope.clone(), freshness, validators, tags.clone())?;
+    let mut cache_request = CachePlanRequest::new(
+        runtime.cache_namespace()?,
+        request.path.clone(),
+        http_policy,
+    )?;
+
+    if let Some(freshness) = freshness.filter(|_| disposition != CacheDisposition::Uncacheable) {
+        cache_request = cache_request
+            .with_application_policy(ApplicationCachePolicy::new(scope, freshness, tags)?);
+    }
+
+    let plan = runtime.cache_planner.plan(cache_request)?;
+    let headers = cache_headers_from_plan(&plan);
+
+    Ok(ExecutedCachePlan { plan, headers })
+}
+
+fn cache_scope_for_request(
+    request: &RequestInput,
+    resolved: &ResolvedRoute,
+    session: &SessionContext,
+    principal: &PrincipalContext,
+    disposition: CacheDisposition,
+) -> Result<CacheScope, CacheModelError> {
+    let mut scope = match disposition {
+        CacheDisposition::Public => CacheScope::public(),
+        CacheDisposition::Private => CacheScope::private(),
+        CacheDisposition::Uncacheable => CacheScope::no_store(),
+    }
+    .with_site(request.host.clone())?;
+
+    if let Some(locale) = resolved.locale.as_deref() {
+        scope = scope.with_locale(locale.to_string())?;
+    }
+
+    if disposition == CacheDisposition::Private {
+        if let Some(principal_id) = principal.principal_id.as_deref() {
+            scope = scope.with_user(principal_id.to_string())?;
+        } else if let Some(session_id) = session.session_id.as_deref() {
+            scope = scope.with_session(session_id.to_string())?;
+        }
+    }
+
+    Ok(scope)
+}
+
+fn cache_tags_for_request(
+    runtime: &RuntimePlan,
+    route: &RouteDefinition,
+    resolved: &ResolvedRoute,
+    request: &RequestInput,
+) -> Result<InvalidationSet, CacheModelError> {
+    let mut tags = InvalidationSet::new();
+    tags.insert(InvalidationTag::new(format!(
+        "customer_app:{}",
+        runtime.config.app.name
+    ))?);
+    tags.insert(InvalidationTag::new(format!(
+        "route:{}",
+        resolved.route_name
+    ))?);
+    tags.insert(InvalidationTag::new(format!("path:{}", request.path))?);
+
+    if let Some(module) = route.module.as_deref() {
+        tags.insert(InvalidationTag::new(format!("module:{module}"))?);
+    }
+
+    if let Some(locale) = resolved.locale.as_deref() {
+        tags.insert(InvalidationTag::new(format!("locale:{locale}"))?);
+    }
+
+    Ok(tags)
+}
+
+fn cache_validators_for_request(
+    request: &RequestInput,
+    resolved: &ResolvedRoute,
+    session: &SessionContext,
+    principal: &PrincipalContext,
+) -> Result<ResponseValidators, CacheModelError> {
+    let mut parts = vec![
+        "etag".to_string(),
+        resolved.route_name.clone(),
+        request.host.clone(),
+        request.path.clone(),
+    ];
+
+    if let Some(locale) = resolved.locale.as_deref() {
+        parts.push(format!("locale:{locale}"));
+    }
+    if let Some(principal_id) = principal.principal_id.as_deref() {
+        parts.push(format!("user:{principal_id}"));
+    } else if let Some(session_id) = session.session_id.as_deref() {
+        parts.push(format!("session:{session_id}"));
+    }
+
+    Ok(ResponseValidators {
+        etag: Some(EntityTag::new(parts.join(":"))?),
+        last_modified_unix_seconds: None,
+    })
+}
+
+fn cache_freshness_for_request(
+    route: &RouteDefinition,
+    method: HttpMethod,
+    disposition: CacheDisposition,
+) -> Option<FreshnessPolicy> {
+    if method.is_state_changing() || disposition == CacheDisposition::Uncacheable {
+        return None;
+    }
+
+    match disposition {
+        CacheDisposition::Public => Some(
+            FreshnessPolicy::new(Duration::from_secs(300), Some(Duration::from_secs(30)))
+                .expect("constant public freshness is valid"),
+        ),
+        CacheDisposition::Private if route.area == RouteArea::Account => Some(
+            FreshnessPolicy::new(Duration::from_secs(60), Some(Duration::from_secs(30)))
+                .expect("constant account freshness is valid"),
+        ),
+        CacheDisposition::Private => Some(
+            FreshnessPolicy::new(Duration::from_secs(30), Some(Duration::from_secs(15)))
+                .expect("constant private freshness is valid"),
+        ),
+        CacheDisposition::Uncacheable => None,
+    }
+}
+
+fn cache_headers_from_plan(plan: &CachePlan) -> BTreeMap<String, String> {
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "Cache-Control".to_string(),
+        plan.http().cache_control().to_string(),
+    );
+
+    if let Some(variation) = plan.http().variation() {
+        headers.insert(
+            "X-Davenda-Variation-Key".to_string(),
+            variation.as_str().to_string(),
+        );
+    }
+
+    if let Some(etag) = plan.http().validators().etag.as_ref() {
+        headers.insert("ETag".to_string(), etag.as_str().to_string());
+    }
+
+    if let Some(surrogate_tags) = plan.http().surrogate_tags().header_value() {
+        headers.insert("Surrogate-Key".to_string(), surrogate_tags);
+    }
+
+    headers
 }
 
 fn module_http_contributions(
@@ -2302,6 +2577,7 @@ mod tests {
     use super::*;
     use davenda_admin::AdminModule;
     use davenda_auth::{Capability, DefaultAuthModelPackage};
+    use davenda_cache::CacheLookupState;
     use davenda_cache::DistributedCacheBackend;
     use davenda_cms::CmsModule;
     use davenda_commerce::CommerceModule;
@@ -2766,6 +3042,21 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(execution.session.session_id.as_deref(), Some("session-123"));
         assert!(execution.session.resolved_from_cookie);
         assert_eq!(execution.cache, CacheDisposition::Private);
+        assert_eq!(
+            execution
+                .cache_plan
+                .headers
+                .get("Cache-Control")
+                .map(String::as_str),
+            Some("private, max-age=60, stale-while-revalidate=30")
+        );
+        assert!(
+            execution
+                .cache_plan
+                .headers
+                .get("X-Davenda-Variation-Key")
+                .is_some()
+        );
         assert_eq!(execution.trace.transport_scheme, "https");
         assert_eq!(execution.middleware, plan.http.middleware);
         assert_eq!(
@@ -2828,6 +3119,15 @@ cdn_base_url = "https://cdn.example.com"
             .unwrap();
 
         assert_eq!(execution.cache, CacheDisposition::Uncacheable);
+        assert_eq!(
+            execution
+                .cache_plan
+                .headers
+                .get("Cache-Control")
+                .map(String::as_str),
+            Some("no-store")
+        );
+        assert!(execution.cache_plan.plan.application().is_none());
         assert_eq!(execution.route.route_name, "cms.publish");
         assert_eq!(
             execution.response,
@@ -2889,12 +3189,83 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(allowed.route.route_name, "cms.preview");
         assert_eq!(allowed.cache, CacheDisposition::Private);
         assert_eq!(
+            allowed
+                .cache_plan
+                .headers
+                .get("Cache-Control")
+                .map(String::as_str),
+            Some("private, max-age=30, stale-while-revalidate=15")
+        );
+        assert_eq!(
             allowed.response,
             HandlerResponse::Fragment(FragmentResponse {
                 template: "cms/preview".to_string(),
                 fragment_id: "preview-pane".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn cache_host_stores_and_revalidates_public_route_responses() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_route(
+                RouteDefinition::new("events.public", HttpMethod::Get, "/events")
+                    .unwrap()
+                    .localized(),
+            )
+            .with_handler(HandlerDefinition::page("events.public", "events/list").unwrap())
+            .build()
+            .unwrap();
+        let execution = plan
+            .execute_request(
+                RequestInput::new(HttpMethod::Get, "www.example.com", "/en-GB/events").unwrap(),
+                b"01234567012345670123456701234567",
+                b"76543210765432107654321076543210",
+            )
+            .unwrap();
+
+        assert_eq!(execution.cache, CacheDisposition::Public);
+        assert_eq!(
+            execution
+                .cache_plan
+                .headers
+                .get("Cache-Control")
+                .map(String::as_str),
+            Some("public, max-age=300, stale-while-revalidate=30")
+        );
+        assert!(execution.cache_plan.headers.get("Surrogate-Key").is_some());
+
+        let mut host = plan.cache_host().unwrap();
+        assert!(
+            host.lookup_execution(&execution, CacheInstant::from_unix_seconds(100))
+                .is_some_and(|lookup| lookup.state == CacheLookupState::Miss)
+        );
+
+        let fill = host
+            .begin_fill(&execution, "renderer-1")
+            .expect("public route should be application-cacheable");
+        assert!(matches!(fill, FillDecision::Start(_)));
+        let key = host
+            .store_execution(
+                &execution,
+                "<html>events</html>",
+                CacheInstant::from_unix_seconds(100),
+            )
+            .expect("public route should store into the cache");
+        host.complete_fill(&fill).unwrap();
+
+        let fresh = host
+            .lookup_execution(&execution, CacheInstant::from_unix_seconds(110))
+            .expect("public route should look up through the cache host");
+        assert_eq!(fresh.state, CacheLookupState::Fresh);
+        assert_eq!(
+            fresh.entry.as_ref().map(|entry| entry.key.clone()),
+            Some(key.clone())
+        );
+
+        let invalidated = host.invalidate(execution.cache_plan.plan.application().unwrap().tags());
+        assert_eq!(invalidated, vec![key]);
     }
 
     #[test]

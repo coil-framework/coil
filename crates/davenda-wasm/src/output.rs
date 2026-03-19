@@ -63,7 +63,7 @@ pub struct JsonLdNode {
 impl JsonLdNode {
     pub fn new(schema_type: impl Into<String>) -> Result<Self, WasmModelError> {
         Ok(Self {
-            schema_type: require_non_empty("schema_type", schema_type.into())?,
+            schema_type: validate_token("schema_type", schema_type.into())?,
             properties: BTreeMap::new(),
         })
     }
@@ -454,7 +454,7 @@ impl TypedExecutionOutput {
             metadata,
             cache_hint,
         };
-        output.validate()?;
+        output.validate_for_point(surface)?;
         Ok(output)
     }
 
@@ -493,7 +493,7 @@ impl TypedExecutionOutput {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, WasmModelError> {
-        self.validate()?;
+        self.validate_for_point(self.surface)?;
         let mut bytes = Vec::new();
         bytes.extend(Self::ABI_MAGIC);
         write_u16(&mut bytes, Self::ABI_VERSION);

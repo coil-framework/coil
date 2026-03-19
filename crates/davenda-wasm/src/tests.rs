@@ -258,19 +258,15 @@ fn extension_package_validates_configuration_schema_and_installation() {
         ContractVersion::new(1, 2, 3),
         ContractVersion::new(1, 0, 0),
         ResourceLimits::baseline_for(ExtensionPointKind::RenderHook),
-        vec![
-            HandlerManifest::new(
-                HandlerId::new("account.loyalty.widget").unwrap(),
-                "exports.loyalty_widget",
-                ExtensionPoint::RenderHook(
-                    RenderHookExtensionPoint::new("cms.page.render").unwrap(),
-                ),
-                HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
-                    slot: "cms.page.render".to_string(),
-                }]),
-            )
-            .unwrap(),
-        ],
+        vec![HandlerManifest::new(
+            HandlerId::new("account.loyalty.widget").unwrap(),
+            "exports.loyalty_widget",
+            ExtensionPoint::RenderHook(RenderHookExtensionPoint::new("cms.page.render").unwrap()),
+            HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                slot: "cms.page.render".to_string(),
+            }]),
+        )
+        .unwrap()],
     )
     .unwrap();
 
@@ -324,26 +320,24 @@ fn installed_extension_prepares_invocation_with_granted_capabilities_and_limits(
         manifest,
         ExtensionInstallation::new(
             "customer-app",
-            vec![
-                HandlerInstallation::new(
-                    HandlerId::new("waitlist-page").unwrap(),
-                    HostGrantSet::from_grants([
-                        HostCapabilityGrant::AuthCheck,
-                        HostCapabilityGrant::DataRead {
-                            resource: "events.waitlist".to_string(),
-                        },
-                    ]),
-                )
-                .with_limit_override(ResourceLimits::new(
-                    Duration::from_secs(1),
-                    32 * 1024 * 1024,
-                    2,
-                    2 * 1024 * 1024,
-                    1,
-                    2 * 1024 * 1024,
-                    8,
-                )),
-            ],
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                HostGrantSet::from_grants([
+                    HostCapabilityGrant::AuthCheck,
+                    HostCapabilityGrant::DataRead {
+                        resource: "events.waitlist".to_string(),
+                    },
+                ]),
+            )
+            .with_limit_override(ResourceLimits::new(
+                Duration::from_secs(1),
+                32 * 1024 * 1024,
+                2,
+                2 * 1024 * 1024,
+                1,
+                2 * 1024 * 1024,
+                8,
+            ))],
         )
         .unwrap(),
     )
@@ -386,29 +380,24 @@ fn execution_session_enforces_host_grants_and_resource_limits() {
         ContractVersion::new(1, 0, 0),
         ContractVersion::new(1, 0, 0),
         default_limits(),
-        vec![
-            HandlerManifest::new(
-                HandlerId::new("waitlist-page").unwrap(),
-                "exports.page_waitlist",
-                ExtensionPoint::Page(
-                    PageExtensionPoint::new(
-                        "/events/waitlist",
-                        [HttpMethod::Get, HttpMethod::Post],
-                    )
+        vec![HandlerManifest::new(
+            HandlerId::new("waitlist-page").unwrap(),
+            "exports.page_waitlist",
+            ExtensionPoint::Page(
+                PageExtensionPoint::new("/events/waitlist", [HttpMethod::Get, HttpMethod::Post])
                     .unwrap(),
-                ),
-                HostGrantSet::from_grants([
-                    HostCapabilityGrant::AuthCheck,
-                    HostCapabilityGrant::OutboundHttp {
-                        integration: "crm".to_string(),
-                    },
-                    HostCapabilityGrant::StorageWrite {
-                        class: StorageClassGrant::PrivateShared,
-                    },
-                ]),
-            )
-            .unwrap(),
-        ],
+            ),
+            HostGrantSet::from_grants([
+                HostCapabilityGrant::AuthCheck,
+                HostCapabilityGrant::OutboundHttp {
+                    integration: "crm".to_string(),
+                },
+                HostCapabilityGrant::StorageWrite {
+                    class: StorageClassGrant::PrivateShared,
+                },
+            ]),
+        )
+        .unwrap()],
     )
     .unwrap();
     let plan = InstalledExtension::install(
@@ -609,11 +598,9 @@ fn module_data_contract_carries_a_typed_repository_binding() {
     assert_eq!(contract.repository_id(), "cms.pages");
     assert_eq!(contract.resource, "cms.pages");
     assert_eq!(contract.repository, repository);
-    assert!(
-        contract
-            .summary("read", 7)
-            .contains("repository_kind=shared")
-    );
+    assert!(contract
+        .summary("read", 7)
+        .contains("repository_kind=shared"));
 }
 
 #[test]
@@ -624,17 +611,15 @@ fn execution_session_rejects_invalid_outcomes_and_runtime_overruns() {
         ContractVersion::new(1, 0, 0),
         ContractVersion::new(1, 0, 0),
         ResourceLimits::baseline_for(ExtensionPointKind::Job),
-        vec![
-            HandlerManifest::new(
-                HandlerId::new("reconcile-job").unwrap(),
-                "exports.reconcile",
-                ExtensionPoint::Job(JobExtensionPoint::new("reconcile", "jobs.work").unwrap()),
-                HostGrantSet::from_grants([HostCapabilityGrant::DataWrite {
-                    resource: "billing.invoice".to_string(),
-                }]),
-            )
-            .unwrap(),
-        ],
+        vec![HandlerManifest::new(
+            HandlerId::new("reconcile-job").unwrap(),
+            "exports.reconcile",
+            ExtensionPoint::Job(JobExtensionPoint::new("reconcile", "jobs.work").unwrap()),
+            HostGrantSet::from_grants([HostCapabilityGrant::DataWrite {
+                resource: "billing.invoice".to_string(),
+            }]),
+        )
+        .unwrap()],
     )
     .unwrap();
     let plan = InstalledExtension::install(
@@ -836,6 +821,43 @@ fn typed_execution_output_rejects_invalid_http_statuses() {
 }
 
 #[test]
+fn typed_execution_output_rejects_unsupported_surfaces_at_construction() {
+    let error = TypedExecutionOutput::new(
+        ExtensionPointKind::Job,
+        200,
+        TypedResponseBody::HtmlDocument("<section>ok</section>".to_string()),
+        TypedMetadata::new(),
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        WasmModelError::TypedReturnBodyMismatch {
+            point: ExtensionPointKind::Job,
+            body: TypedResponseBodyKind::HtmlDocument,
+        }
+    );
+}
+
+#[test]
+fn typed_execution_output_rejects_surface_body_mutations_on_encode() {
+    let mut output = typed_page_output();
+    output.body = TypedResponseBody::JsonObject(BTreeMap::from([(
+        "extension".to_string(),
+        "ok".to_string(),
+    )]));
+
+    let error = output.encode().unwrap_err();
+    assert_eq!(
+        error,
+        WasmModelError::TypedReturnBodyMismatch {
+            point: ExtensionPointKind::Page,
+            body: TypedResponseBodyKind::JsonObject,
+        }
+    );
+}
+
+#[test]
 fn typed_execution_output_rejects_invalid_metadata_and_cache_hints() {
     let invalid_metadata = TypedExecutionOutput {
         surface: ExtensionPointKind::Page,
@@ -1006,26 +1028,24 @@ fn execution_session_tracks_peak_concurrency() {
         manifest,
         ExtensionInstallation::new(
             "customer-app",
-            vec![
-                HandlerInstallation::new(
-                    HandlerId::new("waitlist-page").unwrap(),
-                    HostGrantSet::from_grants([
-                        HostCapabilityGrant::AuthCheck,
-                        HostCapabilityGrant::DataRead {
-                            resource: "events.waitlist".to_string(),
-                        },
-                    ]),
-                )
-                .with_limit_override(ResourceLimits::new(
-                    Duration::from_secs(2),
-                    64 * 1024 * 1024,
-                    4,
-                    4 * 1024 * 1024,
-                    2,
-                    8 * 1024 * 1024,
-                    2,
-                )),
-            ],
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                HostGrantSet::from_grants([
+                    HostCapabilityGrant::AuthCheck,
+                    HostCapabilityGrant::DataRead {
+                        resource: "events.waitlist".to_string(),
+                    },
+                ]),
+            )
+            .with_limit_override(ResourceLimits::new(
+                Duration::from_secs(2),
+                64 * 1024 * 1024,
+                4,
+                4 * 1024 * 1024,
+                2,
+                8 * 1024 * 1024,
+                2,
+            ))],
         )
         .unwrap(),
     )
@@ -1065,17 +1085,15 @@ fn extension_registry_rejects_host_api_mismatch_and_duplicate_targets() {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(2, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
-            vec![
-                HandlerManifest::new(
-                    HandlerId::new("future-widget").unwrap(),
-                    "exports.future_widget",
-                    ExtensionPoint::AdminWidget(
-                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
-                    ),
-                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
-                )
-                .unwrap(),
-            ],
+            vec![HandlerManifest::new(
+                HandlerId::new("future-widget").unwrap(),
+                "exports.future_widget",
+                ExtensionPoint::AdminWidget(
+                    AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                ),
+                HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+            )
+            .unwrap()],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -1130,17 +1148,15 @@ fn extension_registry_rejects_host_api_mismatch_and_duplicate_targets() {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::Page),
-            vec![
-                HandlerManifest::new(
-                    HandlerId::new("waitlist-page-alt").unwrap(),
-                    "exports.page_waitlist_alt",
-                    ExtensionPoint::Page(
-                        PageExtensionPoint::new("/events/waitlist", [HttpMethod::Get]).unwrap(),
-                    ),
-                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
-                )
-                .unwrap(),
-            ],
+            vec![HandlerManifest::new(
+                HandlerId::new("waitlist-page-alt").unwrap(),
+                "exports.page_waitlist_alt",
+                ExtensionPoint::Page(
+                    PageExtensionPoint::new("/events/waitlist", [HttpMethod::Get]).unwrap(),
+                ),
+                HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+            )
+            .unwrap()],
         )
         .unwrap(),
         ExtensionInstallation::new(

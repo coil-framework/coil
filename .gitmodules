@@ -1,3 +1,0 @@
-[submodule "crates/zanzibar"]
-	path = crates/zanzibar
-	url = git@github.com:worka-ai/zanzibar.git

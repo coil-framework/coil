@@ -1,6 +1,10 @@
 use super::*;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
+mod response;
+
+pub(crate) use response::LiveResponseComposition;
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveExecutionReceipts {
     request_surface: Option<ExecutionReceipt>,
@@ -185,9 +189,11 @@ impl LiveExecutionReceipts {
         headers
     }
 
-    pub(crate) fn decorate_response_headers(&self, headers: &mut HeaderMap) {
+    pub(crate) fn response_headers(&self) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+
         if let Some(receipt) = &self.request_surface {
-            append_receipt_headers(headers, "request", receipt);
+            append_receipt_headers(&mut headers, "request", receipt);
         }
 
         if !self.render_hooks.is_empty() {
@@ -209,7 +215,7 @@ impl LiveExecutionReceipts {
                 .expect("render hook handler list is a valid header value"),
             );
             for receipt in &self.render_hooks {
-                append_receipt_headers(headers, "render-hook", receipt);
+                append_receipt_headers(&mut headers, "render-hook", receipt);
             }
         }
 
@@ -232,31 +238,31 @@ impl LiveExecutionReceipts {
                 .expect("admin widget handler list is a valid header value"),
             );
             for receipt in &self.admin_widgets {
-                append_receipt_headers(headers, "admin-widget", receipt);
+                append_receipt_headers(&mut headers, "admin-widget", receipt);
             }
         }
 
         if let Some(metadata) = self.merged_metadata() {
             if let Some(title) = metadata.title.as_ref() {
-                insert_header(headers, "x-davenda-wasm-metadata-title", title.clone());
+                insert_header(&mut headers, "x-davenda-wasm-metadata-title", title.clone());
             }
             if let Some(description) = metadata.description.as_ref() {
                 insert_header(
-                    headers,
+                    &mut headers,
                     "x-davenda-wasm-metadata-description",
                     description.clone(),
                 );
             }
             if let Some(canonical_url) = metadata.canonical_url.as_ref() {
                 insert_header(
-                    headers,
+                    &mut headers,
                     "x-davenda-wasm-metadata-canonical",
                     canonical_url.clone(),
                 );
             }
             if !metadata.alternate_urls.is_empty() {
                 insert_header(
-                    headers,
+                    &mut headers,
                     "x-davenda-wasm-metadata-alternates",
                     metadata
                         .alternate_urls
@@ -268,7 +274,7 @@ impl LiveExecutionReceipts {
             }
             if !metadata.robots.is_empty() {
                 insert_header(
-                    headers,
+                    &mut headers,
                     "x-davenda-wasm-metadata-robots",
                     metadata
                         .robots
@@ -280,7 +286,7 @@ impl LiveExecutionReceipts {
             }
             if !metadata.json_ld.is_empty() {
                 insert_header(
-                    headers,
+                    &mut headers,
                     "x-davenda-wasm-metadata-json-ld-count",
                     metadata.json_ld.len().to_string(),
                 );
@@ -289,7 +295,7 @@ impl LiveExecutionReceipts {
 
         if let Some(cache_hint) = self.merged_cache_hint() {
             insert_header(
-                headers,
+                &mut headers,
                 "x-davenda-wasm-cache-visibility",
                 match cache_hint.visibility {
                     CacheVisibility::Public => "public".to_string(),
@@ -297,13 +303,13 @@ impl LiveExecutionReceipts {
                 },
             );
             insert_header(
-                headers,
+                &mut headers,
                 "x-davenda-wasm-cache-control",
                 render_cache_control(&cache_hint),
             );
             if !cache_hint.tags.is_empty() {
                 insert_header(
-                    headers,
+                    &mut headers,
                     "x-davenda-wasm-cache-tags",
                     cache_hint
                         .tags
@@ -314,6 +320,61 @@ impl LiveExecutionReceipts {
                 );
             }
         }
+
+        headers
+    }
+
+    pub(crate) fn compose_response(
+        &self,
+        plan: &RuntimePlan,
+        execution: &RequestExecution,
+    ) -> Result<LiveResponseComposition, RuntimeServerError> {
+        let mut response = match &execution.response {
+            HandlerResponse::Page(page) => {
+                let html =
+                    plan.render_page_response(execution, page, self.merged_metadata().as_ref())?;
+                let status = self
+                    .response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK));
+                LiveResponseComposition::html(status, self.compose_page_html(html))
+            }
+            HandlerResponse::Fragment(fragment) => {
+                let html = plan.render_fragment_response(execution, fragment)?;
+                let status = self.response_status(StatusCode::OK);
+                LiveResponseComposition::html(status, self.compose_fragment_html(html))
+            }
+            HandlerResponse::Redirect(redirect) => {
+                let status = StatusCode::from_u16(redirect.status).unwrap_or(StatusCode::SEE_OTHER);
+                LiveResponseComposition::empty(status)
+                    .with_header("location", redirect.location.clone())
+            }
+            HandlerResponse::Json(json) => {
+                let payload = self.compose_json_payload(json.payload.clone());
+                let status = self
+                    .response_status(StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK));
+                LiveResponseComposition::json(status, payload)
+            }
+            HandlerResponse::File(file) => LiveResponseComposition::empty(StatusCode::OK)
+                .with_header("content-type", file.content_type.clone())
+                .with_header("x-davenda-file-path", file.logical_path.clone())
+                .with_header(
+                    "x-davenda-file-delivery",
+                    file_delivery_mode_name(file.delivery_mode),
+                ),
+        };
+
+        response = response.extend_headers(self.response_headers());
+        response = response.extend_key_value_headers(
+            self.compose_cache_headers(execution.cache_plan.headers.clone()),
+        );
+        response = response
+            .with_header("x-davenda-route", execution.route.route_name.clone())
+            .with_header("x-davenda-locale", execution.locale.clone());
+
+        for cookie in execution.response_cookies.clone() {
+            response = response.with_cookie(cookie);
+        }
+
+        Ok(response)
     }
 
     fn typed_outputs(&self) -> Vec<&TypedExecutionOutput> {
@@ -384,6 +445,15 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: String) {
         if let Ok(header_value) = HeaderValue::from_str(&value) {
             headers.insert(header_name, header_value);
         }
+    }
+}
+
+fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
+    match mode {
+        FileDeliveryMode::PublicCdn => "public_cdn",
+        FileDeliveryMode::SignedUrl => "signed_url",
+        FileDeliveryMode::AppProxy => "app_proxy",
+        FileDeliveryMode::LocalOnly => "local_only",
     }
 }
 

@@ -178,6 +178,10 @@ impl DistributedCacheClient {
     }
 
     pub fn in_memory(kind: CacheBackendKind) -> Self {
+        Self::local_for_testing(kind)
+    }
+
+    pub fn local_for_testing(kind: CacheBackendKind) -> Self {
         Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
     }
 
@@ -311,6 +315,10 @@ impl CacheBackendAdapter {
     }
 
     pub fn in_memory(topology: CacheTopology) -> Self {
+        Self::local_for_testing(topology)
+    }
+
+    pub fn local_for_testing(topology: CacheTopology) -> Self {
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,

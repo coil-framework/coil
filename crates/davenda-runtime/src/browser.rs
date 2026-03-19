@@ -213,6 +213,10 @@ impl DistributedSessionStoreClient {
     }
 
     pub fn in_memory(kind: SessionStoreBackendKind) -> Self {
+        Self::local_for_testing(kind)
+    }
+
+    pub fn local_for_testing(kind: SessionStoreBackendKind) -> Self {
         Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
     }
 
@@ -960,7 +964,8 @@ mod tests {
     #[test]
     fn database_session_hosts_share_backend_when_reusing_an_explicit_client() {
         let services = services(SessionStoreTopology::Database);
-        let client = DistributedSessionStoreClient::in_memory(SessionStoreBackendKind::Database);
+        let client =
+            DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Database);
         let mut left = BrowserHost::with_session_store_client(
             "browser-db-shared".to_string(),
             services.clone(),

@@ -163,6 +163,53 @@ fn cache_runtime_new_uses_shared_backend_for_distributed_topologies() {
 }
 
 #[test]
+fn explicit_test_local_cache_runtime_keeps_state_isolated() {
+    let mut left = CacheRuntime::local_for_testing(CacheTopology::moka_only());
+    let mut right = left.clone();
+
+    assert_eq!(left.backend_kind(), CacheBackendKind::Local);
+    assert!(!left.backend_is_shared());
+
+    let planner = CachePlanner::new(CacheTopology::moka_only());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:test-local",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    left.insert(
+        plan.application().unwrap(),
+        "<html>local-test</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Miss);
+}
+
+#[test]
 fn planner_respects_explicit_coalescing_override() {
     let planner = CachePlanner::new(CacheTopology::with_redis());
     let plan = planner
@@ -754,7 +801,7 @@ fn distributed_runtimes_share_backend_when_reusing_an_explicit_client() {
         .unwrap();
     let adapter = CacheBackendAdapter::distributed(
         CacheTopology::with_redis(),
-        DistributedCacheClient::in_memory(CacheBackendKind::Redis),
+        DistributedCacheClient::local_for_testing(CacheBackendKind::Redis),
     );
     let mut left = CacheRuntime::with_backend(CacheTopology::with_redis(), adapter.clone());
     let mut right = CacheRuntime::with_backend(CacheTopology::with_redis(), adapter);

@@ -10,7 +10,7 @@ use super::*;
 use crate::backends::RuntimeBackendMaterializer;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
-use axum::http::header::{COOKIE, HOST, LOCATION};
+use axum::http::header::{COOKIE, HOST};
 use axum::http::{HeaderMap, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::any;
@@ -549,6 +549,7 @@ impl HttpServerHost {
         )
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_with_authorizer(
         plan: RuntimePlan,
         backends: SharedBackendClients,
@@ -779,115 +780,7 @@ fn execution_response(
     execution: RequestExecution,
 ) -> Result<Response<Body>, RuntimeServerError> {
     let receipts = LiveExecutionReceipts::collect(plan, &execution)?;
-
-    let mut response = match &execution.response {
-        HandlerResponse::Page(page) => {
-            let html =
-                plan.render_page_response(&execution, page, receipts.merged_metadata().as_ref())?;
-            html_response(
-                receipts
-                    .response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK)),
-                receipts.compose_page_html(html),
-            )
-        }
-        HandlerResponse::Fragment(fragment) => {
-            let html = plan.render_fragment_response(&execution, fragment)?;
-            html_response(
-                receipts.response_status(StatusCode::OK),
-                receipts.compose_fragment_html(html),
-            )
-        }
-        HandlerResponse::Redirect(redirect) => {
-            let mut response = Response::new(Body::empty());
-            *response.status_mut() =
-                StatusCode::from_u16(redirect.status).unwrap_or(StatusCode::SEE_OTHER);
-            response.headers_mut().insert(
-                LOCATION,
-                redirect
-                    .location
-                    .parse()
-                    .expect("validated redirect location is a header value"),
-            );
-            response
-        }
-        HandlerResponse::Json(json) => {
-            let payload = receipts.compose_json_payload(json.payload.clone());
-            let mut parts = Vec::new();
-            for (key, value) in &payload {
-                parts.push(format!(
-                    "\"{}\":\"{}\"",
-                    escape_json(key),
-                    escape_json(value)
-                ));
-            }
-            let mut response = text_response(
-                receipts
-                    .response_status(StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK)),
-                format!("{{{}}}", parts.join(",")),
-            );
-            response.headers_mut().insert(
-                "content-type",
-                "application/json"
-                    .parse()
-                    .expect("static content type is valid"),
-            );
-            response
-        }
-        HandlerResponse::File(file) => {
-            let mut response = Response::new(Body::empty());
-            response.headers_mut().insert(
-                "content-type",
-                file.content_type
-                    .parse()
-                    .unwrap_or_else(|_| "application/octet-stream".parse().unwrap()),
-            );
-            response.headers_mut().insert(
-                "x-davenda-file-path",
-                file.logical_path
-                    .parse()
-                    .expect("validated logical path is a header value"),
-            );
-            response.headers_mut().insert(
-                "x-davenda-file-delivery",
-                file_delivery_mode_name(file.delivery_mode)
-                    .parse()
-                    .expect("static delivery mode name is valid"),
-            );
-            response
-        }
-    };
-
-    for (name, value) in receipts.compose_cache_headers(execution.cache_plan.headers) {
-        if let Ok(header_name) = axum::http::HeaderName::try_from(name.as_str()) {
-            if let Ok(header_value) = value.parse() {
-                response.headers_mut().insert(header_name, header_value);
-            }
-        }
-    }
-    receipts.decorate_response_headers(response.headers_mut());
-
-    response.headers_mut().insert(
-        "x-davenda-route",
-        execution
-            .route
-            .route_name
-            .parse()
-            .expect("validated route name is a header value"),
-    );
-    response.headers_mut().insert(
-        "x-davenda-locale",
-        execution
-            .locale
-            .parse()
-            .expect("validated locale is a header value"),
-    );
-    for cookie in execution.response_cookies {
-        if let Ok(value) = cookie.parse() {
-            response.headers_mut().append("set-cookie", value);
-        }
-    }
-
-    Ok(response)
+    Ok(receipts.compose_response(plan, &execution)?.into_response())
 }
 
 fn error_response(error: RuntimeServerError) -> Response<Body> {
@@ -981,47 +874,6 @@ fn distributed_cache_backend(cache: DistributedCache) -> DistributedCacheBackend
         DistributedCache::Redis => DistributedCacheBackend::Redis,
         DistributedCache::Valkey => DistributedCacheBackend::Valkey,
     }
-}
-
-fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
-    match mode {
-        FileDeliveryMode::PublicCdn => "public_cdn",
-        FileDeliveryMode::SignedUrl => "signed_url",
-        FileDeliveryMode::AppProxy => "app_proxy",
-        FileDeliveryMode::LocalOnly => "local_only",
-    }
-}
-
-fn text_response(status: StatusCode, body: String) -> Response<Body> {
-    let mut response = Response::new(Body::from(body));
-    *response.status_mut() = status;
-    response
-}
-
-fn html_response(status: StatusCode, body: String) -> Response<Body> {
-    let mut response = text_response(status, body);
-    response.headers_mut().insert(
-        "content-type",
-        "text/html; charset=utf-8"
-            .parse()
-            .expect("static content type is valid"),
-    );
-    response
-}
-
-fn escape_json(value: &str) -> String {
-    let mut escaped = String::new();
-    for ch in value.chars() {
-        match ch {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            other => escaped.push(other),
-        }
-    }
-    escaped
 }
 
 impl fmt::Display for SharedBackendClients {

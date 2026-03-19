@@ -1239,13 +1239,16 @@ fn cache_host_shares_distributed_state_by_default_within_a_plan() {
         .lookup_execution(&execution, CacheInstant::from_unix_seconds(110))
         .expect("page execution has an application cache plan");
     assert_eq!(lookup.state, CacheLookupState::Fresh);
-    assert_eq!(lookup.entry.as_ref().map(|entry| entry.key.clone()), Some(stored_key));
+    assert_eq!(
+        lookup.entry.as_ref().map(|entry| entry.key.clone()),
+        Some(stored_key)
+    );
 }
 
 #[test]
 fn browser_host_shares_distributed_sessions_when_reusing_an_explicit_client() {
     let services = plan_browser_services();
-    let client = DistributedSessionStoreClient::in_memory(SessionStoreBackendKind::Redis);
+    let client = DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Redis);
     let mut left = BrowserHost::with_session_store_client(
         "showcase-events".to_string(),
         services.clone(),
@@ -1283,7 +1286,7 @@ fn cache_runtime_shares_distributed_state_when_reusing_an_explicit_backend() {
     let planner = CachePlanner::new(topology);
     let adapter = CacheBackendAdapter::distributed(
         topology,
-        DistributedCacheClient::in_memory(CacheBackendKind::Redis),
+        DistributedCacheClient::local_for_testing(CacheBackendKind::Redis),
     );
     let mut left = CacheRuntime::with_backend(topology, adapter.clone());
     let mut right = CacheRuntime::with_backend(topology, adapter);
@@ -1927,7 +1930,8 @@ async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() 
         )
         .unwrap();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
-    let session_client = DistributedSessionStoreClient::in_memory(SessionStoreBackendKind::Redis);
+    let session_client =
+        DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Redis);
     let browser = BrowserHost::with_session_store_client(
         plan.config.app.name.clone(),
         plan.browser.clone(),

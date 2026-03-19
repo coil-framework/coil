@@ -517,7 +517,11 @@ impl JobsRuntime {
     }
 
     pub fn coordinator_in_memory(&self) -> JobsCoordinator {
-        self.coordinator_with_backend(JobsBackendAdapter::in_memory(self))
+        self.coordinator_for_testing()
+    }
+
+    pub fn coordinator_for_testing(&self) -> JobsCoordinator {
+        self.coordinator_with_backend(JobsBackendAdapter::local_for_testing(self))
     }
 
     pub fn coordinator_with_backend(&self, backend: JobsBackendAdapter) -> JobsCoordinator {
@@ -1004,6 +1008,10 @@ impl JobsBackendAdapter {
     }
 
     pub fn in_memory(runtime: &JobsRuntime) -> Self {
+        Self::local_for_testing(runtime)
+    }
+
+    pub fn local_for_testing(runtime: &JobsRuntime) -> Self {
         Self::new(
             runtime.backend,
             runtime.topology.clone(),
@@ -1383,7 +1391,11 @@ impl JobsCoordinator {
     }
 
     pub fn new_in_memory(runtime: JobsRuntime) -> Self {
-        let backend = JobsBackendAdapter::in_memory(&runtime);
+        Self::new_for_testing(runtime)
+    }
+
+    pub fn new_for_testing(runtime: JobsRuntime) -> Self {
+        let backend = JobsBackendAdapter::local_for_testing(&runtime);
         Self::with_backend(runtime, backend)
     }
 
@@ -1981,8 +1993,8 @@ mod tests {
     #[test]
     fn distributed_coordinators_do_not_share_backend_without_explicit_adapter_reuse() {
         let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-        let mut left = runtime.coordinator_in_memory();
-        let mut right = runtime.coordinator_in_memory();
+        let mut left = runtime.coordinator_for_testing();
+        let mut right = runtime.coordinator_for_testing();
 
         left.enqueue(
             JobSpec::new(

@@ -91,6 +91,10 @@ impl CacheRuntime {
     }
 
     pub fn in_memory(topology: CacheTopology) -> Self {
+        Self::local_for_testing(topology)
+    }
+
+    pub fn local_for_testing(topology: CacheTopology) -> Self {
         Self::with_backend(topology, crate::CacheBackendAdapter::in_memory(topology))
     }
 

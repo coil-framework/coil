@@ -372,7 +372,7 @@ fn distributed_coordinators_do_not_share_backend_without_explicit_adapter_reuse(
 }
 
 #[test]
-fn default_coordinators_share_backend_for_the_same_runtime_instance() {
+fn default_coordinators_do_not_share_backend_across_independent_handles() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
     let mut left = runtime.coordinator();
     let mut right = runtime.coordinator();
@@ -391,8 +391,7 @@ fn default_coordinators_share_backend_for_the_same_runtime_instance() {
     .unwrap();
 
     right.refresh();
-    assert_eq!(right.ready_jobs().len(), 1);
-    assert_eq!(right.ready_jobs()[0].spec.job_id.as_str(), "job-shared");
+    assert_eq!(right.ready_jobs().len(), 0);
 }
 
 #[test]

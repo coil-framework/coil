@@ -155,10 +155,17 @@ impl CachePlanner {
     }
 
     pub fn runtime(&self) -> crate::CacheRuntime {
-        crate::CacheRuntime::with_backend(
-            self.topology,
-            crate::CacheBackendAdapter::scoped_shared(self.topology, format!("{:p}", self)),
-        )
+        if self.topology.l2().is_some() {
+            crate::CacheRuntime::with_backend(
+                self.topology,
+                crate::CacheBackendAdapter::scoped_shared(self.topology, format!("{:p}", self)),
+            )
+        } else {
+            crate::CacheRuntime::with_backend(
+                self.topology,
+                crate::CacheBackendAdapter::local_for_testing(self.topology),
+            )
+        }
     }
 
     #[doc(hidden)]

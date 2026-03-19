@@ -87,7 +87,12 @@ pub struct CacheRuntime {
 
 impl CacheRuntime {
     pub fn new(topology: CacheTopology) -> Self {
-        Self::with_backend(topology, crate::CacheBackendAdapter::shared(topology))
+        let backend = if topology.l2().is_some() {
+            crate::CacheBackendAdapter::shared(topology)
+        } else {
+            crate::CacheBackendAdapter::local_for_testing(topology)
+        };
+        Self::with_backend(topology, backend)
     }
 
     #[allow(dead_code)]

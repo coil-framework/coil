@@ -163,12 +163,12 @@ fn cache_runtime_new_uses_shared_backend_for_distributed_topologies() {
 }
 
 #[test]
-fn cache_runtime_new_uses_shared_backend_for_single_node_topologies() {
+fn cache_runtime_new_uses_local_backend_for_single_node_topologies() {
     let mut left = CacheRuntime::new(CacheTopology::moka_only());
     let mut right = left.clone();
 
     assert_eq!(left.backend_kind(), CacheBackendKind::Local);
-    assert!(left.backend_is_shared());
+    assert!(!left.backend_is_shared());
 
     let planner = CachePlanner::new(CacheTopology::moka_only());
     let plan = planner
@@ -206,7 +206,7 @@ fn cache_runtime_new_uses_shared_backend_for_single_node_topologies() {
         plan.application().unwrap().key(),
         CacheInstant::from_unix_seconds(110),
     );
-    assert_eq!(lookup.state, CacheLookupState::Fresh);
+    assert_eq!(lookup.state, CacheLookupState::Miss);
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn local_cache_runtime_clones_do_not_share_state() {
 }
 
 #[test]
-fn distributed_planner_runtimes_share_backend_by_default() {
+fn distributed_planner_runtimes_do_not_share_backend_across_independent_handles() {
     let planner = CachePlanner::new(CacheTopology::with_valkey());
     let plan = planner
         .plan(
@@ -371,6 +371,50 @@ fn distributed_planner_runtimes_share_backend_by_default() {
 
     assert!(left.backend_is_shared());
     assert_eq!(left.backend_kind(), CacheBackendKind::Valkey);
+
+    left.insert(
+        plan.application().unwrap(),
+        "<html>shared</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(110),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Miss);
+}
+
+#[test]
+fn distributed_planner_runtimes_share_backend_when_reusing_an_explicit_handle() {
+    let planner = CachePlanner::new(CacheTopology::with_valkey());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:2",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    let mut left = planner.runtime();
+    let mut right = left.clone();
 
     left.insert(
         plan.application().unwrap(),

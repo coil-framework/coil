@@ -2,9 +2,8 @@ use crate::error::JobsModelError;
 use crate::identifiers::{DeadLetterId, IdempotencyKey, JobId, JobQueueName};
 use crate::model::{DeadLetterOutcome, DeadLetterReason, JobInstant, QueueTopology};
 use crate::runtime::{JobSpec, JobsRuntime};
-use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,11 +211,11 @@ impl JobsBackendAdapter {
         Self::shared_scoped(runtime, format!("{:p}", runtime))
     }
 
-    pub fn shared_scoped(runtime: &JobsRuntime, scope: impl Into<String>) -> Self {
+    pub fn shared_scoped(runtime: &JobsRuntime, _scope: impl Into<String>) -> Self {
         Self::new(
             runtime.backend,
             runtime.topology.clone(),
-            shared_jobs_runtime(runtime, scope.into()),
+            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())),
         )
     }
 
@@ -276,24 +275,6 @@ impl JobsBackendAdapter {
         self.runtime
             .acknowledge_failed(lease, now, reason, error_message)
     }
-}
-
-fn shared_jobs_runtime(runtime: &JobsRuntime, scope: String) -> Arc<dyn JobsCoordinationRuntime> {
-    static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn JobsCoordinationRuntime>>>> =
-        OnceLock::new();
-
-    let key = format!(
-        "{:?}:{}:{}:{}",
-        runtime.backend, runtime.topology.work_queue, runtime.topology.scheduled_queue, scope
-    );
-    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry
-        .lock()
-        .expect("shared jobs registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())))
-        .clone()
 }
 
 impl fmt::Debug for JobsBackendAdapter {

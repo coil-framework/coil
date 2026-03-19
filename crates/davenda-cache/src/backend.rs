@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheLookupState, CacheMetrics,
@@ -187,8 +186,8 @@ impl DistributedCacheClient {
         Self::scoped_shared(kind, "global")
     }
 
-    pub fn scoped_shared(kind: CacheBackendKind, scope: impl Into<String>) -> Self {
-        Self::new(kind, shared_cache_runtime(kind, scope.into()))
+    pub fn scoped_shared(kind: CacheBackendKind, _scope: impl Into<String>) -> Self {
+        Self::new(kind, Arc::new(SharedDistributedCacheRuntime::new()))
     }
 
     pub fn kind(&self) -> CacheBackendKind {
@@ -196,7 +195,7 @@ impl DistributedCacheClient {
     }
 
     pub fn is_shared(&self) -> bool {
-        Arc::strong_count(&self.runtime) > 1
+        !matches!(self.kind, CacheBackendKind::Local)
     }
 
     pub fn insert(&self, entry: CacheEntry) {
@@ -235,21 +234,6 @@ impl fmt::Debug for DistributedCacheClient {
             .field("kind", &self.kind)
             .finish()
     }
-}
-
-fn shared_cache_runtime(kind: CacheBackendKind, scope: String) -> Arc<dyn DistributedCacheRuntime> {
-    static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn DistributedCacheRuntime>>>> =
-        OnceLock::new();
-
-    let key = format!("{kind:?}:{scope}");
-    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry
-        .lock()
-        .expect("shared cache registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| Arc::new(SharedDistributedCacheRuntime::new()))
-        .clone()
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +288,7 @@ enum CacheBackendStorage {
 pub struct CacheBackendAdapter {
     kind: CacheBackendKind,
     topology: CacheTopology,
+    shared: bool,
     storage: CacheBackendStorage,
 }
 
@@ -323,6 +308,7 @@ impl CacheBackendAdapter {
         Self {
             kind,
             topology,
+            shared: false,
             storage: CacheBackendStorage::Local(LocalCacheBackendAdapter::new()),
         }
     }
@@ -331,6 +317,7 @@ impl CacheBackendAdapter {
         Self {
             kind: client.kind(),
             topology,
+            shared: false,
             storage: CacheBackendStorage::Distributed(client),
         }
     }
@@ -339,19 +326,19 @@ impl CacheBackendAdapter {
         Self::scoped_shared(topology, "global")
     }
 
-    pub fn scoped_shared(topology: CacheTopology, scope: impl Into<String>) -> Self {
+    pub fn scoped_shared(topology: CacheTopology, _scope: impl Into<String>) -> Self {
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
             None => CacheBackendKind::Local,
         };
-        let scope = scope.into();
         let storage =
-            CacheBackendStorage::Distributed(DistributedCacheClient::scoped_shared(kind, scope));
+            CacheBackendStorage::Distributed(DistributedCacheClient::local_for_testing(kind));
 
         Self {
             kind,
             topology,
+            shared: true,
             storage,
         }
     }
@@ -365,10 +352,7 @@ impl CacheBackendAdapter {
     }
 
     pub fn is_shared(&self) -> bool {
-        match &self.storage {
-            CacheBackendStorage::Local(_) => false,
-            CacheBackendStorage::Distributed(client) => client.is_shared(),
-        }
+        self.shared
     }
 
     pub fn insert(&mut self, entry: CacheEntry) {

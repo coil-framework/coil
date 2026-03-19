@@ -436,6 +436,7 @@ dependencies = [
  "davenda-template",
  "davenda-tls",
  "davenda-wasm",
+ "rand",
  "thiserror 1.0.69",
 ]
 

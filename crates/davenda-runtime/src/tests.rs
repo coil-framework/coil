@@ -375,6 +375,15 @@ fn content_fingerprint(fill: char) -> ContentFingerprint {
     ContentFingerprint::new(FingerprintAlgorithm::Sha256, fill.to_string().repeat(64)).unwrap()
 }
 
+fn cookie_value(set_cookie_header: &str) -> String {
+    set_cookie_header
+        .split(';')
+        .next()
+        .and_then(|cookie| cookie.split_once('='))
+        .map(|(_, value)| value.to_string())
+        .expect("set-cookie header should include a value")
+}
+
 #[test]
 fn runtime_builder_creates_a_runtime_plan() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
@@ -652,6 +661,244 @@ fn execute_request_derives_context_and_session_from_cookie() {
             template: "account/dashboard".to_string(),
             status: 200,
         })
+    );
+    assert!(execution.flash_messages.is_empty());
+    assert!(execution.response_cookies.is_empty());
+}
+
+#[test]
+fn browser_host_issues_rotates_and_revokes_server_side_sessions() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let mut host = plan.browser_host();
+    let cookie_secret = b"01234567012345670123456701234567";
+
+    let issued = host
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-1")
+                .unwrap(),
+            cookie_secret,
+            BrowserInstant::from_unix_seconds(100),
+        )
+        .unwrap();
+    assert!(issued.set_cookie_header.starts_with("davenda_session="));
+    assert_eq!(
+        host.session(&issued.record.session_id)
+            .and_then(|record| record.principal_id.as_deref()),
+        Some("member-1")
+    );
+
+    let rotated = host
+        .rotate_session(
+            &issued.record.session_id,
+            cookie_secret,
+            BrowserInstant::from_unix_seconds(120),
+        )
+        .unwrap();
+    assert_ne!(rotated.issued.record.session_id, issued.record.session_id);
+    assert_eq!(
+        host.session(&issued.record.session_id)
+            .map(|record| record.status_at(BrowserInstant::from_unix_seconds(121))),
+        Some(BrowserSessionStatus::Revoked)
+    );
+
+    host.revoke_session(
+        &rotated.issued.record.session_id,
+        BrowserInstant::from_unix_seconds(130),
+    )
+    .unwrap();
+    assert_eq!(
+        host.session(&rotated.issued.record.session_id)
+            .map(|record| record.status_at(BrowserInstant::from_unix_seconds(131))),
+        Some(BrowserSessionStatus::Revoked)
+    );
+}
+
+#[test]
+fn execute_browser_request_uses_server_side_session_resolution_and_flash_transport() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .build()
+        .unwrap();
+    let mut host = plan.browser_host();
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+
+    let issued = host
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-1")
+                .unwrap(),
+            cookie_secret,
+            BrowserInstant::from_unix_seconds(100),
+        )
+        .unwrap();
+    let flash_cookie = host
+        .issue_flash_cookie(
+            cookie_secret,
+            &[
+                FlashMessage::new(FlashLevel::Success, "Saved changes").unwrap(),
+                FlashMessage::new(FlashLevel::Info, "Ready for checkout").unwrap(),
+            ],
+        )
+        .unwrap();
+
+    let execution = plan
+        .execute_browser_request(
+            &mut host,
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/account")
+                .unwrap()
+                .with_session_cookie(issued.cookie_value.clone())
+                .with_flash_cookie(cookie_value(&flash_cookie)),
+            cookie_secret,
+            csrf_secret,
+            BrowserInstant::from_unix_seconds(150),
+        )
+        .unwrap();
+
+    assert_eq!(
+        execution.session.session_id.as_deref(),
+        Some(issued.record.session_id.as_str())
+    );
+    assert!(execution.session.resolved_from_cookie);
+    assert_eq!(
+        execution.principal.principal_id.as_deref(),
+        Some("member-1")
+    );
+    assert_eq!(
+        execution.flash_messages,
+        vec![
+            FlashMessage::new(FlashLevel::Success, "Saved changes").unwrap(),
+            FlashMessage::new(FlashLevel::Info, "Ready for checkout").unwrap(),
+        ]
+    );
+    assert_eq!(execution.response_cookies.len(), 2);
+    assert!(
+        execution
+            .response_cookies
+            .iter()
+            .any(|header| header.starts_with("davenda_session="))
+    );
+    assert!(
+        execution
+            .response_cookies
+            .iter()
+            .any(|header| header.starts_with("davenda_flash=") && header.contains("Max-Age=0"))
+    );
+}
+
+#[test]
+fn execute_browser_request_rejects_expired_server_side_sessions() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .build()
+        .unwrap();
+    let mut host = plan.browser_host();
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let issued = host
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-1")
+                .unwrap(),
+            cookie_secret,
+            BrowserInstant::from_unix_seconds(100),
+        )
+        .unwrap();
+
+    let error = plan
+        .execute_browser_request(
+            &mut host,
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/account")
+                .unwrap()
+                .with_session_cookie(issued.cookie_value.clone()),
+            cookie_secret,
+            csrf_secret,
+            BrowserInstant::from_unix_seconds(4_000),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        RequestExecutionError::ExpiredSession {
+            session_id: issued.record.session_id.clone(),
+        }
+    );
+    assert!(host.session(&issued.record.session_id).is_none());
+}
+
+#[test]
+fn execute_browser_request_supports_csrf_for_host_managed_sessions() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("cms.publish", HttpMethod::Post, "/admin/pages/publish")
+                .unwrap()
+                .with_area(RouteArea::Admin)
+                .requiring_session(),
+        )
+        .with_handler(HandlerDefinition::redirect("cms.publish", "/admin/pages").unwrap())
+        .build()
+        .unwrap();
+    let mut host = plan.browser_host();
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let issued = host
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("editor-1")
+                .unwrap(),
+            cookie_secret,
+            BrowserInstant::from_unix_seconds(100),
+        )
+        .unwrap();
+    let token = host
+        .issue_csrf_token(csrf_secret, &issued.record.session_id, "cms.publish")
+        .unwrap();
+
+    let execution = plan
+        .execute_browser_request(
+            &mut host,
+            RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/pages/publish")
+                .unwrap()
+                .with_session_cookie(issued.cookie_value)
+                .with_csrf_token(token),
+            cookie_secret,
+            csrf_secret,
+            BrowserInstant::from_unix_seconds(110),
+        )
+        .unwrap();
+
+    assert_eq!(execution.cache, CacheDisposition::Uncacheable);
+    assert_eq!(
+        execution.response,
+        HandlerResponse::Redirect(RedirectResponse {
+            location: "/admin/pages".to_string(),
+            status: 303,
+        })
+    );
+    assert!(
+        execution
+            .response_cookies
+            .iter()
+            .any(|header| header.starts_with("davenda_session="))
     );
 }
 

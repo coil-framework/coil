@@ -285,6 +285,7 @@ pub struct RequestInput {
     pub request_id: Option<String>,
     pub session_id: Option<String>,
     pub session_cookie: Option<String>,
+    pub flash_cookie: Option<String>,
     pub csrf_token: Option<String>,
     pub csrf_action: Option<String>,
     pub maintenance_bypass_token: Option<String>,
@@ -307,6 +308,7 @@ impl RequestInput {
             request_id: None,
             session_id: None,
             session_cookie: None,
+            flash_cookie: None,
             csrf_token: None,
             csrf_action: None,
             maintenance_bypass_token: None,
@@ -337,6 +339,11 @@ impl RequestInput {
 
     pub fn with_session_cookie(mut self, session_cookie: impl Into<String>) -> Self {
         self.session_cookie = Some(session_cookie.into());
+        self
+    }
+
+    pub fn with_flash_cookie(mut self, flash_cookie: impl Into<String>) -> Self {
+        self.flash_cookie = Some(flash_cookie.into());
         self
     }
 
@@ -407,6 +414,8 @@ pub struct RequestExecution {
     pub cache_plan: ExecutedCachePlan,
     pub middleware: Vec<MiddlewareStage>,
     pub response: HandlerResponse,
+    pub flash_messages: Vec<FlashMessage>,
+    pub response_cookies: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -582,6 +591,14 @@ pub enum RequestExecutionError {
     InvalidCsrfToken { route: String },
     #[error("session cookie failed validation: {0}")]
     InvalidSessionCookie(String),
+    #[error("flash cookie failed validation: {0}")]
+    InvalidFlashCookie(String),
+    #[error("session `{session_id}` is not present in the server-side store")]
+    UnknownSession { session_id: String },
+    #[error("session `{session_id}` has expired")]
+    ExpiredSession { session_id: String },
+    #[error("session `{session_id}` has been revoked")]
+    RevokedSession { session_id: String },
     #[error("route `{route}` is disabled by maintenance mode")]
     MaintenanceMode { route: String },
     #[error("route `{route}` is disabled because feature flag `{feature_flag}` is not enabled")]
@@ -590,6 +607,27 @@ pub enum RequestExecutionError {
     HandlerNotRegistered { route: String },
     #[error(transparent)]
     Cache(#[from] CacheModelError),
+}
+
+impl RequestExecutionError {
+    pub(crate) fn from_browser_error(error: RuntimeBrowserError) -> Self {
+        match error {
+            RuntimeBrowserError::InvalidSessionCookie { reason } => {
+                Self::InvalidSessionCookie(reason)
+            }
+            RuntimeBrowserError::InvalidFlashCookie { reason } => Self::InvalidFlashCookie(reason),
+            RuntimeBrowserError::UnknownSession { session_id } => {
+                Self::UnknownSession { session_id }
+            }
+            RuntimeBrowserError::ExpiredSession { session_id } => {
+                Self::ExpiredSession { session_id }
+            }
+            RuntimeBrowserError::RevokedSession { session_id } => {
+                Self::RevokedSession { session_id }
+            }
+            other => Self::InvalidFlashCookie(other.to_string()),
+        }
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

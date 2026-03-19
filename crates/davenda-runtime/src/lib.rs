@@ -58,6 +58,7 @@ use davenda_wasm::{
 };
 use thiserror::Error;
 
+mod browser;
 mod builder;
 mod cache;
 mod http;
@@ -68,6 +69,7 @@ mod storage;
 mod tls;
 mod wasm;
 
+pub use browser::*;
 pub use builder::*;
 pub use cache::*;
 pub use http::*;

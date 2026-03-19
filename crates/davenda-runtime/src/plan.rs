@@ -82,6 +82,10 @@ impl RuntimePlan {
         ))
     }
 
+    pub fn browser_host(&self) -> BrowserHost {
+        BrowserHost::new(self.config.app.name.clone(), self.browser.clone())
+    }
+
     pub fn tls_host(&self) -> TlsHost {
         TlsHost::new(self.config.app.name.clone(), self.tls.clone())
     }
@@ -205,7 +209,39 @@ impl RuntimePlan {
             cache_plan,
             middleware: self.http.middleware.clone(),
             response,
+            flash_messages: Vec::new(),
+            response_cookies: Vec::new(),
         })
+    }
+
+    pub fn execute_browser_request(
+        &self,
+        browser: &mut BrowserHost,
+        mut request: RequestInput,
+        cookie_secret: &[u8],
+        csrf_secret: &[u8],
+        now: BrowserInstant,
+    ) -> Result<RequestExecution, RequestExecutionError> {
+        let resolved = browser
+            .resolve_request(&request, cookie_secret, now)
+            .map_err(RequestExecutionError::from_browser_error)?;
+
+        request.session_id = resolved.session.session_id.clone();
+        request.session_cookie = None;
+        request.flash_cookie = None;
+
+        if request.principal_id.is_none() {
+            request.principal_id = resolved.principal_id.clone();
+        }
+
+        let mut execution = self.execute_request(request, cookie_secret, csrf_secret)?;
+        execution.session = resolved.session;
+        if execution.principal.principal_id.is_none() {
+            execution.principal.principal_id = resolved.principal_id;
+        }
+        execution.flash_messages = resolved.flash_messages;
+        execution.response_cookies = resolved.response_cookies;
+        Ok(execution)
     }
 
     fn verify_session_cookie(

@@ -17,6 +17,7 @@ davenda-storage = { path = "../davenda-storage" }
 davenda-template = { path = "../davenda-template" }
 davenda-tls = { path = "../davenda-tls" }
 davenda-wasm = { path = "../davenda-wasm" }
+rand = "0.8"
 thiserror = "1.0"
 
 [dev-dependencies]

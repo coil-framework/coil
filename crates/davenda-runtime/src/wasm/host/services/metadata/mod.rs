@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use davenda_data::DataRuntime;
 use davenda_wasm::{MetadataExecution, MetadataGrant};
 
 use super::super::*;
@@ -49,13 +48,6 @@ impl RuntimeMetadataBackend {
                 root.into(),
                 namespace.into(),
             )),
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn with_shared_runtime(runtime: DataRuntime) -> Self {
-        Self {
-            backend: MetadataAuditBackend::shared(shared::SharedMetadataAuditStore::open(runtime)),
         }
     }
 

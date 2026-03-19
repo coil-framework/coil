@@ -64,7 +64,7 @@ impl RuntimePlan {
         self.auth_package.package()
     }
 
-    pub fn metadata_audit_backend_selection(&self) -> MetadataAuditBackendSelection {
+    pub(crate) fn metadata_audit_backend_selection(&self) -> MetadataAuditBackendSelection {
         match self.config.storage.deployment {
             davenda_config::StorageDeployment::Distributed => {
                 MetadataAuditBackendSelection::SharedPostgres {

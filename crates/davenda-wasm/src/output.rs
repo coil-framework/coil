@@ -505,7 +505,7 @@ impl TypedExecutionOutput {
         Ok(bytes)
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<Self, WasmModelError> {
+    fn decode(bytes: &[u8]) -> Result<Self, WasmModelError> {
         let mut cursor = ByteCursor::new(bytes);
         let magic = cursor.read_array::<4>()?;
         if magic != Self::ABI_MAGIC {

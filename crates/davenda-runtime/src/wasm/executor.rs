@@ -1,11 +1,11 @@
 use super::auth_backend::RuntimeAuthBackend;
-use davenda_wasm::MetadataGrant;
 use super::host::RuntimeWasmHostServices;
 use super::support::{
     runtime_auth_backend_error, runtime_data_backend_error, runtime_executor_error,
     runtime_host_service_error, storage_class_from_grant, trace_id,
 };
 use super::*;
+use davenda_wasm::MetadataGrant;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -228,7 +228,9 @@ impl RuntimeHostServiceExecutor {
         let execution = self
             .services
             .execute_http(integration, response_bytes, context)
-            .map_err(|reason| runtime_host_service_error(context, HostServiceDomain::Network, reason))?;
+            .map_err(|reason| {
+                runtime_host_service_error(context, HostServiceDomain::Network, reason)
+            })?;
 
         Ok(HostServiceExecution {
             call: call.clone(),
@@ -245,7 +247,9 @@ impl RuntimeHostServiceExecutor {
         let execution = self
             .services
             .read_secret(secret, context)
-            .map_err(|reason| runtime_host_service_error(context, HostServiceDomain::Secrets, reason))?;
+            .map_err(|reason| {
+                runtime_host_service_error(context, HostServiceDomain::Secrets, reason)
+            })?;
 
         Ok(HostServiceExecution {
             call: call.clone(),
@@ -262,7 +266,9 @@ impl RuntimeHostServiceExecutor {
         let execution = self
             .services
             .enqueue_job(queue, context)
-            .map_err(|reason| runtime_host_service_error(context, HostServiceDomain::Jobs, reason))?;
+            .map_err(|reason| {
+                runtime_host_service_error(context, HostServiceDomain::Jobs, reason)
+            })?;
 
         Ok(HostServiceExecution {
             call: call.clone(),
@@ -398,14 +404,14 @@ impl HostServiceExecutor for RuntimeHostServiceExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RuntimeBuilder;
     use davenda_auth::DefaultAuthModelPackage;
     use davenda_config::PlatformConfig;
-    use crate::RuntimeBuilder;
     use davenda_wasm::{
-        CustomerAppContext, ExtensionId, HandlerId, HostCapabilityGrant, HostGrantSet,
-        HttpMethod, InvocationContext, InvocationInput, InvocationPlan, JobExecution,
-        MetadataExecution, MetadataGrant, NetworkExecution, PageInvocation, PrincipalRef,
-        ResourceLimits, SecretExecution, TraceContext,
+        CustomerAppContext, ExtensionId, HandlerId, HostCapabilityGrant, HostGrantSet, HttpMethod,
+        InvocationContext, InvocationInput, InvocationPlan, JobExecution, MetadataExecution,
+        MetadataGrant, NetworkExecution, PageInvocation, PrincipalRef, ResourceLimits,
+        SecretExecution, TraceContext,
     };
     use std::collections::BTreeMap;
     use std::io::{Read, Write};
@@ -533,7 +539,9 @@ publish_manifest = false
                 CustomerAppContext::new("customer-app").unwrap(),
                 PrincipalRef::user("user-1").unwrap(),
                 TraceContext::new("trace-1").unwrap(),
-                InvocationInput::Page(PageInvocation::new("/host-side-effects", HttpMethod::Get).unwrap()),
+                InvocationInput::Page(
+                    PageInvocation::new("/host-side-effects", HttpMethod::Get).unwrap(),
+                ),
             ),
         };
 
@@ -557,7 +565,10 @@ publish_manifest = false
                 && status == 200
                 && response_bytes == "live-response".len() as u64
         ));
-        assert_eq!(session.usage().outbound_response_bytes, "live-response".len() as u64);
+        assert_eq!(
+            session.usage().outbound_response_bytes,
+            "live-response".len() as u64
+        );
 
         let secret = session
             .execute_host_call(davenda_wasm::HostCall::SecretRead {
@@ -593,7 +604,10 @@ publish_manifest = false
 
         let jobs = plan.jobs_host("scheduler-a").unwrap();
         assert_eq!(jobs.coordinator().ready_jobs().len(), 1);
-        assert_eq!(jobs.coordinator().ready_jobs()[0].spec.queue.as_str(), "jobs.work");
+        assert_eq!(
+            jobs.coordinator().ready_jobs()[0].spec.queue.as_str(),
+            "jobs.work"
+        );
 
         let metadata = session
             .execute_host_call(davenda_wasm::HostCall::MetadataWrite {
@@ -622,7 +636,14 @@ publish_manifest = false
                 journal_entries: 2,
             })
         ));
-        assert_eq!(services.metadata_records().len(), 2);
+        let records = services.metadata_records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].kind, MetadataGrant::JsonLd);
+        assert_eq!(records[0].trace_id, "trace-1");
+        assert_eq!(records[0].app_id, "customer-app");
+        assert_eq!(records[1].kind, MetadataGrant::JsonLd);
+        assert_eq!(records[1].trace_id, "trace-1");
+        assert_eq!(records[1].app_id, "customer-app");
 
         server.join().unwrap();
     }

@@ -1,0 +1,193 @@
+use davenda_config::{PlatformConfig, StorageClass};
+use thiserror::Error;
+
+use crate::policy::{join_local_path, join_relative, normalize_relative_path};
+use crate::{
+    DurableStore, StorageBackendKind, StoragePolicy, StoragePolicyError, StoragePolicyOverride,
+    StoragePolicySet, StorageTopology, SyncMode,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoragePlanRequest {
+    pub logical_path: String,
+    pub storage_class: Option<StorageClass>,
+    pub override_policy: Option<StoragePolicyOverride>,
+}
+
+impl StoragePlanRequest {
+    pub fn new(logical_path: impl Into<String>) -> Self {
+        Self {
+            logical_path: logical_path.into(),
+            storage_class: None,
+            override_policy: None,
+        }
+    }
+
+    pub fn with_storage_class(mut self, storage_class: StorageClass) -> Self {
+        self.storage_class = Some(storage_class);
+        self
+    }
+
+    pub fn with_override(mut self, override_policy: StoragePolicyOverride) -> Self {
+        self.override_policy = Some(override_policy);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteTargetKind {
+    Primary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteTarget {
+    pub backend: StorageBackendKind,
+    pub locator: String,
+    pub kind: WriteTargetKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoragePlanWarning {
+    LocalOnlyBreaksMultiNode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoragePlan {
+    pub logical_path: String,
+    pub storage_class: StorageClass,
+    pub policy: StoragePolicy,
+    pub durable_store: DurableStore,
+    pub object_key: Option<String>,
+    pub local_path: Option<String>,
+    pub matched_rule_prefix: Option<String>,
+    pub write_targets: Vec<WriteTarget>,
+    pub warnings: Vec<StoragePlanWarning>,
+}
+
+impl StoragePlan {
+    pub fn primary_write_target(&self) -> Option<&WriteTarget> {
+        self.write_targets
+            .iter()
+            .find(|target| target.kind == WriteTargetKind::Primary)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoragePlanner {
+    topology: StorageTopology,
+    policies: StoragePolicySet,
+}
+
+impl StoragePlanner {
+    pub fn from_config(config: &PlatformConfig) -> Self {
+        Self {
+            topology: StorageTopology::from_config(config),
+            policies: StoragePolicySet::default(),
+        }
+    }
+
+    pub fn new(topology: StorageTopology, policies: StoragePolicySet) -> Self {
+        Self { topology, policies }
+    }
+
+    pub fn topology(&self) -> &StorageTopology {
+        &self.topology
+    }
+
+    pub fn policies(&self) -> &StoragePolicySet {
+        &self.policies
+    }
+
+    pub fn plan_write(
+        &self,
+        request: StoragePlanRequest,
+    ) -> Result<StoragePlan, StoragePlanningError> {
+        let logical_path = normalize_relative_path(&request.logical_path)?;
+        let storage_class = request.storage_class.unwrap_or(self.topology.default_class);
+        let resolved = self.policies.resolve(
+            storage_class,
+            &logical_path,
+            request.override_policy.as_ref(),
+        )?;
+
+        let mut warnings = Vec::new();
+        let policy = resolved.policy;
+        let durable_store = policy.durable_store();
+
+        let object_key = match policy.sync_mode {
+            SyncMode::ObjectStore => {
+                if self.topology.object_store.is_none() {
+                    return Err(StoragePlanningError::ObjectStoreRequired {
+                        logical_path,
+                        policy,
+                    });
+                }
+
+                Some(join_relative(
+                    resolved.object_prefix.as_deref(),
+                    &logical_path,
+                ))
+            }
+            SyncMode::LocalOnly => None,
+        };
+
+        let local_path = match policy.sync_mode {
+            SyncMode::ObjectStore => None,
+            SyncMode::LocalOnly => {
+                warnings.push(StoragePlanWarning::LocalOnlyBreaksMultiNode);
+                Some(join_local_path(
+                    &self.topology.local_root,
+                    resolved.local_subdir.as_deref(),
+                    &logical_path,
+                ))
+            }
+        };
+
+        let write_targets = match policy.sync_mode {
+            SyncMode::ObjectStore => vec![WriteTarget {
+                backend: self
+                    .topology
+                    .object_store
+                    .as_ref()
+                    .expect("object store availability checked")
+                    .backend_kind(),
+                locator: object_key
+                    .clone()
+                    .expect("object key is present for object store policies"),
+                kind: WriteTargetKind::Primary,
+            }],
+            SyncMode::LocalOnly => vec![WriteTarget {
+                backend: StorageBackendKind::LocalDisk,
+                locator: local_path
+                    .clone()
+                    .expect("local path is present for local policies"),
+                kind: WriteTargetKind::Primary,
+            }],
+        };
+
+        Ok(StoragePlan {
+            logical_path,
+            storage_class: resolved.storage_class,
+            policy,
+            durable_store,
+            object_key,
+            local_path,
+            matched_rule_prefix: resolved.matched_rule_prefix,
+            write_targets,
+            warnings,
+        })
+    }
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum StoragePlanningError {
+    #[error(transparent)]
+    Policy(#[from] StoragePolicyError),
+    #[error(
+        "storage plan for `{logical_path}` requires object storage but no object-store backend is configured for policy {policy:?}"
+    )]
+    ObjectStoreRequired {
+        logical_path: String,
+        policy: StoragePolicy,
+    },
+}

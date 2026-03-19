@@ -580,6 +580,7 @@ dependencies = [
  "davenda-observability",
  "davenda-ops",
  "davenda-template",
+ "davenda-tls",
  "davenda-wasm",
  "thiserror 1.0.69",
 ]

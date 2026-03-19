@@ -13,6 +13,7 @@ davenda-jobs = { path = "../davenda-jobs" }
 davenda-observability = { path = "../davenda-observability" }
 davenda-ops = { path = "../davenda-ops" }
 davenda-template = { path = "../davenda-template" }
+davenda-tls = { path = "../davenda-tls" }
 davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "1.0"
 

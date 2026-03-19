@@ -28,6 +28,11 @@ use davenda_ops::{
     BulkOperationPlan, BulkOperationRequest, OpsCatalog, OpsModelError, OpsPlanner,
     ReportExportPlan, ReportExportRequest,
 };
+use davenda_tls::{
+    CertificateId, CertificateInventory, CertificateProviderKind, CertificateRecord,
+    ChallengeTicket, EdgeMode, HostnameBinding, HotReloadEvent, IssuancePlan, RenewalPlan,
+    TlsAutomationRuntime, TlsInstant, TlsModelError,
+};
 use davenda_wasm::{
     ContractVersion, ExtensionPointKind, ExtensionRegistry, InstalledExtension, WasmModelError,
 };
@@ -1372,6 +1377,96 @@ impl OpsHost {
     }
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeTlsError {
+    #[error(transparent)]
+    Tls(#[from] TlsModelError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TlsStatusSnapshot {
+    pub customer_app: String,
+    pub mode: davenda_config::TlsMode,
+    pub edge_mode: EdgeMode,
+    pub provider: Option<CertificateProviderKind>,
+    pub inventory: CertificateInventory,
+    pub queued_renewals: Vec<RenewalPlan>,
+    pub pending_challenges: Vec<ChallengeTicket>,
+    pub hot_reload_events: Vec<HotReloadEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TlsHost {
+    pub customer_app: String,
+    pub runtime: TlsRuntimeServices,
+    automation: TlsAutomationRuntime,
+}
+
+impl TlsHost {
+    pub fn status(&self) -> TlsStatusSnapshot {
+        TlsStatusSnapshot {
+            customer_app: self.customer_app.clone(),
+            mode: self.runtime.mode,
+            edge_mode: self.runtime.edge_mode,
+            provider: self.runtime.provider,
+            inventory: self.automation.inventory().clone(),
+            queued_renewals: self.automation.renewal_queue().to_vec(),
+            pending_challenges: self.automation.pending_challenges().to_vec(),
+            hot_reload_events: self.automation.hot_reload_events().to_vec(),
+        }
+    }
+
+    pub fn issue_for_bindings(
+        &self,
+        bindings: Vec<HostnameBinding>,
+    ) -> Result<IssuancePlan, RuntimeTlsError> {
+        Ok(self.runtime.planner().issue_for_bindings(bindings)?)
+    }
+
+    pub fn import_certificate(&mut self, record: CertificateRecord) -> Result<(), RuntimeTlsError> {
+        Ok(self.automation.import_certificate(record)?)
+    }
+
+    pub fn queue_renewal(
+        &mut self,
+        certificate_id: &CertificateId,
+        now: TlsInstant,
+    ) -> Result<RenewalPlan, RuntimeTlsError> {
+        Ok(self.automation.queue_renewal(certificate_id, now)?)
+    }
+
+    pub fn begin_renewal(
+        &mut self,
+        certificate_id: &CertificateId,
+        replacement_certificate_id: CertificateId,
+    ) -> Result<ChallengeTicket, RuntimeTlsError> {
+        Ok(self
+            .automation
+            .begin_renewal(certificate_id, replacement_certificate_id)?)
+    }
+
+    pub fn fail_renewal(
+        &mut self,
+        certificate_id: &CertificateId,
+    ) -> Result<CertificateRecord, RuntimeTlsError> {
+        Ok(self.automation.fail_renewal(certificate_id)?)
+    }
+
+    pub fn activate_replacement(
+        &mut self,
+        certificate_id: &CertificateId,
+        replacement: CertificateRecord,
+    ) -> Result<HotReloadEvent, RuntimeTlsError> {
+        Ok(self
+            .automation
+            .activate_replacement(certificate_id, replacement)?)
+    }
+
+    pub fn automation(&self) -> &TlsAutomationRuntime {
+        &self.automation
+    }
+}
+
 impl RuntimePlan {
     pub fn jobs_host(
         &self,
@@ -1402,6 +1497,14 @@ impl RuntimePlan {
             planner: OpsPlanner::new(self.jobs.clone(), self.ops_catalog.clone())?,
             jobs: self.jobs_host(scheduler_node_id)?,
         })
+    }
+
+    pub fn tls_host(&self) -> TlsHost {
+        TlsHost {
+            customer_app: self.config.app.name.clone(),
+            runtime: self.tls.clone(),
+            automation: self.tls.automation(),
+        }
     }
 
     pub fn execute_request(
@@ -2214,6 +2317,11 @@ mod tests {
         ReportExportRequest, ReportId,
     };
     use davenda_template::TemplateNamespace;
+    use davenda_tls::{
+        CertificateFingerprint, CertificateId, CertificateProviderKind, CertificateRecord,
+        CertificateStateStore, CertificateStatus, CloudflareEncryptionMode, CustomerAppId,
+        Hostname, HostnameBinding, SecretMaterialRef, TlsInstant,
+    };
     use davenda_wasm::{
         AdminWidgetExtensionPoint, ContractVersion, ExtensionInstallation, ExtensionManifest,
         ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest,
@@ -2367,6 +2475,37 @@ cdn_base_url = "https://cdn.example.com"
         ) -> Result<(), RegistrationError> {
             Ok(())
         }
+    }
+
+    fn external_tls_config() -> String {
+        VALID_CONFIG.replace(
+            "mode = \"acme\"\nchallenge = \"dns-01\"\nprovider = \"cloudflare-dns\"",
+            "mode = \"external\"",
+        )
+    }
+
+    fn cloudflare_origin_tls_config() -> String {
+        VALID_CONFIG.replace(
+            "mode = \"acme\"\nchallenge = \"dns-01\"\nprovider = \"cloudflare-dns\"",
+            "mode = \"cloudflare-origin\"\nprovider = \"cloudflare-origin-ca\"",
+        )
+    }
+
+    fn active_certificate(id: &str, hostname: &str) -> CertificateRecord {
+        CertificateRecord::new(
+            CertificateId::new(id).unwrap(),
+            CertificateProviderKind::Acme,
+            CertificateStatus::Active,
+            CertificateFingerprint::new(format!("sha256:{id}")).unwrap(),
+            TlsInstant::from_unix_seconds(1_000),
+            TlsInstant::from_unix_seconds(4_000_000),
+            SecretMaterialRef::new(format!("secrets/tls/{id}")).unwrap(),
+            CertificateStateStore::SharedSecrets,
+        )
+        .with_binding(HostnameBinding::new(
+            Hostname::new(hostname).unwrap(),
+            CustomerAppId::new("showcase-events").unwrap(),
+        ))
     }
 
     #[test]
@@ -3185,6 +3324,134 @@ cdn_base_url = "https://cdn.example.com"
                 .job_name
                 .as_str(),
             "bulk.bulk.events.check-in"
+        );
+    }
+
+    #[test]
+    fn runtime_plan_creates_tls_host_with_expected_provider_mode() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let host = plan.tls_host();
+        let status = host.status();
+
+        assert_eq!(status.customer_app, "showcase-events");
+        assert_eq!(status.mode, davenda_config::TlsMode::Acme);
+        assert_eq!(status.edge_mode, EdgeMode::DirectTermination);
+        assert_eq!(
+            status.provider,
+            Some(CertificateProviderKind::CloudflareDns)
+        );
+        assert!(status.inventory.certificates().is_empty());
+    }
+
+    #[test]
+    fn tls_host_status_tracks_inventory_renewals_and_pending_challenges() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let mut host = plan.tls_host();
+        let certificate_id = CertificateId::new("cert-live").unwrap();
+
+        host.import_certificate(active_certificate("cert-live", "www.example.com"))
+            .unwrap();
+        host.queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+            .unwrap();
+        host.begin_renewal(&certificate_id, CertificateId::new("cert-next").unwrap())
+            .unwrap();
+
+        let status = host.status();
+        assert_eq!(status.inventory.certificates().len(), 1);
+        assert_eq!(status.queued_renewals.len(), 1);
+        assert_eq!(status.pending_challenges.len(), 1);
+        assert_eq!(
+            status.pending_challenges[0]
+                .replacement_certificate_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some("cert-next")
+        );
+    }
+
+    #[test]
+    fn tls_host_activate_replacement_emits_hot_reload_and_supersedes_old_certificate() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let mut host = plan.tls_host();
+        let certificate_id = CertificateId::new("cert-live").unwrap();
+
+        host.import_certificate(active_certificate("cert-live", "shop.example.com"))
+            .unwrap();
+        host.queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+            .unwrap();
+        host.begin_renewal(&certificate_id, CertificateId::new("cert-next").unwrap())
+            .unwrap();
+
+        let event = host
+            .activate_replacement(
+                &certificate_id,
+                active_certificate("cert-next", "shop.example.com")
+                    .with_cloudflare_mode(CloudflareEncryptionMode::FullStrict),
+            )
+            .unwrap();
+        assert_eq!(event.certificate_id.as_str(), "cert-next");
+        assert!(event.reloaded_without_restart);
+
+        let status = host.status();
+        assert_eq!(status.hot_reload_events.len(), 1);
+        assert_eq!(
+            status
+                .inventory
+                .active_for_hostname(&Hostname::new("shop.example.com").unwrap())
+                .unwrap()
+                .id
+                .as_str(),
+            "cert-next"
+        );
+        assert_eq!(
+            status.inventory.record(&certificate_id).unwrap().status,
+            CertificateStatus::Superseded
+        );
+    }
+
+    #[test]
+    fn tls_host_rejects_external_termination_issuance_and_preserves_cloudflare_origin_mode() {
+        let external = PlatformConfig::from_toml_str(&external_tls_config()).unwrap();
+        let external_plan = RuntimeBuilder::new(external, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let external_host = external_plan.tls_host();
+
+        let err = external_host
+            .issue_for_bindings(vec![HostnameBinding::new(
+                Hostname::new("www.example.com").unwrap(),
+                CustomerAppId::new("showcase-events").unwrap(),
+            )])
+            .unwrap_err();
+        assert_eq!(
+            err,
+            RuntimeTlsError::Tls(TlsModelError::ExternalTerminationDoesNotIssue)
+        );
+
+        let origin = PlatformConfig::from_toml_str(&cloudflare_origin_tls_config()).unwrap();
+        let origin_plan = RuntimeBuilder::new(origin, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let issue_plan = origin_plan
+            .tls_host()
+            .issue_for_bindings(vec![HostnameBinding::new(
+                Hostname::new("origin.example.com").unwrap(),
+                CustomerAppId::new("showcase-events").unwrap(),
+            )])
+            .unwrap();
+
+        assert_eq!(
+            issue_plan.cloudflare_mode,
+            Some(CloudflareEncryptionMode::FullStrict)
         );
     }
 

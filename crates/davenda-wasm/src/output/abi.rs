@@ -130,7 +130,23 @@ impl TypedExecutionOutput {
         Ok(output)
     }
 
-    pub fn decode_for_point(
+    pub fn decode_page(bytes: &[u8]) -> Result<Self, WasmModelError> {
+        Self::decode_for_point(bytes, ExtensionPointKind::Page)
+    }
+
+    pub fn decode_api(bytes: &[u8]) -> Result<Self, WasmModelError> {
+        Self::decode_for_point(bytes, ExtensionPointKind::Api)
+    }
+
+    pub fn decode_admin_widget(bytes: &[u8]) -> Result<Self, WasmModelError> {
+        Self::decode_for_point(bytes, ExtensionPointKind::AdminWidget)
+    }
+
+    pub fn decode_render_hook(bytes: &[u8]) -> Result<Self, WasmModelError> {
+        Self::decode_for_point(bytes, ExtensionPointKind::RenderHook)
+    }
+
+    pub(crate) fn decode_for_point(
         bytes: &[u8],
         point: ExtensionPointKind,
     ) -> Result<Self, WasmModelError> {
@@ -139,7 +155,10 @@ impl TypedExecutionOutput {
         Ok(output)
     }
 
-    pub fn validate_for_point(&self, point: ExtensionPointKind) -> Result<(), WasmModelError> {
+    pub(crate) fn validate_for_point(
+        &self,
+        point: ExtensionPointKind,
+    ) -> Result<(), WasmModelError> {
         if self.surface != point {
             return Err(WasmModelError::TypedReturnPointMismatch {
                 expected: point,

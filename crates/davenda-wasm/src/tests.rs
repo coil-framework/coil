@@ -217,7 +217,17 @@ fn typed_render_hook_output() -> TypedExecutionOutput {
 
 fn assert_typed_output_roundtrips(point: ExtensionPointKind, output: TypedExecutionOutput) {
     let encoded = output.encode().unwrap();
-    let decoded = TypedExecutionOutput::decode_for_point(&encoded, point).unwrap();
+    let decoded = match point {
+        ExtensionPointKind::Page => TypedExecutionOutput::decode_page(&encoded).unwrap(),
+        ExtensionPointKind::Api => TypedExecutionOutput::decode_api(&encoded).unwrap(),
+        ExtensionPointKind::AdminWidget => {
+            TypedExecutionOutput::decode_admin_widget(&encoded).unwrap()
+        }
+        ExtensionPointKind::RenderHook => {
+            TypedExecutionOutput::decode_render_hook(&encoded).unwrap()
+        }
+        other => panic!("unexpected typed surface in test: {other:?}"),
+    };
     assert_eq!(decoded, output);
 }
 
@@ -870,33 +880,20 @@ fn typed_execution_output_rejects_invalid_http_statuses() {
 }
 
 #[test]
-fn typed_execution_output_rejects_unsupported_surfaces_at_construction() {
-    let error = TypedExecutionOutput::new(
-        ExtensionPointKind::Job,
-        200,
-        TypedResponseBody::HtmlDocument("<section>ok</section>".to_string()),
-        TypedMetadata::new(),
-        None,
-    )
-    .unwrap_err();
+fn typed_execution_output_rejects_surface_mismatches_on_decode() {
+    let api_encoded = typed_api_output().encode().unwrap();
+    let error = TypedExecutionOutput::decode_page(&api_encoded).unwrap_err();
     assert_eq!(
         error,
-        WasmModelError::TypedReturnBodyMismatch {
-            point: ExtensionPointKind::Job,
-            body: TypedResponseBodyKind::HtmlDocument,
+        WasmModelError::TypedReturnPointMismatch {
+            expected: ExtensionPointKind::Page,
+            actual: ExtensionPointKind::Api,
         }
     );
-}
 
-#[test]
-fn typed_execution_output_rejects_surface_body_mutations_on_encode() {
-    let mut output = typed_page_output();
-    output.body = TypedResponseBody::JsonObject(BTreeMap::from([(
-        "extension".to_string(),
-        "ok".to_string(),
-    )]));
-
-    let error = output.encode().unwrap_err();
+    let mut body_mismatch = api_encoded;
+    body_mismatch[6] = 0;
+    let error = TypedExecutionOutput::decode_page(&body_mismatch).unwrap_err();
     assert_eq!(
         error,
         WasmModelError::TypedReturnBodyMismatch {
@@ -1007,9 +1004,7 @@ fn typed_return_payload_rejects_body_point_mismatches() {
         TypedExecutionOutput::admin_widget(200, "<div>Admin</div>", TypedMetadata::new(), None)
             .unwrap();
 
-    let error = output
-        .validate_for_point(ExtensionPointKind::Page)
-        .unwrap_err();
+    let error = TypedExecutionOutput::decode_page(&output.encode().unwrap()).unwrap_err();
     assert_eq!(
         error,
         WasmModelError::TypedReturnPointMismatch {

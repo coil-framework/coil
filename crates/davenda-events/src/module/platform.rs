@@ -1,68 +1,5 @@
+use super::support::{default_retry_policy, events_waitlist_repository};
 use super::*;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EventsModule {
-    name: String,
-    config_namespace: String,
-    admin_resources: Vec<AdminResourceContribution>,
-}
-
-impl EventsModule {
-    pub fn new() -> Self {
-        Self {
-            name: "events".to_string(),
-            config_namespace: "events".to_string(),
-            admin_resources: vec![
-                AdminResourceContribution::new(
-                    "events.events",
-                    "/admin/events/events",
-                    "Events",
-                    "Events",
-                    AdminNavigationSection::Events,
-                    AdminContributionKind::ResourceIndex,
-                    Capability::EventsEventPublish,
-                ),
-                AdminResourceContribution::new(
-                    "events.slots",
-                    "/admin/events/slots",
-                    "Slots",
-                    "Slots",
-                    AdminNavigationSection::Events,
-                    AdminContributionKind::ResourceIndex,
-                    Capability::EventsSlotManage,
-                ),
-                AdminResourceContribution::new(
-                    "events.bookings",
-                    "/admin/events/bookings",
-                    "Bookings",
-                    "Bookings",
-                    AdminNavigationSection::Events,
-                    AdminContributionKind::ResourceIndex,
-                    Capability::EventsBookingCreate,
-                ),
-                AdminResourceContribution::new(
-                    "events.check-in",
-                    "/admin/events/check-in",
-                    "Check-in",
-                    "Check-in",
-                    AdminNavigationSection::Events,
-                    AdminContributionKind::Workflow,
-                    Capability::EventsBookingCheckIn,
-                ),
-            ],
-        }
-    }
-
-    pub fn admin_resources(&self) -> &[AdminResourceContribution] {
-        &self.admin_resources
-    }
-}
-
-impl Default for EventsModule {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl PlatformModule for EventsModule {
     fn manifest(&self) -> ModuleManifest {
@@ -85,44 +22,23 @@ impl PlatformModule for EventsModule {
             ])
             .with_config_namespace(self.config_namespace.clone())
             .with_capability_contracts(vec![
-                CapabilityContract::required(
-                    Capability::EventsEventPublish,
-                    ["event"],
-                ),
-                CapabilityContract::required(
-                    Capability::EventsSlotManage,
-                    ["event_slot"],
-                ),
+                CapabilityContract::required(Capability::EventsEventPublish, ["event"]),
+                CapabilityContract::required(Capability::EventsSlotManage, ["event_slot"]),
                 CapabilityContract::required(
                     Capability::EventsBookingCreate,
                     ["booking", "event_slot"],
                 ),
-                CapabilityContract::required(
-                    Capability::EventsBookingCheckIn,
-                    ["booking"],
-                ),
-                CapabilityContract::optional(
-                    Capability::AdminShellAccess,
-                    ["admin_module"],
-                ),
+                CapabilityContract::required(Capability::EventsBookingCheckIn, ["booking"]),
+                CapabilityContract::optional(Capability::AdminShellAccess, ["admin_module"]),
                 CapabilityContract::optional(Capability::CmsPageRead, ["page"]),
-                CapabilityContract::optional(
-                    Capability::SeoMetadataEdit,
-                    ["event"],
-                ),
-                CapabilityContract::optional(
-                    Capability::I18nTranslationEdit,
-                    ["event"],
-                ),
+                CapabilityContract::optional(Capability::SeoMetadataEdit, ["event"]),
+                CapabilityContract::optional(Capability::I18nTranslationEdit, ["event"]),
                 CapabilityContract::optional(
                     Capability::MembershipSubscriptionManage,
                     ["subscription", "membership_tier"],
                 ),
                 CapabilityContract::optional(Capability::AssetRead, ["asset", "media"]),
-                CapabilityContract::optional(
-                    Capability::CheckoutSessionCreate,
-                    ["storefront"],
-                ),
+                CapabilityContract::optional(Capability::CheckoutSessionCreate, ["storefront"]),
                 CapabilityContract::optional(Capability::OrderRead, ["order"]),
             ])
             .with_module_dependencies(vec![
@@ -522,43 +438,4 @@ impl PlatformModule for EventsModule {
         .expect("event migration ids are unique");
         Some(plan)
     }
-}
-
-fn events_waitlist_repository() -> DataRepositoryContribution {
-    DataRepositoryContribution::new(
-        RepositorySpec::new(
-            "events.waitlist",
-            TableName::new("davenda.events_waitlist_entries")
-                .expect("constant events table is valid"),
-            vec![
-                QueryField::new("waitlist_entry_id").expect("constant events field is valid"),
-                QueryField::new("event_id").expect("constant events field is valid"),
-                QueryField::new("slot_id").expect("constant events field is valid"),
-                QueryField::new("status").expect("constant events field is valid"),
-                QueryField::new("position").expect("constant events field is valid"),
-                QueryField::new("created_at").expect("constant events field is valid"),
-            ],
-        )
-        .expect("constant events repository is valid")
-        .with_sortable_field("created_at")
-        .expect("constant events sortable field is valid")
-        .with_default_sort(
-            QuerySort::ascending("created_at").expect("constant events sort is valid"),
-        )
-        .with_filterable_field("event_id")
-        .expect("constant events filter field is valid")
-        .with_filterable_field("slot_id")
-        .expect("constant events filter field is valid"),
-        DataRepositoryQueryProfile::new(
-            PageRequest::new(0, 50).expect("constant events page size is valid"),
-            PublicationVisibility::IncludeDrafts,
-            QueryCacheScope::Uncacheable,
-        )
-        .bind_invocation_principal(),
-    )
-}
-
-fn default_retry_policy() -> RetryPolicy {
-    RetryPolicy::new(3, Duration::from_secs(15), Duration::from_secs(300))
-        .expect("constant retry policy is valid")
 }

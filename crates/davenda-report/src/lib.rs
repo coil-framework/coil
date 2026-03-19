@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::collections::BTreeMap;
 
 use thiserror::Error;
@@ -10,21 +11,21 @@ pub enum ReportModelError {
     InvalidToken { field: &'static str, value: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ReportStatus {
     Ok,
     Warning,
     Unsafe,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DiagnosticSeverity {
     Info,
     Warning,
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiagnosticRecord {
     pub severity: DiagnosticSeverity,
     pub code: String,
@@ -45,7 +46,7 @@ impl DiagnosticRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct ReportRow {
     pub cells: BTreeMap<String, String>,
 }
@@ -67,7 +68,7 @@ impl ReportRow {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CommandReport {
     pub command: Vec<String>,
     pub status: ReportStatus,

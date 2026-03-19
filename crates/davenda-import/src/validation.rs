@@ -21,6 +21,10 @@ pub enum ImportModelError {
     CyclicImporterDependencies,
     #[error("import receipt duplicates source key `{source_key}`")]
     DuplicateSourceReceipt { source_key: String },
+    #[error("failed to read import manifest `{path}`: {message}")]
+    ManifestRead { path: String, message: String },
+    #[error("failed to parse import manifest: {message}")]
+    ManifestParse { message: String },
     #[error("{0}")]
     Report(#[from] ReportModelError),
 }

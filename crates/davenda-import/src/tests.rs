@@ -1,5 +1,7 @@
 use super::*;
 use davenda_report::ReportStatus;
+use std::fs;
+use std::path::PathBuf;
 
 #[test]
 fn manifest_plans_importers_in_dependency_order() {
@@ -183,4 +185,71 @@ fn cutover_plan_surfaces_readiness_and_rollback_triggers() {
     let report = blocked.command_report().unwrap();
     assert_eq!(report.status, ReportStatus::Unsafe);
     assert_eq!(report.diagnostics.len(), 1);
+}
+
+#[test]
+fn manifest_document_loads_toml_into_a_typed_manifest() {
+    let manifest = ImportManifest::from_toml_str(
+        r#"
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "harbor-shop"
+modules = ["cms", "events"]
+locale = "en"
+site = "main"
+validation_mode = "strict"
+publication_mode = "stage_validated"
+asset_storage_default = "public_upload"
+
+[[importers]]
+id = "users"
+phase = 10
+resource_kind = "user"
+description = "Import users and groups"
+
+[[importers]]
+id = "events"
+phase = 20
+resource_kind = "event"
+description = "Import events and timeslots"
+dependencies = ["users"]
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(manifest.run_id, ImportRunId::new("wordpress-events").unwrap());
+    assert_eq!(manifest.modules, vec!["cms".to_string(), "events".to_string()]);
+    assert_eq!(manifest.locale.as_deref(), Some("en"));
+    assert_eq!(manifest.site.as_deref(), Some("main"));
+    assert_eq!(manifest.importers.len(), 2);
+    assert_eq!(
+        manifest.importers[1].dependencies,
+        vec![ImporterId::new("users").unwrap()]
+    );
+}
+
+#[test]
+fn manifest_document_reads_from_disk() {
+    let path = PathBuf::from("/tmp/davenda-import-manifest.toml");
+    fs::write(
+        &path,
+        r#"
+run_id = "wordpress-pages"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "harbor-shop"
+
+[[importers]]
+id = "pages"
+phase = 10
+resource_kind = "page"
+description = "Import pages"
+"#,
+    )
+    .unwrap();
+
+    let manifest = ImportManifest::from_file(&path).unwrap();
+    assert_eq!(manifest.importers.len(), 1);
+    assert_eq!(manifest.importers[0].id, ImporterId::new("pages").unwrap());
 }

@@ -1,11 +1,12 @@
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::error::CliRunError;
 use crate::command::OutputMode;
+use crate::{CommandReport, DiagnosticSeverity, ReportStatus};
 use davenda_auth::{
     AllowedExplanation, DeniedAttempt, DeniedExplanation, DeniedReason, ExplainDecision,
     ExplainStep, ExplainTrace,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::fmt::Write as _;
 
 pub(crate) fn render_auth_explain(
@@ -18,15 +19,22 @@ pub(crate) fn render_auth_explain(
     }
 }
 
+pub(crate) fn render_command_report(
+    report: &CommandReport,
+    output_mode: OutputMode,
+) -> Result<String, CliRunError> {
+    match output_mode {
+        OutputMode::Human => Ok(render_report_human(report)),
+        OutputMode::Json => serde_json::to_string_pretty(report)
+            .map_err(|error| CliRunError::execution(format!("failed to encode report JSON: {error}"))),
+    }
+}
+
 fn render_human(result: &AuthExplainResult) -> String {
     let explanation = &result.explanation;
     let mut out = String::new();
     let _ = writeln!(out, "auth explain");
-    let _ = writeln!(
-        out,
-        "  config: {}",
-        result.invocation.config_path.display()
-    );
+    let _ = writeln!(out, "  config: {}", result.invocation.config_path.display());
     let _ = writeln!(
         out,
         "  subject: {}",
@@ -57,6 +65,54 @@ fn render_human(result: &AuthExplainResult) -> String {
     let _ = writeln!(out, "  trace:");
     render_trace_human(&mut out, &explanation.trace, 2);
     out
+}
+
+fn render_report_human(report: &CommandReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", report.command.join(" "));
+    let _ = writeln!(out, "  status: {}", render_report_status(report.status));
+    let _ = writeln!(out, "  summary: {}", report.summary);
+
+    if !report.columns.is_empty() {
+        let _ = writeln!(out, "  columns: {}", report.columns.join(", "));
+    }
+
+    for row in &report.rows {
+        let _ = writeln!(out, "  row:");
+        for column in &report.columns {
+            if let Some(value) = row.cells.get(column) {
+                let _ = writeln!(out, "    {column}: {value}");
+            }
+        }
+    }
+
+    for diagnostic in &report.diagnostics {
+        let _ = writeln!(
+            out,
+            "  diagnostic [{}] {}: {}",
+            render_diagnostic_severity(diagnostic.severity),
+            diagnostic.code,
+            diagnostic.message
+        );
+    }
+
+    out.trim_end().to_string()
+}
+
+fn render_report_status(status: ReportStatus) -> &'static str {
+    match status {
+        ReportStatus::Ok => "ok",
+        ReportStatus::Warning => "warning",
+        ReportStatus::Unsafe => "unsafe",
+    }
+}
+
+fn render_diagnostic_severity(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Info => "info",
+        DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Error => "error",
+    }
 }
 
 fn render_trace_human(out: &mut String, trace: &ExplainTrace, indent: usize) {
@@ -253,13 +309,21 @@ fn step_to_json(step: &ExplainStep) -> Value {
             "tuple": render_tuple(tuple),
             "to": render_node(to),
         }),
-        ExplainStep::Computed { from, via_tuple, to } => json!({
+        ExplainStep::Computed {
+            from,
+            via_tuple,
+            to,
+        } => json!({
             "kind": "computed",
             "from": render_node(from),
             "via_tuple": render_tuple(via_tuple),
             "to": render_node(to),
         }),
-        ExplainStep::TupleToUserset { from, via_tuple, to } => json!({
+        ExplainStep::TupleToUserset {
+            from,
+            via_tuple,
+            to,
+        } => json!({
             "kind": "tuple_to_userset",
             "from": render_node(from),
             "via_tuple": render_tuple(via_tuple),

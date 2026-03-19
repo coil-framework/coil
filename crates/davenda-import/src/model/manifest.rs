@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationMode {
@@ -107,6 +108,14 @@ impl ImportManifest {
     pub fn with_importer(mut self, importer: ImporterSpec) -> Self {
         self.importers.push(importer);
         self
+    }
+
+    pub fn from_toml_str(input: &str) -> Result<Self, ImportModelError> {
+        crate::ImportManifestDocument::from_toml_str(input)?.into_manifest()
+    }
+
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, ImportModelError> {
+        crate::ImportManifestDocument::from_file(path)?.into_manifest()
     }
 
     pub fn validate(&self) -> Result<(), ImportModelError> {

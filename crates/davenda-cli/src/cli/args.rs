@@ -1,4 +1,5 @@
 use crate::cli::error::CliRunError;
+use crate::cli::import::ImportRunInvocation;
 use crate::command::OutputMode;
 use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Relation};
 use std::path::PathBuf;
@@ -19,6 +20,12 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         invocation: AuthExplainInvocation,
     },
+    ImportRun {
+        output_mode: OutputMode,
+        dry_run: bool,
+        confirmed: bool,
+        invocation: ImportRunInvocation,
+    },
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, CliRunError> {
@@ -27,6 +34,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from);
     let mut output_mode = OutputMode::Human;
+    let mut dry_run = false;
+    let mut confirmed = false;
     let mut subject: Option<DefaultSubject> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
@@ -39,6 +48,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
         match token.as_str() {
             "--help" | "-h" => return Ok(CliInput::Help),
             "--json" => output_mode = OutputMode::Json,
+            "--dry-run" => dry_run = true,
+            "--yes" => confirmed = true,
             "--config" => {
                 config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
             }
@@ -112,6 +123,16 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 },
             })
         }
+        [command, subcommand, manifest_path] if command == "import" && subcommand == "run" => {
+            Ok(CliInput::ImportRun {
+                output_mode,
+                dry_run,
+                confirmed,
+                invocation: ImportRunInvocation {
+                    manifest_path: PathBuf::from(manifest_path),
+                },
+            })
+        }
         [command, subcommand] => Err(CliRunError::usage(format!(
             "unsupported command `{command} {subcommand}`"
         ))),
@@ -127,10 +148,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     }
 }
 
-fn next_value(
-    iter: &mut impl Iterator<Item = String>,
-    flag: &str,
-) -> Result<String, CliRunError> {
+fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, CliRunError> {
     iter.next()
         .ok_or_else(|| CliRunError::usage(format!("`{flag}` expects a value")))
 }
@@ -276,5 +294,35 @@ mod tests {
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
         assert_eq!(invocation.resource, Entity::admin_module("app"));
         assert!(invocation.options.cycle_protection);
+    }
+
+    #[test]
+    fn parse_import_run_accepts_manifest_and_execution_flags() {
+        let input = parse([
+            "import".to_string(),
+            "run".to_string(),
+            "imports/wordpress-events.toml".to_string(),
+            "--dry-run".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ImportRun {
+            output_mode,
+            dry_run,
+            confirmed,
+            invocation,
+        } = input
+        else {
+            panic!("expected import run input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert!(!confirmed);
+        assert_eq!(
+            invocation.manifest_path,
+            PathBuf::from("imports/wordpress-events.toml")
+        );
     }
 }

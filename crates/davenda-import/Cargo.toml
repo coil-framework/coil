@@ -5,4 +5,6 @@ edition = "2024"
 
 [dependencies]
 davenda-report = { path = "../davenda-report" }
+serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.17"
+toml = "0.8"

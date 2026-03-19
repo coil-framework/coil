@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::host_api::HostServiceDomain;
 use crate::grants::HostCapabilityGrant;
+use crate::host_api::HostServiceDomain;
 use crate::ids::{ContractVersion, ExtensionPointKind, HttpMethod};
 use crate::invocation::PrincipalKind;
 use crate::manifest::ExtensionConfigValueType;

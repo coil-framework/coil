@@ -1,8 +1,8 @@
 use std::env;
 use std::fmt;
 use std::fs;
-use std::path::Path;
 use std::net::SocketAddr;
+use std::path::Path;
 
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
@@ -174,6 +174,12 @@ impl PlatformConfig {
 
         if self.auth.package.trim().is_empty() {
             errors.push(ConfigValidationError::EmptyAuthPackage);
+        }
+
+        if self.auth.tenant_id <= 0 {
+            errors.push(ConfigValidationError::InvalidAuthTenantId {
+                tenant_id: self.auth.tenant_id,
+            });
         }
 
         if self.wasm.default_time_limit_ms == 0 {
@@ -526,6 +532,7 @@ pub struct SeoConfig {
 pub struct AuthConfig {
     pub package: String,
     pub explain_api: bool,
+    pub tenant_id: i64,
     #[serde(default)]
     pub tuple_store_secret: Option<SecretRef>,
 }
@@ -659,6 +666,8 @@ pub enum ConfigValidationError {
     EmptyCanonicalHost,
     #[error("auth.package must not be empty")]
     EmptyAuthPackage,
+    #[error("auth.tenant_id must be greater than zero, got {tenant_id}")]
+    InvalidAuthTenantId { tenant_id: i64 },
     #[error("wasm.default_time_limit_ms must be greater than zero")]
     InvalidWasmTimeLimit,
     #[error("storage.local_root must not be empty")]
@@ -832,6 +841,7 @@ emit_json_ld = true
 [auth]
 package = "platform-default-auth"
 explain_api = false
+tenant_id = 101
 
 [modules]
 enabled = ["cms-pages", "admin-shell", "memberships", "events", "media-library"]
@@ -858,6 +868,7 @@ cdn_base_url = "https://cdn.example.com"
         let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
 
         assert_eq!(config.app.name, "showcase-events");
+        assert_eq!(config.auth.tenant_id, 101);
         assert_eq!(config.tls.mode, TlsMode::Acme);
         assert_eq!(config.tls.challenge, Some(AcmeChallenge::Dns01));
         assert_eq!(config.database.driver, DatabaseDriver::Postgres);
@@ -979,9 +990,13 @@ max_connections = 4
 
         match error {
             ConfigError::Validation(errors) => {
-                assert!(errors.0.contains(&ConfigValidationError::InvalidTrustedProxy {
-                    value: "not-a-proxy".to_string(),
-                }));
+                assert!(
+                    errors
+                        .0
+                        .contains(&ConfigValidationError::InvalidTrustedProxy {
+                            value: "not-a-proxy".to_string(),
+                        })
+                );
             }
             other => panic!("expected validation error, got {other:?}"),
         }
@@ -1000,7 +1015,10 @@ protection = "encrypted"
             config.http.session_cookie.protection,
             CookieProtection::Encrypted
         );
-        assert_eq!(config.http.flash_cookie.protection, CookieProtection::Signed);
+        assert_eq!(
+            config.http.flash_cookie.protection,
+            CookieProtection::Signed
+        );
     }
 
     #[test]
@@ -1038,14 +1056,16 @@ canonical_host = "preview.example.com"
 
         let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
 
-        assert!(config.server.trusts_forwarded_headers(Some(&SocketAddr::from((
-            [10, 0, 0, 8],
-            443,
-        )))));
-        assert!(!config.server.trusts_forwarded_headers(Some(&SocketAddr::from((
-            [192, 168, 1, 8],
-            443,
-        )))));
+        assert!(
+            config
+                .server
+                .trusts_forwarded_headers(Some(&SocketAddr::from(([10, 0, 0, 8], 443,))))
+        );
+        assert!(
+            !config
+                .server
+                .trusts_forwarded_headers(Some(&SocketAddr::from(([192, 168, 1, 8], 443,))))
+        );
         assert!(!config.server.trusts_forwarded_headers(None));
     }
 }

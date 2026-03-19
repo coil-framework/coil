@@ -2,7 +2,6 @@ use super::*;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -857,142 +856,168 @@ impl RuntimeAuthBackend {
         tenant_id: i64,
     ) -> Result<AuthServiceExecution, WasmModelError> {
         let subject = subject_for_principal(context);
-        let tenant = tenant_object(context, tenant_id);
+        let tenant = tenant_object(context);
         let principal_id = context.principal.id.clone();
         let Some(auth) = self.auth.as_ref() else {
             return Ok(synthetic_auth_execution(request, context));
         };
 
-        let future: Pin<
-            Box<dyn Future<Output = Result<AuthServiceExecution, String>> + Send + '_>,
-        > = match request {
-            AuthServiceRequest::Check => {
-                let subject = subject.clone();
-                let tenant = tenant.clone();
-                let request = request.clone();
-                Box::pin(async move {
-                    let capability = Capability::SystemConfigRead;
-                    let allowed = auth
-                        .check_default_capability(&subject, capability, &tenant)
-                        .await
-                        .map_err(|error| error.to_string())?;
-
-                    Ok(AuthServiceExecution {
-                        request,
-                        allowed,
-                        checks_seen: 1,
-                        principal_id,
-                        details: AuthServiceDetails::Check {
-                            capability: capability.to_string(),
-                            object: tenant.to_string(),
-                            decision: allowed,
-                        },
-                    })
-                })
-            }
-            AuthServiceRequest::List => {
-                let subject = subject.clone();
-                let request = request.clone();
-                let capability = Capability::CmsPageRead;
-                let binding = self.package.binding_for(capability).ok_or_else(|| {
-                    runtime_auth_backend_error(
-                        tenant_id,
-                        format!("no capability binding for `{capability}`"),
-                    )
-                })?;
-                let namespace = binding.resource_namespaces[0];
-                Box::pin(async move {
-                    let object_ids = auth
-                        .list_objects(&subject, binding.relation, namespace)
-                        .await
-                        .map_err(|error| error.to_string())?;
-
-                    Ok(AuthServiceExecution {
-                        request,
-                        allowed: true,
-                        checks_seen: 1,
-                        principal_id,
-                        details: AuthServiceDetails::List {
-                            capability: capability.to_string(),
-                            namespace: namespace.to_string(),
-                            object_ids,
-                        },
-                    })
-                })
-            }
-            AuthServiceRequest::Lookup => {
-                let tenant = tenant.clone();
-                let request = request.clone();
-                let capability = Capability::SystemModuleManage;
-                Box::pin(async move {
-                    let relation = Relation::Manage;
-                    let subject_ids = auth
-                        .list_subject_ids(&tenant, relation, Namespace::User)
-                        .await
-                        .map_err(|error| error.to_string())?;
-
-                    Ok(AuthServiceExecution {
-                        request,
-                        allowed: true,
-                        checks_seen: 1,
-                        principal_id,
-                        details: AuthServiceDetails::Lookup {
-                            capability: capability.to_string(),
-                            object: tenant.to_string(),
-                            relation: relation.to_string(),
-                            subject_namespace: Namespace::User.to_string(),
-                            subject_ids,
-                        },
-                    })
-                })
-            }
+        let auth = auth.clone();
+        match request {
+            AuthServiceRequest::Check => self.execute_check(auth, subject, tenant, principal_id),
+            AuthServiceRequest::List => self.execute_list(auth, subject, principal_id),
+            AuthServiceRequest::Lookup => self.execute_lookup(auth, tenant, principal_id),
             AuthServiceRequest::TupleWrite => {
-                let subject = subject.clone();
-                let tenant = tenant.clone();
-                let request = request.clone();
-                let capability = Capability::SystemConfigWrite;
-                Box::pin(async move {
-                    let allowed = auth
-                        .check_default_capability(&subject, capability, &tenant)
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    let relation = Relation::Manage;
-                    let updates = vec![DefaultTupleUpdate::Write(DefaultTuple::new(
-                        tenant.clone(),
-                        relation,
-                        subject.clone(),
-                    ))];
-                    let written = if allowed {
-                        auth.write(updates.clone())
-                            .await
-                            .map_err(|error| error.to_string())?;
-                        updates.len()
-                    } else {
-                        0
-                    };
-
-                    Ok(AuthServiceExecution {
-                        request,
-                        allowed,
-                        checks_seen: 1,
-                        principal_id,
-                        details: AuthServiceDetails::TupleWrite {
-                            capability: capability.to_string(),
-                            object: tenant.to_string(),
-                            relation: relation.to_string(),
-                            subject: subject_for_description(&subject),
-                            updates: updates
-                                .into_iter()
-                                .map(|update| describe_tuple_update(&update))
-                                .collect(),
-                            written,
-                        },
-                    })
-                })
+                self.execute_tuple_write(auth, subject, tenant, principal_id)
             }
-        };
+        }
+        .map_err(|reason| runtime_auth_backend_error(tenant_id, reason))
+    }
 
-        block_on_auth(future).map_err(|reason| runtime_auth_backend_error(tenant_id, reason))
+    fn execute_check(
+        &self,
+        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        subject: DefaultSubject,
+        tenant: Entity,
+        principal_id: Option<String>,
+    ) -> Result<AuthServiceExecution, String> {
+        block_on_auth(async move {
+            let capability = Capability::SystemConfigRead;
+            let allowed = auth
+                .check_default_capability(&subject, capability, &tenant)
+                .await
+                .map_err(|error| error.to_string())?;
+
+            Ok(AuthServiceExecution {
+                request: AuthServiceRequest::Check,
+                allowed,
+                checks_seen: 1,
+                principal_id,
+                details: AuthServiceDetails::Check {
+                    capability: capability.to_string(),
+                    object: tenant.to_string(),
+                    decision: allowed,
+                },
+            })
+        })
+    }
+
+    fn execute_list(
+        &self,
+        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        subject: DefaultSubject,
+        principal_id: Option<String>,
+    ) -> Result<AuthServiceExecution, String> {
+        let capability = Capability::CmsPageRead;
+        let binding = self
+            .package
+            .binding_for(capability)
+            .ok_or_else(|| format!("no capability binding for `{capability}`"))?;
+        let namespace = *binding
+            .resource_namespaces
+            .first()
+            .ok_or_else(|| format!("no resource namespace binding for `{capability}`"))?;
+        let relation = binding.relation;
+
+        block_on_auth(async move {
+            let object_ids = auth
+                .list_objects(&subject, relation, namespace)
+                .await
+                .map_err(|error| error.to_string())?;
+
+            Ok(AuthServiceExecution {
+                request: AuthServiceRequest::List,
+                allowed: !object_ids.is_empty(),
+                checks_seen: 1,
+                principal_id,
+                details: AuthServiceDetails::List {
+                    capability: capability.to_string(),
+                    namespace: namespace.to_string(),
+                    object_ids,
+                },
+            })
+        })
+    }
+
+    fn execute_lookup(
+        &self,
+        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        tenant: Entity,
+        principal_id: Option<String>,
+    ) -> Result<AuthServiceExecution, String> {
+        let capability = Capability::SystemModuleManage;
+        let binding = self
+            .package
+            .binding_for(capability)
+            .ok_or_else(|| format!("no capability binding for `{capability}`"))?;
+        let relation = binding.relation;
+
+        block_on_auth(async move {
+            let subject_ids = auth
+                .list_subject_ids(&tenant, relation, Namespace::User)
+                .await
+                .map_err(|error| error.to_string())?;
+
+            Ok(AuthServiceExecution {
+                request: AuthServiceRequest::Lookup,
+                allowed: !subject_ids.is_empty(),
+                checks_seen: 1,
+                principal_id,
+                details: AuthServiceDetails::Lookup {
+                    capability: capability.to_string(),
+                    object: tenant.to_string(),
+                    relation: relation.to_string(),
+                    subject_namespace: Namespace::User.to_string(),
+                    subject_ids,
+                },
+            })
+        })
+    }
+
+    fn execute_tuple_write(
+        &self,
+        auth: davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        subject: DefaultSubject,
+        tenant: Entity,
+        principal_id: Option<String>,
+    ) -> Result<AuthServiceExecution, String> {
+        let capability = Capability::SystemConfigWrite;
+        let relation = Relation::Manage;
+
+        block_on_auth(async move {
+            let allowed = auth
+                .check_default_capability(&subject, capability, &tenant)
+                .await
+                .map_err(|error| error.to_string())?;
+            let updates = vec![DefaultTupleUpdate::Write(DefaultTuple::new(
+                tenant.clone(),
+                relation,
+                subject.clone(),
+            ))];
+            let written = if allowed {
+                auth.write(updates.clone())
+                    .await
+                    .map_err(|error| error.to_string())?;
+                updates.len()
+            } else {
+                0
+            };
+
+            Ok(AuthServiceExecution {
+                request: AuthServiceRequest::TupleWrite,
+                allowed,
+                checks_seen: 1,
+                principal_id,
+                details: AuthServiceDetails::TupleWrite {
+                    capability: capability.to_string(),
+                    object: tenant.to_string(),
+                    relation: relation.to_string(),
+                    subject: subject_for_description(&subject),
+                    updates: updates.iter().map(describe_tuple_update).collect(),
+                    written,
+                },
+            })
+        })
     }
 }
 
@@ -1082,12 +1107,12 @@ fn subject_for_principal(context: &InvocationContext) -> DefaultSubject {
     }
 }
 
-fn tenant_object(context: &InvocationContext, tenant_id: i64) -> Entity {
+fn tenant_object(context: &InvocationContext) -> Entity {
     let object_id = context
         .customer_app
         .tenant_id
         .clone()
-        .unwrap_or_else(|| tenant_id.to_string());
+        .unwrap_or_else(|| context.customer_app.app_id.clone());
     Entity::tenant(object_id)
 }
 

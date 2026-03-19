@@ -875,6 +875,7 @@ sitemap_enabled = true
 [auth]
 package = "platform-default-auth"
 explain_api = true
+tenant_id = 101
 
 [modules]
 enabled = ["davenda-cms", "davenda-commerce"]

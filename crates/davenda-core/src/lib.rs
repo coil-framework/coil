@@ -145,11 +145,7 @@ impl CookiePolicy {
         }
     }
 
-    pub fn unprotect(
-        &self,
-        secret: &[u8],
-        encoded: &str,
-    ) -> Result<String, BrowserSecurityError> {
+    pub fn unprotect(&self, secret: &[u8], encoded: &str) -> Result<String, BrowserSecurityError> {
         match self.protection {
             CookieProtection::Signed => CookieSigner::new(self.clone()).verify(secret, encoded),
             CookieProtection::Encrypted => CookieSealer::new(self.clone()).open(secret, encoded),
@@ -2123,6 +2119,7 @@ emit_json_ld = true
 [auth]
 package = "platform-default-auth"
 explain_api = false
+tenant_id = 101
 
 [modules]
 enabled = ["cms-pages", "admin-shell"]

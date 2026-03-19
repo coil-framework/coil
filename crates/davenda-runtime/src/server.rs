@@ -6,6 +6,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::*;
+use crate::backends::RuntimeBackendMaterializer;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
 use axum::http::header::{COOKIE, HOST, LOCATION};
@@ -17,8 +19,6 @@ use davenda_cache::DistributedCacheBackend;
 use davenda_config::{
     DatabaseDriver, DistributedCache, JobBackend, ObjectStoreKind, SecretRef, SessionStore,
 };
-use super::*;
-use crate::backends::RuntimeBackendMaterializer;
 
 #[derive(Debug, Error)]
 pub enum RuntimeServerError {
@@ -614,19 +614,22 @@ impl HttpServerHost {
         &self,
         request: Request<Body>,
     ) -> Result<Response<Body>, RuntimeServerError> {
-        Ok(match execute_live_request(&self.state, request, None).await {
-            Ok(response) => response,
-            Err(error) => error_response(error),
-        })
+        Ok(
+            match execute_live_request(&self.state, request, None).await {
+                Ok(response) => response,
+                Err(error) => error_response(error),
+            },
+        )
     }
 
     pub async fn serve(self, listener: tokio::net::TcpListener) -> std::io::Result<()> {
         serve(
             listener,
-            self.router.into_make_service_with_connect_info::<SocketAddr>(),
+            self.router
+                .into_make_service_with_connect_info::<SocketAddr>(),
         )
-            .await
-            .map_err(std::io::Error::other)
+        .await
+        .map_err(std::io::Error::other)
     }
 }
 
@@ -777,13 +780,11 @@ fn execution_response(
 
     let mut response = match &execution.response {
         HandlerResponse::Page(page) => {
-            let html = plan.render_page_response(
-                &execution,
-                page,
-                receipts.merged_metadata().as_ref(),
-            )?;
+            let html =
+                plan.render_page_response(&execution, page, receipts.merged_metadata().as_ref())?;
             html_response(
-                receipts.response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK)),
+                receipts
+                    .response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK)),
                 receipts.merge_page_html(html),
             )
         }
@@ -815,7 +816,8 @@ fn execution_response(
                 ));
             }
             let mut response = text_response(
-                receipts.response_status(StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK)),
+                receipts
+                    .response_status(StatusCode::from_u16(json.status).unwrap_or(StatusCode::OK)),
                 format!("{{{}}}", parts.join(",")),
             );
             response.headers_mut().insert(

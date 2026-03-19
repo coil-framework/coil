@@ -274,7 +274,12 @@ impl LiveExecutionReceipts {
                 insert_header(
                     headers,
                     "x-davenda-wasm-cache-tags",
-                    cache_hint.tags.iter().cloned().collect::<Vec<_>>().join(","),
+                    cache_hint
+                        .tags
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(","),
                 );
             }
         }
@@ -376,10 +381,7 @@ fn render_cache_control(cache_hint: &TypedCacheHint) -> String {
 fn render_typed_head_markup(metadata: &TypedMetadata) -> String {
     let mut markup = String::new();
     if let Some(title) = &metadata.title {
-        markup.push_str(&format!(
-            "<title>{}</title>",
-            escape_html_attribute(title)
-        ));
+        markup.push_str(&format!("<title>{}</title>", escape_html_attribute(title)));
     }
     if let Some(description) = &metadata.description {
         markup.push_str(&format!(

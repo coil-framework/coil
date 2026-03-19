@@ -1,5 +1,5 @@
 use super::*;
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use davenda_admin::AdminModule;
 use davenda_assets::{
@@ -62,8 +62,8 @@ impl LiveRouteCapabilityAuthorizer for PermissiveLiveRouteCapabilityAuthorizer {
     }
 }
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -127,6 +127,7 @@ emit_json_ld = true
 [auth]
 package = "platform-default-auth"
 explain_api = false
+tenant_id = 101
 
 [modules]
 enabled = ["cms-pages", "admin-shell"]
@@ -156,20 +157,22 @@ fn installed_admin_widget_extension() -> InstalledExtension {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
-            vec![HandlerManifest::new(
-                HandlerId::new("waitlist-summary").unwrap(),
-                "exports.waitlist_summary",
-                ExtensionPoint::AdminWidget(
-                    AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
-                ),
-                HostGrantSet::from_grants([
-                    HostCapabilityGrant::AuthCheck,
-                    HostCapabilityGrant::DataRead {
-                        resource: "events.waitlist".to_string(),
-                    },
-                ]),
-            )
-            .unwrap()],
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    "exports.waitlist_summary",
+                    ExtensionPoint::AdminWidget(
+                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )
+                .unwrap(),
+            ],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -197,17 +200,19 @@ fn installed_render_hook_extension() -> InstalledExtension {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::RenderHook),
-            vec![HandlerManifest::new(
-                HandlerId::new("loyalty-badge").unwrap(),
-                "exports.loyalty_badge",
-                ExtensionPoint::RenderHook(
-                    RenderHookExtensionPoint::new("cms.page.render").unwrap(),
-                ),
-                HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
-                    slot: "cms.page.render".to_string(),
-                }]),
-            )
-            .unwrap()],
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("loyalty-badge").unwrap(),
+                    "exports.loyalty_badge",
+                    ExtensionPoint::RenderHook(
+                        RenderHookExtensionPoint::new("cms.page.render").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                        slot: "cms.page.render".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -232,17 +237,19 @@ fn installed_job_extension() -> InstalledExtension {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::Job),
-            vec![HandlerManifest::new(
-                HandlerId::new("search-adapter").unwrap(),
-                "exports.search_adapter",
-                ExtensionPoint::Job(
-                    JobExtensionPoint::new("ops.search.adapter", "jobs.work").unwrap(),
-                ),
-                HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
-                    queue: "jobs.work".to_string(),
-                }]),
-            )
-            .unwrap()],
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("search-adapter").unwrap(),
+                    "exports.search_adapter",
+                    ExtensionPoint::Job(
+                        JobExtensionPoint::new("ops.search.adapter", "jobs.work").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -267,15 +274,17 @@ fn installed_page_extension_for_app(route: &str, customer_app_id: &str) -> Insta
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::Page),
-            vec![HandlerManifest::new(
-                HandlerId::new("account-dashboard").unwrap(),
-                "exports.account_dashboard",
-                ExtensionPoint::Page(
-                    PageExtensionPoint::new(route, [davenda_wasm::HttpMethod::Get]).unwrap(),
-                ),
-                HostGrantSet::new(),
-            )
-            .unwrap()],
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("account-dashboard").unwrap(),
+                    "exports.account_dashboard",
+                    ExtensionPoint::Page(
+                        PageExtensionPoint::new(route, [davenda_wasm::HttpMethod::Get]).unwrap(),
+                    ),
+                    HostGrantSet::new(),
+                )
+                .unwrap(),
+            ],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -314,18 +323,23 @@ fn installed_webhook_extension() -> InstalledExtension {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::Webhook),
-            vec![HandlerManifest::new(
-                HandlerId::new("payment-authorized").unwrap(),
-                "exports.payment_authorized",
-                ExtensionPoint::Webhook(
-                    WebhookExtensionPoint::new("commerce.payment-provider", "payment.authorized")
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("payment-authorized").unwrap(),
+                    "exports.payment_authorized",
+                    ExtensionPoint::Webhook(
+                        WebhookExtensionPoint::new(
+                            "commerce.payment-provider",
+                            "payment.authorized",
+                        )
                         .unwrap(),
-                ),
-                HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
-                    queue: "jobs.work".to_string(),
-                }]),
-            )
-            .unwrap()],
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -387,15 +401,17 @@ fn installed_api_extension_with_artifact(
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::Api),
-            vec![HandlerManifest::new(
-                HandlerId::new("account-json").unwrap(),
-                "exports.account_json",
-                ExtensionPoint::Api(
-                    ApiExtensionPoint::new(route, [davenda_wasm::HttpMethod::Get]).unwrap(),
-                ),
-                HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
-            )
-            .unwrap()],
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("account-json").unwrap(),
+                    "exports.account_json",
+                    ExtensionPoint::Api(
+                        ApiExtensionPoint::new(route, [davenda_wasm::HttpMethod::Get]).unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )
+                .unwrap(),
+            ],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -498,17 +514,19 @@ fn installed_scheduled_job_extension() -> InstalledExtension {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::ScheduledJob),
-            vec![HandlerManifest::new(
-                HandlerId::new("nightly-rebuild").unwrap(),
-                "exports.nightly_rebuild",
-                ExtensionPoint::ScheduledJob(
-                    ScheduledJobExtensionPoint::new("ops.search.nightly", "0 3 * * *").unwrap(),
-                ),
-                HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
-                    queue: "jobs.work".to_string(),
-                }]),
-            )
-            .unwrap()],
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("nightly-rebuild").unwrap(),
+                    "exports.nightly_rebuild",
+                    ExtensionPoint::ScheduledJob(
+                        ScheduledJobExtensionPoint::new("ops.search.nightly", "0 3 * * *").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
         )
         .unwrap(),
         ExtensionInstallation::new(
@@ -760,17 +778,19 @@ fn runtime_builder_creates_a_runtime_plan() {
         .unwrap();
 
     assert_eq!(plan.auth_package_name, "platform-default-auth");
+    assert_eq!(plan.tenant_id(), 101);
     assert_eq!(
         plan.cache_topology.l2(),
         Some(DistributedCacheBackend::Redis)
     );
     assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
     assert_eq!(plan.browser.csrf.field_name, "_csrf");
-    assert!(plan
-        .cli
-        .registry
-        .commands()
-        .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()]));
+    assert!(
+        plan.cli
+            .registry
+            .commands()
+            .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()])
+    );
     assert_eq!(plan.data.driver, davenda_config::DatabaseDriver::Postgres);
     assert_eq!(plan.data.schema, "public");
     assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);
@@ -832,30 +852,36 @@ fn runtime_builder_creates_a_runtime_plan() {
             .max_runtime,
         Duration::from_millis(50)
     );
-    assert!(plan
-        .services
-        .iter()
-        .any(|service| service.id == "module.admin.shell"));
-    assert!(plan
-        .services
-        .iter()
-        .any(|service| service.id == "module.cms.pages"));
-    assert!(plan
-        .services
-        .iter()
-        .any(|service| service.id == "module.commerce.checkout"));
-    assert!(plan
-        .services
-        .iter()
-        .any(|service| service.id == "module.memberships.entitlements"));
-    assert!(plan
-        .services
-        .iter()
-        .any(|service| service.id == "module.events.bookings"));
-    assert!(plan
-        .services
-        .iter()
-        .any(|service| service.id == "module.media.assets"));
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.admin.shell")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.cms.pages")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.commerce.checkout")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.memberships.entitlements")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.events.bookings")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.media.assets")
+    );
     assert_eq!(plan.modules.len(), 6);
     assert_eq!(plan.modules[0].name, "admin");
     assert_eq!(plan.modules[1].name, "cms");
@@ -863,18 +889,20 @@ fn runtime_builder_creates_a_runtime_plan() {
     assert_eq!(plan.modules[3].name, "memberships");
     assert_eq!(plan.modules[4].name, "events");
     assert_eq!(plan.modules[5].name, "media");
-    assert!(plan
-        .install_migrations
-        .ordered_steps()
-        .iter()
-        .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string())));
+    assert!(
+        plan.install_migrations
+            .ordered_steps()
+            .iter()
+            .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string()))
+    );
     assert!(plan.install_migrations.ordered_steps().iter().any(|step| {
         step.owner == davenda_data::MigrationOwner::Module("memberships".to_string())
     }));
-    assert!(plan
-        .module_jobs
-        .iter()
-        .any(|registered| registered.job.name == "events.reminders"));
+    assert!(
+        plan.module_jobs
+            .iter()
+            .any(|registered| registered.job.name == "events.reminders")
+    );
     assert!(plan.module_event_subscriptions.iter().any(|registered| {
         registered.subscription.event == "commerce.order.paid" && registered.module == "memberships"
     }));
@@ -882,19 +910,21 @@ fn runtime_builder_creates_a_runtime_plan() {
         registered.contract.name == "events.reminders"
             && registered.queue == plan.jobs.topology.scheduled_queue
     }));
-    assert!(plan
-        .registered_runtime_event_subscriptions
-        .iter()
-        .any(|registered| {
-            registered.module == "memberships"
-                && registered.event_type.as_str() == "commerce.order.paid"
-                && registered.job_name == "memberships.entitlements.sync"
-        }));
-    assert!(plan
-        .jobs_domain
-        .handlers
-        .iter()
-        .any(|handler| handler.id.as_str() == "memberships.entitlements.sync"));
+    assert!(
+        plan.registered_runtime_event_subscriptions
+            .iter()
+            .any(|registered| {
+                registered.module == "memberships"
+                    && registered.event_type.as_str() == "commerce.order.paid"
+                    && registered.job_name == "memberships.entitlements.sync"
+            })
+    );
+    assert!(
+        plan.jobs_domain
+            .handlers
+            .iter()
+            .any(|handler| handler.id.as_str() == "memberships.entitlements.sync")
+    );
     assert!(plan.module_search_contributions.iter().any(|registered| {
         registered.module == "commerce" && registered.contribution.id == "search.catalog.products"
     }));
@@ -905,16 +935,18 @@ fn runtime_builder_creates_a_runtime_plan() {
     assert!(plan.module_bulk_operations.iter().any(|registered| {
         registered.module == "events" && registered.definition.id == "bulk.events.check-in"
     }));
-    assert!(plan
-        .ops_catalog
-        .reports
-        .definition(&ReportId::new("report.memberships.summary").unwrap())
-        .is_some());
-    assert!(plan
-        .ops_catalog
-        .bulk
-        .definition(&BulkOperationId::new("bulk.events.check-in").unwrap())
-        .is_some());
+    assert!(
+        plan.ops_catalog
+            .reports
+            .definition(&ReportId::new("report.memberships.summary").unwrap())
+            .is_some()
+    );
+    assert!(
+        plan.ops_catalog
+            .bulk
+            .definition(&BulkOperationId::new("bulk.events.check-in").unwrap())
+            .is_some()
+    );
 }
 
 #[test]
@@ -983,11 +1015,13 @@ fn execute_request_derives_context_and_session_from_cookie() {
             .map(String::as_str),
         Some("private, max-age=60, stale-while-revalidate=30")
     );
-    assert!(execution
-        .cache_plan
-        .headers
-        .get("X-Davenda-Variation-Key")
-        .is_some());
+    assert!(
+        execution
+            .cache_plan
+            .headers
+            .get("X-Davenda-Variation-Key")
+            .is_some()
+    );
     assert_eq!(execution.trace.transport_scheme, "https");
     assert_eq!(execution.middleware, plan.http.middleware);
     assert_eq!(
@@ -1078,16 +1112,18 @@ fn browser_host_keeps_memory_sessions_local_to_each_clone() {
         .unwrap();
 
     assert!(right.session(&issued.record.session_id).is_none());
-    assert!(right
-        .resolve_request(
-            &RequestInput::new(HttpMethod::Get, "www.example.com", "/account").unwrap(),
-            b"01234567012345670123456701234567",
-            BrowserInstant::from_unix_seconds(150),
-        )
-        .unwrap()
-        .session
-        .session_id
-        .is_none());
+    assert!(
+        right
+            .resolve_request(
+                &RequestInput::new(HttpMethod::Get, "www.example.com", "/account").unwrap(),
+                b"01234567012345670123456701234567",
+                BrowserInstant::from_unix_seconds(150),
+            )
+            .unwrap()
+            .session
+            .session_id
+            .is_none()
+    );
 }
 
 #[test]
@@ -1337,14 +1373,18 @@ fn execute_browser_request_uses_server_side_session_resolution_and_flash_transpo
         ]
     );
     assert_eq!(execution.response_cookies.len(), 2);
-    assert!(execution
-        .response_cookies
-        .iter()
-        .any(|header| header.starts_with("davenda_session=")));
-    assert!(execution
-        .response_cookies
-        .iter()
-        .any(|header| header.starts_with("davenda_flash=") && header.contains("Max-Age=0")));
+    assert!(
+        execution
+            .response_cookies
+            .iter()
+            .any(|header| header.starts_with("davenda_session="))
+    );
+    assert!(
+        execution
+            .response_cookies
+            .iter()
+            .any(|header| header.starts_with("davenda_flash=") && header.contains("Max-Age=0"))
+    );
 }
 
 #[test]
@@ -1444,10 +1484,12 @@ fn execute_browser_request_supports_csrf_for_host_managed_sessions() {
             status: 303,
         })
     );
-    assert!(execution
-        .response_cookies
-        .iter()
-        .any(|header| header.starts_with("davenda_session=")));
+    assert!(
+        execution
+            .response_cookies
+            .iter()
+            .any(|header| header.starts_with("davenda_session="))
+    );
 }
 
 #[test]
@@ -1619,9 +1661,10 @@ fn cache_host_stores_and_revalidates_public_route_responses() {
     assert!(execution.cache_plan.headers.get("Surrogate-Key").is_some());
 
     let mut host = plan.cache_host().unwrap();
-    assert!(host
-        .lookup_execution(&execution, CacheInstant::from_unix_seconds(100))
-        .is_some_and(|lookup| lookup.state == CacheLookupState::Miss));
+    assert!(
+        host.lookup_execution(&execution, CacheInstant::from_unix_seconds(100))
+            .is_some_and(|lookup| lookup.state == CacheLookupState::Miss)
+    );
 
     let fill = host
         .begin_fill(&execution, "renderer-1")
@@ -2734,13 +2777,14 @@ fn runtime_builder_materializes_jobs_domain_for_module_subscriptions() {
         job.contract.name == "memberships.entitlements.sync"
             && job.queue == plan.jobs.topology.domain_events_queue
     }));
-    assert!(plan
-        .registered_runtime_event_subscriptions
-        .iter()
-        .any(|subscription| {
-            subscription.job_name == "memberships.entitlements.sync"
-                && subscription.event_type.as_str() == "commerce.order.paid"
-        }));
+    assert!(
+        plan.registered_runtime_event_subscriptions
+            .iter()
+            .any(|subscription| {
+                subscription.job_name == "memberships.entitlements.sync"
+                    && subscription.event_type.as_str() == "commerce.order.paid"
+            })
+    );
     assert!(plan.jobs_domain.validate().is_ok());
 }
 

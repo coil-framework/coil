@@ -1,6 +1,5 @@
 use super::*;
 use davenda_i18n::{I18nError, LocaleTag, LocalizedUrls};
-use davenda_wasm::{RobotsDirective as TypedRobotsDirective, TypedMetadata};
 use davenda_seo::{
     HeadMetadata, OpenGraphData, OpenGraphType, RobotsDirective, SeoError, page_node,
 };
@@ -9,6 +8,7 @@ use davenda_template::{
     RenderValue, TemplateDefinition, TemplateKind, TemplateModelError, TemplateName,
     TemplateNamespace, TemplateRuntime, TemplateSelector, TrustedHtml,
 };
+use davenda_wasm::{RobotsDirective as TypedRobotsDirective, TypedMetadata};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -282,7 +282,8 @@ impl RuntimePlan {
         document_html: String,
         extra_metadata: Option<&TypedMetadata>,
     ) -> Result<String, RuntimeRenderError> {
-        let metadata = self.head_metadata_for_execution(execution, template_name, extra_metadata)?;
+        let metadata =
+            self.head_metadata_for_execution(execution, template_name, extra_metadata)?;
         let json_ld = if self.seo.allows_json_ld() {
             vec![page_node(
                 metadata.title.clone(),
@@ -348,13 +349,18 @@ impl RuntimePlan {
             metadata
                 .alternate_urls
                 .extend(extra_metadata.alternate_urls.clone());
-            metadata.robots.extend(extra_metadata.robots.iter().map(|directive| match directive {
-                TypedRobotsDirective::Index => RobotsDirective::Index,
-                TypedRobotsDirective::NoIndex => RobotsDirective::NoIndex,
-                TypedRobotsDirective::Follow => RobotsDirective::Follow,
-                TypedRobotsDirective::NoFollow => RobotsDirective::NoFollow,
-                TypedRobotsDirective::NoArchive => RobotsDirective::NoArchive,
-            }));
+            metadata.robots.extend(
+                extra_metadata
+                    .robots
+                    .iter()
+                    .map(|directive| match directive {
+                        TypedRobotsDirective::Index => RobotsDirective::Index,
+                        TypedRobotsDirective::NoIndex => RobotsDirective::NoIndex,
+                        TypedRobotsDirective::Follow => RobotsDirective::Follow,
+                        TypedRobotsDirective::NoFollow => RobotsDirective::NoFollow,
+                        TypedRobotsDirective::NoArchive => RobotsDirective::NoArchive,
+                    }),
+            );
             metadata.open_graph = Some(OpenGraphData::new(
                 metadata.title.clone(),
                 metadata.description.clone(),

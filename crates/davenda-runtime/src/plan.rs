@@ -38,11 +38,7 @@ pub struct RuntimePlan {
 
 impl RuntimePlan {
     pub fn tenant_id(&self) -> i64 {
-        tenant_id_from_runtime(
-            self.config.app.name.as_str(),
-            self.config.app.environment,
-            self.config.seo.canonical_host.as_str(),
-        )
+        self.config.auth.tenant_id
     }
 
     pub fn jobs_host(
@@ -417,41 +413,5 @@ impl RuntimePlan {
                 route: resolved.route_name.clone(),
             })
         }
-    }
-}
-
-fn tenant_id_from_runtime(
-    app_name: &str,
-    environment: davenda_config::Environment,
-    canonical_host: &str,
-) -> i64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    for value in [
-        "davenda-tenant",
-        app_name,
-        canonical_host,
-        environment_label(environment),
-    ] {
-        for byte in value.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-
-    let value = hash & i64::MAX as u64;
-    if value == 0 {
-        1
-    } else {
-        value as i64
-    }
-}
-
-fn environment_label(environment: davenda_config::Environment) -> &'static str {
-    match environment {
-        davenda_config::Environment::Development => "development",
-        davenda_config::Environment::Staging => "staging",
-        davenda_config::Environment::Production => "production",
     }
 }

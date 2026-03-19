@@ -367,6 +367,7 @@ emit_json_ld = true
 [auth]
 package = "platform-default-auth"
 explain_api = false
+tenant_id = 101
 
 [modules]
 enabled = ["cms", "commerce"]

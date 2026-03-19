@@ -1,0 +1,8 @@
+[package]
+name = "davenda-import"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+davenda-cli = { path = "../davenda-cli" }
+thiserror = "2.0.17"

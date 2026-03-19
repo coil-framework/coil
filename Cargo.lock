@@ -505,6 +505,14 @@ name = "davenda-i18n"
 version = "0.1.0"
 
 [[package]]
+name = "davenda-import"
+version = "0.1.0"
+dependencies = [
+ "davenda-cli",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "davenda-jobs"
 version = "0.1.0"
 dependencies = [

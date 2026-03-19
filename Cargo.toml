@@ -15,6 +15,7 @@ members = [
     "crates/davenda-data",
     "crates/davenda-events",
     "crates/davenda-i18n",
+    "crates/davenda-import",
     "crates/davenda-jobs",
     "crates/davenda-media",
     "crates/davenda-memberships",

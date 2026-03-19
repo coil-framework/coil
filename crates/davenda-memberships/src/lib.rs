@@ -6,14 +6,17 @@ use std::time::Duration;
 use davenda_auth::Capability;
 use davenda_commerce::{EntitlementKey, OrderId, OrderOutcome};
 use davenda_core::{
-    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
-    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
-    ModuleDependency, ModuleManifest, PlatformModule, RegistrationError, RouteSurface,
-    RouteSurfaceKind, ServiceRegistry,
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution, CapabilityContract,
+    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
+    HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract,
+    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
+    PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode, ReportFormat,
+    ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
+    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
+    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
+use davenda_jobs::RetryPolicy;
 
 const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 
@@ -1065,6 +1068,50 @@ impl PlatformModule for MembershipsModule {
                 "Allows customer app widgets to augment subscription detail views with bounded insights",
             )])
             .with_admin_resources(self.admin_resources.clone())
+            .with_search_contributions(vec![SearchIndexContribution::new(
+                "search.memberships",
+                SearchDocumentKind::MembershipSubscription,
+                SearchVisibility::Capability(Capability::MembershipSubscriptionManage),
+                false,
+                vec![
+                    SearchFieldContribution::new(
+                        "tier",
+                        "tier_name",
+                        SearchFieldRole::Title,
+                        true,
+                        true,
+                    ),
+                    SearchFieldContribution::new(
+                        "status",
+                        "status",
+                        SearchFieldRole::Facet,
+                        true,
+                        true,
+                    ),
+                ],
+                vec![
+                    SearchInvalidationRule::new(
+                        SearchInvalidationTrigger::Updated,
+                        "subscription changed",
+                    ),
+                    SearchInvalidationRule::new(
+                        SearchInvalidationTrigger::ManualRebuild,
+                        "membership audit rebuild",
+                    ),
+                ],
+                SearchRebuildStrategy::ManualOnly,
+            )])
+            .with_report_definitions(vec![ReportDefinition::new(
+                "report.memberships.summary",
+                "Subscription summary",
+                Some("Lifecycle summary for memberships and renewals".to_string()),
+                Capability::MembershipSubscriptionManage,
+                ReportFormat::Csv,
+                ReportSensitivity::Internal,
+                ReportDeliveryMode::SignedUrl,
+                "reports/memberships",
+                default_retry_policy(),
+            )])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "memberships.account",
@@ -1172,6 +1219,11 @@ impl PlatformModule for MembershipsModule {
         .expect("membership migration ids are unique");
         Some(plan)
     }
+}
+
+fn default_retry_policy() -> RetryPolicy {
+    RetryPolicy::new(3, Duration::from_secs(15), Duration::from_secs(300))
+        .expect("constant retry policy is valid")
 }
 
 fn validate_token(field: &'static str, value: String) -> Result<String, MembershipModelError> {
@@ -1462,19 +1514,25 @@ mod tests {
                 .optional_capabilities
                 .contains(&Capability::AdminShellAccess)
         );
-        assert!(manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "commerce"));
-        assert!(manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Jobs));
+        assert!(
+            manifest
+                .module_dependencies
+                .iter()
+                .any(|dependency| dependency.module == "commerce")
+        );
+        assert!(
+            manifest
+                .core_service_dependencies
+                .contains(&CoreServiceDependency::Jobs)
+        );
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 3);
         assert_eq!(manifest.http_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert_eq!(manifest.admin_resources.len(), 2);
+        assert_eq!(manifest.search_contributions.len(), 1);
+        assert_eq!(manifest.report_definitions.len(), 1);
         assert_eq!(
             module
                 .install_migration_plan()

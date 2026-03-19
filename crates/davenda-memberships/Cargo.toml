@@ -8,3 +8,4 @@ davenda-auth = { path = "../davenda-auth" }
 davenda-commerce = { path = "../davenda-commerce" }
 davenda-core = { path = "../davenda-core" }
 davenda-data = { path = "../davenda-data" }
+davenda-jobs = { path = "../davenda-jobs" }

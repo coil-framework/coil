@@ -1,21 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
+use std::time::Duration;
 
 use davenda_auth::Capability;
 use davenda_core::{
-    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
-    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
-    ModuleDependency, ModuleManifest, PlatformModule, RegistrationError, RouteSurface,
-    RouteSurfaceKind, ServiceRegistry,
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution, CapabilityContract,
+    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
+    HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract,
+    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
+    PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode, ReportFormat,
+    ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
+    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
+    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
     MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
     QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
 };
+use davenda_jobs::RetryPolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommerceModelError {
@@ -1562,6 +1566,92 @@ impl PlatformModule for CommerceModule {
                 ),
             ])
             .with_admin_resources(self.admin_resources.clone())
+            .with_search_contributions(vec![
+                SearchIndexContribution::new(
+                    "search.catalog.products",
+                    SearchDocumentKind::Product,
+                    SearchVisibility::Public,
+                    true,
+                    vec![
+                        SearchFieldContribution::new(
+                            "name",
+                            "name",
+                            SearchFieldRole::Title,
+                            true,
+                            true,
+                        ),
+                        SearchFieldContribution::new(
+                            "description",
+                            "description",
+                            SearchFieldRole::Body,
+                            false,
+                            true,
+                        ),
+                        SearchFieldContribution::new(
+                            "sku",
+                            "variants.sku",
+                            SearchFieldRole::Keyword,
+                            true,
+                            true,
+                        ),
+                    ],
+                    vec![
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Published,
+                            "product published",
+                        ),
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Updated,
+                            "product updated",
+                        ),
+                    ],
+                    SearchRebuildStrategy::OnInvalidate,
+                ),
+                SearchIndexContribution::new(
+                    "search.catalog.collections",
+                    SearchDocumentKind::Collection,
+                    SearchVisibility::Public,
+                    true,
+                    vec![
+                        SearchFieldContribution::new(
+                            "title",
+                            "title",
+                            SearchFieldRole::Title,
+                            true,
+                            true,
+                        ),
+                        SearchFieldContribution::new(
+                            "summary",
+                            "summary",
+                            SearchFieldRole::Summary,
+                            true,
+                            true,
+                        ),
+                    ],
+                    vec![
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Published,
+                            "collection published",
+                        ),
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Updated,
+                            "collection updated",
+                        ),
+                    ],
+                    SearchRebuildStrategy::OnInvalidate,
+                ),
+            ])
+            .with_report_definitions(vec![ReportDefinition::new(
+                "report.orders.summary",
+                "Orders summary",
+                Some("Operational summary of captured orders and refunds".to_string()),
+                Capability::OrderRead,
+                ReportFormat::Csv,
+                ReportSensitivity::Restricted,
+                ReportDeliveryMode::InternalOnly,
+                "reports/orders",
+                default_retry_policy(),
+            )])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "commerce.catalog",
@@ -1684,6 +1774,11 @@ fn validate_token(field: &'static str, value: String) -> Result<String, Commerce
     }
 }
 
+fn default_retry_policy() -> RetryPolicy {
+    RetryPolicy::new(3, Duration::from_secs(15), Duration::from_secs(300))
+        .expect("constant retry policy is valid")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1765,17 +1860,25 @@ mod tests {
         assert_eq!(manifest.http_surfaces.len(), 4);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
-        assert!(manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "memberships"));
-        assert!(manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Jobs));
-        assert!(manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::Webhook));
+        assert_eq!(manifest.search_contributions.len(), 2);
+        assert_eq!(manifest.report_definitions.len(), 1);
+        assert!(
+            manifest
+                .module_dependencies
+                .iter()
+                .any(|dependency| dependency.module == "memberships")
+        );
+        assert!(
+            manifest
+                .core_service_dependencies
+                .contains(&CoreServiceDependency::Jobs)
+        );
+        assert!(
+            manifest
+                .extension_slots
+                .iter()
+                .any(|slot| slot.kind == ExtensionSlotKind::Webhook)
+        );
         assert_eq!(manifest.admin_resources.len(), 4);
         assert!(
             registry

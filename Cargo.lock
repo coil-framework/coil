@@ -378,6 +378,7 @@ dependencies = [
  "davenda-auth",
  "davenda-core",
  "davenda-data",
+ "davenda-jobs",
 ]
 
 [[package]]
@@ -414,6 +415,7 @@ dependencies = [
  "davenda-auth",
  "davenda-core",
  "davenda-data",
+ "davenda-jobs",
 ]
 
 [[package]]
@@ -423,6 +425,7 @@ dependencies = [
  "davenda-auth",
  "davenda-core",
  "davenda-data",
+ "davenda-jobs",
 ]
 
 [[package]]
@@ -475,6 +478,7 @@ dependencies = [
  "davenda-commerce",
  "davenda-core",
  "davenda-data",
+ "davenda-jobs",
  "davenda-memberships",
 ]
 
@@ -508,6 +512,7 @@ dependencies = [
  "davenda-commerce",
  "davenda-core",
  "davenda-data",
+ "davenda-jobs",
 ]
 
 [[package]]

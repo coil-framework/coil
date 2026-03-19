@@ -6,11 +6,12 @@ use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind as CoreAdminContributionKind,
     AdminNavigationSection as CoreAdminNavigationSection, AdminResourceContribution,
-    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
-    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
-    ModuleManifest, PlatformModule, RegistrationError, RouteSurface, RouteSurfaceKind,
-    ServiceRegistry,
+    BulkOperationDefinition as CoreBulkOperationDefinition,
+    BulkOperationKind as CoreBulkOperationKind, CapabilityContract, CoreServiceDependency,
+    EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind, HttpSurfaceArea,
+    HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
+    MigrationContract, ModuleBehavior, ModuleManifest, PlatformModule, RegistrationError,
+    RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 
@@ -262,6 +263,18 @@ impl WorkflowAction {
             success_message: require_non_empty("workflow_success_message", success_message.into())?,
         })
     }
+
+    pub fn from_bulk_operation(
+        definition: &CoreBulkOperationDefinition,
+    ) -> Result<Self, AdminModelError> {
+        Self::new(
+            WorkflowId::new(definition.id.clone())?,
+            definition.title.clone(),
+            map_bulk_action_kind(definition.kind),
+            definition.required_capability,
+            format!("{} queued", definition.title),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,6 +388,19 @@ impl AdminShell {
         }
         ensure_unique_resources(&resources)?;
         Ok(resources)
+    }
+
+    pub fn compose_module_workflows(
+        manifests: &[ModuleManifest],
+    ) -> Result<Vec<WorkflowAction>, AdminModelError> {
+        let mut workflows = Vec::new();
+        for manifest in manifests {
+            for definition in &manifest.bulk_operations {
+                workflows.push(WorkflowAction::from_bulk_operation(definition)?);
+            }
+        }
+        ensure_unique_workflows(&workflows)?;
+        Ok(workflows)
     }
 
     pub fn navigation_by_section(
@@ -508,14 +534,6 @@ impl AdminModule {
                         BulkActionKind::Custom,
                         Capability::SystemModuleManage,
                         "Module changes scheduled",
-                    )
-                    .expect("constant workflow is valid"),
-                    WorkflowAction::new(
-                        WorkflowId::new("audit.export").expect("valid id"),
-                        "Export audit log",
-                        BulkActionKind::Export,
-                        Capability::AdminAuditRead,
-                        "Audit export queued",
                     )
                     .expect("constant workflow is valid"),
                 ],
@@ -748,6 +766,18 @@ fn ensure_unique_workflows(workflows: &[WorkflowAction]) -> Result<(), AdminMode
     Ok(())
 }
 
+fn map_bulk_action_kind(kind: CoreBulkOperationKind) -> BulkActionKind {
+    match kind {
+        CoreBulkOperationKind::Publish => BulkActionKind::Publish,
+        CoreBulkOperationKind::Unpublish => BulkActionKind::Custom,
+        CoreBulkOperationKind::Reindex => BulkActionKind::Custom,
+        CoreBulkOperationKind::Export => BulkActionKind::Export,
+        CoreBulkOperationKind::Cancel => BulkActionKind::Cancel,
+        CoreBulkOperationKind::CheckIn => BulkActionKind::CheckIn,
+        CoreBulkOperationKind::Custom => BulkActionKind::Custom,
+    }
+}
+
 fn validate_token(field: &'static str, value: String) -> Result<String, AdminModelError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -808,7 +838,36 @@ mod tests {
 
     #[test]
     fn admin_shell_groups_navigation_and_plans_bulk_actions() {
-        let shell = AdminModule::new().shell().clone();
+        let base = AdminModule::new().shell().clone();
+        let workflows = AdminShell::compose_module_workflows(
+            &[ModuleManifest::new("ops").with_bulk_operations(vec![
+                CoreBulkOperationDefinition::new(
+                    "bulk.reports.export",
+                    "Bulk export reports",
+                    Some("Queue exports for multiple reports".to_string()),
+                    Capability::AdminAuditRead,
+                    CoreBulkOperationKind::Export,
+                    davenda_core::BulkOperationScope::System,
+                    davenda_jobs::RetryPolicy::new(
+                        3,
+                        std::time::Duration::from_secs(15),
+                        std::time::Duration::from_secs(300),
+                    )
+                    .unwrap(),
+                    Some(50),
+                    true,
+                ),
+            ])]
+            .as_slice(),
+        )
+        .unwrap();
+        let shell = AdminShell::new(
+            base.accessibility.clone(),
+            base.resources.clone(),
+            base.widgets.clone(),
+            workflows,
+        )
+        .unwrap();
         let operator = OperatorAccessContext::new()
             .with_capability(Capability::AdminAuditRead)
             .with_capability(Capability::SystemModuleManage);
@@ -817,10 +876,14 @@ mod tests {
         assert_eq!(grouped[&NavigationSection::System].len(), 2);
 
         let plan = shell
-            .build_bulk_action_plan(&WorkflowId::new("audit.export").unwrap(), 42, &operator)
+            .build_bulk_action_plan(
+                &WorkflowId::new("bulk.reports.export").unwrap(),
+                42,
+                &operator,
+            )
             .unwrap();
         assert_eq!(plan.resource_count, 42);
-        assert_eq!(plan.message, "Audit export queued");
+        assert_eq!(plan.message, "Bulk export reports queued");
     }
 
     #[test]
@@ -917,17 +980,15 @@ mod tests {
     #[test]
     fn admin_shell_composes_shared_module_resource_contributions() {
         let manifests = vec![
-            ModuleManifest::new("cms").with_admin_resources(vec![
-                AdminResourceContribution::new(
-                    "cms.pages",
-                    "/admin/cms/pages",
-                    "Pages",
-                    "Pages",
-                    CoreAdminNavigationSection::Content,
-                    CoreAdminContributionKind::ResourceIndex,
-                    Capability::CmsPageRead,
-                ),
-            ]),
+            ModuleManifest::new("cms").with_admin_resources(vec![AdminResourceContribution::new(
+                "cms.pages",
+                "/admin/cms/pages",
+                "Pages",
+                "Pages",
+                CoreAdminNavigationSection::Content,
+                CoreAdminContributionKind::ResourceIndex,
+                Capability::CmsPageRead,
+            )]),
             ModuleManifest::new("events").with_admin_resources(vec![
                 AdminResourceContribution::new(
                     "events.check-in",
@@ -946,5 +1007,38 @@ mod tests {
         assert_eq!(resources[0].route, "/admin/cms/pages");
         assert_eq!(resources[0].section, NavigationSection::Content);
         assert_eq!(resources[1].kind, AdminResourceKind::Workflow);
+    }
+
+    #[test]
+    fn admin_shell_composes_shared_bulk_workflows() {
+        let workflows = AdminShell::compose_module_workflows(
+            &[ModuleManifest::new("events").with_bulk_operations(vec![
+                CoreBulkOperationDefinition::new(
+                    "bulk.events.check-in",
+                    "Bulk check in bookings",
+                    Some("Checks in bookings".to_string()),
+                    Capability::EventsBookingCheckIn,
+                    CoreBulkOperationKind::CheckIn,
+                    davenda_core::BulkOperationScope::Events,
+                    davenda_jobs::RetryPolicy::new(
+                        3,
+                        std::time::Duration::from_secs(15),
+                        std::time::Duration::from_secs(300),
+                    )
+                    .unwrap(),
+                    Some(200),
+                    true,
+                ),
+            ])]
+            .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(workflows.len(), 1);
+        assert_eq!(
+            workflows[0].id,
+            WorkflowId::new("bulk.events.check-in").unwrap()
+        );
+        assert_eq!(workflows[0].bulk_action, BulkActionKind::CheckIn);
     }
 }

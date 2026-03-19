@@ -7,12 +7,14 @@ use davenda_auth::{
     Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
 };
 use davenda_core::{
-    AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpFileDeliveryMode, HttpSurfaceArea, HttpSurfaceContribution,
-    IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
-    ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule, RegistrationError,
-    RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    AdminContributionKind, AdminNavigationSection, AdminResourceContribution, CapabilityContract,
+    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
+    HttpFileDeliveryMode, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
+    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
+    ModuleDependency, ModuleManifest, PlatformModule, RegistrationError, RouteSurface,
+    RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution, SearchFieldRole,
+    SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
+    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 use davenda_storage::{
@@ -82,11 +84,7 @@ impl fmt::Display for MediaModelError {
             Self::MissingStagedReplacement { asset_id } => {
                 write!(f, "media asset `{asset_id}` has no staged replacement")
             }
-            Self::InvalidRevisionTransition {
-                asset_id,
-                from,
-                to,
-            } => write!(
+            Self::InvalidRevisionTransition { asset_id, from, to } => write!(
                 f,
                 "media asset `{asset_id}` cannot transition from `{from}` to `{to}`"
             ),
@@ -199,10 +197,7 @@ impl MediaMetadata {
         Ok(self)
     }
 
-    pub fn with_copyright(
-        mut self,
-        copyright: impl Into<String>,
-    ) -> Result<Self, MediaModelError> {
+    pub fn with_copyright(mut self, copyright: impl Into<String>) -> Result<Self, MediaModelError> {
         self.copyright = Some(require_non_empty("media_copyright", copyright.into())?);
         Ok(self)
     }
@@ -421,15 +416,19 @@ impl MediaLibrary {
     }
 
     pub fn folder(&self, id: &MediaFolderId) -> Result<&MediaFolder, MediaModelError> {
-        self.folders.get(id).ok_or_else(|| MediaModelError::MissingFolder {
-            folder_id: id.to_string(),
-        })
+        self.folders
+            .get(id)
+            .ok_or_else(|| MediaModelError::MissingFolder {
+                folder_id: id.to_string(),
+            })
     }
 
     pub fn asset(&self, id: &MediaAssetId) -> Result<&MediaAsset, MediaModelError> {
-        self.assets.get(id).ok_or_else(|| MediaModelError::MissingAsset {
-            asset_id: id.to_string(),
-        })
+        self.assets
+            .get(id)
+            .ok_or_else(|| MediaModelError::MissingAsset {
+                asset_id: id.to_string(),
+            })
     }
 
     pub fn folder_path(&self, folder_id: &MediaFolderId) -> Result<String, MediaModelError> {
@@ -648,12 +647,11 @@ impl MediaAsset {
     }
 
     pub fn apply_staged_replacement(&mut self) -> Result<(), MediaModelError> {
-        let revision = self
-            .staged_replacement
-            .take()
-            .ok_or_else(|| MediaModelError::MissingStagedReplacement {
+        let revision = self.staged_replacement.take().ok_or_else(|| {
+            MediaModelError::MissingStagedReplacement {
                 asset_id: self.id.to_string(),
-            })?;
+            }
+        })?;
         self.current_revision = revision;
         Ok(())
     }
@@ -746,7 +744,10 @@ pub struct MediaLibraryPolicy {
 }
 
 impl MediaLibraryPolicy {
-    pub fn new(folder_default: StoragePolicy, asset_default: StoragePolicy) -> Result<Self, MediaModelError> {
+    pub fn new(
+        folder_default: StoragePolicy,
+        asset_default: StoragePolicy,
+    ) -> Result<Self, MediaModelError> {
         folder_default
             .validate()
             .map_err(|error| MediaModelError::StoragePolicy { error })?;
@@ -1007,6 +1008,39 @@ impl PlatformModule for MediaModule {
                     Capability::AssetManageStorage,
                 ),
             ])
+            .with_search_contributions(vec![SearchIndexContribution::new(
+                "search.media",
+                SearchDocumentKind::Media,
+                SearchVisibility::Public,
+                true,
+                vec![
+                    SearchFieldContribution::new(
+                        "title",
+                        "title",
+                        SearchFieldRole::Title,
+                        true,
+                        true,
+                    ),
+                    SearchFieldContribution::new(
+                        "alt",
+                        "alt_text",
+                        SearchFieldRole::Metadata,
+                        true,
+                        true,
+                    ),
+                ],
+                vec![
+                    SearchInvalidationRule::new(
+                        SearchInvalidationTrigger::Published,
+                        "asset published",
+                    ),
+                    SearchInvalidationRule::new(
+                        SearchInvalidationTrigger::Updated,
+                        "asset replaced",
+                    ),
+                ],
+                SearchRebuildStrategy::OnInvalidate,
+            )])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "media.library",
@@ -1183,12 +1217,8 @@ mod tests {
             .with_tag("campaign")
             .unwrap();
 
-        let technical = MediaTechnicalMetadata::new(
-            "image/jpeg",
-            42_000,
-            fingerprint("abc123"),
-        )
-        .unwrap();
+        let technical =
+            MediaTechnicalMetadata::new("image/jpeg", 42_000, fingerprint("abc123")).unwrap();
         let revision = MediaAssetRevision::new(
             MediaRevisionId::new("rev-1").unwrap(),
             AssetId::new("asset-1").unwrap(),
@@ -1237,12 +1267,8 @@ mod tests {
             sensitivity: Some(Sensitivity::Restricted),
         });
 
-        let technical = MediaTechnicalMetadata::new(
-            "image/png",
-            1_024,
-            fingerprint("def456"),
-        )
-        .unwrap();
+        let technical =
+            MediaTechnicalMetadata::new("image/png", 1_024, fingerprint("def456")).unwrap();
         let revision = MediaAssetRevision::new(
             MediaRevisionId::new("rev-2").unwrap(),
             AssetId::new("asset-2").unwrap(),
@@ -1284,12 +1310,8 @@ mod tests {
             storage_public(),
         )
         .unwrap();
-        let technical = MediaTechnicalMetadata::new(
-            "image/jpeg",
-            10_000,
-            fingerprint("ghi789"),
-        )
-        .unwrap();
+        let technical =
+            MediaTechnicalMetadata::new("image/jpeg", 10_000, fingerprint("ghi789")).unwrap();
         let revision = MediaAssetRevision::new(
             MediaRevisionId::new("rev-3").unwrap(),
             AssetId::new("asset-3").unwrap(),
@@ -1322,12 +1344,8 @@ mod tests {
 
     #[test]
     fn replacement_workflow_tracks_staged_revisions() {
-        let technical = MediaTechnicalMetadata::new(
-            "image/jpeg",
-            10_000,
-            fingerprint("jkl012"),
-        )
-        .unwrap();
+        let technical =
+            MediaTechnicalMetadata::new("image/jpeg", 10_000, fingerprint("jkl012")).unwrap();
         let current = MediaAssetRevision::new(
             MediaRevisionId::new("rev-4").unwrap(),
             AssetId::new("asset-4").unwrap(),
@@ -1367,25 +1385,34 @@ mod tests {
         let module = MediaModule::default();
         let manifest = module.manifest();
         assert_eq!(manifest.name, "media");
-        assert!(manifest
-            .required_capabilities
-            .contains(&Capability::AssetManageStorage));
-        assert!(manifest
-            .optional_capabilities
-            .contains(&Capability::AdminShellAccess));
+        assert!(
+            manifest
+                .required_capabilities
+                .contains(&Capability::AssetManageStorage)
+        );
+        assert!(
+            manifest
+                .optional_capabilities
+                .contains(&Capability::AdminShellAccess)
+        );
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 3);
         assert_eq!(manifest.http_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert_eq!(manifest.admin_resources.len(), 2);
-        assert!(manifest
-            .behaviors
-            .contains(&ModuleBehavior::AuthGovernedPublication));
-        assert!(manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
+        assert_eq!(manifest.search_contributions.len(), 1);
+        assert!(
+            manifest
+                .behaviors
+                .contains(&ModuleBehavior::AuthGovernedPublication)
+        );
+        assert!(
+            manifest
+                .extension_slots
+                .iter()
+                .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget)
+        );
         assert_eq!(
             module
                 .install_migration_plan()
@@ -1397,7 +1424,10 @@ mod tests {
 
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).unwrap();
-        let service_ids = registry.services().map(|service| service.id.clone()).collect::<Vec<_>>();
+        let service_ids = registry
+            .services()
+            .map(|service| service.id.clone())
+            .collect::<Vec<_>>();
         assert!(service_ids.contains(&"module.media.assets".to_string()));
         assert!(service_ids.contains(&"module.media.storage".to_string()));
     }

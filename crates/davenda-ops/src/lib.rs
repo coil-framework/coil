@@ -6,11 +6,23 @@ use std::time::Duration;
 use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod,
-    IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
-    ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule, RegistrationError,
-    RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    BulkOperationDefinition as ManifestBulkOperationDefinition,
+    BulkOperationKind as ManifestBulkOperationKind,
+    BulkOperationScope as ManifestBulkOperationScope, CapabilityContract, CoreServiceDependency,
+    EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind, HttpSurfaceArea,
+    HttpSurfaceContribution, HttpSurfaceMethod, IntegrationKind, IntegrationPoint, JobContract,
+    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
+    PlatformModule, RegistrationError, ReportDefinition as ManifestReportDefinition,
+    ReportDeliveryMode as ManifestReportDeliveryMode, ReportFormat as ManifestReportFormat,
+    ReportSensitivity as ManifestReportSensitivity, RouteSurface, RouteSurfaceKind,
+    SearchDocumentKind as ManifestSearchDocumentKind,
+    SearchFieldContribution as ManifestSearchFieldContribution,
+    SearchFieldRole as ManifestSearchFieldRole,
+    SearchIndexContribution as ManifestSearchIndexContribution,
+    SearchInvalidationRule as ManifestSearchInvalidationRule,
+    SearchInvalidationTrigger as ManifestSearchInvalidationTrigger,
+    SearchRebuildStrategy as ManifestSearchRebuildStrategy,
+    SearchVisibility as ManifestSearchVisibility, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 use davenda_jobs::{
@@ -238,6 +250,18 @@ impl SearchFieldContribution {
             searchable,
         })
     }
+
+    fn from_manifest_contribution(
+        contribution: &ManifestSearchFieldContribution,
+    ) -> Result<Self, OpsModelError> {
+        Self::new(
+            SearchFieldId::new(contribution.id.clone())?,
+            contribution.source_path.clone(),
+            map_search_field_role(contribution.role),
+            contribution.stored,
+            contribution.searchable,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +279,13 @@ impl SearchInvalidationRule {
             trigger,
             reason: require_non_empty("search_invalidation_reason", reason.into())?,
         })
+    }
+
+    fn from_manifest_rule(rule: &ManifestSearchInvalidationRule) -> Result<Self, OpsModelError> {
+        Self::new(
+            map_search_invalidation_trigger(rule.trigger),
+            rule.reason.clone(),
+        )
     }
 }
 
@@ -322,6 +353,33 @@ impl SearchIndexContribution {
     pub fn visible_to(&self, capabilities: &[Capability]) -> bool {
         self.visibility.allows(capabilities)
     }
+
+    fn from_manifest_contribution(
+        source_module: &str,
+        contribution: &ManifestSearchIndexContribution,
+    ) -> Result<Self, OpsModelError> {
+        let fields = contribution
+            .fields
+            .iter()
+            .map(SearchFieldContribution::from_manifest_contribution)
+            .collect::<Result<Vec<_>, _>>()?;
+        let invalidation_rules = contribution
+            .invalidation_rules
+            .iter()
+            .map(SearchInvalidationRule::from_manifest_rule)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Self::new(
+            SearchIndexId::new(contribution.id.clone())?,
+            source_module,
+            map_search_document_kind(contribution.document_kind),
+            map_search_visibility(contribution.visibility),
+            contribution.publication_required,
+            fields,
+            invalidation_rules,
+            map_search_rebuild_strategy(contribution.rebuild_strategy),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -336,15 +394,23 @@ impl SearchCatalog {
 
     pub fn standard() -> Self {
         Self {
-            contributions: vec![
-                search_index_page(),
-                search_index_product(),
-                search_index_event(),
-                search_index_booking(),
-                search_index_media(),
-                search_index_membership(),
-            ],
+            contributions: Vec::new(),
         }
+    }
+
+    pub fn from_manifests(manifests: &[ModuleManifest]) -> Result<Self, OpsModelError> {
+        let mut contributions = Vec::new();
+        for manifest in manifests {
+            for contribution in &manifest.search_contributions {
+                contributions.push(SearchIndexContribution::from_manifest_contribution(
+                    &manifest.name,
+                    contribution,
+                )?);
+            }
+        }
+        let catalog = Self::new(contributions);
+        catalog.validate()?;
+        Ok(catalog)
     }
 
     pub fn validate(&self) -> Result<(), OpsModelError> {
@@ -523,6 +589,24 @@ impl ReportDefinition {
     pub fn allows(&self, capabilities: &[Capability]) -> bool {
         capabilities.contains(&self.required_capability)
     }
+
+    fn from_manifest_definition(
+        source_module: &str,
+        definition: &ManifestReportDefinition,
+    ) -> Result<Self, OpsModelError> {
+        Self::new(
+            ReportId::new(definition.id.clone())?,
+            source_module,
+            definition.title.clone(),
+            definition.description.clone(),
+            definition.required_capability,
+            map_report_format(definition.format),
+            map_report_sensitivity(definition.sensitivity),
+            map_report_delivery_mode(definition.delivery_mode),
+            definition.export_prefix.clone(),
+            definition.retry_policy.clone(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -598,13 +682,23 @@ impl ReportCatalog {
 
     pub fn standard() -> Self {
         Self {
-            definitions: vec![
-                report_orders_summary(),
-                report_subscription_summary(),
-                report_event_attendance(),
-                report_search_health(),
-            ],
+            definitions: Vec::new(),
         }
+    }
+
+    pub fn from_manifests(manifests: &[ModuleManifest]) -> Result<Self, OpsModelError> {
+        let mut definitions = Vec::new();
+        for manifest in manifests {
+            for definition in &manifest.report_definitions {
+                definitions.push(ReportDefinition::from_manifest_definition(
+                    &manifest.name,
+                    definition,
+                )?);
+            }
+        }
+        let catalog = Self::new(definitions);
+        catalog.validate()?;
+        Ok(catalog)
     }
 
     pub fn validate(&self) -> Result<(), OpsModelError> {
@@ -746,6 +840,24 @@ impl BulkOperationDefinition {
     pub fn allows(&self, capabilities: &[Capability]) -> bool {
         capabilities.contains(&self.required_capability)
     }
+
+    fn from_manifest_definition(
+        source_module: &str,
+        definition: &ManifestBulkOperationDefinition,
+    ) -> Result<Self, OpsModelError> {
+        Self::new(
+            BulkOperationId::new(definition.id.clone())?,
+            source_module,
+            definition.title.clone(),
+            definition.description.clone(),
+            definition.required_capability,
+            map_bulk_operation_kind(definition.kind),
+            map_bulk_operation_scope(definition.scope),
+            definition.retry_policy.clone(),
+            definition.max_items,
+            definition.requires_idempotency_key,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -825,14 +937,23 @@ impl BulkCatalog {
 
     pub fn standard() -> Self {
         Self {
-            definitions: vec![
-                bulk_publish_content(),
-                bulk_unpublish_content(),
-                bulk_reindex_search(),
-                bulk_check_in_bookings(),
-                bulk_export_reports(),
-            ],
+            definitions: Vec::new(),
         }
+    }
+
+    pub fn from_manifests(manifests: &[ModuleManifest]) -> Result<Self, OpsModelError> {
+        let mut definitions = Vec::new();
+        for manifest in manifests {
+            for definition in &manifest.bulk_operations {
+                definitions.push(BulkOperationDefinition::from_manifest_definition(
+                    &manifest.name,
+                    definition,
+                )?);
+            }
+        }
+        let catalog = Self::new(definitions);
+        catalog.validate()?;
+        Ok(catalog)
     }
 
     pub fn validate(&self) -> Result<(), OpsModelError> {
@@ -897,6 +1018,16 @@ impl OpsCatalog {
             reports: ReportCatalog::standard(),
             bulk: BulkCatalog::standard(),
         }
+    }
+
+    pub fn from_manifests(manifests: &[ModuleManifest]) -> Result<Self, OpsModelError> {
+        let catalog = Self {
+            search: SearchCatalog::from_manifests(manifests)?,
+            reports: ReportCatalog::from_manifests(manifests)?,
+            bulk: BulkCatalog::from_manifests(manifests)?,
+        };
+        catalog.validate()?;
+        Ok(catalog)
     }
 
     pub fn validate(&self) -> Result<(), OpsModelError> {
@@ -1095,7 +1226,6 @@ impl OpsPlanner {
 pub struct OpsModule {
     name: String,
     config_namespace: String,
-    catalog: OpsCatalog,
 }
 
 impl OpsModule {
@@ -1103,16 +1233,15 @@ impl OpsModule {
         Self {
             name: "ops".to_string(),
             config_namespace: "ops".to_string(),
-            catalog: OpsCatalog::standard(),
         }
     }
 
-    pub fn catalog(&self) -> &OpsCatalog {
-        &self.catalog
-    }
-
-    pub fn planner(&self, runtime: JobsRuntime) -> Result<OpsPlanner, OpsModelError> {
-        OpsPlanner::new(runtime, self.catalog.clone())
+    pub fn planner(
+        &self,
+        runtime: JobsRuntime,
+        manifests: &[ModuleManifest],
+    ) -> Result<OpsPlanner, OpsModelError> {
+        OpsPlanner::new(runtime, OpsCatalog::from_manifests(manifests)?)
     }
 }
 
@@ -1399,6 +1528,41 @@ impl PlatformModule for OpsModule {
                     Capability::SystemModuleManage,
                 ),
             ])
+            .with_report_definitions(vec![ManifestReportDefinition::new(
+                "report.ops.search-health",
+                "Search health",
+                Some("Operational visibility into index freshness, drift, and rebuild lag".to_string()),
+                Capability::AdminAuditRead,
+                ManifestReportFormat::Json,
+                ManifestReportSensitivity::Internal,
+                ManifestReportDeliveryMode::SignedUrl,
+                "reports/ops/search",
+                default_retry_policy(),
+            )])
+            .with_bulk_operations(vec![
+                ManifestBulkOperationDefinition::new(
+                    "bulk.search.reindex",
+                    "Reindex search",
+                    Some("Queues a coordinated rebuild across declared search indexes".to_string()),
+                    Capability::SystemModuleManage,
+                    ManifestBulkOperationKind::Reindex,
+                    ManifestBulkOperationScope::Search,
+                    default_retry_policy(),
+                    Some(100),
+                    true,
+                ),
+                ManifestBulkOperationDefinition::new(
+                    "bulk.reports.export",
+                    "Bulk export reports",
+                    Some("Queues exports for multiple reports without request-time blocking".to_string()),
+                    Capability::AdminAuditRead,
+                    ManifestBulkOperationKind::Export,
+                    ManifestBulkOperationScope::System,
+                    default_retry_policy(),
+                    Some(50),
+                    true,
+                ),
+            ])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "ops.search",
@@ -1506,395 +1670,113 @@ impl PlatformModule for OpsModule {
     }
 }
 
-fn search_index_page() -> SearchIndexContribution {
-    SearchIndexContribution::new(
-        SearchIndexId::new("search.cms.pages").expect("valid id"),
-        "cms",
-        SearchDocumentKind::Page,
-        SearchVisibility::Public,
-        true,
-        vec![
-            SearchFieldContribution::new(
-                SearchFieldId::new("title").expect("valid id"),
-                "title",
-                SearchFieldRole::Title,
-                true,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("body").expect("valid id"),
-                "body_html",
-                SearchFieldRole::Body,
-                false,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("seo").expect("valid id"),
-                "seo",
-                SearchFieldRole::Metadata,
-                true,
-                false,
-            )
-            .expect("valid field"),
-        ],
-        vec![
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Published, "page published")
-                .expect("valid rule"),
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "page updated")
-                .expect("valid rule"),
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Unpublished, "page unpublished")
-                .expect("valid rule"),
-        ],
-        SearchRebuildStrategy::OnInvalidate,
-    )
-    .expect("valid search index")
+fn map_search_document_kind(kind: ManifestSearchDocumentKind) -> SearchDocumentKind {
+    match kind {
+        ManifestSearchDocumentKind::Page => SearchDocumentKind::Page,
+        ManifestSearchDocumentKind::Product => SearchDocumentKind::Product,
+        ManifestSearchDocumentKind::Collection => SearchDocumentKind::Collection,
+        ManifestSearchDocumentKind::Event => SearchDocumentKind::Event,
+        ManifestSearchDocumentKind::EventSlot => SearchDocumentKind::EventSlot,
+        ManifestSearchDocumentKind::Booking => SearchDocumentKind::Booking,
+        ManifestSearchDocumentKind::Media => SearchDocumentKind::Media,
+        ManifestSearchDocumentKind::MembershipSubscription => {
+            SearchDocumentKind::MembershipSubscription
+        }
+        ManifestSearchDocumentKind::Custom => SearchDocumentKind::Custom,
+    }
 }
 
-fn search_index_product() -> SearchIndexContribution {
-    SearchIndexContribution::new(
-        SearchIndexId::new("search.catalog.products").expect("valid id"),
-        "commerce",
-        SearchDocumentKind::Product,
-        SearchVisibility::Public,
-        true,
-        vec![
-            SearchFieldContribution::new(
-                SearchFieldId::new("name").expect("valid id"),
-                "name",
-                SearchFieldRole::Title,
-                true,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("description").expect("valid id"),
-                "description",
-                SearchFieldRole::Body,
-                false,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("sku").expect("valid id"),
-                "variants.sku",
-                SearchFieldRole::Keyword,
-                true,
-                true,
-            )
-            .expect("valid field"),
-        ],
-        vec![
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Published, "product published")
-                .expect("valid rule"),
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "product updated")
-                .expect("valid rule"),
-        ],
-        SearchRebuildStrategy::OnInvalidate,
-    )
-    .expect("valid search index")
+fn map_search_field_role(role: ManifestSearchFieldRole) -> SearchFieldRole {
+    match role {
+        ManifestSearchFieldRole::Title => SearchFieldRole::Title,
+        ManifestSearchFieldRole::Summary => SearchFieldRole::Summary,
+        ManifestSearchFieldRole::Body => SearchFieldRole::Body,
+        ManifestSearchFieldRole::Keyword => SearchFieldRole::Keyword,
+        ManifestSearchFieldRole::Facet => SearchFieldRole::Facet,
+        ManifestSearchFieldRole::Metadata => SearchFieldRole::Metadata,
+    }
 }
 
-fn search_index_event() -> SearchIndexContribution {
-    SearchIndexContribution::new(
-        SearchIndexId::new("search.events").expect("valid id"),
-        "events",
-        SearchDocumentKind::Event,
-        SearchVisibility::Public,
-        true,
-        vec![
-            SearchFieldContribution::new(
-                SearchFieldId::new("title").expect("valid id"),
-                "title",
-                SearchFieldRole::Title,
-                true,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("summary").expect("valid id"),
-                "summary",
-                SearchFieldRole::Summary,
-                false,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("location").expect("valid id"),
-                "location",
-                SearchFieldRole::Facet,
-                true,
-                true,
-            )
-            .expect("valid field"),
-        ],
-        vec![
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Published, "event published")
-                .expect("valid rule"),
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "event updated")
-                .expect("valid rule"),
-        ],
-        SearchRebuildStrategy::Scheduled {
-            interval: Duration::from_secs(3600),
-        },
-    )
-    .expect("valid search index")
+fn map_search_visibility(visibility: ManifestSearchVisibility) -> SearchVisibility {
+    match visibility {
+        ManifestSearchVisibility::Public => SearchVisibility::Public,
+        ManifestSearchVisibility::Authenticated => SearchVisibility::Authenticated,
+        ManifestSearchVisibility::Capability(capability) => {
+            SearchVisibility::Capability(capability)
+        }
+    }
 }
 
-fn search_index_booking() -> SearchIndexContribution {
-    SearchIndexContribution::new(
-        SearchIndexId::new("search.events.bookings").expect("valid id"),
-        "events",
-        SearchDocumentKind::Booking,
-        SearchVisibility::Capability(Capability::EventsBookingCheckIn),
-        false,
-        vec![
-            SearchFieldContribution::new(
-                SearchFieldId::new("attendee").expect("valid id"),
-                "attendee.display_name",
-                SearchFieldRole::Title,
-                true,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("status").expect("valid id"),
-                "status",
-                SearchFieldRole::Facet,
-                true,
-                true,
-            )
-            .expect("valid field"),
-        ],
-        vec![
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "booking changed")
-                .expect("valid rule"),
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Deleted, "booking deleted")
-                .expect("valid rule"),
-        ],
-        SearchRebuildStrategy::ManualOnly,
-    )
-    .expect("valid search index")
+fn map_search_invalidation_trigger(
+    trigger: ManifestSearchInvalidationTrigger,
+) -> SearchInvalidationTrigger {
+    match trigger {
+        ManifestSearchInvalidationTrigger::Published => SearchInvalidationTrigger::Published,
+        ManifestSearchInvalidationTrigger::Updated => SearchInvalidationTrigger::Updated,
+        ManifestSearchInvalidationTrigger::Unpublished => SearchInvalidationTrigger::Unpublished,
+        ManifestSearchInvalidationTrigger::Deleted => SearchInvalidationTrigger::Deleted,
+        ManifestSearchInvalidationTrigger::ManualRebuild => {
+            SearchInvalidationTrigger::ManualRebuild
+        }
+    }
 }
 
-fn search_index_media() -> SearchIndexContribution {
-    SearchIndexContribution::new(
-        SearchIndexId::new("search.media").expect("valid id"),
-        "media",
-        SearchDocumentKind::Media,
-        SearchVisibility::Public,
-        true,
-        vec![
-            SearchFieldContribution::new(
-                SearchFieldId::new("title").expect("valid id"),
-                "title",
-                SearchFieldRole::Title,
-                true,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("alt").expect("valid id"),
-                "alt_text",
-                SearchFieldRole::Metadata,
-                true,
-                true,
-            )
-            .expect("valid field"),
-        ],
-        vec![
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Published, "asset published")
-                .expect("valid rule"),
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "asset replaced")
-                .expect("valid rule"),
-        ],
-        SearchRebuildStrategy::OnInvalidate,
-    )
-    .expect("valid search index")
+fn map_search_rebuild_strategy(strategy: ManifestSearchRebuildStrategy) -> SearchRebuildStrategy {
+    match strategy {
+        ManifestSearchRebuildStrategy::OnInvalidate => SearchRebuildStrategy::OnInvalidate,
+        ManifestSearchRebuildStrategy::Scheduled { interval } => {
+            SearchRebuildStrategy::Scheduled { interval }
+        }
+        ManifestSearchRebuildStrategy::ManualOnly => SearchRebuildStrategy::ManualOnly,
+    }
 }
 
-fn search_index_membership() -> SearchIndexContribution {
-    SearchIndexContribution::new(
-        SearchIndexId::new("search.memberships").expect("valid id"),
-        "memberships",
-        SearchDocumentKind::MembershipSubscription,
-        SearchVisibility::Capability(Capability::MembershipSubscriptionManage),
-        false,
-        vec![
-            SearchFieldContribution::new(
-                SearchFieldId::new("tier").expect("valid id"),
-                "tier_name",
-                SearchFieldRole::Title,
-                true,
-                true,
-            )
-            .expect("valid field"),
-            SearchFieldContribution::new(
-                SearchFieldId::new("status").expect("valid id"),
-                "status",
-                SearchFieldRole::Facet,
-                true,
-                true,
-            )
-            .expect("valid field"),
-        ],
-        vec![
-            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "subscription changed")
-                .expect("valid rule"),
-            SearchInvalidationRule::new(
-                SearchInvalidationTrigger::ManualRebuild,
-                "membership audit rebuild",
-            )
-            .expect("valid rule"),
-        ],
-        SearchRebuildStrategy::ManualOnly,
-    )
-    .expect("valid search index")
+fn map_report_format(format: ManifestReportFormat) -> ReportFormat {
+    match format {
+        ManifestReportFormat::Csv => ReportFormat::Csv,
+        ManifestReportFormat::Json => ReportFormat::Json,
+        ManifestReportFormat::Pdf => ReportFormat::Pdf,
+    }
 }
 
-fn report_orders_summary() -> ReportDefinition {
-    ReportDefinition::new(
-        ReportId::new("report.orders.summary").expect("valid id"),
-        "commerce",
-        "Orders summary",
-        Some("Operational summary of captured orders and refunds".to_string()),
-        Capability::OrderRead,
-        ReportFormat::Csv,
-        ReportSensitivity::Restricted,
-        ReportDeliveryMode::InternalOnly,
-        "reports/orders",
-        default_retry_policy(),
-    )
-    .expect("valid report definition")
+fn map_report_sensitivity(sensitivity: ManifestReportSensitivity) -> ReportSensitivity {
+    match sensitivity {
+        ManifestReportSensitivity::Public => ReportSensitivity::Public,
+        ManifestReportSensitivity::Internal => ReportSensitivity::Internal,
+        ManifestReportSensitivity::Restricted => ReportSensitivity::Restricted,
+    }
 }
 
-fn report_subscription_summary() -> ReportDefinition {
-    ReportDefinition::new(
-        ReportId::new("report.memberships.summary").expect("valid id"),
-        "memberships",
-        "Subscription summary",
-        Some("Lifecycle summary for memberships and renewals".to_string()),
-        Capability::MembershipSubscriptionManage,
-        ReportFormat::Csv,
-        ReportSensitivity::Internal,
-        ReportDeliveryMode::SignedUrl,
-        "reports/memberships",
-        default_retry_policy(),
-    )
-    .expect("valid report definition")
+fn map_report_delivery_mode(mode: ManifestReportDeliveryMode) -> ReportDeliveryMode {
+    match mode {
+        ManifestReportDeliveryMode::PublicObjectStore => ReportDeliveryMode::PublicObjectStore,
+        ManifestReportDeliveryMode::SignedUrl => ReportDeliveryMode::SignedUrl,
+        ManifestReportDeliveryMode::InternalOnly => ReportDeliveryMode::InternalOnly,
+    }
 }
 
-fn report_event_attendance() -> ReportDefinition {
-    ReportDefinition::new(
-        ReportId::new("report.events.attendance").expect("valid id"),
-        "events",
-        "Event attendance",
-        Some("Attendance and check-in summary for events".to_string()),
-        Capability::EventsBookingCheckIn,
-        ReportFormat::Csv,
-        ReportSensitivity::Internal,
-        ReportDeliveryMode::InternalOnly,
-        "reports/events",
-        default_retry_policy(),
-    )
-    .expect("valid report definition")
+fn map_bulk_operation_kind(kind: ManifestBulkOperationKind) -> BulkOperationKind {
+    match kind {
+        ManifestBulkOperationKind::Publish => BulkOperationKind::Publish,
+        ManifestBulkOperationKind::Unpublish => BulkOperationKind::Unpublish,
+        ManifestBulkOperationKind::Reindex => BulkOperationKind::Reindex,
+        ManifestBulkOperationKind::Export => BulkOperationKind::Export,
+        ManifestBulkOperationKind::Cancel => BulkOperationKind::Cancel,
+        ManifestBulkOperationKind::CheckIn => BulkOperationKind::CheckIn,
+        ManifestBulkOperationKind::Custom => BulkOperationKind::Custom,
+    }
 }
 
-fn report_search_health() -> ReportDefinition {
-    ReportDefinition::new(
-        ReportId::new("report.ops.search-health").expect("valid id"),
-        "ops",
-        "Search health",
-        Some("Index coverage, invalidation backlog, and rebuild status".to_string()),
-        Capability::SystemModuleManage,
-        ReportFormat::Json,
-        ReportSensitivity::Internal,
-        ReportDeliveryMode::InternalOnly,
-        "reports/ops",
-        default_retry_policy(),
-    )
-    .expect("valid report definition")
-}
-
-fn bulk_publish_content() -> BulkOperationDefinition {
-    BulkOperationDefinition::new(
-        BulkOperationId::new("bulk.cms.publish").expect("valid id"),
-        "cms",
-        "Bulk publish content",
-        Some("Publish many CMS entries in a single audited workflow".to_string()),
-        Capability::CmsPagePublish,
-        BulkOperationKind::Publish,
-        BulkOperationScope::Cms,
-        default_retry_policy(),
-        Some(100),
-        true,
-    )
-    .expect("valid bulk operation definition")
-}
-
-fn bulk_unpublish_content() -> BulkOperationDefinition {
-    BulkOperationDefinition::new(
-        BulkOperationId::new("bulk.cms.unpublish").expect("valid id"),
-        "cms",
-        "Bulk unpublish content",
-        Some("Unpublish many CMS entries in a single audited workflow".to_string()),
-        Capability::CmsPagePublish,
-        BulkOperationKind::Unpublish,
-        BulkOperationScope::Cms,
-        default_retry_policy(),
-        Some(100),
-        true,
-    )
-    .expect("valid bulk operation definition")
-}
-
-fn bulk_reindex_search() -> BulkOperationDefinition {
-    BulkOperationDefinition::new(
-        BulkOperationId::new("bulk.search.reindex").expect("valid id"),
-        "ops",
-        "Bulk rebuild search indexes",
-        Some("Rebuild index projections after schema or content changes".to_string()),
-        Capability::SystemModuleManage,
-        BulkOperationKind::Reindex,
-        BulkOperationScope::Search,
-        default_retry_policy(),
-        Some(1000),
-        true,
-    )
-    .expect("valid bulk operation definition")
-}
-
-fn bulk_check_in_bookings() -> BulkOperationDefinition {
-    BulkOperationDefinition::new(
-        BulkOperationId::new("bulk.events.check-in").expect("valid id"),
-        "events",
-        "Bulk check in bookings",
-        Some("Mark many bookings as checked in after operator confirmation".to_string()),
-        Capability::EventsBookingCheckIn,
-        BulkOperationKind::CheckIn,
-        BulkOperationScope::Events,
-        default_retry_policy(),
-        Some(500),
-        true,
-    )
-    .expect("valid bulk operation definition")
-}
-
-fn bulk_export_reports() -> BulkOperationDefinition {
-    BulkOperationDefinition::new(
-        BulkOperationId::new("bulk.reports.export").expect("valid id"),
-        "ops",
-        "Bulk export reports",
-        Some("Queue exports for many reports without request-time blocking".to_string()),
-        Capability::AdminAuditRead,
-        BulkOperationKind::Export,
-        BulkOperationScope::System,
-        default_retry_policy(),
-        Some(50),
-        true,
-    )
-    .expect("valid bulk operation definition")
+fn map_bulk_operation_scope(scope: ManifestBulkOperationScope) -> BulkOperationScope {
+    match scope {
+        ManifestBulkOperationScope::Cms => BulkOperationScope::Cms,
+        ManifestBulkOperationScope::Commerce => BulkOperationScope::Commerce,
+        ManifestBulkOperationScope::Memberships => BulkOperationScope::Memberships,
+        ManifestBulkOperationScope::Events => BulkOperationScope::Events,
+        ManifestBulkOperationScope::Media => BulkOperationScope::Media,
+        ManifestBulkOperationScope::Search => BulkOperationScope::Search,
+        ManifestBulkOperationScope::System => BulkOperationScope::System,
+    }
 }
 
 fn default_retry_policy() -> RetryPolicy {
@@ -1942,12 +1824,129 @@ mod tests {
         .expect("valid jobs runtime")
     }
 
+    fn sample_manifests() -> Vec<ModuleManifest> {
+        vec![
+            ModuleManifest::new("cms")
+                .with_search_contributions(vec![ManifestSearchIndexContribution::new(
+                    "search.cms.pages",
+                    ManifestSearchDocumentKind::Page,
+                    ManifestSearchVisibility::Public,
+                    true,
+                    vec![ManifestSearchFieldContribution::new(
+                        "title",
+                        "title",
+                        ManifestSearchFieldRole::Title,
+                        true,
+                        true,
+                    )],
+                    vec![ManifestSearchInvalidationRule::new(
+                        ManifestSearchInvalidationTrigger::Published,
+                        "page published",
+                    )],
+                    ManifestSearchRebuildStrategy::OnInvalidate,
+                )])
+                .with_bulk_operations(vec![ManifestBulkOperationDefinition::new(
+                    "bulk.cms.publish",
+                    "Bulk publish pages",
+                    Some("Publishes editorial pages".to_string()),
+                    Capability::CmsPagePublish,
+                    ManifestBulkOperationKind::Publish,
+                    ManifestBulkOperationScope::Cms,
+                    default_retry_policy(),
+                    Some(100),
+                    true,
+                )]),
+            ModuleManifest::new("commerce")
+                .with_search_contributions(vec![ManifestSearchIndexContribution::new(
+                    "search.catalog.products",
+                    ManifestSearchDocumentKind::Product,
+                    ManifestSearchVisibility::Public,
+                    true,
+                    vec![ManifestSearchFieldContribution::new(
+                        "name",
+                        "name",
+                        ManifestSearchFieldRole::Title,
+                        true,
+                        true,
+                    )],
+                    vec![ManifestSearchInvalidationRule::new(
+                        ManifestSearchInvalidationTrigger::Published,
+                        "product published",
+                    )],
+                    ManifestSearchRebuildStrategy::OnInvalidate,
+                )])
+                .with_report_definitions(vec![ManifestReportDefinition::new(
+                    "report.orders.summary",
+                    "Orders summary",
+                    Some("Operational summary of captured orders".to_string()),
+                    Capability::OrderRead,
+                    ManifestReportFormat::Csv,
+                    ManifestReportSensitivity::Restricted,
+                    ManifestReportDeliveryMode::InternalOnly,
+                    "reports/orders",
+                    default_retry_policy(),
+                )]),
+            ModuleManifest::new("events")
+                .with_search_contributions(vec![ManifestSearchIndexContribution::new(
+                    "search.events.bookings",
+                    ManifestSearchDocumentKind::Booking,
+                    ManifestSearchVisibility::Capability(Capability::EventsBookingCheckIn),
+                    false,
+                    vec![ManifestSearchFieldContribution::new(
+                        "attendee",
+                        "attendee.display_name",
+                        ManifestSearchFieldRole::Title,
+                        true,
+                        true,
+                    )],
+                    vec![ManifestSearchInvalidationRule::new(
+                        ManifestSearchInvalidationTrigger::Updated,
+                        "booking changed",
+                    )],
+                    ManifestSearchRebuildStrategy::ManualOnly,
+                )])
+                .with_bulk_operations(vec![ManifestBulkOperationDefinition::new(
+                    "bulk.events.check-in",
+                    "Bulk check in bookings",
+                    Some("Checks in event bookings".to_string()),
+                    Capability::EventsBookingCheckIn,
+                    ManifestBulkOperationKind::CheckIn,
+                    ManifestBulkOperationScope::Events,
+                    default_retry_policy(),
+                    Some(500),
+                    true,
+                )]),
+            ModuleManifest::new("media").with_search_contributions(vec![
+                ManifestSearchIndexContribution::new(
+                    "search.media",
+                    ManifestSearchDocumentKind::Media,
+                    ManifestSearchVisibility::Public,
+                    true,
+                    vec![ManifestSearchFieldContribution::new(
+                        "title",
+                        "title",
+                        ManifestSearchFieldRole::Title,
+                        true,
+                        true,
+                    )],
+                    vec![ManifestSearchInvalidationRule::new(
+                        ManifestSearchInvalidationTrigger::Published,
+                        "asset published",
+                    )],
+                    ManifestSearchRebuildStrategy::OnInvalidate,
+                ),
+            ]),
+            OpsModule::new().manifest(),
+        ]
+    }
+
     #[test]
     fn catalog_exposes_search_visibility_rules() {
-        let catalog = OpsCatalog::standard();
+        let manifests = sample_manifests();
+        let catalog = OpsCatalog::from_manifests(&manifests).expect("catalog");
         catalog
             .validate()
-            .expect("standard catalog should validate");
+            .expect("composed catalog should validate");
 
         let visible = catalog.search.visible_to(&[]);
         assert!(
@@ -1969,7 +1968,11 @@ mod tests {
 
     #[test]
     fn report_exports_are_planned_as_async_jobs_with_output_metadata() {
-        let planner = OpsPlanner::new(jobs_runtime(), OpsCatalog::standard()).expect("planner");
+        let planner = OpsPlanner::new(
+            jobs_runtime(),
+            OpsCatalog::from_manifests(&sample_manifests()).expect("catalog"),
+        )
+        .expect("planner");
         let request = ReportExportRequest::new(
             ReportExportId::new("export-1").expect("valid id"),
             ReportId::new("report.orders.summary").expect("valid id"),
@@ -1989,7 +1992,11 @@ mod tests {
 
     #[test]
     fn bulk_operations_require_their_capability_and_idempotency() {
-        let planner = OpsPlanner::new(jobs_runtime(), OpsCatalog::standard()).expect("planner");
+        let planner = OpsPlanner::new(
+            jobs_runtime(),
+            OpsCatalog::from_manifests(&sample_manifests()).expect("catalog"),
+        )
+        .expect("planner");
         let request = BulkOperationRequest::new(
             BulkExecutionId::new("bulk-1").expect("valid id"),
             BulkOperationId::new("bulk.events.check-in").expect("valid id"),
@@ -2040,23 +2047,31 @@ mod tests {
                 .optional_capabilities
                 .contains(&Capability::CmsPagePublish)
         );
-        assert!(manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "admin"));
+        assert!(
+            manifest
+                .module_dependencies
+                .iter()
+                .any(|dependency| dependency.module == "admin")
+        );
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 3);
         assert_eq!(manifest.http_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 3);
         assert_eq!(manifest.event_subscriptions.len(), 3);
         assert_eq!(manifest.admin_resources.len(), 3);
-        assert!(manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Storage));
-        assert!(manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::Job));
+        assert_eq!(manifest.report_definitions.len(), 1);
+        assert_eq!(manifest.bulk_operations.len(), 2);
+        assert!(
+            manifest
+                .core_service_dependencies
+                .contains(&CoreServiceDependency::Storage)
+        );
+        assert!(
+            manifest
+                .extension_slots
+                .iter()
+                .any(|slot| slot.kind == ExtensionSlotKind::Job)
+        );
         assert_eq!(
             module
                 .install_migration_plan()

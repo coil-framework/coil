@@ -9,17 +9,21 @@ use davenda_auth::{
 use davenda_commerce::OrderId;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod,
-    IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
-    ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule, RegistrationError,
-    RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    BulkOperationDefinition, BulkOperationKind, BulkOperationScope, CapabilityContract,
+    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
+    HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, IntegrationKind, IntegrationPoint,
+    JobContract, JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency,
+    ModuleManifest, PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode,
+    ReportFormat, ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind,
+    SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
+    SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
-    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext,
-    QueryFilter, QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
+    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
+    QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
 };
+use davenda_jobs::RetryPolicy;
 use davenda_memberships::MembershipTierId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1709,12 +1713,15 @@ impl EventCatalog {
         &self,
         reservation: &Reservation,
     ) -> Result<TransactionPlan, EventModelError> {
-        TransactionPlan::new("events.reservation.hold", TransactionIsolation::Serializable)?
-            .with_write(DomainWrite::new("events.reservations", "insert")?)
-            .with_write(DomainWrite::new("events.slots", "hold_capacity")?)
-            .with_after_commit_job("events.reservations.expiry")?
-            .with_after_commit_event(format!("events.reservation.{}", reservation.status))
-            .map_err(EventModelError::from)
+        TransactionPlan::new(
+            "events.reservation.hold",
+            TransactionIsolation::Serializable,
+        )?
+        .with_write(DomainWrite::new("events.reservations", "insert")?)
+        .with_write(DomainWrite::new("events.slots", "hold_capacity")?)
+        .with_after_commit_job("events.reservations.expiry")?
+        .with_after_commit_event(format!("events.reservation.{}", reservation.status))
+        .map_err(EventModelError::from)
     }
 
     pub fn booking_confirmation_transaction_plan(
@@ -1747,12 +1754,18 @@ impl EventCatalog {
         Ok(transaction)
     }
 
-    pub fn check_in_transaction_plan(&self, booking: &Booking) -> Result<TransactionPlan, EventModelError> {
-        TransactionPlan::new("events.booking.check_in", TransactionIsolation::Serializable)?
-            .with_write(DomainWrite::new("events.bookings", "check_in")?)
-            .with_write(DomainWrite::new("events.slots", "check_in")?)
-            .with_after_commit_event(format!("events.booking.{}", booking.status))
-            .map_err(EventModelError::from)
+    pub fn check_in_transaction_plan(
+        &self,
+        booking: &Booking,
+    ) -> Result<TransactionPlan, EventModelError> {
+        TransactionPlan::new(
+            "events.booking.check_in",
+            TransactionIsolation::Serializable,
+        )?
+        .with_write(DomainWrite::new("events.bookings", "check_in")?)
+        .with_write(DomainWrite::new("events.slots", "check_in")?)
+        .with_after_commit_event(format!("events.booking.{}", booking.status))
+        .map_err(EventModelError::from)
     }
 
     pub fn reservations(&self) -> impl Iterator<Item = &Reservation> {
@@ -2109,6 +2122,105 @@ impl PlatformModule for EventsModule {
                 ),
             ])
             .with_admin_resources(self.admin_resources.clone())
+            .with_search_contributions(vec![
+                SearchIndexContribution::new(
+                    "search.events",
+                    SearchDocumentKind::Event,
+                    SearchVisibility::Public,
+                    true,
+                    vec![
+                        SearchFieldContribution::new(
+                            "title",
+                            "title",
+                            SearchFieldRole::Title,
+                            true,
+                            true,
+                        ),
+                        SearchFieldContribution::new(
+                            "summary",
+                            "summary",
+                            SearchFieldRole::Summary,
+                            false,
+                            true,
+                        ),
+                        SearchFieldContribution::new(
+                            "location",
+                            "location",
+                            SearchFieldRole::Facet,
+                            true,
+                            true,
+                        ),
+                    ],
+                    vec![
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Published,
+                            "event published",
+                        ),
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Updated,
+                            "event updated",
+                        ),
+                    ],
+                    SearchRebuildStrategy::Scheduled {
+                        interval: Duration::from_secs(3600),
+                    },
+                ),
+                SearchIndexContribution::new(
+                    "search.events.bookings",
+                    SearchDocumentKind::Booking,
+                    SearchVisibility::Capability(Capability::EventsBookingCheckIn),
+                    false,
+                    vec![
+                        SearchFieldContribution::new(
+                            "attendee",
+                            "attendee.display_name",
+                            SearchFieldRole::Title,
+                            true,
+                            true,
+                        ),
+                        SearchFieldContribution::new(
+                            "status",
+                            "status",
+                            SearchFieldRole::Facet,
+                            true,
+                            true,
+                        ),
+                    ],
+                    vec![
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Updated,
+                            "booking changed",
+                        ),
+                        SearchInvalidationRule::new(
+                            SearchInvalidationTrigger::Deleted,
+                            "booking deleted",
+                        ),
+                    ],
+                    SearchRebuildStrategy::ManualOnly,
+                ),
+            ])
+            .with_report_definitions(vec![ReportDefinition::new(
+                "report.events.attendance",
+                "Event attendance",
+                Some("Attendance and booking-state export for check-in operations".to_string()),
+                Capability::EventsBookingCheckIn,
+                ReportFormat::Csv,
+                ReportSensitivity::Internal,
+                ReportDeliveryMode::SignedUrl,
+                "reports/events",
+                default_retry_policy(),
+            )])
+            .with_bulk_operations(vec![BulkOperationDefinition::new(
+                "bulk.events.check-in",
+                "Bulk check in bookings",
+                Some("Applies audited attendance check-in through retry-safe job execution".to_string()),
+                Capability::EventsBookingCheckIn,
+                BulkOperationKind::CheckIn,
+                BulkOperationScope::Events,
+                default_retry_policy(),
+                Some(1000),
+                true,
+            )])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "events.list",
@@ -2278,6 +2390,11 @@ fn require_non_empty(field: &'static str, value: String) -> Result<String, Event
     } else {
         Ok(trimmed.to_string())
     }
+}
+
+fn default_retry_policy() -> RetryPolicy {
+    RetryPolicy::new(3, Duration::from_secs(15), Duration::from_secs(300))
+        .expect("constant retry policy is valid")
 }
 
 #[cfg(test)]
@@ -2541,17 +2658,26 @@ mod tests {
         assert_eq!(manifest.jobs.len(), 3);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert_eq!(manifest.admin_resources.len(), 4);
-        assert!(manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "commerce"));
-        assert!(manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Jobs));
-        assert!(manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
+        assert_eq!(manifest.search_contributions.len(), 2);
+        assert_eq!(manifest.report_definitions.len(), 1);
+        assert_eq!(manifest.bulk_operations.len(), 1);
+        assert!(
+            manifest
+                .module_dependencies
+                .iter()
+                .any(|dependency| dependency.module == "commerce")
+        );
+        assert!(
+            manifest
+                .core_service_dependencies
+                .contains(&CoreServiceDependency::Jobs)
+        );
+        assert!(
+            manifest
+                .extension_slots
+                .iter()
+                .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget)
+        );
         assert_eq!(
             module
                 .install_migration_plan()

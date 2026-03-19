@@ -1,21 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
+use std::time::Duration;
 
 use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
-    CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
-    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
-    ModuleDependency, ModuleManifest, PlatformModule, RegistrationError, RouteSurface,
-    RouteSurfaceKind, ServiceRegistry,
+    BulkOperationDefinition, BulkOperationKind, BulkOperationScope, CapabilityContract,
+    CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
+    HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract,
+    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
+    PlatformModule, RegistrationError, RouteSurface, RouteSurfaceKind, SearchDocumentKind,
+    SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
+    SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
     MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext, QueryFilter,
     QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
 };
+use davenda_jobs::RetryPolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CmsModelError {
@@ -919,6 +923,74 @@ impl PlatformModule for CmsModule {
                 ),
             ])
             .with_admin_resources(self.admin_resources.clone())
+            .with_search_contributions(vec![SearchIndexContribution::new(
+                "search.cms.pages",
+                SearchDocumentKind::Page,
+                SearchVisibility::Public,
+                true,
+                vec![
+                    SearchFieldContribution::new(
+                        "title",
+                        "title",
+                        SearchFieldRole::Title,
+                        true,
+                        true,
+                    ),
+                    SearchFieldContribution::new(
+                        "body",
+                        "body_html",
+                        SearchFieldRole::Body,
+                        false,
+                        true,
+                    ),
+                    SearchFieldContribution::new(
+                        "seo",
+                        "seo",
+                        SearchFieldRole::Metadata,
+                        true,
+                        false,
+                    ),
+                ],
+                vec![
+                    SearchInvalidationRule::new(
+                        SearchInvalidationTrigger::Published,
+                        "page published",
+                    ),
+                    SearchInvalidationRule::new(
+                        SearchInvalidationTrigger::Updated,
+                        "page updated",
+                    ),
+                    SearchInvalidationRule::new(
+                        SearchInvalidationTrigger::Unpublished,
+                        "page unpublished",
+                    ),
+                ],
+                SearchRebuildStrategy::OnInvalidate,
+            )])
+            .with_bulk_operations(vec![
+                BulkOperationDefinition::new(
+                    "bulk.cms.publish",
+                    "Bulk publish pages",
+                    Some("Publishes editorially approved pages through idempotent background work".to_string()),
+                    Capability::CmsPagePublish,
+                    BulkOperationKind::Publish,
+                    BulkOperationScope::Cms,
+                    default_retry_policy(),
+                    Some(500),
+                    true,
+                ),
+                BulkOperationDefinition::new(
+                    "bulk.cms.unpublish",
+                    "Bulk unpublish pages",
+                    Some("Withdraws published pages without requiring per-row request-time mutations".to_string()),
+                    Capability::CmsPagePublish,
+                    BulkOperationKind::Unpublish,
+                    BulkOperationScope::Cms,
+                    default_retry_policy(),
+                    Some(500),
+                    true,
+                ),
+            ])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "cms.page",
@@ -1015,6 +1087,11 @@ fn validate_navigation_item(
     stack.pop();
 
     Ok(())
+}
+
+fn default_retry_policy() -> RetryPolicy {
+    RetryPolicy::new(3, Duration::from_secs(15), Duration::from_secs(300))
+        .expect("constant retry policy is valid")
 }
 
 fn resolve_navigation_item(
@@ -1146,17 +1223,25 @@ mod tests {
         assert_eq!(manifest.http_surfaces.len(), 5);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
-        assert!(manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "media"));
-        assert!(manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Seo));
-        assert!(manifest
-            .extension_slots
-            .iter()
-            .any(|slot| slot.kind == ExtensionSlotKind::RenderHook));
+        assert_eq!(manifest.search_contributions.len(), 1);
+        assert_eq!(manifest.bulk_operations.len(), 2);
+        assert!(
+            manifest
+                .module_dependencies
+                .iter()
+                .any(|dependency| dependency.module == "media")
+        );
+        assert!(
+            manifest
+                .core_service_dependencies
+                .contains(&CoreServiceDependency::Seo)
+        );
+        assert!(
+            manifest
+                .extension_slots
+                .iter()
+                .any(|slot| slot.kind == ExtensionSlotKind::RenderHook)
+        );
         assert_eq!(manifest.admin_resources.len(), 3);
         assert!(
             registry

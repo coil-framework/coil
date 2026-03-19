@@ -4,13 +4,13 @@ use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    BrowserSecurityServices, CapabilityValidationError, CliRuntimeServices, CookieSigner,
-    DataRuntimeServices, EventSubscription, HttpFileDeliveryMode, HttpResponseContract,
-    HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, JobContract,
+    BrowserSecurityServices, BulkOperationDefinition, CapabilityValidationError,
+    CliRuntimeServices, CookieSigner, DataRuntimeServices, EventSubscription, HttpFileDeliveryMode,
+    HttpResponseContract, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, JobContract,
     JobsRuntimeServices, ModuleInstallationError, ModuleManifest, ObservabilityRuntimeServices,
-    PlatformModule, RegistrationError, ServiceDescriptor, TemplateRuntimeServices,
-    TlsRuntimeServices, WasmRuntimeServices, bootstrap_core_services,
-    validate_module_capabilities, validate_module_installation,
+    PlatformModule, RegistrationError, ReportDefinition, SearchIndexContribution,
+    ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
+    bootstrap_core_services, validate_module_capabilities, validate_module_installation,
 };
 use davenda_data::{DataModelError, MigrationPlan};
 use davenda_observability::{
@@ -182,20 +182,18 @@ impl HttpRuntimePlan {
             }
 
             match route.locale_policy {
-                LocalePolicy::DefaultOnly => {
-                    match match_route_path(&route.path, path) {
-                        Some(params) => Some(ResolvedRouteMatch {
-                            route: route.clone(),
-                            resolved: ResolvedRoute {
-                                route_name: route.name.clone(),
-                                locale: None,
-                                auth: route.auth,
-                                params,
-                            },
-                        }),
-                        None => None,
-                    }
-                }
+                LocalePolicy::DefaultOnly => match match_route_path(&route.path, path) {
+                    Some(params) => Some(ResolvedRouteMatch {
+                        route: route.clone(),
+                        resolved: ResolvedRoute {
+                            route_name: route.name.clone(),
+                            locale: None,
+                            auth: route.auth,
+                            params,
+                        },
+                    }),
+                    None => None,
+                },
                 LocalePolicy::Localized if config.i18n.localized_routes => {
                     config.i18n.supported_locales.iter().find_map(|locale| {
                         let localized_path = format!(
@@ -237,7 +235,12 @@ impl HttpRuntimePlan {
 
         if route.locale_policy == LocalePolicy::Localized {
             let locale = locale.unwrap_or(&config.i18n.default_locale);
-            if !config.i18n.supported_locales.iter().any(|item| item == locale) {
+            if !config
+                .i18n
+                .supported_locales
+                .iter()
+                .any(|item| item == locale)
+            {
                 return Err(RouteUrlError::UnsupportedLocale {
                     route: route_name.to_string(),
                     locale: locale.to_string(),
@@ -729,23 +732,67 @@ where
         let module_jobs = module_manifests
             .iter()
             .flat_map(|manifest| {
-                manifest.jobs.iter().cloned().map(|job| RegisteredModuleJob {
-                    module: manifest.name.clone(),
-                    job,
-                })
+                manifest
+                    .jobs
+                    .iter()
+                    .cloned()
+                    .map(|job| RegisteredModuleJob {
+                        module: manifest.name.clone(),
+                        job,
+                    })
             })
             .collect::<Vec<_>>();
         let module_event_subscriptions = module_manifests
             .iter()
             .flat_map(|manifest| {
-                manifest.event_subscriptions.iter().cloned().map(|subscription| {
-                    RegisteredEventSubscription {
+                manifest
+                    .event_subscriptions
+                    .iter()
+                    .cloned()
+                    .map(|subscription| RegisteredEventSubscription {
                         module: manifest.name.clone(),
                         subscription,
-                    }
-                })
+                    })
             })
             .collect::<Vec<_>>();
+        let module_search_contributions = module_manifests
+            .iter()
+            .flat_map(|manifest| {
+                manifest
+                    .search_contributions
+                    .iter()
+                    .cloned()
+                    .map(|contribution| RegisteredSearchContribution {
+                        module: manifest.name.clone(),
+                        contribution,
+                    })
+            })
+            .collect::<Vec<_>>();
+        let module_report_definitions = module_manifests
+            .iter()
+            .flat_map(|manifest| {
+                manifest
+                    .report_definitions
+                    .iter()
+                    .cloned()
+                    .map(|definition| RegisteredReportDefinition {
+                        module: manifest.name.clone(),
+                        definition,
+                    })
+            })
+            .collect::<Vec<_>>();
+        let module_bulk_operations =
+            module_manifests
+                .iter()
+                .flat_map(|manifest| {
+                    manifest.bulk_operations.iter().cloned().map(|definition| {
+                        RegisteredBulkOperation {
+                            module: manifest.name.clone(),
+                            definition,
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
 
         Ok(RuntimePlan {
             config: self.config,
@@ -766,6 +813,9 @@ where
             install_migrations,
             module_jobs,
             module_event_subscriptions,
+            module_search_contributions,
+            module_report_definitions,
+            module_bulk_operations,
         })
     }
 }
@@ -790,6 +840,9 @@ pub struct RuntimePlan {
     pub install_migrations: MigrationPlan,
     pub module_jobs: Vec<RegisteredModuleJob>,
     pub module_event_subscriptions: Vec<RegisteredEventSubscription>,
+    pub module_search_contributions: Vec<RegisteredSearchContribution>,
+    pub module_report_definitions: Vec<RegisteredReportDefinition>,
+    pub module_bulk_operations: Vec<RegisteredBulkOperation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -802,6 +855,24 @@ pub struct RegisteredModuleJob {
 pub struct RegisteredEventSubscription {
     pub module: String,
     pub subscription: EventSubscription,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredSearchContribution {
+    pub module: String,
+    pub contribution: SearchIndexContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredReportDefinition {
+    pub module: String,
+    pub definition: ReportDefinition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredBulkOperation {
+    pub module: String,
+    pub definition: BulkOperationDefinition,
 }
 
 impl RuntimePlan {
@@ -1112,14 +1183,11 @@ fn handler_definition_from_surface(
         HttpResponseContract::Fragment {
             template,
             fragment_id,
-        } => HandlerDefinition::fragment(
-            surface.name.clone(),
-            template.clone(),
-            fragment_id.clone(),
-        ),
+        } => {
+            HandlerDefinition::fragment(surface.name.clone(), template.clone(), fragment_id.clone())
+        }
         HttpResponseContract::Redirect { location, status } => {
-            let mut handler =
-                HandlerDefinition::redirect(surface.name.clone(), location.clone())?;
+            let mut handler = HandlerDefinition::redirect(surface.name.clone(), location.clone())?;
             if let HandlerResponse::Redirect(redirect) = &mut handler.response {
                 redirect.status = *status;
             }
@@ -1523,26 +1591,29 @@ cdn_base_url = "https://cdn.example.com"
                 .iter()
                 .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string()))
         );
-        assert!(
-            plan.install_migrations
-                .ordered_steps()
-                .iter()
-                .any(|step| {
-                    step.owner
-                        == davenda_data::MigrationOwner::Module("memberships".to_string())
-                })
-        );
+        assert!(plan.install_migrations.ordered_steps().iter().any(|step| {
+            step.owner == davenda_data::MigrationOwner::Module("memberships".to_string())
+        }));
         assert!(
             plan.module_jobs
                 .iter()
                 .any(|registered| registered.job.name == "events.reminders")
         );
-        assert!(
-            plan.module_event_subscriptions.iter().any(|registered| {
-                registered.subscription.event == "commerce.order.paid"
-                    && registered.module == "memberships"
-            })
-        );
+        assert!(plan.module_event_subscriptions.iter().any(|registered| {
+            registered.subscription.event == "commerce.order.paid"
+                && registered.module == "memberships"
+        }));
+        assert!(plan.module_search_contributions.iter().any(|registered| {
+            registered.module == "commerce"
+                && registered.contribution.id == "search.catalog.products"
+        }));
+        assert!(plan.module_report_definitions.iter().any(|registered| {
+            registered.module == "memberships"
+                && registered.definition.id == "report.memberships.summary"
+        }));
+        assert!(plan.module_bulk_operations.iter().any(|registered| {
+            registered.module == "events" && registered.definition.id == "bulk.events.check-in"
+        }));
     }
 
     #[test]
@@ -1950,10 +2021,7 @@ cdn_base_url = "https://cdn.example.com"
             .with_module(EventsModule::new())
             .build()
             .unwrap();
-        let params = BTreeMap::from([(
-            "event_slug".to_string(),
-            "summer-gala".to_string(),
-        )]);
+        let params = BTreeMap::from([("event_slug".to_string(), "summer-gala".to_string())]);
 
         let path = plan
             .http

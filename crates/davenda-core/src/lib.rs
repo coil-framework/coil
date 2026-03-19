@@ -48,7 +48,7 @@ pub enum ServiceOwner {
     CustomerApp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheRuntimeServices {
     pub topology: CacheTopology,
     pub planner: CachePlanner,

@@ -226,9 +226,15 @@ impl JobsBackendAdapter {
         Self::new(backend, queue_topology, runtime)
     }
 
-    #[cfg(test)]
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-        Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
+        #[cfg(test)]
+        {
+            Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone()))
+        }
+        #[cfg(not(test))]
+        {
+            shared::local_runtime(runtime)
+        }
     }
 
     #[allow(dead_code)]

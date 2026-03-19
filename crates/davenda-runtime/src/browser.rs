@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
 use std::fmt::Write;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,9 +8,8 @@ use super::*;
 use davenda_core::BrowserSecurityError;
 
 mod shared;
-
 #[cfg(test)]
-use std::sync::OnceLock;
+mod testing;
 
 const FLASH_COOKIE_MAX_AGE_SECS: u64 = 300;
 static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -92,63 +90,6 @@ pub struct BrowserSessionRecord {
     pub revoked_at: Option<BrowserInstant>,
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone, Default)]
-struct SessionStoreState {
-    sessions: BTreeMap<String, BrowserSessionRecord>,
-}
-
-#[cfg(test)]
-impl SessionStoreState {
-    fn issue(&mut self, record: BrowserSessionRecord) {
-        self.sessions.insert(record.session_id.clone(), record);
-    }
-
-    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
-        self.sessions.get(session_id).cloned()
-    }
-
-    fn revoke(&mut self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
-        let existing = self.sessions.get_mut(session_id).ok_or_else(|| {
-            RuntimeBrowserError::UnknownSession {
-                session_id: session_id.to_string(),
-            }
-        })?;
-        existing.revoked_at = Some(now);
-        Ok(())
-    }
-
-    fn touch_active_session(
-        &mut self,
-        session_id: &str,
-        idle_timeout: Duration,
-        now: BrowserInstant,
-    ) -> Result<Option<String>, RuntimeBrowserError> {
-        let record = self.sessions.get_mut(session_id).ok_or_else(|| {
-            RuntimeBrowserError::UnknownSession {
-                session_id: session_id.to_string(),
-            }
-        })?;
-
-        match record.status_at(now) {
-            BrowserSessionStatus::Active => {
-                record.last_seen_at = now;
-                record.idle_expires_at = now.saturating_add(idle_timeout);
-                Ok(record.principal_id.clone())
-            }
-            BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
-                self.sessions.remove(session_id);
-                Err(RuntimeBrowserError::ExpiredSession {
-                    session_id: session_id.to_string(),
-                })
-            }
-            BrowserSessionStatus::Revoked => Err(RuntimeBrowserError::RevokedSession {
-                session_id: session_id.to_string(),
-            }),
-        }
-    }
-}
-
 pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
     fn issue(&self, record: BrowserSessionRecord);
     fn session(&self, session_id: &str) -> Option<BrowserSessionRecord>;
@@ -163,58 +104,6 @@ pub trait DistributedSessionStoreRuntime: Send + Sync + 'static {
     fn is_shared_backend(&self) -> bool;
 }
 
-#[cfg(test)]
-#[derive(Debug)]
-struct SharedDistributedSessionStoreRuntime {
-    state: Mutex<SessionStoreState>,
-}
-
-#[cfg(test)]
-impl SharedDistributedSessionStoreRuntime {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(SessionStoreState::default()),
-        }
-    }
-}
-
-#[cfg(test)]
-impl DistributedSessionStoreRuntime for SharedDistributedSessionStoreRuntime {
-    fn issue(&self, record: BrowserSessionRecord) {
-        let mut guard = self.state.lock().expect("session backend mutex poisoned");
-        guard.issue(record);
-    }
-
-    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
-        let guard = self.state.lock().expect("session backend mutex poisoned");
-        guard.session(session_id)
-    }
-
-    fn delete(&self, session_id: &str) {
-        let mut guard = self.state.lock().expect("session backend mutex poisoned");
-        guard.sessions.remove(session_id);
-    }
-
-    fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
-        let mut guard = self.state.lock().expect("session backend mutex poisoned");
-        guard.revoke(session_id, now)
-    }
-
-    fn touch_active_session(
-        &self,
-        session_id: &str,
-        idle_timeout: Duration,
-        now: BrowserInstant,
-    ) -> Result<Option<String>, RuntimeBrowserError> {
-        let mut guard = self.state.lock().expect("session backend mutex poisoned");
-        guard.touch_active_session(session_id, idle_timeout, now)
-    }
-
-    fn is_shared_backend(&self) -> bool {
-        true
-    }
-}
-
 #[derive(Clone)]
 pub struct DistributedSessionStoreClient {
     kind: SessionStoreBackendKind,
@@ -227,26 +116,6 @@ impl DistributedSessionStoreClient {
         runtime: Arc<dyn DistributedSessionStoreRuntime>,
     ) -> Self {
         Self { kind, runtime }
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn in_memory(kind: SessionStoreBackendKind) -> Self {
-        Self::local_for_testing(kind)
-    }
-
-    #[cfg(test)]
-    #[doc(hidden)]
-    pub(crate) fn local_for_testing(kind: SessionStoreBackendKind) -> Self {
-        Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn shared_runtime(
-        kind: SessionStoreBackendKind,
-        scope: impl Into<String>,
-    ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        shared_test_runtime(kind, scope.into())
     }
 
     #[cfg(not(test))]
@@ -300,37 +169,10 @@ impl std::fmt::Debug for DistributedSessionStoreClient {
     }
 }
 
-#[cfg(test)]
-fn shared_test_runtime(
-    kind: SessionStoreBackendKind,
-    scope: String,
-) -> Arc<dyn DistributedSessionStoreRuntime> {
-    static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn DistributedSessionStoreRuntime>>>> =
-        OnceLock::new();
-
-    let key = format!("{}:{kind:?}:{scope}", test_scope());
-    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry
-        .lock()
-        .expect("test session store registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| Arc::new(SharedDistributedSessionStoreRuntime::new()))
-        .clone()
-}
-
-#[cfg(test)]
-fn test_scope() -> String {
-    std::thread::current()
-        .name()
-        .unwrap_or("unnamed-test")
-        .to_string()
-}
-
 #[derive(Debug, Clone)]
 enum SessionStoreBackend {
     #[cfg(test)]
-    Local(SessionStoreState),
+    Local(testing::SessionStoreState),
     Distributed(DistributedSessionStoreClient),
 }
 
@@ -375,37 +217,6 @@ impl SessionStoreBackend {
                     ),
                 )),
             )),
-        }
-    }
-
-    #[cfg(test)]
-    fn local(
-        _customer_app: &str,
-        services: &davenda_core::SessionSecurityServices,
-    ) -> (SessionStoreBackendKind, Self) {
-        match services.store {
-            davenda_core::SessionStoreTopology::Memory => (
-                SessionStoreBackendKind::Local,
-                Self::Local(SessionStoreState::default()),
-            ),
-            davenda_core::SessionStoreTopology::Database => (
-                SessionStoreBackendKind::Database,
-                Self::Distributed(DistributedSessionStoreClient::local_for_testing(
-                    SessionStoreBackendKind::Database,
-                )),
-            ),
-            davenda_core::SessionStoreTopology::Redis => (
-                SessionStoreBackendKind::Redis,
-                Self::Distributed(DistributedSessionStoreClient::local_for_testing(
-                    SessionStoreBackendKind::Redis,
-                )),
-            ),
-            davenda_core::SessionStoreTopology::Valkey => (
-                SessionStoreBackendKind::Valkey,
-                Self::Distributed(DistributedSessionStoreClient::local_for_testing(
-                    SessionStoreBackendKind::Valkey,
-                )),
-            ),
         }
     }
 
@@ -620,21 +431,6 @@ impl BrowserHost {
             session_store_kind,
             sessions,
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn local_for_testing(
-        customer_app: String,
-        services: BrowserSecurityServices,
-    ) -> Self {
-        let (session_store_kind, sessions) =
-            SessionStoreBackend::local(&customer_app, &services.sessions);
-        Self {
-            customer_app,
-            services,
-            session_store_kind,
-            sessions,
-        }
     }
 
     pub fn with_session_store_client(

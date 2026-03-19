@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(dead_code))]
+
 #[cfg(test)]
 use super::EmulatedJobsCoordinationRuntime;
 use super::{JobsBackendState, JobsCoordinationRuntime, JobsRuntime};

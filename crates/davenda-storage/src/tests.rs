@@ -180,6 +180,7 @@ fn local_only_override_is_rejected_for_distributed_deployments() {
             logical_path: "secure/reports/march.csv".to_string(),
             policy: StoragePolicy::local_only_sensitive(),
             deployment: davenda_config::StorageDeployment::Distributed,
+            local_only_mode: davenda_config::LocalOnlyStorageMode::ExplicitSingleNode,
         }
     );
 }
@@ -262,6 +263,7 @@ mode = "external"
 [storage]
 default_class = "private_shared"
 deployment = "single_node"
+local_only = "explicit_single_node"
 object_store = "s3"
 local_root = "var/davenda/storage"
 

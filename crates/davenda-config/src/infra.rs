@@ -83,6 +83,8 @@ pub struct StorageConfig {
     pub default_class: StorageClass,
     #[serde(default = "default_storage_deployment")]
     pub deployment: StorageDeployment,
+    #[serde(default = "default_local_only_storage_mode")]
+    pub local_only: LocalOnlyStorageMode,
     #[serde(default)]
     pub object_store: Option<ObjectStoreKind>,
     pub local_root: String,
@@ -95,6 +97,13 @@ pub struct StorageConfig {
 pub enum StorageDeployment {
     Distributed,
     SingleNode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalOnlyStorageMode {
+    Disabled,
+    ExplicitSingleNode,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -195,4 +204,8 @@ fn default_statement_timeout_secs() -> u64 {
 
 fn default_storage_deployment() -> StorageDeployment {
     StorageDeployment::Distributed
+}
+
+fn default_local_only_storage_mode() -> LocalOnlyStorageMode {
+    LocalOnlyStorageMode::Disabled
 }

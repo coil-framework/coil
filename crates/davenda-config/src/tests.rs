@@ -115,10 +115,12 @@ fn rejects_default_locale_outside_supported_list() {
 
     match error {
         ConfigError::Validation(errors) => {
-            assert!(errors
-                .0
-                .iter()
-                .any(|err| matches!(err, ConfigValidationError::DefaultLocaleNotSupported { .. })));
+            assert!(
+                errors.0.iter().any(|err| matches!(
+                    err,
+                    ConfigValidationError::DefaultLocaleNotSupported { .. }
+                ))
+            );
         }
         other => panic!("expected validation error, got {other:?}"),
     }
@@ -132,9 +134,11 @@ fn rejects_dns_01_without_provider() {
 
     match error {
         ConfigError::Validation(errors) => {
-            assert!(errors
-                .0
-                .contains(&ConfigValidationError::MissingDnsAutomationProvider));
+            assert!(
+                errors
+                    .0
+                    .contains(&ConfigValidationError::MissingDnsAutomationProvider)
+            );
         }
         other => panic!("expected validation error, got {other:?}"),
     }
@@ -155,7 +159,7 @@ fn rejects_manifest_publishing_without_cdn_base_url() {
 }
 
 #[test]
-fn rejects_local_only_defaults_on_distributed_deployments() {
+fn rejects_local_only_defaults_without_explicit_escape_hatch() {
     let invalid = VALID_CONFIG.replace(
         "default_class = \"public_upload\"",
         "default_class = \"local_only_sensitive\"",
@@ -166,10 +170,29 @@ fn rejects_local_only_defaults_on_distributed_deployments() {
     match error {
         ConfigError::Validation(errors) => {
             assert!(errors.0.contains(
-                &ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment {
+                &ConfigValidationError::LocalOnlyStorageRequiresExplicitOptIn {
                     storage_class: StorageClass::LocalOnlySensitive,
                 }
             ));
+        }
+        other => panic!("expected validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_explicit_local_only_on_distributed_deployments() {
+    let invalid = VALID_CONFIG.replace(
+        "deployment = \"distributed\"",
+        "deployment = \"distributed\"\nlocal_only = \"explicit_single_node\"",
+    );
+
+    let error = PlatformConfig::from_toml_str(&invalid).unwrap_err();
+
+    match error {
+        ConfigError::Validation(errors) => {
+            assert!(errors
+                .0
+                .contains(&ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment));
         }
         other => panic!("expected validation error, got {other:?}"),
     }
@@ -206,12 +229,14 @@ max_connections = 4
 
     match error {
         ConfigError::Validation(errors) => {
-            assert!(errors
-                .0
-                .contains(&ConfigValidationError::InvalidDatabasePoolSize {
-                    min_connections: 8,
-                    max_connections: 4,
-                }));
+            assert!(
+                errors
+                    .0
+                    .contains(&ConfigValidationError::InvalidDatabasePoolSize {
+                        min_connections: 8,
+                        max_connections: 4,
+                    })
+            );
         }
         other => panic!("expected validation error, got {other:?}"),
     }
@@ -225,11 +250,13 @@ fn rejects_invalid_trusted_proxy_entries() {
 
     match error {
         ConfigError::Validation(errors) => {
-            assert!(errors
-                .0
-                .contains(&ConfigValidationError::InvalidTrustedProxy {
-                    value: "not-a-proxy".to_string(),
-                }));
+            assert!(
+                errors
+                    .0
+                    .contains(&ConfigValidationError::InvalidTrustedProxy {
+                        value: "not-a-proxy".to_string(),
+                    })
+            );
         }
         other => panic!("expected validation error, got {other:?}"),
     }
@@ -289,11 +316,15 @@ fn trusted_proxies_gate_forwarded_metadata_trust() {
 
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
 
-    assert!(config
-        .server
-        .trusts_forwarded_headers(Some(&SocketAddr::from(([10, 0, 0, 8], 443,)))));
-    assert!(!config
-        .server
-        .trusts_forwarded_headers(Some(&SocketAddr::from(([192, 168, 1, 8], 443,)))));
+    assert!(
+        config
+            .server
+            .trusts_forwarded_headers(Some(&SocketAddr::from(([10, 0, 0, 8], 443,))))
+    );
+    assert!(
+        !config
+            .server
+            .trusts_forwarded_headers(Some(&SocketAddr::from(([192, 168, 1, 8], 443,))))
+    );
     assert!(!config.server.trusts_forwarded_headers(None));
 }

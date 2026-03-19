@@ -74,9 +74,13 @@ pub enum ConfigValidationError {
     #[error("storage.local_root must not be empty")]
     EmptyLocalStorageRoot,
     #[error(
-        "storage.default_class={storage_class:?} requires storage.deployment=single_node because local-only storage is not permitted in distributed deployments"
+        "storage.default_class={storage_class:?} requires storage.local_only=explicit_single_node because local-only storage must be explicitly enabled"
     )]
-    LocalOnlyStorageRequiresSingleNodeDeployment { storage_class: StorageClass },
+    LocalOnlyStorageRequiresExplicitOptIn { storage_class: StorageClass },
+    #[error(
+        "storage.local_only=explicit_single_node requires storage.deployment=single_node because local-only storage is not permitted in distributed deployments"
+    )]
+    LocalOnlyStorageRequiresSingleNodeDeployment,
     #[error("database.schema must not be empty")]
     EmptyDatabaseSchema,
     #[error("database.migrations_table must not be empty")]
@@ -240,13 +244,17 @@ impl PlatformConfig {
         }
 
         if matches!(self.storage.default_class, StorageClass::LocalOnlySensitive)
+            && self.storage.local_only != LocalOnlyStorageMode::ExplicitSingleNode
+        {
+            errors.push(ConfigValidationError::LocalOnlyStorageRequiresExplicitOptIn {
+                storage_class: self.storage.default_class,
+            });
+        }
+
+        if self.storage.local_only == LocalOnlyStorageMode::ExplicitSingleNode
             && self.storage.deployment != StorageDeployment::SingleNode
         {
-            errors.push(
-                ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment {
-                    storage_class: self.storage.default_class,
-                },
-            );
+            errors.push(ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment);
         }
 
         if self.database.schema.trim().is_empty() {

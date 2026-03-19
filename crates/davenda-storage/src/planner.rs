@@ -159,11 +159,12 @@ impl StoragePlanner {
         let local_path = match policy.sync_mode {
             SyncMode::ObjectStore => None,
             SyncMode::LocalOnly => {
-                if !self.topology.allows_local_only() {
+                if !self.topology.allows_explicit_local_only() {
                     return Err(StoragePlanningError::LocalOnlyNotAllowedForDeployment {
                         logical_path,
                         policy,
                         deployment: self.topology.deployment,
+                        local_only_mode: self.topology.local_only_mode,
                     });
                 }
 
@@ -233,11 +234,12 @@ pub enum StoragePlanningError {
         policy: StoragePolicy,
     },
     #[error(
-        "storage plan for `{logical_path}` with policy {policy:?} is not allowed for deployment {deployment:?}"
+        "storage plan for `{logical_path}` with policy {policy:?} is not allowed for deployment {deployment:?} because local-only mode is {local_only_mode:?}"
     )]
     LocalOnlyNotAllowedForDeployment {
         logical_path: String,
         policy: StoragePolicy,
         deployment: davenda_config::StorageDeployment,
+        local_only_mode: davenda_config::LocalOnlyStorageMode,
     },
 }

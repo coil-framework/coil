@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use davenda_wasm::{MetadataExecution, MetadataGrant};
 
@@ -10,6 +12,7 @@ mod shared;
 #[derive(Debug, Clone)]
 pub(super) struct RuntimeMetadataBackend {
     backend: MetadataAuditBackend,
+    write_sequence: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +41,10 @@ impl RuntimeMetadataBackend {
             }
         };
 
-        Self { backend }
+        Self {
+            backend,
+            write_sequence: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     #[cfg(test)]
@@ -48,6 +54,7 @@ impl RuntimeMetadataBackend {
                 root.into(),
                 namespace.into(),
             )),
+            write_sequence: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -58,12 +65,12 @@ impl RuntimeMetadataBackend {
     ) -> Result<MetadataExecution, String> {
         let record = MetadataAuditRecord::from_context(kind, context);
         self.backend.insert(&record)?;
-        let journal_entries = self.backend.count()?;
+        let journal_entries = self.write_sequence.fetch_add(1, Ordering::Relaxed) + 1;
 
         Ok(MetadataExecution {
             kind,
             recorded: true,
-            journal_entries,
+            journal_entries: journal_entries as usize,
         })
     }
 
@@ -195,6 +202,12 @@ mod tests {
     use crate::RuntimeBuilder;
     use davenda_auth::DefaultAuthModelPackage;
     use davenda_config::{PlatformConfig, StorageDeployment};
+    use davenda_wasm::{
+        ApiInvocation, CustomerAppContext, InvocationContext, InvocationInput, MetadataGrant,
+        PrincipalRef, TraceContext,
+    };
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const TEST_CONFIG: &str = r#"
 [app]
@@ -311,5 +324,41 @@ publish_manifest = false
             backend.location_label(),
             "shared-postgres:public.metadata_audit_entries"
         );
+    }
+
+    #[test]
+    fn runtime_metadata_backend_records_without_counting_the_table_on_write() {
+        let root = std::env::temp_dir().join(format!(
+            "davenda-metadata-audit-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let backend = RuntimeMetadataBackend::with_local_root(root.clone(), "metadata-tests");
+        let context = InvocationContext::new(
+            CustomerAppContext::new("metadata-tests")
+                .unwrap()
+                .with_tenant_id("1")
+                .unwrap()
+                .with_locale("en-GB")
+                .unwrap(),
+            PrincipalRef::user("alice").unwrap(),
+            TraceContext::new("trace-metadata").unwrap(),
+            InvocationInput::Api(
+                ApiInvocation::new("/metadata", davenda_wasm::HttpMethod::Get).unwrap(),
+            ),
+        );
+
+        let first = backend.record(MetadataGrant::JsonLd, &context).unwrap();
+        let second = backend.record(MetadataGrant::JsonLd, &context).unwrap();
+        let snapshot = backend.snapshot(10).unwrap();
+
+        assert_eq!(first.journal_entries, 1);
+        assert_eq!(second.journal_entries, 2);
+        assert_eq!(snapshot.entry_count, 2);
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

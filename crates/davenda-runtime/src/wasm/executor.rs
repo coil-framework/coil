@@ -8,7 +8,6 @@ use super::*;
 use davenda_wasm::MetadataGrant;
 use std::sync::OnceLock;
 use std::time::Duration;
-use url::Url;
 
 #[derive(Debug)]
 pub(super) struct RuntimeHostServiceExecutor {
@@ -411,6 +410,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::thread;
+    use url::Url;
 
     const TEST_CONFIG: &str = r#"
 [app]

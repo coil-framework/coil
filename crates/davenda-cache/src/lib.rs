@@ -13,6 +13,7 @@ pub enum CacheModelError {
     MissingHttpFreshness,
     NoStoreCannotDefineFreshness,
     ZeroDuration { field: &'static str },
+    UnknownInflightFill { key: String },
 }
 
 impl fmt::Display for CacheModelError {
@@ -38,6 +39,9 @@ impl fmt::Display for CacheModelError {
                 f.write_str("no-store HTTP responses cannot define freshness")
             }
             Self::ZeroDuration { field } => write!(f, "`{field}` must be greater than zero"),
+            Self::UnknownInflightFill { key } => {
+                write!(f, "cache fill for `{key}` is not currently in progress")
+            }
         }
     }
 }
@@ -216,7 +220,7 @@ impl CacheScope {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VariationKey(String);
 
 impl VariationKey {
@@ -454,7 +458,7 @@ impl HttpCachePolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CacheNamespace(String);
 
 impl CacheNamespace {
@@ -473,7 +477,7 @@ impl fmt::Display for CacheNamespace {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CacheKey {
     namespace: CacheNamespace,
     resource: String,
@@ -712,6 +716,213 @@ impl CachePlan {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CacheInstant(u64);
+
+impl CacheInstant {
+    pub const fn from_unix_seconds(seconds: u64) -> Self {
+        Self(seconds)
+    }
+
+    pub const fn as_unix_seconds(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheEntry {
+    pub key: CacheKey,
+    pub value: String,
+    pub stored_at: CacheInstant,
+    pub freshness: FreshnessPolicy,
+    pub tags: InvalidationSet,
+    pub scope: CacheScope,
+    pub layers: CacheLayerPlan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheLookupState {
+    Miss,
+    Fresh,
+    Stale,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheLookup {
+    pub state: CacheLookupState,
+    pub entry: Option<CacheEntry>,
+    pub needs_revalidation: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CacheMetrics {
+    pub hits: u64,
+    pub stale_hits: u64,
+    pub misses: u64,
+    pub invalidations: u64,
+    pub coalesced_waits: u64,
+    pub fills_started: u64,
+    pub fills_completed: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FillDecision {
+    Start(FillLease),
+    Coalesced { key: CacheKey, holder: String },
+    Uncoalesced,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FillLease {
+    pub key: CacheKey,
+    pub holder: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheRuntime {
+    topology: CacheTopology,
+    entries: BTreeMap<CacheKey, CacheEntry>,
+    inflight_fills: BTreeMap<CacheKey, String>,
+    metrics: CacheMetrics,
+}
+
+impl CacheRuntime {
+    pub fn new(topology: CacheTopology) -> Self {
+        Self {
+            topology,
+            entries: BTreeMap::new(),
+            inflight_fills: BTreeMap::new(),
+            metrics: CacheMetrics::default(),
+        }
+    }
+
+    pub fn topology(&self) -> CacheTopology {
+        self.topology
+    }
+
+    pub fn metrics(&self) -> CacheMetrics {
+        self.metrics
+    }
+
+    pub fn insert(
+        &mut self,
+        plan: &ApplicationCachePlan,
+        value: impl Into<String>,
+        now: CacheInstant,
+    ) {
+        let entry = CacheEntry {
+            key: plan.key.clone(),
+            value: value.into(),
+            stored_at: now,
+            freshness: plan.freshness,
+            tags: plan.tags.clone(),
+            scope: plan.scope.clone(),
+            layers: plan.layers.clone(),
+        };
+        self.entries.insert(plan.key.clone(), entry);
+    }
+
+    pub fn lookup(&mut self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
+        let entry = self.entries.get(key).cloned();
+        let Some(entry) = entry else {
+            self.metrics.misses += 1;
+            return CacheLookup {
+                state: CacheLookupState::Miss,
+                entry: None,
+                needs_revalidation: false,
+            };
+        };
+
+        let age = now.as_unix_seconds().saturating_sub(entry.stored_at.as_unix_seconds());
+        if age <= entry.freshness.ttl_seconds() {
+            self.metrics.hits += 1;
+            return CacheLookup {
+                state: CacheLookupState::Fresh,
+                entry: Some(entry),
+                needs_revalidation: false,
+            };
+        }
+
+        let max_stale_age = entry
+            .freshness
+            .stale_while_revalidate_seconds()
+            .map(|swr| entry.freshness.ttl_seconds().saturating_add(swr));
+        if max_stale_age.is_some_and(|max_age| age <= max_age) {
+            self.metrics.stale_hits += 1;
+            return CacheLookup {
+                state: CacheLookupState::Stale,
+                entry: Some(entry),
+                needs_revalidation: true,
+            };
+        }
+
+        self.entries.remove(key);
+        self.metrics.misses += 1;
+        CacheLookup {
+            state: CacheLookupState::Miss,
+            entry: None,
+            needs_revalidation: false,
+        }
+    }
+
+    pub fn invalidate(&mut self, tags: &InvalidationSet) -> Vec<CacheKey> {
+        if tags.is_empty() {
+            return Vec::new();
+        }
+
+        let removed = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.tags.iter().any(|tag| tags.iter().any(|wanted| wanted == tag)))
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        for key in &removed {
+            self.entries.remove(key);
+        }
+        self.metrics.invalidations += removed.len() as u64;
+        removed
+    }
+
+    pub fn begin_fill(
+        &mut self,
+        key: &CacheKey,
+        mode: RequestCoalescingMode,
+        holder: impl Into<String>,
+    ) -> FillDecision {
+        let holder = holder.into();
+        if mode == RequestCoalescingMode::Disabled {
+            return FillDecision::Uncoalesced;
+        }
+
+        if let Some(existing) = self.inflight_fills.get(key) {
+            self.metrics.coalesced_waits += 1;
+            return FillDecision::Coalesced {
+                key: key.clone(),
+                holder: existing.clone(),
+            };
+        }
+
+        self.inflight_fills.insert(key.clone(), holder.clone());
+        self.metrics.fills_started += 1;
+        FillDecision::Start(FillLease {
+            key: key.clone(),
+            holder,
+        })
+    }
+
+    pub fn complete_fill(&mut self, lease: &FillLease) -> Result<(), CacheModelError> {
+        match self.inflight_fills.remove(&lease.key) {
+            Some(_) => {
+                self.metrics.fills_completed += 1;
+                Ok(())
+            }
+            None => Err(CacheModelError::UnknownInflightFill {
+                key: lease.key.to_string(),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CachePlanner {
     topology: CacheTopology,
@@ -724,6 +935,10 @@ impl CachePlanner {
 
     pub fn topology(&self) -> CacheTopology {
         self.topology
+    }
+
+    pub fn runtime(&self) -> CacheRuntime {
+        CacheRuntime::new(self.topology)
     }
 
     pub fn plan(&self, request: CachePlanRequest) -> Result<CachePlan, CacheModelError> {
@@ -994,5 +1209,181 @@ mod tests {
             .unwrap_err(),
             CacheModelError::MissingHttpFreshness
         );
+    }
+
+    #[test]
+    fn runtime_serves_fresh_then_stale_then_miss() {
+        let planner = CachePlanner::new(CacheTopology::with_valkey());
+        let plan = planner
+            .plan(
+                CachePlanRequest::new(
+                    CacheNamespace::new("cms.page").unwrap(),
+                    "page:42",
+                    HttpCachePolicy::new(
+                        CacheScope::public(),
+                        Some(
+                            FreshnessPolicy::new(
+                                Duration::from_secs(60),
+                                Some(Duration::from_secs(30)),
+                            )
+                            .unwrap(),
+                        ),
+                        ResponseValidators::default(),
+                        InvalidationSet::from_tags([tag("page:42")]),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+                .with_application_policy(
+                    ApplicationCachePolicy::new(
+                        CacheScope::public(),
+                        FreshnessPolicy::new(
+                            Duration::from_secs(60),
+                            Some(Duration::from_secs(30)),
+                        )
+                        .unwrap(),
+                        InvalidationSet::from_tags([tag("page:42")]),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let application = plan.application().unwrap();
+        let mut runtime = planner.runtime();
+        runtime.insert(
+            application,
+            "<html>cached</html>",
+            CacheInstant::from_unix_seconds(100),
+        );
+
+        let fresh = runtime.lookup(application.key(), CacheInstant::from_unix_seconds(140));
+        assert_eq!(fresh.state, CacheLookupState::Fresh);
+        assert!(!fresh.needs_revalidation);
+
+        let stale = runtime.lookup(application.key(), CacheInstant::from_unix_seconds(170));
+        assert_eq!(stale.state, CacheLookupState::Stale);
+        assert!(stale.needs_revalidation);
+
+        let miss = runtime.lookup(application.key(), CacheInstant::from_unix_seconds(195));
+        assert_eq!(miss.state, CacheLookupState::Miss);
+        assert_eq!(runtime.metrics().hits, 1);
+        assert_eq!(runtime.metrics().stale_hits, 1);
+        assert_eq!(runtime.metrics().misses, 1);
+    }
+
+    #[test]
+    fn runtime_invalidates_entries_by_surrogate_tag() {
+        let planner = CachePlanner::new(CacheTopology::with_redis());
+        let page_plan = planner
+            .plan(
+                CachePlanRequest::new(
+                    CacheNamespace::new("cms.page").unwrap(),
+                    "page:42",
+                    HttpCachePolicy::new(
+                        CacheScope::public(),
+                        Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                        ResponseValidators::default(),
+                        InvalidationSet::from_tags([tag("page:42")]),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+                .with_application_policy(
+                    ApplicationCachePolicy::new(
+                        CacheScope::public(),
+                        FreshnessPolicy::new(Duration::from_secs(300), None).unwrap(),
+                        InvalidationSet::from_tags([tag("page:42"), tag("nav:main")]),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let nav_plan = planner
+            .plan(
+                CachePlanRequest::new(
+                    CacheNamespace::new("cms.nav").unwrap(),
+                    "nav:main",
+                    HttpCachePolicy::new(
+                        CacheScope::public(),
+                        Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                        ResponseValidators::default(),
+                        InvalidationSet::from_tags([tag("nav:main")]),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+                .with_application_policy(
+                    ApplicationCachePolicy::new(
+                        CacheScope::public(),
+                        FreshnessPolicy::new(Duration::from_secs(300), None).unwrap(),
+                        InvalidationSet::from_tags([tag("nav:main")]),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let mut runtime = planner.runtime();
+        runtime.insert(
+            page_plan.application().unwrap(),
+            "page",
+            CacheInstant::from_unix_seconds(100),
+        );
+        runtime.insert(
+            nav_plan.application().unwrap(),
+            "nav",
+            CacheInstant::from_unix_seconds(100),
+        );
+
+        let removed = runtime.invalidate(&InvalidationSet::from_tags([tag("nav:main")]));
+        assert_eq!(removed.len(), 2);
+        assert_eq!(runtime.lookup(page_plan.application().unwrap().key(), CacheInstant::from_unix_seconds(110)).state, CacheLookupState::Miss);
+        assert_eq!(runtime.metrics().invalidations, 2);
+    }
+
+    #[test]
+    fn runtime_coalesces_duplicate_fill_requests() {
+        let planner = CachePlanner::new(CacheTopology::with_redis());
+        let plan = planner
+            .plan(
+                CachePlanRequest::new(
+                    CacheNamespace::new("catalog.page").unwrap(),
+                    "product:sku-1",
+                    HttpCachePolicy::new(
+                        CacheScope::public(),
+                        Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                        ResponseValidators::default(),
+                        InvalidationSet::new(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+                .with_application_policy(
+                    ApplicationCachePolicy::new(
+                        CacheScope::public(),
+                        FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                        InvalidationSet::new(),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let key = plan.application().unwrap().key().clone();
+        let mut runtime = planner.runtime();
+
+        let first = runtime.begin_fill(&key, RequestCoalescingMode::Cluster, "request-a");
+        let lease = match first {
+            FillDecision::Start(lease) => lease,
+            other => panic!("expected fill lease, got {other:?}"),
+        };
+
+        let second = runtime.begin_fill(&key, RequestCoalescingMode::Cluster, "request-b");
+        assert!(matches!(
+            second,
+            FillDecision::Coalesced { ref holder, .. } if holder == "request-a"
+        ));
+        runtime.complete_fill(&lease).unwrap();
+        assert_eq!(runtime.metrics().fills_started, 1);
+        assert_eq!(runtime.metrics().fills_completed, 1);
+        assert_eq!(runtime.metrics().coalesced_waits, 1);
     }
 }

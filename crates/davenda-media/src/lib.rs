@@ -12,6 +12,7 @@ use davenda_core::{
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
     RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
+use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 use davenda_storage::{
     DeliveryMode, Sensitivity, StoragePolicy, StoragePolicyError, StoragePolicyOverride,
 };
@@ -1023,6 +1024,54 @@ impl PlatformModule for MediaModule {
             "Media admin resources and operator workflows",
         )
     }
+
+    fn install_migration_plan(&self) -> Option<MigrationPlan> {
+        let owner = MigrationOwner::Module(self.name.clone());
+        let mut plan = MigrationPlan::new();
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("media_libraries").expect("constant migration id is valid"),
+                owner.clone(),
+                10,
+                "Create media-library and folder policy storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS media_libraries (id TEXT PRIMARY KEY, name TEXT NOT NULL, default_policy TEXT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("media migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("media_assets").expect("constant migration id is valid"),
+                owner.clone(),
+                20,
+                "Create managed media asset and revision storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS media_assets (id TEXT PRIMARY KEY, library_id TEXT NOT NULL, slug TEXT NOT NULL, status TEXT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("media migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("media_derivatives").expect("constant migration id is valid"),
+                owner,
+                30,
+                "Create media derivative and sync backlog storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS media_derivatives (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("media migration ids are unique");
+        Some(plan)
+    }
 }
 
 fn validate_token(field: &'static str, value: String) -> Result<String, MediaModelError> {
@@ -1288,6 +1337,14 @@ mod tests {
             .extension_slots
             .iter()
             .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
+        assert_eq!(
+            module
+                .install_migration_plan()
+                .expect("media migration plan")
+                .ordered_steps()
+                .len(),
+            3
+        );
 
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).unwrap();

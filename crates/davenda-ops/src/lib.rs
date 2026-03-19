@@ -10,6 +10,7 @@ use davenda_core::{
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
     RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
+use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 use davenda_jobs::{
     IdempotencyKey, JobId, JobInstant, JobName, JobSpec, JobsModelError, JobsPlanner, JobsRuntime,
     PlannedJob, RetryPolicy,
@@ -1396,6 +1397,54 @@ impl PlatformModule for OpsModule {
             "Operator visibility into search, reporting, and bulk action plans",
         )
     }
+
+    fn install_migration_plan(&self) -> Option<MigrationPlan> {
+        let owner = MigrationOwner::Module(self.name.clone());
+        let mut plan = MigrationPlan::new();
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("ops_search").expect("constant migration id is valid"),
+                owner.clone(),
+                10,
+                "Create search projection and rebuild cursor storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS ops_search_projection (id TEXT PRIMARY KEY, document_type TEXT NOT NULL, visibility TEXT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("ops migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("ops_reports").expect("constant migration id is valid"),
+                owner.clone(),
+                20,
+                "Create report definition and export artifact storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS ops_reports (id TEXT PRIMARY KEY, format TEXT NOT NULL, output_path TEXT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("ops migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("ops_bulk").expect("constant migration id is valid"),
+                owner,
+                30,
+                "Create bulk workflow intent and idempotency storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS ops_bulk_operations (id TEXT PRIMARY KEY, action TEXT NOT NULL, idempotency_key TEXT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("ops migration ids are unique");
+        Some(plan)
+    }
 }
 
 fn search_index_page() -> SearchIndexContribution {
@@ -1947,6 +1996,14 @@ mod tests {
             .extension_slots
             .iter()
             .any(|slot| slot.kind == ExtensionSlotKind::Job));
+        assert_eq!(
+            module
+                .install_migration_plan()
+                .expect("ops migration plan")
+                .ordered_steps()
+                .len(),
+            3
+        );
 
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).expect("module register");

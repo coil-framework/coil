@@ -11,6 +11,7 @@ use davenda_core::{
     MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
     RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
+use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 
 const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 
@@ -1110,6 +1111,56 @@ impl PlatformModule for MembershipsModule {
             "Membership operator resources for tiers, subscriptions, and entitlement review",
         )
     }
+
+    fn install_migration_plan(&self) -> Option<MigrationPlan> {
+        let owner = MigrationOwner::Module(self.name.clone());
+        let mut plan = MigrationPlan::new();
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("membership_tiers").expect("constant migration id is valid"),
+                owner.clone(),
+                10,
+                "Create membership tier and benefit storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS membership_tiers (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("membership migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("membership_subscriptions")
+                    .expect("constant migration id is valid"),
+                owner.clone(),
+                20,
+                "Create subscription lifecycle and renewal state storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS membership_subscriptions (id TEXT PRIMARY KEY, tier_id TEXT NOT NULL, status TEXT NOT NULL, renews_at BIGINT)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("membership migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("membership_entitlements")
+                    .expect("constant migration id is valid"),
+                owner,
+                30,
+                "Create entitlement grant and revocation audit storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS membership_entitlements (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, entitlement_key TEXT NOT NULL, active BOOLEAN NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("membership migration ids are unique");
+        Some(plan)
+    }
 }
 
 fn validate_token(field: &'static str, value: String) -> Result<String, MembershipModelError> {
@@ -1423,6 +1474,14 @@ mod tests {
         assert_eq!(manifest.route_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
+        assert_eq!(
+            module
+                .install_migration_plan()
+                .expect("memberships migration plan")
+                .ordered_steps()
+                .len(),
+            3
+        );
 
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).unwrap();

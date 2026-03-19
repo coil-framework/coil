@@ -1602,6 +1602,13 @@ impl PlatformModule for CommerceModule {
             "Commerce admin resources, catalog operations, and order review",
         )
     }
+
+    fn install_migration_plan(&self) -> Option<MigrationPlan> {
+        Some(
+            CommerceModule::migration_plan(self)
+                .expect("commerce migration plan is constant and valid"),
+        )
+    }
 }
 
 fn ensure_same_currency(

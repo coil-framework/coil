@@ -377,6 +377,7 @@ version = "0.1.0"
 dependencies = [
  "davenda-auth",
  "davenda-core",
+ "davenda-data",
 ]
 
 [[package]]
@@ -495,6 +496,7 @@ dependencies = [
  "davenda-assets",
  "davenda-auth",
  "davenda-core",
+ "davenda-data",
  "davenda-storage",
 ]
 
@@ -505,6 +507,7 @@ dependencies = [
  "davenda-auth",
  "davenda-commerce",
  "davenda-core",
+ "davenda-data",
 ]
 
 [[package]]
@@ -522,6 +525,7 @@ dependencies = [
  "davenda-auth",
  "davenda-config",
  "davenda-core",
+ "davenda-data",
  "davenda-jobs",
  "thiserror",
 ]
@@ -537,6 +541,7 @@ dependencies = [
  "davenda-commerce",
  "davenda-config",
  "davenda-core",
+ "davenda-data",
  "davenda-events",
  "davenda-media",
  "davenda-memberships",

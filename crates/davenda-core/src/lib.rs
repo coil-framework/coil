@@ -11,7 +11,7 @@ use davenda_config::{
     CookieConfig as HttpCookieConfig, CsrfConfig as HttpCsrfConfig, DistributedCache,
     PlatformConfig, SameSitePolicy, SessionStore as ConfigSessionStore, TlsMode,
 };
-use davenda_data::DataRuntime;
+use davenda_data::{DataRuntime, MigrationPlan};
 use davenda_i18n::{
     CurrencyCode, LocaleContext, LocaleRouter, LocaleTag, LocaleUrlConfig, TimeZoneId,
     TranslationCatalog, TranslationRuntime,
@@ -826,6 +826,9 @@ impl ExtensionSlotDescriptor {
 pub trait PlatformModule {
     fn manifest(&self) -> ModuleManifest;
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError>;
+    fn install_migration_plan(&self) -> Option<MigrationPlan> {
+        None
+    }
 }
 
 #[derive(Debug, Default, Clone)]

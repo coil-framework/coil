@@ -10,6 +10,7 @@ use davenda_core::{
     TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices, bootstrap_core_services,
     validate_module_capabilities, validate_module_installation,
 };
+use davenda_data::{DataModelError, MigrationPlan};
 use davenda_observability::{
     CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
     ObservabilityError,
@@ -604,6 +605,7 @@ where
         let mut module_manifests = Vec::new();
         let http = build_http_runtime_plan(&self.auth_package, &self.routes)?;
         let handlers = build_handler_registry(&self.routes, self.handlers)?;
+        let mut install_migrations = MigrationPlan::new();
 
         for feature_flag in self.feature_flags {
             observability.flags.insert(feature_flag)?;
@@ -639,6 +641,11 @@ where
         }
 
         for (module, _) in collected_modules {
+            if let Some(plan) = module.install_migration_plan() {
+                for step in plan.ordered_steps().iter().cloned() {
+                    install_migrations.insert(step)?;
+                }
+            }
             module.register(&mut registry)?;
         }
 
@@ -658,6 +665,7 @@ where
             wasm: bootstrap.wasm,
             services: registry.services().cloned().collect(),
             modules: module_manifests,
+            install_migrations,
         })
     }
 }
@@ -679,6 +687,7 @@ pub struct RuntimePlan {
     pub wasm: WasmRuntimeServices,
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
+    pub install_migrations: MigrationPlan,
 }
 
 impl RuntimePlan {
@@ -936,6 +945,8 @@ pub enum RuntimeBuildError {
     Capability(#[from] CapabilityValidationError),
     #[error(transparent)]
     ModuleInstallation(#[from] ModuleInstallationError),
+    #[error(transparent)]
+    Data(#[from] DataModelError),
     #[error(transparent)]
     Route(#[from] RouteBuildError),
     #[error(transparent)]
@@ -1213,6 +1224,21 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(plan.modules[3].name, "memberships");
         assert_eq!(plan.modules[4].name, "events");
         assert_eq!(plan.modules[5].name, "media");
+        assert!(
+            plan.install_migrations
+                .ordered_steps()
+                .iter()
+                .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string()))
+        );
+        assert!(
+            plan.install_migrations
+                .ordered_steps()
+                .iter()
+                .any(|step| {
+                    step.owner
+                        == davenda_data::MigrationOwner::Module("memberships".to_string())
+                })
+        );
     }
 
     #[test]

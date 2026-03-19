@@ -949,6 +949,10 @@ impl PlatformModule for CmsModule {
             "CMS media references bound to managed assets and publication state",
         )
     }
+
+    fn install_migration_plan(&self) -> Option<MigrationPlan> {
+        Some(CmsModule::migration_plan(self).expect("cms migration plan is constant and valid"))
+    }
 }
 
 fn validate_navigation_item(

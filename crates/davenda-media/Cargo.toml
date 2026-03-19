@@ -7,4 +7,5 @@ edition = "2024"
 davenda-assets = { path = "../davenda-assets" }
 davenda-auth = { path = "../davenda-auth" }
 davenda-core = { path = "../davenda-core" }
+davenda-data = { path = "../davenda-data" }
 davenda-storage = { path = "../davenda-storage" }

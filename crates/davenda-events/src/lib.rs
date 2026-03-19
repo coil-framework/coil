@@ -14,9 +14,9 @@ use davenda_core::{
     RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{
-    DataModelError, DomainWrite, FilterOperator, PageRequest, PublicationVisibility,
-    QueryCacheScope, QueryContext, QueryFilter, QuerySort, QuerySpec, TransactionIsolation,
-    TransactionPlan,
+    DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
+    MigrationStep, PageRequest, PublicationVisibility, QueryCacheScope, QueryContext,
+    QueryFilter, QuerySort, QuerySpec, TransactionIsolation, TransactionPlan,
 };
 use davenda_memberships::MembershipTierId;
 
@@ -2154,6 +2154,54 @@ impl PlatformModule for EventsModule {
             "Event admin resources, slot operations, and booking review",
         )
     }
+
+    fn install_migration_plan(&self) -> Option<MigrationPlan> {
+        let owner = MigrationOwner::Module(self.name.clone());
+        let mut plan = MigrationPlan::new();
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("events_catalog").expect("constant migration id is valid"),
+                owner.clone(),
+                10,
+                "Create event catalog and publication storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS events_catalog (id TEXT PRIMARY KEY, slug TEXT NOT NULL, status TEXT NOT NULL, published_at BIGINT)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("event migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("event_slots").expect("constant migration id is valid"),
+                owner.clone(),
+                20,
+                "Create event slot and capacity storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS event_slots (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, starts_at BIGINT NOT NULL, capacity BIGINT NOT NULL)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("event migration ids are unique");
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("event_bookings").expect("constant migration id is valid"),
+                owner,
+                30,
+                "Create booking, reservation, waitlist, and check-in storage",
+            )
+            .expect("constant migration step is valid")
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS event_bookings (id TEXT PRIMARY KEY, slot_id TEXT NOT NULL, status TEXT NOT NULL, checked_in_at BIGINT)",
+            )
+            .expect("constant migration statement is valid"),
+        )
+        .expect("event migration ids are unique");
+        Some(plan)
+    }
 }
 
 fn validate_token(field: &'static str, value: String) -> Result<String, EventModelError> {
@@ -2462,6 +2510,14 @@ mod tests {
             .extension_slots
             .iter()
             .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
+        assert_eq!(
+            module
+                .install_migration_plan()
+                .expect("events migration plan")
+                .ordered_steps()
+                .len(),
+            3
+        );
         assert!(
             registry
                 .services()

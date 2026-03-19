@@ -155,6 +155,14 @@ fn distributed_topology_enables_cluster_coalescing_and_l2_cache() {
 }
 
 #[test]
+fn cache_runtime_new_uses_shared_backend_for_distributed_topologies() {
+    let runtime = CacheRuntime::new(CacheTopology::with_redis());
+
+    assert_eq!(runtime.backend_kind(), CacheBackendKind::Redis);
+    assert!(runtime.backend_is_shared());
+}
+
+#[test]
 fn planner_respects_explicit_coalescing_override() {
     let planner = CachePlanner::new(CacheTopology::with_redis());
     let plan = planner

@@ -510,6 +510,13 @@ impl JobsRuntime {
     }
 
     pub fn coordinator(&self) -> JobsCoordinator {
+        self.coordinator_with_backend(JobsBackendAdapter::shared_scoped(
+            self,
+            format!("{:p}", self),
+        ))
+    }
+
+    pub fn coordinator_in_memory(&self) -> JobsCoordinator {
         self.coordinator_with_backend(JobsBackendAdapter::in_memory(self))
     }
 
@@ -1074,22 +1081,18 @@ impl JobsBackendAdapter {
     }
 }
 
-fn shared_jobs_runtime(
-    runtime: &JobsRuntime,
-    scope: String,
-) -> Arc<dyn JobsCoordinationRuntime> {
+fn shared_jobs_runtime(runtime: &JobsRuntime, scope: String) -> Arc<dyn JobsCoordinationRuntime> {
     static REGISTRY: OnceLock<Mutex<BTreeMap<String, Arc<dyn JobsCoordinationRuntime>>>> =
         OnceLock::new();
 
     let key = format!(
         "{:?}:{}:{}:{}",
-        runtime.backend,
-        runtime.topology.work_queue,
-        runtime.topology.scheduled_queue,
-        scope
+        runtime.backend, runtime.topology.work_queue, runtime.topology.scheduled_queue, scope
     );
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry.lock().expect("shared jobs registry mutex poisoned");
+    let mut guard = registry
+        .lock()
+        .expect("shared jobs registry mutex poisoned");
     guard
         .entry(key)
         .or_insert_with(|| Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())))
@@ -1375,6 +1378,11 @@ pub struct JobsCoordinator {
 
 impl JobsCoordinator {
     pub fn new(runtime: JobsRuntime) -> Self {
+        let backend = JobsBackendAdapter::shared_scoped(&runtime, format!("{:p}", &runtime));
+        Self::with_backend(runtime, backend)
+    }
+
+    pub fn new_in_memory(runtime: JobsRuntime) -> Self {
         let backend = JobsBackendAdapter::in_memory(&runtime);
         Self::with_backend(runtime, backend)
     }
@@ -1973,8 +1981,8 @@ mod tests {
     #[test]
     fn distributed_coordinators_do_not_share_backend_without_explicit_adapter_reuse() {
         let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-        let mut left = runtime.coordinator();
-        let mut right = runtime.coordinator();
+        let mut left = runtime.coordinator_in_memory();
+        let mut right = runtime.coordinator_in_memory();
 
         left.enqueue(
             JobSpec::new(
@@ -1995,6 +2003,30 @@ mod tests {
         left.refresh();
         assert_eq!(left.ready_jobs().len(), 1);
         assert_eq!(left.ready_jobs()[0].spec.job_id.as_str(), "job-shared");
+    }
+
+    #[test]
+    fn default_coordinators_share_backend_for_the_same_runtime_instance() {
+        let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+        let mut left = runtime.coordinator();
+        let mut right = runtime.coordinator();
+
+        left.enqueue(
+            JobSpec::new(
+                JobId::new("job-shared").unwrap(),
+                JobName::new("shared-work").unwrap(),
+                runtime.describe().work_queue.clone(),
+                "shared backend work item",
+            )
+            .unwrap()
+            .with_idempotency_key(IdempotencyKey::new("shared-work:v1").unwrap()),
+            JobInstant::from_unix_seconds(10),
+        )
+        .unwrap();
+
+        right.refresh();
+        assert_eq!(right.ready_jobs().len(), 1);
+        assert_eq!(right.ready_jobs()[0].spec.job_id.as_str(), "job-shared");
     }
 
     #[test]

@@ -1,0 +1,533 @@
+use super::*;
+use std::time::Duration;
+
+fn tag(value: &str) -> InvalidationTag {
+    InvalidationTag::new(value).unwrap()
+}
+
+#[test]
+fn variation_keys_are_stable_for_equivalent_scopes() {
+    let left = CacheScope::public()
+        .with_locale("en-GB")
+        .unwrap()
+        .with_tenant("tenant-a")
+        .unwrap()
+        .with_custom_variation("currency", "GBP")
+        .unwrap()
+        .with_custom_variation("channel", "web")
+        .unwrap();
+    let right = CacheScope::public()
+        .with_custom_variation("channel", "web")
+        .unwrap()
+        .with_tenant("tenant-a")
+        .unwrap()
+        .with_custom_variation("currency", "GBP")
+        .unwrap()
+        .with_locale("en-GB")
+        .unwrap();
+
+    assert_eq!(left.variation_key(), right.variation_key());
+    assert_eq!(
+        left.variation_key().unwrap().as_str(),
+        "tenant=tenant-a|locale=en-GB|x:channel=web|x:currency=GBP"
+    );
+}
+
+#[test]
+fn partition_keys_include_visibility_for_scope_isolation() {
+    let public = CacheScope::public();
+    let private = CacheScope::private();
+
+    assert_eq!(
+        public.cache_partition_key().unwrap().as_str(),
+        "visibility=public"
+    );
+    assert_eq!(
+        private.cache_partition_key().unwrap().as_str(),
+        "visibility=private"
+    );
+    assert_ne!(public.cache_partition_key(), private.cache_partition_key());
+}
+
+#[test]
+fn public_scope_rejects_user_and_session_variation() {
+    assert_eq!(
+        CacheScope::public().with_user("user-123").unwrap_err(),
+        CacheModelError::PublicScopeCannotVaryByUser
+    );
+    assert_eq!(
+        CacheScope::public().with_session("sess-123").unwrap_err(),
+        CacheModelError::PublicScopeCannotVaryBySession
+    );
+}
+
+#[test]
+fn invalidation_tags_are_deduped_and_rendered_for_surrogate_headers() {
+    let mut tags = InvalidationSet::new();
+    tags.insert(tag("page:42"));
+    tags.insert(tag("page:42"));
+    tags.insert(tag("site:main"));
+
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags.header_value().as_deref(), Some("page:42 site:main"));
+}
+
+#[test]
+fn topology_reports_cluster_and_local_coalescing_modes() {
+    assert_eq!(
+        CacheTopology::moka_only().request_coalescing_mode(),
+        RequestCoalescingMode::Local
+    );
+    assert_eq!(
+        CacheTopology::with_redis().request_coalescing_mode(),
+        RequestCoalescingMode::Cluster
+    );
+    assert!(CacheTopology::with_valkey().supports_shared_invalidation());
+    assert!(CacheTopology::with_valkey().supports_shared_coalescing());
+}
+
+#[test]
+fn distributed_topology_enables_cluster_coalescing_and_l2_cache() {
+    let topology = CacheTopology::with_redis();
+    let planner = CachePlanner::new(topology);
+    let app_policy = ApplicationCachePolicy::new(
+        CacheScope::public()
+            .with_site("main")
+            .unwrap()
+            .with_locale("en-GB")
+            .unwrap(),
+        FreshnessPolicy::new(Duration::from_secs(300), Some(Duration::from_secs(30))).unwrap(),
+        InvalidationSet::from_tags([tag("page:42"), tag("nav:main")]),
+    )
+    .unwrap();
+    let http_policy = HttpCachePolicy::new(
+        CacheScope::public()
+            .with_site("main")
+            .unwrap()
+            .with_locale("en-GB")
+            .unwrap(),
+        Some(FreshnessPolicy::new(Duration::from_secs(60), Some(Duration::from_secs(15))).unwrap()),
+        ResponseValidators {
+            etag: Some(EntityTag::new("etag-42").unwrap()),
+            last_modified_unix_seconds: Some(1_763_000_000),
+        },
+        InvalidationSet::from_tags([tag("page:42"), tag("jsonld:page:42")]),
+    )
+    .unwrap();
+
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("cms.page").unwrap(),
+                "page:42",
+                http_policy,
+            )
+            .unwrap()
+            .with_application_policy(app_policy),
+        )
+        .unwrap();
+
+    let application = plan.application().unwrap();
+    assert_eq!(
+        application.key().to_string(),
+        "cms.page:page:42|visibility=public|site=main|locale=en-GB"
+    );
+    assert_eq!(application.layers().l1, LocalCacheBackend::Moka);
+    assert_eq!(
+        application.layers().l2,
+        Some(DistributedCacheBackend::Redis)
+    );
+    assert_eq!(application.coalescing(), RequestCoalescingMode::Cluster);
+    assert_eq!(
+        plan.http().cache_control(),
+        "public, max-age=60, stale-while-revalidate=15"
+    );
+    assert!(plan.http().edge_cacheable());
+    assert_eq!(
+        plan.http().variation().unwrap().as_str(),
+        "site=main|locale=en-GB"
+    );
+    assert_eq!(
+        plan.http().surrogate_tags().header_value().as_deref(),
+        Some("jsonld:page:42 page:42")
+    );
+}
+
+#[test]
+fn planner_respects_explicit_coalescing_override() {
+    let planner = CachePlanner::new(CacheTopology::with_redis());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "product:sku-1",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .with_request_coalescing_mode(RequestCoalescingMode::Disabled),
+        )
+        .unwrap();
+
+    assert_eq!(
+        plan.application().unwrap().coalescing(),
+        RequestCoalescingMode::Disabled
+    );
+}
+
+#[test]
+fn no_store_http_policy_can_coexist_with_private_application_cache() {
+    let planner = CachePlanner::new(CacheTopology::moka_only());
+    let app_policy = ApplicationCachePolicy::new(
+        CacheScope::private()
+            .with_user("user-123")
+            .unwrap()
+            .with_session("sess-456")
+            .unwrap(),
+        FreshnessPolicy::new(Duration::from_secs(30), None).unwrap(),
+        InvalidationSet::from_tags([tag("account:dashboard"), tag("user:user-123")]),
+    )
+    .unwrap();
+    let http_policy = HttpCachePolicy::new(
+        CacheScope::no_store(),
+        None,
+        ResponseValidators::default(),
+        InvalidationSet::new(),
+    )
+    .unwrap();
+
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("account.dashboard").unwrap(),
+                "dashboard",
+                http_policy,
+            )
+            .unwrap()
+            .with_application_policy(app_policy),
+        )
+        .unwrap();
+
+    let application = plan.application().unwrap();
+    assert_eq!(application.layers().l2, None);
+    assert_eq!(application.coalescing(), RequestCoalescingMode::Local);
+    assert_eq!(
+        application.key().to_string(),
+        "account.dashboard:dashboard|visibility=private|user=user-123|session=sess-456"
+    );
+    assert_eq!(plan.http().cache_control(), "no-store");
+    assert!(!plan.http().edge_cacheable());
+    assert_eq!(plan.http().variation(), None);
+}
+
+#[test]
+fn no_store_http_policy_rejects_freshness_and_cacheable_http_requires_it() {
+    assert_eq!(
+        HttpCachePolicy::new(
+            CacheScope::no_store(),
+            Some(FreshnessPolicy::new(Duration::from_secs(10), None).unwrap()),
+            ResponseValidators::default(),
+            InvalidationSet::new(),
+        )
+        .unwrap_err(),
+        CacheModelError::NoStoreCannotDefineFreshness
+    );
+
+    assert_eq!(
+        HttpCachePolicy::new(
+            CacheScope::private(),
+            None,
+            ResponseValidators::default(),
+            InvalidationSet::new(),
+        )
+        .unwrap_err(),
+        CacheModelError::MissingHttpFreshness
+    );
+}
+
+#[test]
+fn runtime_serves_fresh_then_stale_then_miss() {
+    let planner = CachePlanner::new(CacheTopology::with_valkey());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("cms.page").unwrap(),
+                "page:42",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(
+                        FreshnessPolicy::new(
+                            Duration::from_secs(60),
+                            Some(Duration::from_secs(30)),
+                        )
+                        .unwrap(),
+                    ),
+                    ResponseValidators::default(),
+                    InvalidationSet::from_tags([tag("page:42")]),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), Some(Duration::from_secs(30)))
+                        .unwrap(),
+                    InvalidationSet::from_tags([tag("page:42")]),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let application = plan.application().unwrap();
+    let mut runtime = planner.runtime();
+    runtime.insert(
+        application,
+        "<html>cached</html>",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let fresh = runtime.lookup(application.key(), CacheInstant::from_unix_seconds(140));
+    assert_eq!(fresh.state, CacheLookupState::Fresh);
+    assert!(!fresh.needs_revalidation);
+
+    let stale = runtime.lookup(application.key(), CacheInstant::from_unix_seconds(170));
+    assert_eq!(stale.state, CacheLookupState::Stale);
+    assert!(stale.needs_revalidation);
+
+    let miss = runtime.lookup(application.key(), CacheInstant::from_unix_seconds(195));
+    assert_eq!(miss.state, CacheLookupState::Miss);
+    assert_eq!(runtime.metrics().hits, 1);
+    assert_eq!(runtime.metrics().stale_hits, 1);
+    assert_eq!(runtime.metrics().misses, 1);
+}
+
+#[test]
+fn runtime_keeps_public_and_private_entries_isolated() {
+    let planner = CachePlanner::new(CacheTopology::with_redis());
+    let public_plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("cms.page").unwrap(),
+                "page:42",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::from_tags([tag("page:42")]),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::from_tags([tag("page:42")]),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let private_plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("cms.page").unwrap(),
+                "page:42",
+                HttpCachePolicy::new(
+                    CacheScope::private(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::from_tags([tag("page:42")]),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::private(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::from_tags([tag("page:42")]),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    assert_ne!(
+        public_plan.application().unwrap().key(),
+        private_plan.application().unwrap().key()
+    );
+
+    let mut runtime = planner.runtime();
+    runtime.insert(
+        public_plan.application().unwrap(),
+        "public",
+        CacheInstant::from_unix_seconds(100),
+    );
+    runtime.insert(
+        private_plan.application().unwrap(),
+        "private",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    assert_eq!(
+        runtime
+            .lookup(
+                public_plan.application().unwrap().key(),
+                CacheInstant::from_unix_seconds(110)
+            )
+            .entry
+            .as_ref()
+            .map(|entry| entry.value.as_str()),
+        Some("public")
+    );
+    assert_eq!(
+        runtime
+            .lookup(
+                private_plan.application().unwrap().key(),
+                CacheInstant::from_unix_seconds(110)
+            )
+            .entry
+            .as_ref()
+            .map(|entry| entry.value.as_str()),
+        Some("private")
+    );
+}
+
+#[test]
+fn runtime_invalidates_entries_by_surrogate_tag() {
+    let planner = CachePlanner::new(CacheTopology::with_redis());
+    let page_plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("cms.page").unwrap(),
+                "page:42",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::from_tags([tag("page:42")]),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(300), None).unwrap(),
+                    InvalidationSet::from_tags([tag("page:42"), tag("nav:main")]),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let nav_plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("cms.nav").unwrap(),
+                "nav:main",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::from_tags([tag("nav:main")]),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(300), None).unwrap(),
+                    InvalidationSet::from_tags([tag("nav:main")]),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let mut runtime = planner.runtime();
+    runtime.insert(
+        page_plan.application().unwrap(),
+        "page",
+        CacheInstant::from_unix_seconds(100),
+    );
+    runtime.insert(
+        nav_plan.application().unwrap(),
+        "nav",
+        CacheInstant::from_unix_seconds(100),
+    );
+
+    let removed = runtime.invalidate(&InvalidationSet::from_tags([tag("nav:main")]));
+    assert_eq!(removed.len(), 2);
+    assert_eq!(
+        runtime
+            .lookup(
+                page_plan.application().unwrap().key(),
+                CacheInstant::from_unix_seconds(110)
+            )
+            .state,
+        CacheLookupState::Miss
+    );
+    assert_eq!(runtime.metrics().invalidations, 2);
+}
+
+#[test]
+fn runtime_coalesces_duplicate_fill_requests() {
+    let planner = CachePlanner::new(CacheTopology::with_redis());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "product:sku-1",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let key = plan.application().unwrap().key().clone();
+    let mut runtime = planner.runtime();
+
+    let first = runtime.begin_fill(&key, RequestCoalescingMode::Cluster, "request-a");
+    let lease = match first {
+        FillDecision::Start(lease) => lease,
+        other => panic!("expected fill lease, got {other:?}"),
+    };
+
+    let second = runtime.begin_fill(&key, RequestCoalescingMode::Cluster, "request-b");
+    assert!(matches!(
+        second,
+        FillDecision::Coalesced { ref holder, .. } if holder == "request-a"
+    ));
+    runtime.complete_fill(&lease).unwrap();
+    assert_eq!(runtime.metrics().fills_started, 1);
+    assert_eq!(runtime.metrics().fills_completed, 1);
+    assert_eq!(runtime.metrics().coalesced_waits, 1);
+}

@@ -433,6 +433,7 @@ dependencies = [
  "davenda-auth",
  "davenda-cache",
  "davenda-config",
+ "davenda-data",
  "davenda-i18n",
  "davenda-jobs",
  "davenda-observability",
@@ -445,6 +446,14 @@ dependencies = [
  "sha2",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "davenda-data"
+version = "0.1.0"
+dependencies = [
+ "davenda-config",
+ "thiserror",
 ]
 
 [[package]]

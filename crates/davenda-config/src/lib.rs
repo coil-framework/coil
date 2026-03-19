@@ -11,6 +11,8 @@ pub struct PlatformConfig {
     pub server: ServerConfig,
     pub http: HttpConfig,
     pub tls: TlsConfig,
+    #[serde(default)]
+    pub database: DatabaseConfig,
     pub storage: StorageConfig,
     pub cache: CacheConfig,
     pub i18n: I18nConfig,
@@ -169,6 +171,23 @@ impl PlatformConfig {
 
         if self.storage.local_root.trim().is_empty() {
             errors.push(ConfigValidationError::EmptyLocalStorageRoot);
+        }
+
+        if self.database.schema.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyDatabaseSchema);
+        }
+
+        if self.database.migrations_table.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyMigrationsTable);
+        }
+
+        if self.database.max_connections == 0
+            || self.database.min_connections > self.database.max_connections
+        {
+            errors.push(ConfigValidationError::InvalidDatabasePoolSize {
+                min_connections: self.database.min_connections,
+                max_connections: self.database.max_connections,
+            });
         }
 
         if self.assets.publish_manifest {
@@ -338,6 +357,44 @@ pub struct TlsConfig {
     pub provider: Option<TlsProvider>,
     #[serde(default)]
     pub account_secret: Option<SecretRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DatabaseConfig {
+    #[serde(default = "default_database_driver")]
+    pub driver: DatabaseDriver,
+    #[serde(default = "default_database_url_secret")]
+    pub url: Option<SecretRef>,
+    #[serde(default = "default_database_schema")]
+    pub schema: String,
+    #[serde(default = "default_migrations_table")]
+    pub migrations_table: String,
+    #[serde(default = "default_min_database_connections")]
+    pub min_connections: u16,
+    #[serde(default = "default_max_database_connections")]
+    pub max_connections: u16,
+    #[serde(default = "default_statement_timeout_secs")]
+    pub statement_timeout_secs: u64,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            driver: default_database_driver(),
+            url: default_database_url_secret(),
+            schema: default_database_schema(),
+            migrations_table: default_migrations_table(),
+            min_connections: default_min_database_connections(),
+            max_connections: default_max_database_connections(),
+            statement_timeout_secs: default_statement_timeout_secs(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseDriver {
+    Postgres,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -568,6 +625,17 @@ pub enum ConfigValidationError {
     InvalidWasmTimeLimit,
     #[error("storage.local_root must not be empty")]
     EmptyLocalStorageRoot,
+    #[error("database.schema must not be empty")]
+    EmptyDatabaseSchema,
+    #[error("database.migrations_table must not be empty")]
+    EmptyMigrationsTable,
+    #[error(
+        "database pool sizing is invalid: min_connections={min_connections} max_connections={max_connections}"
+    )]
+    InvalidDatabasePoolSize {
+        min_connections: u16,
+        max_connections: u16,
+    },
     #[error("assets.publish_manifest requires assets.cdn_base_url")]
     MissingCdnBaseUrl,
     #[error("assets.cdn_base_url must start with http:// or https://, got `{url}`")]
@@ -604,6 +672,36 @@ fn default_sitemap_enabled() -> bool {
 
 fn default_retry_limit() -> u32 {
     5
+}
+
+fn default_database_driver() -> DatabaseDriver {
+    DatabaseDriver::Postgres
+}
+
+fn default_database_url_secret() -> Option<SecretRef> {
+    Some(SecretRef::Env {
+        var: "DATABASE_URL".to_string(),
+    })
+}
+
+fn default_database_schema() -> String {
+    "public".to_string()
+}
+
+fn default_migrations_table() -> String {
+    "_davenda_migrations".to_string()
+}
+
+fn default_min_database_connections() -> u16 {
+    4
+}
+
+fn default_max_database_connections() -> u16 {
+    32
+}
+
+fn default_statement_timeout_secs() -> u64 {
+    30
 }
 
 fn default_cookie_path() -> String {
@@ -726,6 +824,13 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(config.app.name, "showcase-events");
         assert_eq!(config.tls.mode, TlsMode::Acme);
         assert_eq!(config.tls.challenge, Some(AcmeChallenge::Dns01));
+        assert_eq!(config.database.driver, DatabaseDriver::Postgres);
+        assert_eq!(
+            config.database.url,
+            Some(SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            })
+        );
         assert_eq!(config.cache.l1, CacheL1::Moka);
         assert_eq!(config.cache.l2, Some(DistributedCache::Redis));
         assert_eq!(config.http.session.store, SessionStore::Redis);
@@ -795,6 +900,32 @@ cdn_base_url = "https://cdn.example.com"
                         cache_backend: Some(DistributedCache::Valkey),
                     }
                 ));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_database_pool_sizing() {
+        let overlay = r#"
+[database]
+min_connections = 8
+max_connections = 4
+"#;
+
+        let error =
+            PlatformConfig::from_toml_str_with_overlays(VALID_CONFIG, [overlay]).unwrap_err();
+
+        match error {
+            ConfigError::Validation(errors) => {
+                assert!(
+                    errors
+                        .0
+                        .contains(&ConfigValidationError::InvalidDatabasePoolSize {
+                            min_connections: 8,
+                            max_connections: 4,
+                        })
+                );
             }
             other => panic!("expected validation error, got {other:?}"),
         }

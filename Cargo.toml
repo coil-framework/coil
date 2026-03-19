@@ -10,6 +10,7 @@ members = [
     "crates/davenda-commerce",
     "crates/davenda-config",
     "crates/davenda-core",
+    "crates/davenda-data",
     "crates/davenda-events",
     "crates/davenda-i18n",
     "crates/davenda-jobs",

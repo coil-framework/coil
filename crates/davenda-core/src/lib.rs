@@ -10,6 +10,7 @@ use davenda_config::{
     CookieConfig as HttpCookieConfig, CsrfConfig as HttpCsrfConfig, DistributedCache,
     PlatformConfig, SameSitePolicy, SessionStore as ConfigSessionStore, TlsMode,
 };
+use davenda_data::DataRuntime;
 use davenda_i18n::{
     CurrencyCode, LocaleContext, LocaleRouter, LocaleTag, LocaleUrlConfig, TimeZoneId,
     TranslationCatalog, TranslationRuntime,
@@ -370,6 +371,7 @@ pub struct A11yRuntimeServices {
     pub theme_baseline: ThemeAccessibilityContract,
 }
 
+pub type DataRuntimeServices = DataRuntime;
 pub type JobsRuntimeServices = JobsRuntime;
 pub type ObservabilityRuntimeServices = ObservabilityRuntime;
 pub type TlsRuntimeServices = TlsRuntime;
@@ -379,6 +381,7 @@ pub struct CoreBootstrap {
     pub registry: ServiceRegistry,
     pub cache: CacheRuntimeServices,
     pub browser: BrowserSecurityServices,
+    pub data: DataRuntimeServices,
     pub jobs: JobsRuntimeServices,
     pub observability: ObservabilityRuntimeServices,
     pub i18n: I18nRuntimeServices,
@@ -539,6 +542,7 @@ pub fn bootstrap_core_services(
         planner: CachePlanner::new(cache_topology),
     };
     let browser = browser_security_from_config(config);
+    let data = data_runtime_from_config(config);
     let jobs = jobs_runtime_from_config(config);
     let observability = observability_runtime_from_config(config);
     let i18n = i18n_runtime_from_config(config);
@@ -575,6 +579,20 @@ pub fn bootstrap_core_services(
     }
 
     registry.register_core_service("core.auth", "Authorization engine and model loader")?;
+    registry.register_core_service(
+        "core.data",
+        format!(
+            "Primary {:?} data access with schema `{}` and pool {}..{}",
+            data.driver, data.schema, data.pool.min_connections, data.pool.max_connections
+        ),
+    )?;
+    registry.register_core_service(
+        "core.data.migrations",
+        format!(
+            "Owned migration planning through `{}`",
+            data.migrations_table
+        ),
+    )?;
     registry.register_core_service(
         "core.cache.l1",
         format!("Local cache backend: {}", cache.topology.l1()),
@@ -690,6 +708,7 @@ pub fn bootstrap_core_services(
         registry,
         cache,
         browser,
+        data,
         jobs,
         observability,
         i18n,
@@ -824,6 +843,8 @@ cdn_base_url = "https://cdn.example.com"
         assert!(ids.contains(&"core.auth"));
         assert!(ids.contains(&"core.tls"));
         assert!(ids.contains(&"core.tls.reload"));
+        assert!(ids.contains(&"core.data"));
+        assert!(ids.contains(&"core.data.migrations"));
         assert!(ids.contains(&"core.jobs"));
         assert!(ids.contains(&"core.health"));
         assert!(ids.contains(&"core.maintenance"));
@@ -861,6 +882,12 @@ cdn_base_url = "https://cdn.example.com"
             "davenda_session"
         );
         assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
+        assert_eq!(
+            bootstrap.data.driver,
+            davenda_config::DatabaseDriver::Postgres
+        );
+        assert_eq!(bootstrap.data.schema, "public");
+        assert_eq!(bootstrap.data.migrations_table, "_davenda_migrations");
         assert_eq!(bootstrap.jobs.backend, davenda_config::JobBackend::Redis);
         assert_eq!(bootstrap.jobs.topology.work_queue.as_str(), "jobs.work");
         assert_eq!(
@@ -879,6 +906,14 @@ cdn_base_url = "https://cdn.example.com"
         assert!(bootstrap.tls.hot_reload_supported);
         assert!(bootstrap.observability.telemetry.metrics_enabled);
         assert!(bootstrap.observability.telemetry.trace.enabled);
+        assert!(
+            bootstrap
+                .observability
+                .readiness
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.kind == DependencyKind::Database)
+        );
         assert!(
             bootstrap
                 .observability
@@ -1058,6 +1093,8 @@ fn observability_runtime_from_config(config: &PlatformConfig) -> ObservabilityRu
     runtime.liveness = HealthReport::new(HealthProbeKind::Liveness);
 
     let mut readiness = HealthReport::new(HealthProbeKind::Readiness)
+        .with_dependency(DependencyKind::Database, true, DependencyStatus::Healthy)
+        .expect("database dependency must be unique")
         .with_dependency(
             DependencyKind::ExtensionRegistry,
             true,
@@ -1110,6 +1147,10 @@ fn observability_runtime_from_config(config: &PlatformConfig) -> ObservabilityRu
 
 fn jobs_runtime_from_config(config: &PlatformConfig) -> JobsRuntimeServices {
     JobsRuntime::from_config(&config.jobs).expect("jobs runtime config must be valid")
+}
+
+fn data_runtime_from_config(config: &PlatformConfig) -> DataRuntimeServices {
+    DataRuntime::from_config(&config.database).expect("data runtime config must be valid")
 }
 
 fn tls_runtime_from_config(config: &PlatformConfig) -> TlsRuntimeServices {

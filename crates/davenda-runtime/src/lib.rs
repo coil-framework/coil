@@ -4,10 +4,10 @@ use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
-    BrowserSecurityServices, CapabilityValidationError, CookieSigner, JobsRuntimeServices,
-    ModuleManifest, ObservabilityRuntimeServices, PlatformModule, RegistrationError,
-    ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
-    bootstrap_core_services, validate_module_capabilities,
+    BrowserSecurityServices, CapabilityValidationError, CookieSigner, DataRuntimeServices,
+    JobsRuntimeServices, ModuleManifest, ObservabilityRuntimeServices, PlatformModule,
+    RegistrationError, ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices,
+    WasmRuntimeServices, bootstrap_core_services, validate_module_capabilities,
 };
 use davenda_observability::{
     CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
@@ -625,6 +625,7 @@ where
             auth_package_name: self.auth_package.manifest().name.clone(),
             cache_topology: bootstrap.cache.topology,
             browser: bootstrap.browser,
+            data: bootstrap.data,
             jobs: bootstrap.jobs,
             observability,
             http,
@@ -644,6 +645,7 @@ pub struct RuntimePlan {
     pub auth_package_name: String,
     pub cache_topology: CacheTopology,
     pub browser: BrowserSecurityServices,
+    pub data: DataRuntimeServices,
     pub jobs: JobsRuntimeServices,
     pub observability: ObservabilityRuntimeServices,
     pub http: HttpRuntimePlan,
@@ -1082,6 +1084,8 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
         assert_eq!(plan.browser.csrf.field_name, "_csrf");
+        assert_eq!(plan.data.driver, davenda_config::DatabaseDriver::Postgres);
+        assert_eq!(plan.data.schema, "public");
         assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);
         assert_eq!(
             plan.jobs.topology.scheduled_queue.as_str(),

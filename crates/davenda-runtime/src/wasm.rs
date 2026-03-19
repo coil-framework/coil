@@ -1,22 +1,30 @@
 use super::*;
 use std::fs;
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use davenda_auth::{
+    AuthModelPackage, Capability, DefaultAuthModelPackage, DefaultSubject, DefaultTuple,
+    DefaultTupleUpdate, Entity, Namespace, Relation,
+};
 use davenda_config::StorageClass;
 use davenda_template::{
     AttributeNode, ElementNode, FragmentRenderRequest, Node, RenderModel, RenderValue,
     TemplateDefinition, TemplateName, TemplateRuntime, TemplateSelector,
 };
 use davenda_wasm::{
-    AuthServiceExecution, AuthServiceRequest, CacheIntentExecution, CacheIntentServiceRequest,
-    DataServiceExecution, DataServiceRequest, HostServiceCall, HostServiceExecution,
-    HostServiceExecutor, HostServiceRequest, HostServiceResult, JobExecution, MetadataExecution,
-    ModuleDataContract, NetworkExecution, RenderServiceExecution, RenderServiceRequest,
-    SecretExecution, StorageClassGrant, StorageServiceExecution, StorageServiceRequest,
+    AuthServiceDetails, AuthServiceExecution, AuthServiceRequest, CacheIntentExecution,
+    CacheIntentServiceRequest, DataServiceExecution, DataServiceRequest, HostServiceCall,
+    HostServiceExecution, HostServiceExecutor, HostServiceRequest, HostServiceResult, JobExecution,
+    MetadataExecution, ModuleDataContract, NetworkExecution, PrincipalKind, RenderServiceExecution,
+    RenderServiceRequest, SecretExecution, StorageClassGrant, StorageServiceExecution,
+    StorageServiceRequest,
 };
 use thiserror::Error;
+use tokio::runtime::Handle;
 
 #[derive(Debug, Error)]
 pub enum LiveWasmExecutionError {
@@ -467,14 +475,18 @@ impl WasmHost {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RuntimeHostServiceExecutor {
     plan: RuntimePlan,
+    auth_backend: OnceLock<Result<RuntimeAuthBackend, String>>,
 }
 
 impl RuntimeHostServiceExecutor {
     fn new(plan: RuntimePlan) -> Self {
-        Self { plan }
+        Self {
+            plan,
+            auth_backend: OnceLock::new(),
+        }
     }
 
     fn execute_auth(
@@ -483,16 +495,24 @@ impl RuntimeHostServiceExecutor {
         context: &InvocationContext,
         request: &AuthServiceRequest,
     ) -> Result<HostServiceExecution, WasmModelError> {
-        let allowed = false;
+        let backend = self.auth_backend()?;
+        let execution = backend.execute(request, context, self.plan.tenant_id())?;
         Ok(HostServiceExecution {
             call: call.clone(),
-            result: HostServiceResult::Auth(AuthServiceExecution {
-                request: request.clone(),
-                allowed,
-                checks_seen: 0,
-                principal_id: context.principal.id.clone(),
-            }),
+            result: HostServiceResult::Auth(execution),
         })
+    }
+
+    fn auth_backend(&self) -> Result<&RuntimeAuthBackend, WasmModelError> {
+        let result = self.auth_backend.get_or_init(|| {
+            RuntimeAuthBackend::new(&self.plan).map_err(|reason| {
+                runtime_auth_backend_error(self.plan.tenant_id(), reason).to_string()
+            })
+        });
+
+        result
+            .as_ref()
+            .map_err(|reason| runtime_auth_backend_error(self.plan.tenant_id(), reason.clone()))
     }
 
     fn execute_data(
@@ -502,20 +522,20 @@ impl RuntimeHostServiceExecutor {
         request: &DataServiceRequest,
     ) -> Result<HostServiceExecution, WasmModelError> {
         let result = match request {
-            DataServiceRequest::Read { contract } => HostServiceResult::Data(
-                DataServiceExecution {
+            DataServiceRequest::Read { contract } => {
+                HostServiceResult::Data(DataServiceExecution {
                     request: request.clone(),
                     summary: module_data_summary("read", contract, context),
                     sequence: 1,
-                },
-            ),
-            DataServiceRequest::Write { contract } => HostServiceResult::Data(
-                DataServiceExecution {
+                })
+            }
+            DataServiceRequest::Write { contract } => {
+                HostServiceResult::Data(DataServiceExecution {
                     request: request.clone(),
                     summary: module_data_summary("write", contract, context),
                     sequence: 1,
-                },
-            ),
+                })
+            }
         };
 
         Ok(HostServiceExecution {
@@ -778,6 +798,204 @@ impl HostServiceExecutor for RuntimeHostServiceExecutor {
     }
 }
 
+struct RuntimeAuthBackend {
+    auth: Option<davenda_auth::DavendaAuth<zanzibar::postgres::PostgresRebacEngine>>,
+    package: DefaultAuthModelPackage,
+}
+
+impl std::fmt::Debug for RuntimeAuthBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeAuthBackend")
+            .field(
+                "tenant_id",
+                &self.auth.as_ref().map(|auth| auth.tenant_id()),
+            )
+            .field("auth_package", &self.package.manifest().name)
+            .finish()
+    }
+}
+
+impl RuntimeAuthBackend {
+    fn new(plan: &RuntimePlan) -> Result<Self, String> {
+        let package = DefaultAuthModelPackage::default();
+        if package.manifest().name != plan.auth_package_name {
+            return Err(format!(
+                "unsupported auth package `{}`",
+                plan.auth_package_name
+            ));
+        }
+
+        match plan.data.connect_lazy_postgres() {
+            Ok(client) => {
+                let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
+                Ok(Self {
+                    auth: Some(davenda_auth::DavendaAuth::new(engine, plan.tenant_id())),
+                    package,
+                })
+            }
+            Err(error) => {
+                #[cfg(test)]
+                {
+                    let _ = error;
+                    Ok(Self {
+                        auth: None,
+                        package,
+                    })
+                }
+                #[cfg(not(test))]
+                {
+                    Err(error.to_string())
+                }
+            }
+        }
+    }
+
+    fn execute(
+        &self,
+        request: &AuthServiceRequest,
+        context: &InvocationContext,
+        tenant_id: i64,
+    ) -> Result<AuthServiceExecution, WasmModelError> {
+        let subject = subject_for_principal(context);
+        let tenant = tenant_object(context, tenant_id);
+        let principal_id = context.principal.id.clone();
+        let Some(auth) = self.auth.as_ref() else {
+            return Ok(synthetic_auth_execution(request, context));
+        };
+
+        let future: Pin<
+            Box<dyn Future<Output = Result<AuthServiceExecution, String>> + Send + '_>,
+        > = match request {
+            AuthServiceRequest::Check => {
+                let subject = subject.clone();
+                let tenant = tenant.clone();
+                let request = request.clone();
+                Box::pin(async move {
+                    let capability = Capability::SystemConfigRead;
+                    let allowed = auth
+                        .check_default_capability(&subject, capability, &tenant)
+                        .await
+                        .map_err(|error| error.to_string())?;
+
+                    Ok(AuthServiceExecution {
+                        request,
+                        allowed,
+                        checks_seen: 1,
+                        principal_id,
+                        details: AuthServiceDetails::Check {
+                            capability: capability.to_string(),
+                            object: tenant.to_string(),
+                            decision: allowed,
+                        },
+                    })
+                })
+            }
+            AuthServiceRequest::List => {
+                let subject = subject.clone();
+                let request = request.clone();
+                let capability = Capability::CmsPageRead;
+                let binding = self.package.binding_for(capability).ok_or_else(|| {
+                    runtime_auth_backend_error(
+                        tenant_id,
+                        format!("no capability binding for `{capability}`"),
+                    )
+                })?;
+                let namespace = binding.resource_namespaces[0];
+                Box::pin(async move {
+                    let object_ids = auth
+                        .list_objects(&subject, binding.relation, namespace)
+                        .await
+                        .map_err(|error| error.to_string())?;
+
+                    Ok(AuthServiceExecution {
+                        request,
+                        allowed: true,
+                        checks_seen: 1,
+                        principal_id,
+                        details: AuthServiceDetails::List {
+                            capability: capability.to_string(),
+                            namespace: namespace.to_string(),
+                            object_ids,
+                        },
+                    })
+                })
+            }
+            AuthServiceRequest::Lookup => {
+                let tenant = tenant.clone();
+                let request = request.clone();
+                let capability = Capability::SystemModuleManage;
+                Box::pin(async move {
+                    let relation = Relation::Manage;
+                    let subject_ids = auth
+                        .list_subject_ids(&tenant, relation, Namespace::User)
+                        .await
+                        .map_err(|error| error.to_string())?;
+
+                    Ok(AuthServiceExecution {
+                        request,
+                        allowed: true,
+                        checks_seen: 1,
+                        principal_id,
+                        details: AuthServiceDetails::Lookup {
+                            capability: capability.to_string(),
+                            object: tenant.to_string(),
+                            relation: relation.to_string(),
+                            subject_namespace: Namespace::User.to_string(),
+                            subject_ids,
+                        },
+                    })
+                })
+            }
+            AuthServiceRequest::TupleWrite => {
+                let subject = subject.clone();
+                let tenant = tenant.clone();
+                let request = request.clone();
+                let capability = Capability::SystemConfigWrite;
+                Box::pin(async move {
+                    let allowed = auth
+                        .check_default_capability(&subject, capability, &tenant)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let relation = Relation::Manage;
+                    let updates = vec![DefaultTupleUpdate::Write(DefaultTuple::new(
+                        tenant.clone(),
+                        relation,
+                        subject.clone(),
+                    ))];
+                    let written = if allowed {
+                        auth.write(updates.clone())
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        updates.len()
+                    } else {
+                        0
+                    };
+
+                    Ok(AuthServiceExecution {
+                        request,
+                        allowed,
+                        checks_seen: 1,
+                        principal_id,
+                        details: AuthServiceDetails::TupleWrite {
+                            capability: capability.to_string(),
+                            object: tenant.to_string(),
+                            relation: relation.to_string(),
+                            subject: subject_for_description(&subject),
+                            updates: updates
+                                .into_iter()
+                                .map(|update| describe_tuple_update(&update))
+                                .collect(),
+                            written,
+                        },
+                    })
+                })
+            }
+        };
+
+        block_on_auth(future).map_err(|reason| runtime_auth_backend_error(tenant_id, reason))
+    }
+}
+
 fn runtime_executor_error(context: &InvocationContext, error: impl ToString) -> WasmModelError {
     WasmModelError::EngineTrap {
         handler_id: trace_id(context).to_string(),
@@ -826,5 +1044,153 @@ fn http_method_to_wasm(method: HttpMethod) -> WasmHttpMethod {
         HttpMethod::Put => WasmHttpMethod::Put,
         HttpMethod::Patch => WasmHttpMethod::Patch,
         HttpMethod::Delete => WasmHttpMethod::Delete,
+    }
+}
+
+fn runtime_auth_backend_error(tenant_id: i64, reason: impl ToString) -> WasmModelError {
+    WasmModelError::EngineTrap {
+        handler_id: format!("auth-tenant-{tenant_id}"),
+        reason: reason.to_string(),
+    }
+}
+
+fn block_on_auth<T>(future: impl Future<Output = Result<T, String>> + Send) -> Result<T, String>
+where
+    T: Send,
+{
+    match Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?;
+            runtime.block_on(future)
+        }
+    }
+}
+
+fn subject_for_principal(context: &InvocationContext) -> DefaultSubject {
+    match context.principal.id.as_deref() {
+        Some(principal_id) => match context.principal.kind {
+            PrincipalKind::ServiceAccount => {
+                DefaultSubject::entity(Entity::service_account(principal_id.to_string()))
+            }
+            _ => DefaultSubject::entity(Entity::user(principal_id.to_string())),
+        },
+        None => DefaultSubject::entity(Entity::any_user()),
+    }
+}
+
+fn tenant_object(context: &InvocationContext, tenant_id: i64) -> Entity {
+    let object_id = context
+        .customer_app
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| tenant_id.to_string());
+    Entity::tenant(object_id)
+}
+
+fn auth_sequence(context: &InvocationContext) -> u32 {
+    context
+        .trace
+        .trace_id
+        .as_bytes()
+        .iter()
+        .fold(0u32, |acc, byte| {
+            acc.wrapping_mul(31).wrapping_add(u32::from(*byte))
+        })
+}
+
+fn synthetic_auth_execution(
+    request: &AuthServiceRequest,
+    context: &InvocationContext,
+) -> AuthServiceExecution {
+    let principal_id = context.principal.id.clone();
+    let tenant = Entity::tenant(
+        context
+            .customer_app
+            .tenant_id
+            .clone()
+            .unwrap_or_else(|| context.customer_app.app_id.clone()),
+    );
+    let subject = subject_for_principal(context);
+    let decision = true;
+    let sequence = auth_sequence(context);
+
+    match request {
+        AuthServiceRequest::Check => AuthServiceExecution {
+            request: request.clone(),
+            allowed: decision,
+            checks_seen: 1,
+            principal_id,
+            details: AuthServiceDetails::Check {
+                capability: Capability::SystemConfigRead.to_string(),
+                object: tenant.to_string(),
+                decision,
+            },
+        },
+        AuthServiceRequest::List => AuthServiceExecution {
+            request: request.clone(),
+            allowed: true,
+            checks_seen: 1,
+            principal_id,
+            details: AuthServiceDetails::List {
+                capability: Capability::CmsPageRead.to_string(),
+                namespace: Namespace::Page.to_string(),
+                object_ids: vec![format!("synthetic-page-{sequence}")],
+            },
+        },
+        AuthServiceRequest::Lookup => AuthServiceExecution {
+            request: request.clone(),
+            allowed: true,
+            checks_seen: 1,
+            principal_id,
+            details: AuthServiceDetails::Lookup {
+                capability: Capability::SystemModuleManage.to_string(),
+                object: tenant.to_string(),
+                relation: Relation::Manage.to_string(),
+                subject_namespace: Namespace::User.to_string(),
+                subject_ids: vec![subject_for_description(&subject)],
+            },
+        },
+        AuthServiceRequest::TupleWrite => AuthServiceExecution {
+            request: request.clone(),
+            allowed: true,
+            checks_seen: 1,
+            principal_id,
+            details: AuthServiceDetails::TupleWrite {
+                capability: Capability::SystemConfigWrite.to_string(),
+                object: tenant.to_string(),
+                relation: Relation::Manage.to_string(),
+                subject: subject_for_description(&subject),
+                updates: vec![format!("write {}#manage", tenant)],
+                written: 1,
+            },
+        },
+    }
+}
+
+fn subject_for_description(subject: &DefaultSubject) -> String {
+    match subject {
+        DefaultSubject::Entity(entity) => entity.to_string(),
+        DefaultSubject::Userset { object, relation } => format!("{object}#{relation}"),
+    }
+}
+
+fn describe_tuple_update(update: &DefaultTupleUpdate) -> String {
+    match update {
+        DefaultTupleUpdate::Write(tuple) => format!(
+            "write {}#{}@{}",
+            tuple.object,
+            tuple.relation,
+            subject_for_description(&tuple.subject)
+        ),
+        DefaultTupleUpdate::Delete(tuple) => format!(
+            "delete {}#{}@{}",
+            tuple.object,
+            tuple.relation,
+            subject_for_description(&tuple.subject)
+        ),
     }
 }

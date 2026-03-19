@@ -302,15 +302,11 @@ fn data_summary_for_request(
     match request {
         DataServiceRequest::Read { contract } => format!(
             "module={} handler={} resource={} access=read sequence={sequence}",
-            contract.owner_extension_id,
-            contract.owner_handler_id,
-            contract.resource,
+            contract.owner_extension_id, contract.owner_handler_id, contract.resource,
         ),
         DataServiceRequest::Write { contract } => format!(
             "module={} handler={} resource={} access=write sequence={sequence}",
-            contract.owner_extension_id,
-            contract.owner_handler_id,
-            contract.resource,
+            contract.owner_extension_id, contract.owner_handler_id, contract.resource,
         ),
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use davenda_data::TransactionIsolation;
 
 fn gbp(value: i64) -> Money {
     Money::new(CurrencyCode::new("GBP").unwrap(), value).unwrap()

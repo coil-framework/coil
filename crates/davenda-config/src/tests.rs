@@ -190,9 +190,11 @@ fn rejects_explicit_single_node_escape_hatch_on_distributed_deployments() {
 
     match error {
         ConfigError::Validation(errors) => {
-            assert!(errors
-                .0
-                .contains(&ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment));
+            assert!(
+                errors
+                    .0
+                    .contains(&ConfigValidationError::LocalOnlyStorageRequiresSingleNodeDeployment)
+            );
         }
         other => panic!("expected validation error, got {other:?}"),
     }

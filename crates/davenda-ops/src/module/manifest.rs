@@ -68,10 +68,7 @@ fn capability_contracts() -> Vec<CapabilityContract> {
         CapabilityContract::optional(Capability::CatalogCollectionEdit, ["collection"]),
         CapabilityContract::optional(Capability::OrderRead, ["order"]),
         CapabilityContract::optional(Capability::OrderRefundIssue, ["order"]),
-        CapabilityContract::optional(
-            Capability::MembershipSubscriptionManage,
-            ["subscription"],
-        ),
+        CapabilityContract::optional(Capability::MembershipSubscriptionManage, ["subscription"]),
         CapabilityContract::optional(Capability::MembershipTierEdit, ["membership_tier"]),
         CapabilityContract::optional(Capability::EventsEventPublish, ["event"]),
         CapabilityContract::optional(Capability::EventsSlotManage, ["event_slot"]),

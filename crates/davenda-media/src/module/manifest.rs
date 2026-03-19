@@ -116,8 +116,12 @@ fn route_surfaces() -> Vec<RouteSurface> {
     vec![
         RouteSurface::new("media.library", RouteSurfaceKind::AdminPage, "/admin/media")
             .gated_by(Capability::AssetRead),
-        RouteSurface::new("media.delivery", RouteSurfaceKind::Asset, "/media/files/{asset_id}")
-            .gated_by(Capability::AssetRead),
+        RouteSurface::new(
+            "media.delivery",
+            RouteSurfaceKind::Asset,
+            "/media/files/{asset_id}",
+        )
+        .gated_by(Capability::AssetRead),
         RouteSurface::new(
             "media.storage",
             RouteSurfaceKind::AdminPage,
@@ -234,23 +238,11 @@ fn search_contributions() -> Vec<SearchIndexContribution> {
         true,
         vec![
             SearchFieldContribution::new("title", "title", SearchFieldRole::Title, true, true),
-            SearchFieldContribution::new(
-                "alt",
-                "alt_text",
-                SearchFieldRole::Metadata,
-                true,
-                true,
-            ),
+            SearchFieldContribution::new("alt", "alt_text", SearchFieldRole::Metadata, true, true),
         ],
         vec![
-            SearchInvalidationRule::new(
-                SearchInvalidationTrigger::Published,
-                "asset published",
-            ),
-            SearchInvalidationRule::new(
-                SearchInvalidationTrigger::Updated,
-                "asset replaced",
-            ),
+            SearchInvalidationRule::new(SearchInvalidationTrigger::Published, "asset published"),
+            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "asset replaced"),
         ],
         SearchRebuildStrategy::OnInvalidate,
     )]

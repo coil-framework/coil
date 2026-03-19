@@ -39,10 +39,7 @@ fn optional_capabilities() -> Vec<Capability> {
 
 fn capability_contracts() -> Vec<CapabilityContract> {
     vec![
-        CapabilityContract::required(
-            Capability::MembershipSubscriptionManage,
-            ["subscription"],
-        ),
+        CapabilityContract::required(Capability::MembershipSubscriptionManage, ["subscription"]),
         CapabilityContract::required(Capability::MembershipTierEdit, ["membership_tier"]),
         CapabilityContract::optional(Capability::AdminShellAccess, ["admin_module"]),
         CapabilityContract::optional(Capability::OrderRead, ["order"]),
@@ -200,10 +197,7 @@ fn search_contributions() -> Vec<SearchIndexContribution> {
             SearchFieldContribution::new("status", "status", SearchFieldRole::Facet, true, true),
         ],
         vec![
-            SearchInvalidationRule::new(
-                SearchInvalidationTrigger::Updated,
-                "subscription changed",
-            ),
+            SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "subscription changed"),
             SearchInvalidationRule::new(
                 SearchInvalidationTrigger::ManualRebuild,
                 "membership audit rebuild",

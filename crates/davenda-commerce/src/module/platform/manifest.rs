@@ -127,10 +127,18 @@ fn module_migrations() -> Vec<MigrationContract> {
 fn route_surfaces() -> Vec<RouteSurface> {
     vec![
         RouteSurface::new("commerce.catalog", RouteSurfaceKind::FrontendPage, "/shop").localized(),
-        RouteSurface::new("commerce.checkout", RouteSurfaceKind::FrontendAction, "/checkout")
-            .gated_by(Capability::CheckoutSessionCreate),
-        RouteSurface::new("commerce.orders", RouteSurfaceKind::AdminPage, "/admin/orders")
-            .gated_by(Capability::OrderRead),
+        RouteSurface::new(
+            "commerce.checkout",
+            RouteSurfaceKind::FrontendAction,
+            "/checkout",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new(
+            "commerce.orders",
+            RouteSurfaceKind::AdminPage,
+            "/admin/orders",
+        )
+        .gated_by(Capability::OrderRead),
         RouteSurface::new(
             "commerce.catalog-admin",
             RouteSurfaceKind::AdminPage,
@@ -256,10 +264,7 @@ fn search_contributions() -> Vec<SearchIndexContribution> {
                     SearchInvalidationTrigger::Published,
                     "product published",
                 ),
-                SearchInvalidationRule::new(
-                    SearchInvalidationTrigger::Updated,
-                    "product updated",
-                ),
+                SearchInvalidationRule::new(SearchInvalidationTrigger::Updated, "product updated"),
             ],
             SearchRebuildStrategy::OnInvalidate,
         ),

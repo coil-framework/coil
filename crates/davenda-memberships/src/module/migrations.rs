@@ -1,8 +1,6 @@
 use super::*;
 
-pub(super) fn install_module_migration_plan(
-    module: &MembershipsModule,
-) -> Option<MigrationPlan> {
+pub(super) fn install_module_migration_plan(module: &MembershipsModule) -> Option<MigrationPlan> {
     let owner = MigrationOwner::Module(module.name().to_string());
     let mut plan = MigrationPlan::new();
 

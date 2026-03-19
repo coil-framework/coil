@@ -244,12 +244,13 @@ impl PlatformConfig {
         }
 
         if matches!(self.storage.default_class, StorageClass::LocalOnlySensitive)
-            && self.storage.single_node_escape_hatch
-                != SingleNodeStorageMode::ExplicitSingleNode
+            && self.storage.single_node_escape_hatch != SingleNodeStorageMode::ExplicitSingleNode
         {
-            errors.push(ConfigValidationError::LocalOnlyStorageRequiresExplicitOptIn {
-                storage_class: self.storage.default_class,
-            });
+            errors.push(
+                ConfigValidationError::LocalOnlyStorageRequiresExplicitOptIn {
+                    storage_class: self.storage.default_class,
+                },
+            );
         }
 
         if self.storage.single_node_escape_hatch == SingleNodeStorageMode::ExplicitSingleNode

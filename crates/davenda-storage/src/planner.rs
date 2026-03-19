@@ -201,7 +201,6 @@ impl StoragePlanner {
             deployment_scope: StorageDeploymentScope::Scalable,
         })
     }
-
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -285,12 +284,14 @@ impl SingleNodeEscapeHatchPlanner {
         }
 
         if !self.topology.allows_explicit_local_only() {
-            return Err(StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
-                logical_path,
-                policy,
-                deployment: self.topology.deployment,
-                single_node_escape_hatch: self.topology.single_node_escape_hatch,
-            });
+            return Err(
+                StoragePlanningError::SingleNodeEscapeHatchNotAllowedForDeployment {
+                    logical_path,
+                    policy,
+                    deployment: self.topology.deployment,
+                    single_node_escape_hatch: self.topology.single_node_escape_hatch,
+                },
+            );
         }
 
         let local_path = Some(join_local_path(

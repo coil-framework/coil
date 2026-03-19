@@ -1,0 +1,2159 @@
+use super::*;
+use davenda_admin::AdminModule;
+use davenda_assets::{
+    AssetDeliveryTarget, AssetId, ContentFingerprint, DeliveryAudience, DeploymentArtifact,
+    DeploymentRelease, FingerprintAlgorithm, ManagedAsset, ReleaseId, RevisionId,
+};
+use davenda_auth::{Capability, DefaultAuthModelPackage};
+use davenda_cache::CacheLookupState;
+use davenda_cache::DistributedCacheBackend;
+use davenda_cms::CmsModule;
+use davenda_commerce::CommerceModule;
+use davenda_config::{PlatformConfig, StorageClass};
+use davenda_core::CookieSigner;
+use davenda_core::{ExtensionSlotDescriptor, ExtensionSlotKind};
+use davenda_events::EventsModule;
+use davenda_media::MediaModule;
+use davenda_memberships::MembershipsModule;
+use davenda_observability::{
+    CustomerAppId as FlagCustomerAppId, FeatureFlag, MaintenanceAudience, MaintenanceImpact,
+};
+use davenda_ops::{
+    BulkExecutionId, BulkOperationId, BulkOperationRequest, OpsModule, ReportExportId,
+    ReportExportRequest, ReportId,
+};
+use davenda_storage::{
+    DeliveryMode, PathPolicyRule, StoragePlanRequest, StoragePlanWarning, StoragePolicy,
+};
+use davenda_template::TemplateNamespace;
+use davenda_tls::{
+    CertificateFingerprint, CertificateId, CertificateProviderKind, CertificateRecord,
+    CertificateStateStore, CertificateStatus, CloudflareEncryptionMode, CustomerAppId, Hostname,
+    HostnameBinding, SecretMaterialRef, TlsInstant,
+};
+use davenda_wasm::{
+    AdminWidgetExtensionPoint, ContractVersion, ExtensionInstallation, ExtensionManifest,
+    ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest, HostCall,
+    HostCapabilityGrant, HostGrantSet, InstalledExtension, InvocationInput, InvocationOutcome,
+    JobExtensionPoint, PrincipalKind, RenderHookExtensionPoint, ResourceLimits,
+    ScheduledJobExtensionPoint, WasmModelError, WebhookExtensionPoint,
+};
+use std::time::Duration;
+
+const VALID_CONFIG: &str = r#"
+[app]
+name = "showcase-events"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+object_store = "s3"
+local_root = "/var/lib/platform"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+localized_routes = true
+
+[seo]
+canonical_host = "www.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#;
+
+fn installed_admin_widget_extension() -> InstalledExtension {
+    InstalledExtension::install(
+        ExtensionManifest::new(
+            davenda_wasm::ExtensionId::new("admin.waitlist").unwrap(),
+            "Waitlist Dashboard Widgets",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    "exports.waitlist_summary",
+                    ExtensionPoint::AdminWidget(
+                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+        ExtensionInstallation::new(
+            "showcase-events",
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-summary").unwrap(),
+                HostGrantSet::from_grants([
+                    HostCapabilityGrant::AuthCheck,
+                    HostCapabilityGrant::DataRead {
+                        resource: "events.waitlist".to_string(),
+                    },
+                ]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn installed_render_hook_extension() -> InstalledExtension {
+    InstalledExtension::install(
+        ExtensionManifest::new(
+            davenda_wasm::ExtensionId::new("cms.loyalty").unwrap(),
+            "CMS Loyalty Fragments",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::RenderHook),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("loyalty-badge").unwrap(),
+                    "exports.loyalty_badge",
+                    ExtensionPoint::RenderHook(
+                        RenderHookExtensionPoint::new("cms.page.render").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                        slot: "cms.page.render".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+        ExtensionInstallation::new(
+            "showcase-events",
+            vec![HandlerInstallation::new(
+                HandlerId::new("loyalty-badge").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
+                    slot: "cms.page.render".to_string(),
+                }]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn installed_job_extension() -> InstalledExtension {
+    InstalledExtension::install(
+        ExtensionManifest::new(
+            davenda_wasm::ExtensionId::new("ops.search.worker").unwrap(),
+            "Ops Search Worker",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::Job),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("search-adapter").unwrap(),
+                    "exports.search_adapter",
+                    ExtensionPoint::Job(
+                        JobExtensionPoint::new("ops.search.adapter", "jobs.work").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+        ExtensionInstallation::new(
+            "showcase-events",
+            vec![HandlerInstallation::new(
+                HandlerId::new("search-adapter").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                    queue: "jobs.work".to_string(),
+                }]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn installed_webhook_extension() -> InstalledExtension {
+    InstalledExtension::install(
+        ExtensionManifest::new(
+            davenda_wasm::ExtensionId::new("commerce.payment.webhooks").unwrap(),
+            "Commerce Payment Webhooks",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::Webhook),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("payment-authorized").unwrap(),
+                    "exports.payment_authorized",
+                    ExtensionPoint::Webhook(
+                        WebhookExtensionPoint::new(
+                            "commerce.payment-provider",
+                            "payment.authorized",
+                        )
+                        .unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+        ExtensionInstallation::new(
+            "showcase-events",
+            vec![HandlerInstallation::new(
+                HandlerId::new("payment-authorized").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                    queue: "jobs.work".to_string(),
+                }]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn installed_scheduled_job_extension() -> InstalledExtension {
+    InstalledExtension::install(
+        ExtensionManifest::new(
+            davenda_wasm::ExtensionId::new("ops.search.nightly").unwrap(),
+            "Ops Search Nightly",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::ScheduledJob),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("nightly-rebuild").unwrap(),
+                    "exports.nightly_rebuild",
+                    ExtensionPoint::ScheduledJob(
+                        ScheduledJobExtensionPoint::new("ops.search.nightly", "0 3 * * *").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                        queue: "jobs.work".to_string(),
+                    }]),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+        ExtensionInstallation::new(
+            "showcase-events",
+            vec![HandlerInstallation::new(
+                HandlerId::new("nightly-rebuild").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::EnqueueJob {
+                    queue: "jobs.work".to_string(),
+                }]),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[derive(Debug)]
+struct StaticManifestModule {
+    manifest: ModuleManifest,
+}
+
+impl StaticManifestModule {
+    fn new(manifest: ModuleManifest) -> Self {
+        Self { manifest }
+    }
+}
+
+impl PlatformModule for StaticManifestModule {
+    fn manifest(&self) -> ModuleManifest {
+        self.manifest.clone()
+    }
+
+    fn register(
+        &self,
+        _registry: &mut davenda_core::ServiceRegistry,
+    ) -> Result<(), RegistrationError> {
+        Ok(())
+    }
+}
+
+fn external_tls_config() -> String {
+    VALID_CONFIG.replace(
+        "mode = \"acme\"\nchallenge = \"dns-01\"\nprovider = \"cloudflare-dns\"",
+        "mode = \"external\"",
+    )
+}
+
+fn cloudflare_origin_tls_config() -> String {
+    VALID_CONFIG.replace(
+        "mode = \"acme\"\nchallenge = \"dns-01\"\nprovider = \"cloudflare-dns\"",
+        "mode = \"cloudflare-origin\"\nprovider = \"cloudflare-origin-ca\"",
+    )
+}
+
+fn active_certificate(id: &str, hostname: &str) -> CertificateRecord {
+    CertificateRecord::new(
+        CertificateId::new(id).unwrap(),
+        CertificateProviderKind::Acme,
+        CertificateStatus::Active,
+        CertificateFingerprint::new(format!("sha256:{id}")).unwrap(),
+        TlsInstant::from_unix_seconds(1_000),
+        TlsInstant::from_unix_seconds(4_000_000),
+        SecretMaterialRef::new(format!("secrets/tls/{id}")).unwrap(),
+        CertificateStateStore::SharedSecrets,
+    )
+    .with_binding(HostnameBinding::new(
+        Hostname::new(hostname).unwrap(),
+        CustomerAppId::new("showcase-events").unwrap(),
+    ))
+}
+
+fn content_fingerprint(fill: char) -> ContentFingerprint {
+    ContentFingerprint::new(FingerprintAlgorithm::Sha256, fill.to_string().repeat(64)).unwrap()
+}
+
+#[test]
+fn runtime_builder_creates_a_runtime_plan() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("events.show", HttpMethod::Get, "/events")
+                .unwrap()
+                .localized()
+                .from_module("events"),
+        )
+        .with_route(
+            RouteDefinition::new("admin.settings", HttpMethod::Get, "/admin/settings")
+                .unwrap()
+                .with_area(RouteArea::Admin)
+                .requiring_session(),
+        )
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(MembershipsModule::new())
+        .with_module(EventsModule::new())
+        .with_module(MediaModule::new())
+        .build()
+        .unwrap();
+
+    assert_eq!(plan.auth_package_name, "platform-default-auth");
+    assert_eq!(
+        plan.cache_topology.l2(),
+        Some(DistributedCacheBackend::Redis)
+    );
+    assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
+    assert_eq!(plan.browser.csrf.field_name, "_csrf");
+    assert!(
+        plan.cli
+            .registry
+            .commands()
+            .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()])
+    );
+    assert_eq!(plan.data.driver, davenda_config::DatabaseDriver::Postgres);
+    assert_eq!(plan.data.schema, "public");
+    assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);
+    assert_eq!(
+        plan.jobs.topology.scheduled_queue.as_str(),
+        "jobs.scheduled"
+    );
+    assert_eq!(plan.tls.mode, davenda_config::TlsMode::Acme);
+    assert_eq!(
+        plan.tls.provider.map(|provider| provider.to_string()),
+        Some("cloudflare_dns".to_string())
+    );
+    assert!(plan.observability.telemetry.metrics_enabled);
+    assert!(plan.observability.telemetry.trace.enabled);
+    assert_eq!(
+        plan.observability.readiness.overall_status(),
+        davenda_observability::DependencyStatus::Healthy
+    );
+    assert_eq!(
+        plan.http.middleware,
+        vec![
+            MiddlewareStage::TransportNormalization,
+            MiddlewareStage::CustomerAppResolution,
+            MiddlewareStage::TraceContext,
+            MiddlewareStage::LocaleResolution,
+            MiddlewareStage::SessionResolution,
+            MiddlewareStage::BrowserPolicy,
+            MiddlewareStage::ResponsePolicy,
+        ]
+    );
+    assert_eq!(
+        plan.http.resolve(
+            &plan.config,
+            HttpMethod::Get,
+            "www.example.com",
+            "/fr-FR/events"
+        ),
+        Some(ResolvedRoute {
+            route_name: "events.show".to_string(),
+            locale: Some("fr-FR".to_string()),
+            auth: RouteAuthGate::Public,
+            params: BTreeMap::new(),
+        })
+    );
+    assert_eq!(
+        plan.template
+            .namespace_chain(Some(&TemplateNamespace::new("cms-pages").unwrap())),
+        vec![
+            TemplateNamespace::new("customer-app").unwrap(),
+            TemplateNamespace::new("cms-pages").unwrap(),
+            TemplateNamespace::new("core").unwrap(),
+        ]
+    );
+    assert_eq!(plan.wasm.extension_directory, "extensions");
+    assert_eq!(
+        plan.wasm
+            .limits
+            .for_point(ExtensionPointKind::Page)
+            .max_runtime,
+        Duration::from_millis(50)
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.admin.shell")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.cms.pages")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.commerce.checkout")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.memberships.entitlements")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.events.bookings")
+    );
+    assert!(
+        plan.services
+            .iter()
+            .any(|service| service.id == "module.media.assets")
+    );
+    assert_eq!(plan.modules.len(), 6);
+    assert_eq!(plan.modules[0].name, "admin");
+    assert_eq!(plan.modules[1].name, "cms");
+    assert_eq!(plan.modules[2].name, "commerce");
+    assert_eq!(plan.modules[3].name, "memberships");
+    assert_eq!(plan.modules[4].name, "events");
+    assert_eq!(plan.modules[5].name, "media");
+    assert!(
+        plan.install_migrations
+            .ordered_steps()
+            .iter()
+            .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string()))
+    );
+    assert!(plan.install_migrations.ordered_steps().iter().any(|step| {
+        step.owner == davenda_data::MigrationOwner::Module("memberships".to_string())
+    }));
+    assert!(
+        plan.module_jobs
+            .iter()
+            .any(|registered| registered.job.name == "events.reminders")
+    );
+    assert!(plan.module_event_subscriptions.iter().any(|registered| {
+        registered.subscription.event == "commerce.order.paid" && registered.module == "memberships"
+    }));
+    assert!(plan.registered_runtime_jobs.iter().any(|registered| {
+        registered.contract.name == "events.reminders"
+            && registered.queue == plan.jobs.topology.scheduled_queue
+    }));
+    assert!(
+        plan.registered_runtime_event_subscriptions
+            .iter()
+            .any(|registered| {
+                registered.module == "memberships"
+                    && registered.event_type.as_str() == "commerce.order.paid"
+                    && registered.job_name == "memberships.entitlements.sync"
+            })
+    );
+    assert!(
+        plan.jobs_domain
+            .handlers
+            .iter()
+            .any(|handler| handler.id.as_str() == "memberships.entitlements.sync")
+    );
+    assert!(plan.module_search_contributions.iter().any(|registered| {
+        registered.module == "commerce" && registered.contribution.id == "search.catalog.products"
+    }));
+    assert!(plan.module_report_definitions.iter().any(|registered| {
+        registered.module == "memberships"
+            && registered.definition.id == "report.memberships.summary"
+    }));
+    assert!(plan.module_bulk_operations.iter().any(|registered| {
+        registered.module == "events" && registered.definition.id == "bulk.events.check-in"
+    }));
+    assert!(
+        plan.ops_catalog
+            .reports
+            .definition(&ReportId::new("report.memberships.summary").unwrap())
+            .is_some()
+    );
+    assert!(
+        plan.ops_catalog
+            .bulk
+            .definition(&BulkOperationId::new("bulk.events.check-in").unwrap())
+            .is_some()
+    );
+}
+
+#[test]
+fn rejects_duplicate_route_names_for_the_same_method() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(RouteDefinition::new("events.show", HttpMethod::Get, "/events").unwrap())
+        .with_route(
+            RouteDefinition::new("events.show", HttpMethod::Get, "/events-duplicate").unwrap(),
+        )
+        .build()
+        .unwrap_err();
+
+    match error {
+        RuntimeBuildError::Route(RouteBuildError::DuplicateRoute { name, method }) => {
+            assert_eq!(name, "events.show");
+            assert_eq!(method, HttpMethod::Get);
+        }
+        other => panic!("expected duplicate route error, got {other:?}"),
+    }
+}
+
+#[test]
+fn execute_request_derives_context_and_session_from_cookie() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-123")
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/account")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .with_principal("user-1"),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    assert_eq!(execution.customer_app, "showcase-events");
+    assert_eq!(execution.route.route_name, "account.dashboard");
+    assert_eq!(execution.route_area, RouteArea::Account);
+    assert_eq!(execution.locale, "en-GB");
+    assert_eq!(execution.session.session_id.as_deref(), Some("session-123"));
+    assert!(execution.session.resolved_from_cookie);
+    assert_eq!(execution.cache, CacheDisposition::Private);
+    assert_eq!(
+        execution
+            .cache_plan
+            .headers
+            .get("Cache-Control")
+            .map(String::as_str),
+        Some("private, max-age=60, stale-while-revalidate=30")
+    );
+    assert!(
+        execution
+            .cache_plan
+            .headers
+            .get("X-Davenda-Variation-Key")
+            .is_some()
+    );
+    assert_eq!(execution.trace.transport_scheme, "https");
+    assert_eq!(execution.middleware, plan.http.middleware);
+    assert_eq!(
+        execution.response,
+        HandlerResponse::Page(PageResponse {
+            template: "account/dashboard".to_string(),
+            status: 200,
+        })
+    );
+}
+
+#[test]
+fn execute_request_enforces_csrf_for_state_changing_browser_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("cms.publish", HttpMethod::Post, "/admin/pages/publish")
+                .unwrap()
+                .with_area(RouteArea::Admin)
+                .requiring_session(),
+        )
+        .with_handler(HandlerDefinition::redirect("cms.publish", "/admin/pages").unwrap())
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-123")
+        .unwrap();
+
+    let missing_token = plan.execute_request(
+        RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/pages/publish")
+            .unwrap()
+            .with_session_cookie(session_cookie.clone()),
+        cookie_secret,
+        csrf_secret,
+    );
+    assert_eq!(
+        missing_token.unwrap_err(),
+        RequestExecutionError::MissingCsrfToken {
+            route: "cms.publish".to_string(),
+        }
+    );
+
+    let token = plan
+        .browser
+        .csrf
+        .issue_token(csrf_secret, "session-123", "cms.publish")
+        .unwrap();
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/pages/publish")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .with_csrf_token(token),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    assert_eq!(execution.cache, CacheDisposition::Uncacheable);
+    assert_eq!(
+        execution
+            .cache_plan
+            .headers
+            .get("Cache-Control")
+            .map(String::as_str),
+        Some("no-store")
+    );
+    assert!(execution.cache_plan.plan.application().is_none());
+    assert_eq!(execution.route.route_name, "cms.publish");
+    assert_eq!(
+        execution.response,
+        HandlerResponse::Redirect(RedirectResponse {
+            location: "/admin/pages".to_string(),
+            status: 303,
+        })
+    );
+}
+
+#[test]
+fn execute_request_requires_capability_for_capability_gated_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("cms.preview", HttpMethod::Get, "/admin/pages/preview")
+                .unwrap()
+                .with_area(RouteArea::Admin)
+                .requiring_capability(davenda_auth::Capability::CmsPageRead),
+        )
+        .with_handler(
+            HandlerDefinition::fragment("cms.preview", "cms/preview", "preview-pane").unwrap(),
+        )
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-123")
+        .unwrap();
+
+    let denied = plan.execute_request(
+        RequestInput::new(HttpMethod::Get, "www.example.com", "/admin/pages/preview")
+            .unwrap()
+            .with_session_cookie(session_cookie.clone()),
+        cookie_secret,
+        csrf_secret,
+    );
+    assert_eq!(
+        denied.unwrap_err(),
+        RequestExecutionError::CapabilityRequired {
+            route: "cms.preview".to_string(),
+            capability: davenda_auth::Capability::CmsPageRead,
+        }
+    );
+
+    let allowed = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/admin/pages/preview")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .grant_capability(davenda_auth::Capability::CmsPageRead),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    assert_eq!(allowed.route.route_name, "cms.preview");
+    assert_eq!(allowed.cache, CacheDisposition::Private);
+    assert_eq!(
+        allowed
+            .cache_plan
+            .headers
+            .get("Cache-Control")
+            .map(String::as_str),
+        Some("private, max-age=30, stale-while-revalidate=15")
+    );
+    assert_eq!(
+        allowed.response,
+        HandlerResponse::Fragment(FragmentResponse {
+            template: "cms/preview".to_string(),
+            fragment_id: "preview-pane".to_string(),
+        })
+    );
+}
+
+#[test]
+fn cache_host_stores_and_revalidates_public_route_responses() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("events.public", HttpMethod::Get, "/events")
+                .unwrap()
+                .localized(),
+        )
+        .with_handler(HandlerDefinition::page("events.public", "events/list").unwrap())
+        .build()
+        .unwrap();
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/en-GB/events").unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    assert_eq!(execution.cache, CacheDisposition::Public);
+    assert_eq!(
+        execution
+            .cache_plan
+            .headers
+            .get("Cache-Control")
+            .map(String::as_str),
+        Some("public, max-age=300, stale-while-revalidate=30")
+    );
+    assert!(execution.cache_plan.headers.get("Surrogate-Key").is_some());
+
+    let mut host = plan.cache_host().unwrap();
+    assert!(
+        host.lookup_execution(&execution, CacheInstant::from_unix_seconds(100))
+            .is_some_and(|lookup| lookup.state == CacheLookupState::Miss)
+    );
+
+    let fill = host
+        .begin_fill(&execution, "renderer-1")
+        .expect("public route should be application-cacheable");
+    assert!(matches!(fill, FillDecision::Start(_)));
+    let key = host
+        .store_execution(
+            &execution,
+            "<html>events</html>",
+            CacheInstant::from_unix_seconds(100),
+        )
+        .expect("public route should store into the cache");
+    host.complete_fill(&fill).unwrap();
+
+    let fresh = host
+        .lookup_execution(&execution, CacheInstant::from_unix_seconds(110))
+        .expect("public route should look up through the cache host");
+    assert_eq!(fresh.state, CacheLookupState::Fresh);
+    assert_eq!(
+        fresh.entry.as_ref().map(|entry| entry.key.clone()),
+        Some(key.clone())
+    );
+
+    let invalidated = host.invalidate(execution.cache_plan.plan.application().unwrap().tags());
+    assert_eq!(invalidated, vec![key]);
+}
+
+#[test]
+fn execute_request_blocks_routes_when_feature_flag_is_disabled() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let feature_flag = FeatureFlag::new("beta-events", false)
+        .unwrap()
+        .with_rule(
+            davenda_observability::FlagTarget::CustomerApp(
+                FlagCustomerAppId::new("other-app").unwrap(),
+            ),
+            true,
+        )
+        .unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("events.beta", HttpMethod::Get, "/events/beta")
+                .unwrap()
+                .with_feature_flag("beta-events"),
+        )
+        .with_handler(HandlerDefinition::page("events.beta", "events/beta").unwrap())
+        .with_feature_flag(feature_flag)
+        .build()
+        .unwrap();
+
+    let error = plan.execute_request(
+        RequestInput::new(HttpMethod::Get, "www.example.com", "/events/beta").unwrap(),
+        b"01234567012345670123456701234567",
+        b"76543210765432107654321076543210",
+    );
+
+    assert_eq!(
+        error.unwrap_err(),
+        RequestExecutionError::FeatureFlagDisabled {
+            route: "events.beta".to_string(),
+            feature_flag: "beta-events".to_string(),
+        }
+    );
+}
+
+#[test]
+fn execute_request_respects_maintenance_mode_with_operator_bypass() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let maintenance = davenda_observability::MaintenanceMode {
+        enabled: true,
+        audience: MaintenanceAudience::CustomerApp(
+            FlagCustomerAppId::new("showcase-events").unwrap(),
+        ),
+        impact: MaintenanceImpact::MutatingTrafficOnly,
+        bypass_token: Some("ops-bypass".to_string()),
+        allowed_background_work: BTreeSet::new(),
+    };
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new(
+                "admin.bulk-publish",
+                HttpMethod::Post,
+                "/admin/bulk/publish",
+            )
+            .unwrap()
+            .with_area(RouteArea::Admin)
+            .requiring_session(),
+        )
+        .with_handler(
+            HandlerDefinition::json(
+                "admin.bulk-publish",
+                BTreeMap::from([("status".to_string(), "queued".to_string())]),
+            )
+            .unwrap(),
+        )
+        .with_maintenance_mode(maintenance)
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-123")
+        .unwrap();
+    let token = plan
+        .browser
+        .csrf
+        .issue_token(csrf_secret, "session-123", "admin.bulk-publish")
+        .unwrap();
+
+    let blocked = plan.execute_request(
+        RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/bulk/publish")
+            .unwrap()
+            .with_session_cookie(session_cookie.clone())
+            .with_csrf_token(token.clone()),
+        cookie_secret,
+        csrf_secret,
+    );
+    assert_eq!(
+        blocked.unwrap_err(),
+        RequestExecutionError::MaintenanceMode {
+            route: "admin.bulk-publish".to_string(),
+        }
+    );
+
+    let allowed = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/bulk/publish")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .with_csrf_token(token)
+                .with_maintenance_bypass_token("ops-bypass"),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+    assert_eq!(
+        allowed.response,
+        HandlerResponse::Json(JsonResponse {
+            status: 200,
+            payload: BTreeMap::from([("status".to_string(), "queued".to_string())]),
+        })
+    );
+}
+
+#[test]
+fn runtime_builder_rejects_missing_required_module_dependencies() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(MembershipsModule::new())
+        .build()
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeBuildError::ModuleInstallation(ModuleInstallationError::MissingModuleDependency {
+            module,
+            dependency,
+        }) if module == "memberships" && dependency == "commerce"
+    ));
+}
+
+#[test]
+fn runtime_builder_materializes_jobs_domain_for_module_subscriptions() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(MembershipsModule::new())
+        .with_module(EventsModule::new())
+        .build()
+        .unwrap();
+
+    assert!(plan.registered_runtime_jobs.iter().any(|job| {
+        job.contract.name == "memberships.entitlements.sync"
+            && job.queue == plan.jobs.topology.domain_events_queue
+    }));
+    assert!(
+        plan.registered_runtime_event_subscriptions
+            .iter()
+            .any(|subscription| {
+                subscription.job_name == "memberships.entitlements.sync"
+                    && subscription.event_type.as_str() == "commerce.order.paid"
+            })
+    );
+    assert!(plan.jobs_domain.validate().is_ok());
+}
+
+#[test]
+fn jobs_host_dispatches_domain_events_and_retries_declared_jobs() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(MembershipsModule::new())
+        .build()
+        .unwrap();
+    let mut host = plan.jobs_host("scheduler-a").unwrap();
+
+    let dispatch = host
+        .emit_domain_event(
+            DomainEventDispatchRequest::new(
+                "commerce.order.paid",
+                "order",
+                "order-42",
+                "membership checkout completed",
+            )
+            .unwrap(),
+            JobInstant::from_unix_seconds(200),
+        )
+        .unwrap();
+
+    assert_eq!(dispatch.event_type.as_str(), "commerce.order.paid");
+    assert_eq!(dispatch.enqueued_jobs.len(), 2);
+    assert_eq!(host.coordinator().ready_jobs().len(), 2);
+    assert!(host.coordinator().ready_jobs().iter().any(|record| {
+        record.spec.job_name.as_str() == "event-handler:memberships.entitlements.sync"
+    }));
+
+    let first_lease = host
+        .lease_ready_jobs(
+            &plan.jobs.topology.domain_events_queue,
+            "worker-a",
+            JobInstant::from_unix_seconds(200),
+            Duration::from_secs(30),
+            1,
+        )
+        .unwrap()
+        .remove(0);
+    let retry = host
+        .acknowledge_failed(
+            &first_lease,
+            JobInstant::from_unix_seconds(205),
+            DeadLetterReason::PolicyViolation,
+            "temporary membership projection failure",
+        )
+        .unwrap();
+
+    assert!(matches!(
+        retry,
+        JobFailureDisposition::Retried { ref queue, .. }
+            if queue == &plan.jobs.topology.domain_events_queue
+    ));
+}
+
+#[test]
+fn jobs_host_requires_scheduler_leadership_for_scheduled_jobs() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .build()
+        .unwrap();
+    let mut host = plan.jobs_host("scheduler-a").unwrap();
+    let scheduled =
+        JobDispatchRequest::new("cms.publish-scheduled", "publish scheduled landing page")
+            .unwrap()
+            .scheduled_for(JobInstant::from_unix_seconds(120))
+            .with_idempotency_key("cms.publish-scheduled:page-42")
+            .unwrap();
+
+    let job_id = host
+        .enqueue_job(scheduled, JobInstant::from_unix_seconds(100))
+        .unwrap();
+    assert_eq!(host.coordinator().scheduled_jobs().len(), 1);
+
+    let err = host
+        .promote_due_jobs(JobInstant::from_unix_seconds(120))
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RuntimeJobsError::Jobs(JobsModelError::MissingSchedulerLeadership { node_id })
+            if node_id == "scheduler-a"
+    ));
+
+    host.acquire_scheduler_leadership(JobInstant::from_unix_seconds(110), Duration::from_secs(60))
+        .unwrap();
+    let promoted = host
+        .promote_due_jobs(JobInstant::from_unix_seconds(120))
+        .unwrap();
+    assert_eq!(promoted, vec![job_id]);
+    assert_eq!(host.coordinator().ready_jobs().len(), 1);
+}
+
+#[test]
+fn jobs_host_rejects_domain_event_jobs_without_event_dispatch() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(MembershipsModule::new())
+        .build()
+        .unwrap();
+    let mut host = plan.jobs_host("scheduler-a").unwrap();
+    let request = JobDispatchRequest::new(
+        "memberships.entitlements.sync",
+        "attempt to bypass event flow",
+    )
+    .unwrap()
+    .with_idempotency_key("memberships.entitlements.sync:42")
+    .unwrap();
+
+    let err = host
+        .enqueue_job(request, JobInstant::from_unix_seconds(50))
+        .unwrap_err();
+    assert_eq!(
+        err,
+        RuntimeJobsError::DomainEventJobRequiresEventDispatch {
+            job: "memberships.entitlements.sync".to_string(),
+        }
+    );
+}
+
+#[test]
+fn runtime_builder_rejects_duplicate_runtime_job_names() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let first = StaticManifestModule::new(ModuleManifest::new("invalid").with_jobs(vec![
+        JobContract::new(
+            "shared.job",
+            JobTriggerKind::Operator,
+            true,
+            "first copy of a duplicated runtime job",
+        ),
+    ]));
+    let second =
+        StaticManifestModule::new(
+            ModuleManifest::new("other").with_jobs(vec![JobContract::new(
+                "shared.job",
+                JobTriggerKind::Webhook,
+                true,
+                "second copy of a duplicated runtime job",
+            )]),
+        );
+
+    let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(first)
+        .with_module(second)
+        .build()
+        .unwrap_err();
+
+    match error {
+        RuntimeBuildError::DuplicateRuntimeJobName {
+            job,
+            first_module,
+            second_module,
+        } => {
+            assert_eq!(job, "shared.job");
+            assert_eq!(first_module, "invalid");
+            assert_eq!(second_module, "other");
+        }
+        other => panic!("expected duplicate runtime job error, got {other:?}"),
+    }
+}
+
+#[test]
+fn ops_host_queues_report_exports_into_the_jobs_runtime() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(MembershipsModule::new())
+        .with_module(OpsModule::new())
+        .build()
+        .unwrap();
+    let mut ops = plan.ops_host("scheduler-a").unwrap();
+
+    let queued = ops
+        .queue_report_export(
+            ReportExportRequest::new(
+                ReportExportId::new("export-memberships-1").unwrap(),
+                ReportId::new("report.memberships.summary").unwrap(),
+                "operator-1",
+                JobInstant::from_unix_seconds(100),
+            )
+            .unwrap()
+            .with_capability(Capability::MembershipSubscriptionManage)
+            .with_idempotency_key(IdempotencyKey::new("report:memberships:summary:1").unwrap()),
+        )
+        .unwrap();
+
+    assert_eq!(
+        queued.plan.definition.id.as_str(),
+        "report.memberships.summary"
+    );
+    assert_eq!(queued.queued_job_id.as_str(), "export-memberships-1");
+    assert_eq!(ops.jobs().coordinator().ready_jobs().len(), 1);
+    assert_eq!(
+        ops.jobs().coordinator().ready_jobs()[0]
+            .spec
+            .job_name
+            .as_str(),
+        "report.export.report.memberships.summary"
+    );
+}
+
+#[test]
+fn ops_host_enforces_bulk_capabilities_before_queueing_jobs() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(EventsModule::new())
+        .with_module(OpsModule::new())
+        .build()
+        .unwrap();
+    let mut ops = plan.ops_host("scheduler-a").unwrap();
+
+    let denied = ops
+        .queue_bulk_operation(
+            BulkOperationRequest::new(
+                BulkExecutionId::new("bulk-check-in-1").unwrap(),
+                BulkOperationId::new("bulk.events.check-in").unwrap(),
+                "operator-1",
+                JobInstant::from_unix_seconds(100),
+                25,
+            )
+            .unwrap()
+            .with_idempotency_key(IdempotencyKey::new("bulk:events:check-in:1").unwrap()),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        denied,
+        RuntimeOpsError::Ops(OpsModelError::MissingCapability {
+            operation: "bulk operation",
+            required: Capability::EventsBookingCheckIn,
+        })
+    ));
+
+    let queued = ops
+        .queue_bulk_operation(
+            BulkOperationRequest::new(
+                BulkExecutionId::new("bulk-check-in-2").unwrap(),
+                BulkOperationId::new("bulk.events.check-in").unwrap(),
+                "operator-1",
+                JobInstant::from_unix_seconds(110),
+                25,
+            )
+            .unwrap()
+            .with_capability(Capability::EventsBookingCheckIn)
+            .with_idempotency_key(IdempotencyKey::new("bulk:events:check-in:2").unwrap()),
+        )
+        .unwrap();
+
+    assert_eq!(queued.queued_job_id.as_str(), "bulk-check-in-2");
+    assert_eq!(ops.jobs().coordinator().ready_jobs().len(), 1);
+    assert_eq!(
+        ops.jobs().coordinator().ready_jobs()[0]
+            .spec
+            .job_name
+            .as_str(),
+        "bulk.bulk.events.check-in"
+    );
+}
+
+#[test]
+fn runtime_plan_creates_tls_host_with_expected_provider_mode() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let host = plan.tls_host();
+    let status = host.status();
+
+    assert_eq!(status.customer_app, "showcase-events");
+    assert_eq!(status.mode, davenda_config::TlsMode::Acme);
+    assert_eq!(status.edge_mode, EdgeMode::DirectTermination);
+    assert_eq!(
+        status.provider,
+        Some(CertificateProviderKind::CloudflareDns)
+    );
+    assert!(status.inventory.certificates().is_empty());
+}
+
+#[test]
+fn tls_host_status_tracks_inventory_renewals_and_pending_challenges() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let mut host = plan.tls_host();
+    let certificate_id = CertificateId::new("cert-live").unwrap();
+
+    host.import_certificate(active_certificate("cert-live", "www.example.com"))
+        .unwrap();
+    host.queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+        .unwrap();
+    host.begin_renewal(&certificate_id, CertificateId::new("cert-next").unwrap())
+        .unwrap();
+
+    let status = host.status();
+    assert_eq!(status.inventory.certificates().len(), 1);
+    assert_eq!(status.queued_renewals.len(), 1);
+    assert_eq!(status.pending_challenges.len(), 1);
+    assert_eq!(
+        status.pending_challenges[0]
+            .replacement_certificate_id
+            .as_ref()
+            .map(|id| id.as_str()),
+        Some("cert-next")
+    );
+}
+
+#[test]
+fn tls_host_activate_replacement_emits_hot_reload_and_supersedes_old_certificate() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let mut host = plan.tls_host();
+    let certificate_id = CertificateId::new("cert-live").unwrap();
+
+    host.import_certificate(active_certificate("cert-live", "shop.example.com"))
+        .unwrap();
+    host.queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+        .unwrap();
+    host.begin_renewal(&certificate_id, CertificateId::new("cert-next").unwrap())
+        .unwrap();
+
+    let event = host
+        .activate_replacement(
+            &certificate_id,
+            active_certificate("cert-next", "shop.example.com")
+                .with_cloudflare_mode(CloudflareEncryptionMode::FullStrict),
+        )
+        .unwrap();
+    assert_eq!(event.certificate_id.as_str(), "cert-next");
+    assert!(event.reloaded_without_restart);
+
+    let status = host.status();
+    assert_eq!(status.hot_reload_events.len(), 1);
+    assert_eq!(
+        status
+            .inventory
+            .active_for_hostname(&Hostname::new("shop.example.com").unwrap())
+            .unwrap()
+            .id
+            .as_str(),
+        "cert-next"
+    );
+    assert_eq!(
+        status.inventory.record(&certificate_id).unwrap().status,
+        CertificateStatus::Superseded
+    );
+}
+
+#[test]
+fn tls_host_rejects_external_termination_issuance_and_preserves_cloudflare_origin_mode() {
+    let external = PlatformConfig::from_toml_str(&external_tls_config()).unwrap();
+    let external_plan = RuntimeBuilder::new(external, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let external_host = external_plan.tls_host();
+
+    let err = external_host
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("showcase-events").unwrap(),
+        )])
+        .unwrap_err();
+    assert_eq!(
+        err,
+        RuntimeTlsError::Tls(TlsModelError::ExternalTerminationDoesNotIssue)
+    );
+
+    let origin = PlatformConfig::from_toml_str(&cloudflare_origin_tls_config()).unwrap();
+    let origin_plan = RuntimeBuilder::new(origin, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let issue_plan = origin_plan
+        .tls_host()
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("origin.example.com").unwrap(),
+            CustomerAppId::new("showcase-events").unwrap(),
+        )])
+        .unwrap();
+
+    assert_eq!(
+        issue_plan.cloudflare_mode,
+        Some(CloudflareEncryptionMode::FullStrict)
+    );
+}
+
+#[test]
+fn runtime_builder_registers_installed_extensions_against_declared_slots() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_installed_extension(installed_admin_widget_extension())
+        .build()
+        .unwrap();
+
+    assert_eq!(plan.installed_extensions.len(), 1);
+    assert_eq!(plan.installed_extensions[0].extension_id, "admin.waitlist");
+    assert!(plan.registered_extension_slots.iter().any(|slot| {
+        slot.module == "admin"
+            && slot.kind == ExtensionPointKind::AdminWidget
+            && slot.surface == "admin.dashboard.summary"
+    }));
+    assert_eq!(
+        plan.extension_registry
+            .admin_widget_handlers("admin.dashboard.summary")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn runtime_builder_rejects_extensions_without_declared_slots() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_installed_extension(installed_admin_widget_extension())
+        .build()
+        .unwrap_err();
+
+    match error {
+        RuntimeBuildError::UnknownExtensionSlot {
+            extension_id,
+            handler_id,
+            point,
+            surface,
+        } => {
+            assert_eq!(extension_id, "admin.waitlist");
+            assert_eq!(handler_id, "waitlist-summary");
+            assert_eq!(point, ExtensionPointKind::AdminWidget);
+            assert_eq!(surface, "admin.dashboard.summary");
+        }
+        other => panic!("expected unknown extension slot, got {other:?}"),
+    }
+}
+
+#[test]
+fn wasm_host_prepares_admin_widget_invocations_from_request_execution() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_installed_extension(installed_admin_widget_extension())
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-operator-1")
+        .unwrap();
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/admin")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .with_principal("operator-1")
+                .grant_capability(Capability::AdminShellAccess),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    let mut sessions = plan
+        .wasm_host()
+        .begin_admin_widget_invocations("admin.dashboard.summary", &execution)
+        .unwrap();
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].plan().context.customer_app.locale.as_deref(),
+        Some("en-GB")
+    );
+    assert_eq!(
+        sessions[0].plan().context.principal.kind,
+        PrincipalKind::User
+    );
+    assert_eq!(
+        sessions[0].plan().context.principal.id.as_deref(),
+        Some("operator-1")
+    );
+    assert!(matches!(
+        sessions[0].plan().context.input,
+        InvocationInput::AdminWidget(_)
+    ));
+
+    sessions[0].record_host_call(HostCall::AuthCheck).unwrap();
+    sessions[0]
+        .record_host_call(HostCall::DataRead {
+            resource: "events.waitlist".to_string(),
+        })
+        .unwrap();
+
+    let receipt = sessions
+        .into_iter()
+        .next()
+        .unwrap()
+        .finish(Duration::from_millis(10), InvocationOutcome::AdminWidget)
+        .unwrap();
+
+    assert_eq!(receipt.point, ExtensionPointKind::AdminWidget);
+}
+
+#[test]
+fn wasm_host_prepares_render_hook_invocations_from_request_execution() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .with_installed_extension(installed_render_hook_extension())
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/en-GB/pages/home").unwrap(),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    let mut sessions = plan
+        .wasm_host()
+        .begin_render_hook_invocations("cms.page.render", &execution)
+        .unwrap();
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].plan().context.customer_app.locale.as_deref(),
+        Some("en-GB")
+    );
+    assert_eq!(
+        sessions[0].plan().context.principal.kind,
+        PrincipalKind::Anonymous
+    );
+    assert!(matches!(
+        sessions[0].plan().context.input,
+        InvocationInput::RenderHook(_)
+    ));
+
+    sessions[0]
+        .record_host_call(HostCall::RenderFragment {
+            slot: "cms.page.render".to_string(),
+        })
+        .unwrap();
+
+    let receipt = sessions
+        .into_iter()
+        .next()
+        .unwrap()
+        .finish(Duration::from_millis(8), InvocationOutcome::RenderHook)
+        .unwrap();
+
+    assert_eq!(receipt.point, ExtensionPointKind::RenderHook);
+}
+
+#[test]
+fn wasm_host_prepares_job_and_webhook_invocations() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(OpsModule::new())
+        .with_installed_extension(installed_job_extension())
+        .with_installed_extension(installed_webhook_extension())
+        .build()
+        .unwrap();
+
+    let mut job_session = plan
+        .wasm_host()
+        .begin_job_invocation(
+            "ops.search.adapter",
+            2,
+            "trace.jobs.search-adapter",
+            ExtensionPrincipal::service_account("ops.search-worker"),
+        )
+        .unwrap()
+        .expect("job extension is installed");
+
+    assert_eq!(
+        job_session.plan().context.principal.kind,
+        PrincipalKind::ServiceAccount
+    );
+    assert_eq!(
+        job_session.plan().context.principal.id.as_deref(),
+        Some("ops.search-worker")
+    );
+    assert!(matches!(
+        job_session.plan().context.input,
+        InvocationInput::Job(_)
+    ));
+    job_session
+        .record_host_call(HostCall::EnqueueJob {
+            queue: "jobs.work".to_string(),
+        })
+        .unwrap();
+    let job_receipt = job_session
+        .finish(Duration::from_millis(25), InvocationOutcome::JobCompleted)
+        .unwrap();
+    assert_eq!(job_receipt.point, ExtensionPointKind::Job);
+
+    let mut webhook_session = plan
+        .wasm_host()
+        .begin_webhook_invocation(
+            "commerce.payment-provider",
+            "payment.authorized",
+            true,
+            true,
+            "trace.webhooks.payment-authorized",
+            ExtensionPrincipal::service_account("commerce.webhooks"),
+        )
+        .unwrap()
+        .expect("webhook extension is installed");
+
+    assert_eq!(
+        webhook_session.plan().context.principal.kind,
+        PrincipalKind::ServiceAccount
+    );
+    assert!(matches!(
+        webhook_session.plan().context.input,
+        InvocationInput::Webhook(_)
+    ));
+    webhook_session
+        .record_host_call(HostCall::EnqueueJob {
+            queue: "jobs.work".to_string(),
+        })
+        .unwrap();
+    let webhook_receipt = webhook_session
+        .finish(
+            Duration::from_millis(15),
+            InvocationOutcome::WebhookAccepted,
+        )
+        .unwrap();
+    assert_eq!(webhook_receipt.point, ExtensionPointKind::Webhook);
+}
+
+#[test]
+fn wasm_host_prepares_leased_job_invocations_for_extension_jobs() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_module(OpsModule::new())
+        .with_installed_extension(installed_job_extension())
+        .build()
+        .unwrap();
+
+    assert!(plan.registered_runtime_jobs.iter().any(|job| {
+        job.module == "extension:ops.search.worker" && job.contract.name == "ops.search.adapter"
+    }));
+
+    let mut jobs = plan.jobs_host("scheduler-a").unwrap();
+    let now = JobInstant::from_unix_seconds(50);
+    jobs.enqueue_job(
+        JobDispatchRequest::new("ops.search.adapter", "rebuild search indexes").unwrap(),
+        now,
+    )
+    .unwrap();
+
+    let work_queue = jobs.queue_topology.work_queue.clone();
+    let leases = jobs
+        .lease_ready_jobs(
+            &work_queue,
+            "worker-1",
+            JobInstant::from_unix_seconds(51),
+            Duration::from_secs(30),
+            1,
+        )
+        .unwrap();
+    let mut session = plan
+        .wasm_host()
+        .begin_leased_job_invocation(&leases[0])
+        .unwrap()
+        .expect("leased extension job should be executable");
+
+    assert_eq!(session.plan().point, ExtensionPointKind::Job);
+    assert_eq!(
+        session.plan().context.principal.kind,
+        PrincipalKind::ServiceAccount
+    );
+    assert_eq!(
+        session.plan().context.principal.id.as_deref(),
+        Some("runtime.jobs")
+    );
+    assert!(matches!(
+        session.plan().context.input,
+        InvocationInput::Job(ref job)
+            if job.job_name == "ops.search.adapter" && job.attempt == 1
+    ));
+
+    session
+        .record_host_call(HostCall::EnqueueJob {
+            queue: "jobs.work".to_string(),
+        })
+        .unwrap();
+    let receipt = session
+        .finish(Duration::from_millis(12), InvocationOutcome::JobCompleted)
+        .unwrap();
+    assert_eq!(receipt.extension_id.to_string(), "ops.search.worker");
+}
+
+#[test]
+fn wasm_host_prepares_leased_scheduled_job_invocations_for_extensions() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let scheduled_slots =
+        StaticManifestModule::new(ModuleManifest::new("scheduler.slots").with_extension_slots(
+            vec![ExtensionSlotDescriptor::new(
+                ExtensionSlotKind::ScheduledJob,
+                "ops.search.nightly",
+                "Allows scheduled search extension workflows",
+            )],
+        ));
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(scheduled_slots)
+        .with_installed_extension(installed_scheduled_job_extension())
+        .build()
+        .unwrap();
+
+    assert!(plan.registered_runtime_jobs.iter().any(|job| {
+        job.module == "extension:ops.search.nightly"
+            && job.contract.name == "ops.search.nightly"
+            && job.contract.trigger == JobTriggerKind::Scheduled
+    }));
+
+    let mut jobs = plan.jobs_host("scheduler-a").unwrap();
+    let scheduled_for = JobInstant::from_unix_seconds(100);
+    jobs.enqueue_job(
+        JobDispatchRequest::new("ops.search.nightly", "nightly search refresh")
+            .unwrap()
+            .scheduled_for(scheduled_for),
+        JobInstant::from_unix_seconds(10),
+    )
+    .unwrap();
+    jobs.acquire_scheduler_leadership(JobInstant::from_unix_seconds(150), Duration::from_secs(30))
+        .unwrap();
+    jobs.promote_due_jobs(JobInstant::from_unix_seconds(150))
+        .unwrap();
+
+    let scheduled_queue = jobs.queue_topology.scheduled_queue.clone();
+    let leases = jobs
+        .lease_ready_jobs(
+            &scheduled_queue,
+            "worker-1",
+            JobInstant::from_unix_seconds(151),
+            Duration::from_secs(30),
+            1,
+        )
+        .unwrap();
+    let mut session = plan
+        .wasm_host()
+        .begin_leased_job_invocation(&leases[0])
+        .unwrap()
+        .expect("leased scheduled extension job should be executable");
+
+    assert_eq!(session.plan().point, ExtensionPointKind::ScheduledJob);
+    assert!(matches!(
+        session.plan().context.input,
+        InvocationInput::ScheduledJob(ref job) if job.job_name == "ops.search.nightly"
+    ));
+    session
+        .record_host_call(HostCall::EnqueueJob {
+            queue: "jobs.work".to_string(),
+        })
+        .unwrap();
+    let receipt = session
+        .finish(
+            Duration::from_millis(20),
+            InvocationOutcome::ScheduledJobCompleted,
+        )
+        .unwrap();
+    assert_eq!(receipt.extension_id.to_string(), "ops.search.nightly");
+}
+
+#[test]
+fn wasm_host_rejects_unverified_webhook_execution() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_installed_extension(installed_webhook_extension())
+        .build()
+        .unwrap();
+
+    let error = plan
+        .wasm_host()
+        .prepare_webhook_invocation(
+            "commerce.payment-provider",
+            "payment.authorized",
+            false,
+            true,
+            "trace.webhooks.unverified",
+            ExtensionPrincipal::service_account("commerce.webhooks"),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        WasmModelError::UnverifiedWebhook {
+            handler_id: "payment-authorized".to_string(),
+        }
+    );
+}
+
+#[test]
+fn storage_host_applies_path_rules_for_sensitive_files() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_storage_policy_rule(
+            PathPolicyRule::new(
+                "secure/reports",
+                Some(StorageClass::LocalOnlySensitive),
+                StoragePolicy::local_only_sensitive(),
+            )
+            .unwrap()
+            .with_local_subdir("sensitive")
+            .unwrap(),
+        )
+        .build()
+        .unwrap();
+
+    let storage_plan = plan
+        .storage_host()
+        .plan_write(StoragePlanRequest::new("secure/reports/march.csv"))
+        .unwrap();
+
+    assert_eq!(storage_plan.storage_class, StorageClass::LocalOnlySensitive);
+    assert_eq!(
+        storage_plan.matched_rule_prefix.as_deref(),
+        Some("secure/reports")
+    );
+    assert_eq!(
+        storage_plan.local_path.as_deref(),
+        Some("/var/lib/platform/sensitive/secure/reports/march.csv")
+    );
+    assert_eq!(
+        storage_plan.warnings,
+        vec![StoragePlanWarning::LocalOnlyBreaksMultiNode]
+    );
+}
+
+#[test]
+fn storage_host_publishes_deployment_releases_to_the_cdn_manifest() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let digest = "a".repeat(64);
+    let artifact = DeploymentArtifact::new(
+        "theme/site.css",
+        format!("theme/site.{digest}.css"),
+        content_fingerprint('a'),
+        "text/css",
+        512,
+    )
+    .unwrap();
+    let release =
+        DeploymentRelease::new(ReleaseId::new("release-20260319").unwrap(), [artifact]).unwrap();
+
+    let manifest = plan
+        .storage_host()
+        .publish_deployment_release(&release)
+        .unwrap();
+    let published = manifest.resolve("theme/site.css").unwrap();
+
+    assert_eq!(manifest.release_id().as_str(), "release-20260319");
+    assert_eq!(published.delivery().audience(), DeliveryAudience::Public);
+    assert!(published.delivery().immutable());
+    assert!(matches!(
+        published.delivery().target(),
+        AssetDeliveryTarget::Cdn { public_url, object_key }
+            if public_url == &format!("https://cdn.example.com/theme/site.{digest}.css")
+                && object_key == &format!("theme/site.{digest}.css")
+    ));
+}
+
+#[test]
+fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_storage_policy_rule(
+            PathPolicyRule::new(
+                "secure/docs",
+                Some(StorageClass::LocalOnlySensitive),
+                StoragePolicy::local_only_sensitive(),
+            )
+            .unwrap()
+            .with_local_subdir("vault")
+            .unwrap(),
+        )
+        .build()
+        .unwrap();
+    let host = plan.storage_host();
+
+    let public_revision = host
+        .plan_managed_revision(
+            RevisionId::new("rev-public-1").unwrap(),
+            "uploads/catalog/brochure.pdf",
+            None,
+            "application/pdf",
+            2_048,
+            content_fingerprint('b'),
+        )
+        .unwrap();
+    let mut public_asset = ManagedAsset::new(
+        AssetId::new("asset-brochure").unwrap(),
+        "Brochure",
+        public_revision,
+    )
+    .unwrap();
+    public_asset.publish_current();
+
+    let public_delivery = host.plan_public_asset_delivery(&public_asset).unwrap();
+    assert_eq!(public_delivery.delivery_mode(), DeliveryMode::PublicCdn);
+    assert_eq!(public_delivery.audience(), DeliveryAudience::Public);
+    assert!(matches!(
+        public_delivery.target(),
+        AssetDeliveryTarget::Cdn { public_url, .. }
+            if public_url == "https://cdn.example.com/uploads/catalog/brochure.pdf"
+    ));
+
+    let restricted_revision = host
+        .plan_managed_revision(
+            RevisionId::new("rev-secret-1").unwrap(),
+            "secure/docs/orders.csv",
+            None,
+            "text/csv",
+            256,
+            content_fingerprint('c'),
+        )
+        .unwrap();
+    let restricted_asset = ManagedAsset::new(
+        AssetId::new("asset-orders").unwrap(),
+        "Orders Export",
+        restricted_revision,
+    )
+    .unwrap();
+
+    let authorized_delivery = host
+        .plan_authorized_asset_delivery(&restricted_asset)
+        .unwrap();
+    assert_eq!(authorized_delivery.delivery_mode(), DeliveryMode::LocalOnly);
+    assert_eq!(authorized_delivery.audience(), DeliveryAudience::Authorized);
+    assert!(matches!(
+        authorized_delivery.target(),
+        AssetDeliveryTarget::LocalPath { path }
+            if path == "/var/lib/platform/vault/secure/docs/orders.csv"
+    ));
+}
+
+#[test]
+fn search_host_exposes_visibility_and_invalidation_catalog() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_module(OpsModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(EventsModule::new())
+        .with_module(MediaModule::new())
+        .build()
+        .unwrap();
+    let host = plan.search_host("scheduler-a").unwrap();
+
+    let public_visible = host
+        .visible_to(&[])
+        .into_iter()
+        .map(|index| index.id.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    assert!(public_visible.contains("search.cms.pages"));
+    assert!(public_visible.contains("search.catalog.products"));
+    assert!(public_visible.contains("search.media"));
+    assert!(!public_visible.contains("search.events.bookings"));
+
+    let events_visible = host
+        .visible_to(&[Capability::EventsBookingCheckIn])
+        .into_iter()
+        .map(|index| index.id.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    assert!(events_visible.contains("search.events.bookings"));
+
+    let published = host.invalidation_plan(SearchInvalidationTrigger::Published);
+    let published_ids = published
+        .indexes
+        .iter()
+        .map(|index| index.id.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    assert!(published_ids.contains("search.cms.pages"));
+    assert!(published_ids.contains("search.catalog.products"));
+    assert!(published_ids.contains("search.media"));
+    assert!(!published_ids.contains("search.events.bookings"));
+
+    let scheduled = host.scheduled_rebuilds();
+    assert!(scheduled.iter().all(|index| matches!(
+        index.rebuild_strategy,
+        SearchRebuildStrategy::Scheduled { .. }
+    )));
+}
+
+#[test]
+fn search_host_queues_full_reindex_through_ops_bulk_workflow() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_module(OpsModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .build()
+        .unwrap();
+    let expected_index_count = plan.ops_catalog.search.contributions.len();
+
+    let mut host = plan.search_host("scheduler-a").unwrap();
+    let queued = host
+        .queue_full_reindex(
+            BulkExecutionId::new("search-reindex-1").unwrap(),
+            "operator-1",
+            JobInstant::from_unix_seconds(200),
+            vec![Capability::SystemModuleManage],
+            false,
+        )
+        .unwrap();
+
+    assert_eq!(queued.plan.definition.id.as_str(), "bulk.search.reindex");
+    assert_eq!(queued.plan.target_count, expected_index_count);
+    assert_eq!(queued.queued_job_id.as_str(), "search-reindex-1");
+}
+
+#[test]
+fn runtime_builder_materializes_module_http_surfaces() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(MediaModule::new())
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-456")
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/admin/media")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .grant_capability(davenda_auth::Capability::AssetRead),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    assert_eq!(execution.route.route_name, "media.library");
+    assert_eq!(execution.route_area, RouteArea::Admin);
+    assert_eq!(
+        execution.response,
+        HandlerResponse::Page(PageResponse {
+            template: "media/library".to_string(),
+            status: 200,
+        })
+    );
+}
+
+#[test]
+fn runtime_builder_matches_parameterized_module_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(EventsModule::new())
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(
+                HttpMethod::Get,
+                "www.example.com",
+                "/en-GB/events/summer-gala",
+            )
+            .unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    assert_eq!(execution.route.route_name, "events.detail");
+    assert_eq!(execution.locale, "en-GB");
+    assert_eq!(
+        execution.route.params.get("event_slug").map(String::as_str),
+        Some("summer-gala")
+    );
+    assert_eq!(
+        execution.response,
+        HandlerResponse::Page(PageResponse {
+            template: "events/detail".to_string(),
+            status: 200,
+        })
+    );
+}
+
+#[test]
+fn http_runtime_generates_named_paths_for_module_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(EventsModule::new())
+        .build()
+        .unwrap();
+    let params = BTreeMap::from([("event_slug".to_string(), "summer-gala".to_string())]);
+
+    let path = plan
+        .http
+        .path_for(&plan.config, "events.detail", &params, Some("fr-FR"))
+        .unwrap();
+    assert_eq!(path, "/fr-FR/events/summer-gala");
+
+    let absolute = plan
+        .http
+        .absolute_url_for(&plan.config, "events.detail", &params, Some("en-GB"))
+        .unwrap();
+    assert_eq!(absolute, "https://www.example.com/en-GB/events/summer-gala");
+
+    let missing = plan
+        .http
+        .path_for(
+            &plan.config,
+            "events.detail",
+            &BTreeMap::new(),
+            Some("en-GB"),
+        )
+        .unwrap_err();
+    assert_eq!(
+        missing,
+        RouteUrlError::MissingRouteParameter {
+            route: "events.detail".to_string(),
+            parameter: "event_slug".to_string(),
+        }
+    );
+}

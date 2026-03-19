@@ -6,9 +6,10 @@ use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
+    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
+    ModuleDependency, ModuleManifest, PlatformModule, RegistrationError, RouteSurface,
+    RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
@@ -918,6 +919,43 @@ impl PlatformModule for CmsModule {
                 ),
             ])
             .with_admin_resources(self.admin_resources.clone())
+            .with_http_surfaces(vec![
+                HttpSurfaceContribution::page(
+                    "cms.page",
+                    HttpSurfaceArea::Public,
+                    "/pages/{slug}",
+                    "cms/page",
+                )
+                .localized(),
+                HttpSurfaceContribution::fragment(
+                    "cms.preview",
+                    "/admin/pages/preview",
+                    "cms/preview",
+                    "preview-pane",
+                )
+                .gated_by(Capability::CmsPageRead),
+                HttpSurfaceContribution::page(
+                    "cms.pages.index",
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages",
+                    "cms/pages",
+                )
+                .gated_by(Capability::CmsPageRead),
+                HttpSurfaceContribution::page(
+                    "cms.navigation.index",
+                    HttpSurfaceArea::Admin,
+                    "/admin/navigation",
+                    "cms/navigation",
+                )
+                .gated_by(Capability::CmsNavigationEdit),
+                HttpSurfaceContribution::page(
+                    "cms.redirects.index",
+                    HttpSurfaceArea::Admin,
+                    "/admin/redirects",
+                    "cms/redirects",
+                )
+                .gated_by(Capability::CmsPageEdit),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1105,6 +1143,7 @@ mod tests {
         );
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 5);
+        assert_eq!(manifest.http_surfaces.len(), 5);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert!(manifest

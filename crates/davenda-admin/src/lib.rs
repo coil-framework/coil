@@ -7,9 +7,10 @@ use davenda_core::{
     AdminContributionKind as CoreAdminContributionKind,
     AdminNavigationSection as CoreAdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleManifest, PlatformModule, RegistrationError,
-    RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
+    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
+    ModuleManifest, PlatformModule, RegistrationError, RouteSurface, RouteSurfaceKind,
+    ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 
@@ -624,6 +625,22 @@ impl PlatformModule for AdminModule {
                 "admin.dashboard.summary",
                 "Allows bounded customer widgets to participate in the shared admin dashboard",
             )])
+            .with_http_surfaces(vec![
+                HttpSurfaceContribution::page(
+                    "admin.dashboard",
+                    HttpSurfaceArea::Admin,
+                    "/admin",
+                    "admin/dashboard",
+                )
+                .gated_by(Capability::AdminShellAccess),
+                HttpSurfaceContribution::page(
+                    "admin.audit",
+                    HttpSurfaceArea::Admin,
+                    "/admin/audit",
+                    "admin/audit",
+                )
+                .gated_by(Capability::AdminAuditRead),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -855,6 +872,7 @@ mod tests {
             ]
         );
         assert_eq!(manifest.route_surfaces.len(), 2);
+        assert_eq!(manifest.http_surfaces.len(), 2);
         assert_eq!(manifest.jobs.len(), 1);
         assert_eq!(manifest.event_subscriptions.len(), 1);
         assert!(

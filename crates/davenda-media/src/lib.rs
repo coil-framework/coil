@@ -9,9 +9,10 @@ use davenda_auth::{
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    ExtensionSlotKind, HttpFileDeliveryMode, HttpSurfaceArea, HttpSurfaceContribution,
+    IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
+    ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule, RegistrationError,
+    RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 use davenda_storage::{
@@ -1006,6 +1007,31 @@ impl PlatformModule for MediaModule {
                     Capability::AssetManageStorage,
                 ),
             ])
+            .with_http_surfaces(vec![
+                HttpSurfaceContribution::page(
+                    "media.library",
+                    HttpSurfaceArea::Admin,
+                    "/admin/media",
+                    "media/library",
+                )
+                .gated_by(Capability::AssetRead),
+                HttpSurfaceContribution::file(
+                    "media.delivery",
+                    HttpSurfaceArea::Public,
+                    "/media/files/{asset_id}",
+                    "media/files/{asset_id}",
+                    "application/octet-stream",
+                    HttpFileDeliveryMode::AppProxy,
+                )
+                .gated_by(Capability::AssetRead),
+                HttpSurfaceContribution::page(
+                    "media.storage",
+                    HttpSurfaceArea::Admin,
+                    "/admin/media/storage",
+                    "media/storage",
+                )
+                .gated_by(Capability::AssetManageStorage),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1349,6 +1375,7 @@ mod tests {
             .contains(&Capability::AdminShellAccess));
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 3);
+        assert_eq!(manifest.http_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert_eq!(manifest.admin_resources.len(), 2);

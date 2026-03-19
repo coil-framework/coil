@@ -7,9 +7,10 @@ use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod,
+    IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
+    ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule, RegistrationError,
+    RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 use davenda_jobs::{
@@ -1398,6 +1399,34 @@ impl PlatformModule for OpsModule {
                     Capability::SystemModuleManage,
                 ),
             ])
+            .with_http_surfaces(vec![
+                HttpSurfaceContribution::page(
+                    "ops.search",
+                    HttpSurfaceArea::Admin,
+                    "/admin/search",
+                    "ops/search",
+                )
+                .gated_by(Capability::AdminShellAccess),
+                HttpSurfaceContribution::page(
+                    "ops.reports",
+                    HttpSurfaceArea::Admin,
+                    "/admin/reports",
+                    "ops/reports",
+                )
+                .gated_by(Capability::AdminAuditRead),
+                HttpSurfaceContribution::json(
+                    "ops.bulk",
+                    HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/bulk",
+                    202,
+                    std::collections::BTreeMap::from([(
+                        "status".to_string(),
+                        "queued".to_string(),
+                    )]),
+                )
+                .gated_by(Capability::SystemModuleManage),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -2017,6 +2046,7 @@ mod tests {
             .any(|dependency| dependency.module == "admin"));
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 3);
+        assert_eq!(manifest.http_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 3);
         assert_eq!(manifest.event_subscriptions.len(), 3);
         assert_eq!(manifest.admin_resources.len(), 3);

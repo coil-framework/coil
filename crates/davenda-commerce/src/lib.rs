@@ -6,9 +6,10 @@ use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
+    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
+    ModuleDependency, ModuleManifest, PlatformModule, RegistrationError, RouteSurface,
+    RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
@@ -1561,6 +1562,36 @@ impl PlatformModule for CommerceModule {
                 ),
             ])
             .with_admin_resources(self.admin_resources.clone())
+            .with_http_surfaces(vec![
+                HttpSurfaceContribution::page(
+                    "commerce.catalog",
+                    HttpSurfaceArea::Public,
+                    "/shop",
+                    "commerce/catalog",
+                )
+                .localized(),
+                HttpSurfaceContribution::page(
+                    "commerce.checkout",
+                    HttpSurfaceArea::Public,
+                    "/checkout",
+                    "commerce/checkout",
+                )
+                .gated_by(Capability::CheckoutSessionCreate),
+                HttpSurfaceContribution::page(
+                    "commerce.orders",
+                    HttpSurfaceArea::Admin,
+                    "/admin/orders",
+                    "commerce/orders",
+                )
+                .gated_by(Capability::OrderRead),
+                HttpSurfaceContribution::page(
+                    "commerce.catalog-admin",
+                    HttpSurfaceArea::Admin,
+                    "/admin/catalog/products",
+                    "commerce/catalog-admin",
+                )
+                .gated_by(Capability::CatalogProductEdit),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1731,6 +1762,7 @@ mod tests {
         );
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 4);
+        assert_eq!(manifest.http_surfaces.len(), 4);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert!(manifest

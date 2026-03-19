@@ -10,9 +10,10 @@ use davenda_commerce::OrderId;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod,
+    IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
+    ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule, RegistrationError,
+    RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{
     DataModelError, DomainWrite, FilterOperator, MigrationId, MigrationOwner, MigrationPlan,
@@ -2108,6 +2109,52 @@ impl PlatformModule for EventsModule {
                 ),
             ])
             .with_admin_resources(self.admin_resources.clone())
+            .with_http_surfaces(vec![
+                HttpSurfaceContribution::page(
+                    "events.list",
+                    HttpSurfaceArea::Public,
+                    "/events",
+                    "events/list",
+                )
+                .localized(),
+                HttpSurfaceContribution::page(
+                    "events.detail",
+                    HttpSurfaceArea::Public,
+                    "/events/{event_slug}",
+                    "events/detail",
+                )
+                .localized(),
+                HttpSurfaceContribution::json(
+                    "events.book",
+                    HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Public,
+                    "/events/{event_slug}/book",
+                    202,
+                    BTreeMap::from([("status".to_string(), "queued".to_string())]),
+                )
+                .gated_by(Capability::EventsBookingCreate),
+                HttpSurfaceContribution::page(
+                    "events.admin.index",
+                    HttpSurfaceArea::Admin,
+                    "/admin/events",
+                    "events/admin/index",
+                )
+                .gated_by(Capability::EventsEventPublish),
+                HttpSurfaceContribution::page(
+                    "events.admin.bookings",
+                    HttpSurfaceArea::Admin,
+                    "/admin/events/bookings",
+                    "events/admin/bookings",
+                )
+                .gated_by(Capability::EventsBookingCreate),
+                HttpSurfaceContribution::page(
+                    "events.admin.check-in",
+                    HttpSurfaceArea::Admin,
+                    "/admin/events/check-in",
+                    "events/admin/check-in",
+                )
+                .gated_by(Capability::EventsBookingCheckIn),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -2490,6 +2537,7 @@ mod tests {
         );
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 6);
+        assert_eq!(manifest.http_surfaces.len(), 6);
         assert_eq!(manifest.jobs.len(), 3);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert_eq!(manifest.admin_resources.len(), 4);

@@ -8,9 +8,10 @@ use davenda_commerce::{EntitlementKey, OrderId, OrderOutcome};
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind,
-    MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest, PlatformModule,
-    RegistrationError, RouteSurface, RouteSurfaceKind, ServiceRegistry,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind,
+    IntegrationPoint, JobContract, JobTriggerKind, MigrationContract, ModuleBehavior,
+    ModuleDependency, ModuleManifest, PlatformModule, RegistrationError, RouteSurface,
+    RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 
@@ -1064,6 +1065,29 @@ impl PlatformModule for MembershipsModule {
                 "Allows customer app widgets to augment subscription detail views with bounded insights",
             )])
             .with_admin_resources(self.admin_resources.clone())
+            .with_http_surfaces(vec![
+                HttpSurfaceContribution::page(
+                    "memberships.account",
+                    HttpSurfaceArea::Account,
+                    "/account/memberships",
+                    "memberships/account",
+                )
+                .gated_by(Capability::MembershipSubscriptionManage),
+                HttpSurfaceContribution::page(
+                    "memberships.tiers",
+                    HttpSurfaceArea::Admin,
+                    "/admin/memberships/tiers",
+                    "memberships/tiers",
+                )
+                .gated_by(Capability::MembershipTierEdit),
+                HttpSurfaceContribution::page(
+                    "memberships.subscriptions",
+                    HttpSurfaceArea::Admin,
+                    "/admin/memberships/subscriptions",
+                    "memberships/subscriptions",
+                )
+                .gated_by(Capability::MembershipSubscriptionManage),
+            ])
     }
 
     fn register(&self, registry: &mut ServiceRegistry) -> Result<(), RegistrationError> {
@@ -1447,6 +1471,7 @@ mod tests {
             .contains(&CoreServiceDependency::Jobs));
         assert_eq!(manifest.migrations.len(), 3);
         assert_eq!(manifest.route_surfaces.len(), 3);
+        assert_eq!(manifest.http_surfaces.len(), 3);
         assert_eq!(manifest.jobs.len(), 2);
         assert_eq!(manifest.event_subscriptions.len(), 2);
         assert_eq!(manifest.admin_resources.len(), 2);

@@ -217,6 +217,63 @@ impl HttpRuntimePlan {
             }
         })
     }
+
+    pub fn path_for(
+        &self,
+        config: &PlatformConfig,
+        route_name: &str,
+        params: &BTreeMap<String, String>,
+        locale: Option<&str>,
+    ) -> Result<String, RouteUrlError> {
+        let route = self
+            .routes
+            .iter()
+            .find(|route| route.name == route_name)
+            .ok_or_else(|| RouteUrlError::UnknownRoute {
+                route: route_name.to_string(),
+            })?;
+        let rendered_path = render_route_path(&route.path, params, route_name)?;
+
+        if route.locale_policy == LocalePolicy::Localized {
+            let locale = locale.unwrap_or(&config.i18n.default_locale);
+            if !config.i18n.supported_locales.iter().any(|item| item == locale) {
+                return Err(RouteUrlError::UnsupportedLocale {
+                    route: route_name.to_string(),
+                    locale: locale.to_string(),
+                });
+            }
+
+            return Ok(format!(
+                "/{}/{}",
+                locale.trim_matches('/'),
+                rendered_path.trim_start_matches('/')
+            ));
+        }
+
+        Ok(rendered_path)
+    }
+
+    pub fn absolute_url_for(
+        &self,
+        config: &PlatformConfig,
+        route_name: &str,
+        params: &BTreeMap<String, String>,
+        locale: Option<&str>,
+    ) -> Result<String, RouteUrlError> {
+        let route = self
+            .routes
+            .iter()
+            .find(|route| route.name == route_name)
+            .ok_or_else(|| RouteUrlError::UnknownRoute {
+                route: route_name.to_string(),
+            })?;
+        let path = self.path_for(config, route_name, params, locale)?;
+        let host = match &route.host {
+            HostPattern::Exact(host) => host.as_str(),
+            HostPattern::Any => config.seo.canonical_host.as_str(),
+        };
+        Ok(format!("https://{host}{path}"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -536,6 +593,16 @@ pub enum RequestExecutionError {
     FeatureFlagDisabled { route: String, feature_flag: String },
     #[error("route `{route}` has no registered handler")]
     HandlerNotRegistered { route: String },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RouteUrlError {
+    #[error("route `{route}` is not registered")]
+    UnknownRoute { route: String },
+    #[error("route `{route}` requires parameter `{parameter}`")]
+    MissingRouteParameter { route: String, parameter: String },
+    #[error("route `{route}` does not support locale `{locale}`")]
+    UnsupportedLocale { route: String, locale: String },
 }
 
 pub struct RuntimeBuilder<P> {
@@ -1090,6 +1157,36 @@ fn path_segments(path: &str) -> Vec<&str> {
         .split('/')
         .filter(|segment| !segment.is_empty())
         .collect()
+}
+
+fn render_route_path(
+    pattern: &str,
+    params: &BTreeMap<String, String>,
+    route_name: &str,
+) -> Result<String, RouteUrlError> {
+    let rendered_segments = path_segments(pattern)
+        .into_iter()
+        .map(|segment| {
+            if segment.starts_with('{') && segment.ends_with('}') && segment.len() > 2 {
+                let parameter = &segment[1..segment.len() - 1];
+                params
+                    .get(parameter)
+                    .cloned()
+                    .ok_or_else(|| RouteUrlError::MissingRouteParameter {
+                        route: route_name.to_string(),
+                        parameter: parameter.to_string(),
+                    })
+            } else {
+                Ok(segment.to_string())
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if rendered_segments.is_empty() {
+        Ok("/".to_string())
+    } else {
+        Ok(format!("/{}", rendered_segments.join("/")))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -1794,6 +1891,48 @@ cdn_base_url = "https://cdn.example.com"
                 template: "events/detail".to_string(),
                 status: 200,
             })
+        );
+    }
+
+    #[test]
+    fn http_runtime_generates_named_paths_for_module_routes() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(EventsModule::new())
+            .build()
+            .unwrap();
+        let params = BTreeMap::from([(
+            "event_slug".to_string(),
+            "summer-gala".to_string(),
+        )]);
+
+        let path = plan
+            .http
+            .path_for(&plan.config, "events.detail", &params, Some("fr-FR"))
+            .unwrap();
+        assert_eq!(path, "/fr-FR/events/summer-gala");
+
+        let absolute = plan
+            .http
+            .absolute_url_for(&plan.config, "events.detail", &params, Some("en-GB"))
+            .unwrap();
+        assert_eq!(absolute, "https://www.example.com/en-GB/events/summer-gala");
+
+        let missing = plan
+            .http
+            .path_for(
+                &plan.config,
+                "events.detail",
+                &BTreeMap::new(),
+                Some("en-GB"),
+            )
+            .unwrap_err();
+        assert_eq!(
+            missing,
+            RouteUrlError::MissingRouteParameter {
+                route: "events.detail".to_string(),
+                parameter: "event_slug".to_string(),
+            }
         );
     }
 }

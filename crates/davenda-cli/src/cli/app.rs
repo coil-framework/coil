@@ -203,6 +203,10 @@ publish_manifest = false
         let config_path = PathBuf::from("/tmp/davenda-cli-enabled.toml");
         let enabled_config = DISABLED_EXPLAIN_CONFIG
             .replace("explain_api = false", "explain_api = true")
+            .replace(
+                "package = \"platform-default-auth\"",
+                "package = \"platform-extended-auth\"",
+            )
             .replace("[modules]\nenabled = []", "[modules]\nenabled = [\"cms\"]")
             .replace(
                 "[cache]\nl1 = \"moka\"",
@@ -225,5 +229,11 @@ publish_manifest = false
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("failed to build the auth explanation")
+        );
+        assert!(!error.to_string().contains("not registered"));
     }
 }

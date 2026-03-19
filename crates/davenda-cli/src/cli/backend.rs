@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use davenda_auth::{
-    AuthModelPackage, AuthModelPackageSelection, CapabilityExplanation, DefaultAuthModelPackage,
-    LiveAuthExplainHost, LiveAuthExplainRequest,
+    AuthModelPackageSelection, CapabilityExplanation, LiveAuthExplainHost, LiveAuthExplainRequest,
+    configured_auth_model_package,
 };
 use davenda_config::PlatformConfig;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ pub(crate) struct LiveAuthExplainBackend {
 
 impl LiveAuthExplainBackend {
     pub(crate) fn from_config(config: &PlatformConfig) -> Result<Self, CliRunError> {
-        let package = resolve_auth_package(config)?;
+        let package = resolve_auth_package(config);
         let explainer = LiveAuthExplainHost::from_config(config, package).map_err(|error| {
             CliRunError::execution(format!(
                 "failed to initialize the live auth explain backend: {error}"
@@ -59,16 +59,10 @@ impl AuthExplainBackend for LiveAuthExplainBackend {
     }
 }
 
-fn resolve_auth_package(config: &PlatformConfig) -> Result<AuthModelPackageSelection, CliRunError> {
-    let package = DefaultAuthModelPackage::default();
-    if config.auth.package == package.manifest().name {
-        Ok(AuthModelPackageSelection::new(package))
-    } else {
-        Err(CliRunError::execution(format!(
-            "configured auth package `{}` is not registered with the CLI auth explain backend",
-            config.auth.package
-        )))
-    }
+fn resolve_auth_package(config: &PlatformConfig) -> AuthModelPackageSelection {
+    // The CLI explain path is keyed by deployment package identity, but it intentionally
+    // reuses the shipped capability bindings until a deployment provides a different package.
+    AuthModelPackageSelection::new(configured_auth_model_package(config.auth.package.clone()))
 }
 
 #[cfg(test)]
@@ -249,6 +243,28 @@ publish_manifest = false
     fn from_config_rejects_disabled_deployment_config() {
         let error = LiveAuthExplainBackend::from_config(&config(false)).unwrap_err();
         assert!(error.to_string().contains("disabled by deployment config"));
+    }
+
+    #[test]
+    fn from_config_accepts_replacement_package_identity() {
+        let mut config = config(true);
+        config.auth.package = "platform-extended-auth".to_string();
+
+        let package = resolve_auth_package(&config);
+
+        assert_eq!(package.manifest().name, "platform-extended-auth");
+        assert_eq!(
+            package
+                .package()
+                .binding_for(Capability::CmsPageRead)
+                .unwrap(),
+            DefaultAuthModelPackage::default()
+                .binding_for(Capability::CmsPageRead)
+                .unwrap()
+        );
+
+        let backend = LiveAuthExplainBackend::from_config(&config).unwrap();
+        assert!(format!("{backend:?}").contains("platform-extended-auth"));
     }
 
     #[test]

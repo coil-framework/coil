@@ -119,6 +119,7 @@ impl PostgresAuthExplainer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AuthModelPackageSelection, configured_auth_model_package};
     use davenda_config::PlatformConfig;
     use std::future::Future;
     use std::pin::Pin;
@@ -272,5 +273,19 @@ publish_manifest = false
         let error = block_on(host.explain_capability(&explain_request())).unwrap_err();
 
         assert!(matches!(error, LiveAuthError::BackendInitialization { .. }));
+    }
+
+    #[test]
+    fn from_runtime_keeps_the_configured_package_identity() {
+        let package =
+            AuthModelPackageSelection::new(configured_auth_model_package("platform-extended-auth"));
+        let host = LiveAuthExplainHost::from_runtime(
+            &config(true),
+            DataRuntime::from_config(&config(true).database).unwrap(),
+            package,
+        )
+        .unwrap();
+
+        assert!(format!("{host:?}").contains("platform-extended-auth"));
     }
 }

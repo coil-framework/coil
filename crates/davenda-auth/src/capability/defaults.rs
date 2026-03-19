@@ -43,8 +43,66 @@ impl AuthModelPackage for DefaultAuthModelPackage {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ConfiguredAuthModelPackage {
+    manifest: AuthModelManifest,
+    schema: Schema,
+    capability_bindings: HashMap<Capability, CapabilityBinding>,
+}
+
+impl ConfiguredAuthModelPackage {
+    /// Build a package selection that keeps the configured identity but reuses the
+    /// shipped default schema and capability bindings.
+    pub fn new(name: impl Into<String>) -> Self {
+        let mut manifest = default_manifest();
+        manifest.name = name.into();
+        Self {
+            manifest,
+            schema: default_schema(),
+            capability_bindings: default_capability_bindings(),
+        }
+    }
+}
+
+impl AuthModelPackage for ConfiguredAuthModelPackage {
+    fn manifest(&self) -> &AuthModelManifest {
+        &self.manifest
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn capability_bindings(&self) -> &HashMap<Capability, CapabilityBinding> {
+        &self.capability_bindings
+    }
+}
+
 pub fn default_auth_model_package() -> DefaultAuthModelPackage {
     DefaultAuthModelPackage::default()
+}
+
+pub fn configured_auth_model_package(name: impl Into<String>) -> ConfiguredAuthModelPackage {
+    ConfiguredAuthModelPackage::new(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AuthModelPackage, Capability};
+
+    #[test]
+    fn configured_package_preserves_identity_while_reusing_default_bindings() {
+        let package = configured_auth_model_package("platform-extended-auth");
+
+        assert_eq!(package.manifest().name, "platform-extended-auth");
+        assert_eq!(
+            package.binding_for(Capability::CmsPageRead).unwrap(),
+            DefaultAuthModelPackage::default()
+                .binding_for(Capability::CmsPageRead)
+                .unwrap()
+        );
+    }
 }
 
 pub fn default_manifest() -> AuthModelManifest {

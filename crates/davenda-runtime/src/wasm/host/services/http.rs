@@ -65,32 +65,17 @@ impl RuntimeOutboundHttpBackend {
         let byte_limit = self.response_byte_limit(response_bytes_hint)?;
         let integration = integration.to_string();
         let endpoint_string = endpoint.to_string();
-        run_blocking(|| {
-            let response = self
-                .client
-                .get(endpoint.as_str())
-                .timeout(self.request_timeout)
-                .call()
-                .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?;
-            let status = response.status();
-            let mut reader = response.into_reader().take(byte_limit.saturating_add(1));
-            let mut response_bytes = Vec::new();
-            reader
-                .read_to_end(&mut response_bytes)
-                .map_err(|error| format!("failed to read `{endpoint}` response body: {error}"))?;
-
-            if response_bytes.len() as u64 > byte_limit {
-                return Err(format!(
-                    "response from `{endpoint}` exceeded the configured limit of {byte_limit} bytes"
-                ));
-            }
-
-            Ok(NetworkExecution {
+        let client = self.client.clone();
+        let request_timeout = self.request_timeout;
+        execute_on_blocking_pool(move || {
+            perform_request(
+                client,
+                endpoint,
+                endpoint_string,
                 integration,
-                endpoint: endpoint_string,
-                status,
-                response_bytes: response_bytes.len() as u64,
-            })
+                request_timeout,
+                byte_limit,
+            )
         })
     }
 
@@ -125,9 +110,49 @@ impl RuntimeOutboundHttpBackend {
     }
 }
 
-fn run_blocking<T, F>(operation: F) -> Result<T, String>
+fn perform_request(
+    client: Agent,
+    endpoint: Url,
+    endpoint_string: String,
+    integration: String,
+    request_timeout: Duration,
+    byte_limit: u64,
+) -> Result<NetworkExecution, String> {
+    let response = client
+        .get(endpoint.as_str())
+        .timeout(request_timeout)
+        .call()
+        .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?;
+    let status = response.status();
+    let mut reader = response.into_reader().take(byte_limit.saturating_add(1));
+    let mut response_bytes = Vec::new();
+    reader
+        .read_to_end(&mut response_bytes)
+        .map_err(|error| format!("failed to read `{endpoint}` response body: {error}"))?;
+
+    if response_bytes.len() as u64 > byte_limit {
+        return Err(format!(
+            "response from `{endpoint}` exceeded the configured limit of {byte_limit} bytes"
+        ));
+    }
+
+    Ok(NetworkExecution {
+        integration,
+        endpoint: endpoint_string,
+        status,
+        response_bytes: response_bytes.len() as u64,
+    })
+}
+
+/// Submit blocking outbound HTTP work to Tokio's blocking pool.
+///
+/// The request thread only waits at the boundary; the actual network call and
+/// body read run off the core worker lane when a multi-thread runtime is
+/// present.
+fn execute_on_blocking_pool<T, F>(operation: F) -> Result<T, String>
 where
-    F: FnOnce() -> Result<T, String>,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
 {
     if matches!(
         tokio::runtime::Handle::try_current()
@@ -135,7 +160,15 @@ where
             .map(|handle| handle.runtime_flavor()),
         Some(tokio::runtime::RuntimeFlavor::MultiThread)
     ) {
-        Ok(tokio::task::block_in_place(operation)?)
+        let handle = tokio::runtime::Handle::current();
+        let join = handle.spawn_blocking(operation);
+        tokio::task::block_in_place(|| {
+            handle.block_on(async move {
+                join.await.map_err(|error| {
+                    format!("failed to execute outbound HTTP on the blocking pool: {error}")
+                })?
+            })
+        })
     } else {
         operation()
     }

@@ -1,4 +1,4 @@
-use super::*;
+use crate::{Capability, DefaultSubject, Entity, ExplainOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveAuthExplainRequest {

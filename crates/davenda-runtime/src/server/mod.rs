@@ -109,16 +109,7 @@ impl HttpServerHost {
                 backends.database.url.clone(),
                 plan.auth_package.clone(),
             ));
-        let auth_explainer = if plan.config.auth.explain_api {
-            Some(Arc::new(davenda_auth::LiveAuthExplainHost::new(
-                plan.data.clone(),
-                plan.tenant_id(),
-                backends.database.url.clone(),
-                plan.auth_package.clone(),
-            )) as Arc<dyn auth::LiveAuthExplainer>)
-        } else {
-            None
-        };
+        let auth_explainer = build_auth_explainer(&plan)?;
         let browser =
             materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
         let wasm_host = WasmHost::with_host_services(
@@ -156,16 +147,7 @@ impl HttpServerHost {
                 backends.database.url.clone(),
                 plan.auth_package.clone(),
             ));
-        let auth_explainer = if plan.config.auth.explain_api {
-            Some(Arc::new(davenda_auth::LiveAuthExplainHost::new(
-                plan.data.clone(),
-                plan.tenant_id(),
-                backends.database.url.clone(),
-                plan.auth_package.clone(),
-            )) as Arc<dyn auth::LiveAuthExplainer>)
-        } else {
-            None
-        };
+        let auth_explainer = build_auth_explainer(&plan)?;
         let wasm_host = plan.wasm_host();
         Ok(Self::new_with_browser_and_authorizer(
             plan,
@@ -189,16 +171,7 @@ impl HttpServerHost {
     ) -> Result<Self, RuntimeServerError> {
         let browser = plan.browser_host()?;
         let wasm_host = plan.wasm_host();
-        let auth_explainer = if plan.config.auth.explain_api {
-            Some(Arc::new(davenda_auth::LiveAuthExplainHost::new(
-                plan.data.clone(),
-                plan.tenant_id(),
-                backends.database.url.clone(),
-                plan.auth_package.clone(),
-            )) as Arc<dyn auth::LiveAuthExplainer>)
-        } else {
-            None
-        };
+        let auth_explainer = build_auth_explainer(&plan)?;
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
@@ -255,8 +228,8 @@ impl HttpServerHost {
             auth_explainer,
         });
         let public_router = observability_router();
-        let privileged_router = diagnostics_router(state.clone())
-            .merge(auth_explain_router(state.clone()));
+        let privileged_router =
+            diagnostics_router(state.clone()).merge(auth_explain_router(state.clone()));
         let router = Router::new()
             .merge(public_router)
             .merge(privileged_router)
@@ -321,4 +294,24 @@ impl HttpServerHost {
         .await
         .map_err(std::io::Error::other)
     }
+}
+
+fn build_auth_explainer(
+    plan: &RuntimePlan,
+) -> Result<Option<Arc<dyn auth::LiveAuthExplainer>>, RuntimeServerError> {
+    if !plan.config.auth.explain_api {
+        return Ok(None);
+    }
+
+    let explainer = davenda_auth::LiveAuthExplainHost::from_runtime(
+        &plan.config,
+        plan.data.clone(),
+        plan.auth_package.clone(),
+    )
+    .map_err(|error| RuntimeServerError::Explain {
+        reason: error.to_string(),
+    })?;
+
+    let explainer: Arc<dyn auth::LiveAuthExplainer> = Arc::new(explainer);
+    Ok(Some(explainer))
 }

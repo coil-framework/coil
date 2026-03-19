@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 fn tag(value: &str) -> InvalidationTag {
@@ -624,4 +625,176 @@ fn runtime_coalesces_duplicate_fill_requests() {
     assert_eq!(runtime.metrics().fills_started, 1);
     assert_eq!(runtime.metrics().fills_completed, 1);
     assert_eq!(runtime.metrics().coalesced_waits, 1);
+}
+
+#[test]
+fn distributed_planner_runtimes_share_backend_across_fresh_handles() {
+    let planner = CachePlanner::new(CacheTopology::with_redis());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:shared",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+
+    let mut left = planner.runtime();
+    let mut right = planner.runtime();
+    left.insert(
+        plan.application().unwrap(),
+        "<html>shared-across-handles</html>",
+        CacheInstant::from_unix_seconds(200),
+    );
+
+    let lookup = right.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(210),
+    );
+    assert_eq!(lookup.state, CacheLookupState::Fresh);
+}
+
+#[derive(Default)]
+struct RecordingDistributedCacheRuntime {
+    inserted: Mutex<Vec<String>>,
+    looked_up: Mutex<Vec<String>>,
+    stored_entry: Mutex<Option<CacheEntry>>,
+}
+
+impl DistributedCacheRuntime for RecordingDistributedCacheRuntime {
+    fn insert(&self, entry: CacheEntry) {
+        self.inserted
+            .lock()
+            .expect("recording cache insert mutex poisoned")
+            .push(entry.key.to_string());
+        *self
+            .stored_entry
+            .lock()
+            .expect("recording cache entry mutex poisoned") = Some(entry);
+    }
+
+    fn lookup(&self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
+        self.looked_up
+            .lock()
+            .expect("recording cache lookup mutex poisoned")
+            .push(key.to_string());
+        let entry = self
+            .stored_entry
+            .lock()
+            .expect("recording cache entry mutex poisoned")
+            .clone();
+        match entry.filter(|entry| &entry.key == key && entry.is_fresh(now)) {
+            Some(entry) => CacheLookup {
+                state: CacheLookupState::Fresh,
+                entry: Some(entry),
+                needs_revalidation: false,
+            },
+            None => CacheLookup {
+                state: CacheLookupState::Miss,
+                entry: None,
+                needs_revalidation: false,
+            },
+        }
+    }
+
+    fn invalidate(&self, _tags: &InvalidationSet) -> Vec<CacheKey> {
+        Vec::new()
+    }
+
+    fn begin_fill(
+        &self,
+        key: &CacheKey,
+        _mode: RequestCoalescingMode,
+        holder: String,
+    ) -> FillDecision {
+        FillDecision::Start(FillLease {
+            key: key.clone(),
+            holder,
+        })
+    }
+
+    fn complete_fill(&self, _lease: &FillLease) -> Result<(), CacheModelError> {
+        Ok(())
+    }
+
+    fn metrics(&self) -> CacheMetrics {
+        CacheMetrics::default()
+    }
+}
+
+#[test]
+fn runtime_accepts_injected_distributed_backend_clients() {
+    let planner = CachePlanner::new(CacheTopology::with_redis());
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:adapter",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let backend = Arc::new(RecordingDistributedCacheRuntime::default());
+    let client = DistributedCacheClient::new(CacheBackendKind::Redis, backend.clone());
+    let adapter = CacheBackendAdapter::distributed(CacheTopology::with_redis(), client);
+    let mut runtime = CacheRuntime::with_backend(CacheTopology::with_redis(), adapter);
+
+    runtime.insert(
+        plan.application().unwrap(),
+        "<html>adapter</html>",
+        CacheInstant::from_unix_seconds(300),
+    );
+    let lookup = runtime.lookup(
+        plan.application().unwrap().key(),
+        CacheInstant::from_unix_seconds(305),
+    );
+
+    assert_eq!(lookup.state, CacheLookupState::Fresh);
+    assert_eq!(
+        backend
+            .inserted
+            .lock()
+            .expect("recording cache insert mutex poisoned")
+            .as_slice(),
+        &[plan.application().unwrap().key().to_string()]
+    );
+    assert_eq!(
+        backend
+            .looked_up
+            .lock()
+            .expect("recording cache lookup mutex poisoned")
+            .as_slice(),
+        &[plan.application().unwrap().key().to_string()]
+    );
 }

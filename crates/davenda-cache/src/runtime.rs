@@ -87,10 +87,18 @@ pub struct CacheRuntime {
 
 impl CacheRuntime {
     pub fn new(topology: CacheTopology) -> Self {
-        Self {
+        Self::with_backend(topology, crate::CacheBackendAdapter::new(topology))
+    }
+
+    pub fn with_backend(topology: CacheTopology, backend: crate::CacheBackendAdapter) -> Self {
+        Self { topology, backend }
+    }
+
+    pub(crate) fn for_deployment(topology: CacheTopology, deployment_id: u64) -> Self {
+        Self::with_backend(
             topology,
-            backend: crate::CacheBackendAdapter::new(topology),
-        }
+            crate::CacheBackendAdapter::for_deployment(topology, deployment_id),
+        )
     }
 
     pub fn topology(&self) -> CacheTopology {

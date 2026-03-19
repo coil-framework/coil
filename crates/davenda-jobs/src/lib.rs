@@ -1,9 +1,15 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use davenda_config::{JobBackend, JobsConfig};
+
+static JOBS_BACKEND_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static JOBS_BACKEND_REGISTRY: OnceLock<Mutex<HashMap<u64, Arc<dyn JobsCoordinationRuntime>>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobsModelError {
@@ -431,11 +437,12 @@ impl QueueTopology {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct JobsRuntime {
     pub backend: JobBackend,
     pub topology: QueueTopology,
     pub default_retry_limit: u32,
+    backend_id: u64,
 }
 
 impl JobsRuntime {
@@ -497,6 +504,7 @@ impl JobsRuntime {
             backend: config.backend,
             topology,
             default_retry_limit: config.retry_limit.max(1),
+            backend_id: JOBS_BACKEND_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         })
     }
 
@@ -509,9 +517,23 @@ impl JobsRuntime {
     }
 
     pub fn coordinator(&self) -> JobsCoordinator {
-        JobsCoordinator::new(self.clone())
+        self.coordinator_with_backend(JobsBackendAdapter::shared_emulated(self))
+    }
+
+    pub fn coordinator_with_backend(&self, backend: JobsBackendAdapter) -> JobsCoordinator {
+        JobsCoordinator::with_backend(self.clone(), backend)
     }
 }
+
+impl PartialEq for JobsRuntime {
+    fn eq(&self, other: &Self) -> bool {
+        self.backend == other.backend
+            && self.topology == other.topology
+            && self.default_retry_limit == other.default_retry_limit
+    }
+}
+
+impl Eq for JobsRuntime {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedJob {
@@ -840,8 +862,229 @@ pub enum JobFailureDisposition {
     DeadLettered(DeadLetterOutcome),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JobsCoordinator {
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct JobsCoordinatorSnapshot {
+    ready: Vec<QueuedJobRecord>,
+    scheduled: Vec<QueuedJobRecord>,
+    in_flight: Vec<JobLease>,
+    dead_letters: Vec<DeadLetterOutcome>,
+    leadership: Option<SchedulerLeadership>,
+}
+
+pub(crate) trait JobsCoordinationRuntime: Send + Sync + 'static {
+    fn snapshot(&self) -> JobsCoordinatorSnapshot;
+    fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError>;
+    fn acquire_scheduler_leadership(
+        &self,
+        node_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+    ) -> Result<SchedulerLeadership, JobsModelError>;
+    fn promote_due_jobs(
+        &self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError>;
+    fn lease_ready_jobs(
+        &self,
+        queue: &JobQueueName,
+        worker_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, JobsModelError>;
+    fn acknowledge_completed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError>;
+    fn acknowledge_failed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: String,
+    ) -> Result<JobFailureDisposition, JobsModelError>;
+}
+
+#[derive(Debug)]
+struct EmulatedJobsCoordinationRuntime {
+    state: Mutex<JobsBackendState>,
+}
+
+impl EmulatedJobsCoordinationRuntime {
+    fn new(runtime: JobsRuntime) -> Self {
+        Self {
+            state: Mutex::new(JobsBackendState::new(runtime)),
+        }
+    }
+}
+
+impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
+    fn snapshot(&self) -> JobsCoordinatorSnapshot {
+        let guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.snapshot()
+    }
+
+    fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.enqueue(spec, now)
+    }
+
+    fn acquire_scheduler_leadership(
+        &self,
+        node_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+    ) -> Result<SchedulerLeadership, JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.acquire_scheduler_leadership(node_id, now, lease_ttl)
+    }
+
+    fn promote_due_jobs(
+        &self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.promote_due_jobs(node_id, now)
+    }
+
+    fn lease_ready_jobs(
+        &self,
+        queue: &JobQueueName,
+        worker_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.lease_ready_jobs(queue, worker_id, now, lease_ttl, max_jobs)
+    }
+
+    fn acknowledge_completed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.acknowledge_completed(lease, now)
+    }
+
+    fn acknowledge_failed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: String,
+    ) -> Result<JobFailureDisposition, JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.acknowledge_failed(lease, now, reason, error_message)
+    }
+}
+
+#[derive(Clone)]
+pub struct JobsBackendAdapter {
+    backend: JobBackend,
+    queue_topology: QueueTopology,
+    runtime: Arc<dyn JobsCoordinationRuntime>,
+}
+
+impl JobsBackendAdapter {
+    pub(crate) fn new(
+        backend: JobBackend,
+        queue_topology: QueueTopology,
+        runtime: Arc<dyn JobsCoordinationRuntime>,
+    ) -> Self {
+        Self {
+            backend,
+            queue_topology,
+            runtime,
+        }
+    }
+
+    fn shared_emulated(runtime: &JobsRuntime) -> Self {
+        let registry = JOBS_BACKEND_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = registry
+            .lock()
+            .expect("jobs backend registry mutex poisoned");
+        let shared = guard
+            .entry(runtime.backend_id)
+            .or_insert_with(|| Arc::new(EmulatedJobsCoordinationRuntime::new(runtime.clone())))
+            .clone();
+
+        Self::new(runtime.backend, runtime.topology.clone(), shared)
+    }
+
+    fn snapshot(&self) -> JobsCoordinatorSnapshot {
+        self.runtime.snapshot()
+    }
+
+    fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
+        self.runtime.enqueue(spec, now)
+    }
+
+    fn acquire_scheduler_leadership(
+        &self,
+        node_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+    ) -> Result<SchedulerLeadership, JobsModelError> {
+        self.runtime
+            .acquire_scheduler_leadership(node_id, now, lease_ttl)
+    }
+
+    fn promote_due_jobs(
+        &self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        self.runtime.promote_due_jobs(node_id, now)
+    }
+
+    fn lease_ready_jobs(
+        &self,
+        queue: &JobQueueName,
+        worker_id: String,
+        now: JobInstant,
+        lease_ttl: Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, JobsModelError> {
+        self.runtime
+            .lease_ready_jobs(queue, worker_id, now, lease_ttl, max_jobs)
+    }
+
+    fn acknowledge_completed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError> {
+        self.runtime.acknowledge_completed(lease, now)
+    }
+
+    fn acknowledge_failed(
+        &self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: String,
+    ) -> Result<JobFailureDisposition, JobsModelError> {
+        self.runtime
+            .acknowledge_failed(lease, now, reason, error_message)
+    }
+}
+
+impl fmt::Debug for JobsBackendAdapter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JobsBackendAdapter")
+            .field("backend", &self.backend)
+            .field("queue_topology", &self.queue_topology)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct JobsBackendState {
     runtime: JobsRuntime,
     ready: Vec<QueuedJobRecord>,
     scheduled: Vec<QueuedJobRecord>,
@@ -850,8 +1093,8 @@ pub struct JobsCoordinator {
     leadership: Option<SchedulerLeadership>,
 }
 
-impl JobsCoordinator {
-    pub fn new(runtime: JobsRuntime) -> Self {
+impl JobsBackendState {
+    fn new(runtime: JobsRuntime) -> Self {
         Self {
             runtime,
             ready: Vec::new(),
@@ -862,27 +1105,17 @@ impl JobsCoordinator {
         }
     }
 
-    pub fn ready_jobs(&self) -> &[QueuedJobRecord] {
-        &self.ready
+    fn snapshot(&self) -> JobsCoordinatorSnapshot {
+        JobsCoordinatorSnapshot {
+            ready: self.ready.clone(),
+            scheduled: self.scheduled.clone(),
+            in_flight: self.in_flight.clone(),
+            dead_letters: self.dead_letters.clone(),
+            leadership: self.leadership.clone(),
+        }
     }
 
-    pub fn scheduled_jobs(&self) -> &[QueuedJobRecord] {
-        &self.scheduled
-    }
-
-    pub fn in_flight_jobs(&self) -> &[JobLease] {
-        &self.in_flight
-    }
-
-    pub fn dead_letters(&self) -> &[DeadLetterOutcome] {
-        &self.dead_letters
-    }
-
-    pub fn leadership(&self) -> Option<&SchedulerLeadership> {
-        self.leadership.as_ref()
-    }
-
-    pub fn enqueue(&mut self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
+    fn enqueue(&mut self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
         let planned = self.runtime.planner().plan_job(spec.clone(), now)?;
         let record = QueuedJobRecord {
             spec: JobSpec {
@@ -905,7 +1138,7 @@ impl JobsCoordinator {
         Ok(())
     }
 
-    pub fn acquire_scheduler_leadership(
+    fn acquire_scheduler_leadership(
         &mut self,
         node_id: impl Into<String>,
         now: JobInstant,
@@ -930,7 +1163,7 @@ impl JobsCoordinator {
         Ok(leadership)
     }
 
-    pub fn promote_due_jobs(
+    fn promote_due_jobs(
         &mut self,
         node_id: &str,
         now: JobInstant,
@@ -956,7 +1189,7 @@ impl JobsCoordinator {
         Ok(promoted_ids)
     }
 
-    pub fn lease_ready_jobs(
+    fn lease_ready_jobs(
         &mut self,
         queue: &JobQueueName,
         worker_id: impl Into<String>,
@@ -995,7 +1228,7 @@ impl JobsCoordinator {
         Ok(leased)
     }
 
-    pub fn acknowledge_completed(
+    fn acknowledge_completed(
         &mut self,
         lease: &JobLease,
         now: JobInstant,
@@ -1005,7 +1238,7 @@ impl JobsCoordinator {
         Ok(())
     }
 
-    pub fn acknowledge_failed(
+    fn acknowledge_failed(
         &mut self,
         lease: &JobLease,
         now: JobInstant,
@@ -1059,55 +1292,6 @@ impl JobsCoordinator {
         }
     }
 
-    pub fn dispatch_event<P>(
-        &mut self,
-        domain: &JobsDomain,
-        event: &DomainEventEnvelope<P>,
-        now: JobInstant,
-    ) -> Result<Vec<JobId>, JobsModelError> {
-        let mut planned = Vec::new();
-
-        for subscription in domain
-            .domain_event_subscriptions
-            .iter()
-            .filter(|subscription| subscription.event_type == event.event_type)
-        {
-            if !domain
-                .handlers
-                .iter()
-                .any(|handler| handler.id == subscription.handler)
-            {
-                return Err(JobsModelError::MissingEventHandler {
-                    handler_id: subscription.handler.to_string(),
-                });
-            }
-
-            let spec = JobSpec::new(
-                JobId::new(format!(
-                    "event:{}:{}",
-                    event.event_id.as_str(),
-                    subscription.id.as_str()
-                ))?,
-                JobName::new(format!("event-handler:{}", subscription.handler.as_str()))?,
-                subscription.queue.clone(),
-                format!(
-                    "dispatch {} for {}:{}",
-                    event.event_type, event.aggregate_kind, event.aggregate_id
-                ),
-            )?
-            .with_retry_policy(subscription.retry_policy.clone());
-            let spec = match subscription.idempotency_key.clone() {
-                Some(key) => spec.with_idempotency_key(key),
-                None => spec,
-            };
-            let job_id = spec.job_id.clone();
-            self.enqueue(spec, now)?;
-            planned.push(job_id);
-        }
-
-        Ok(planned)
-    }
-
     fn require_active_leadership(
         &self,
         node_id: &str,
@@ -1158,6 +1342,169 @@ impl JobsCoordinator {
                 job_id: job_id.to_string(),
             })?;
         Ok(self.in_flight.remove(index).record)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct JobsCoordinator {
+    backend: JobsBackendAdapter,
+    snapshot: JobsCoordinatorSnapshot,
+}
+
+impl JobsCoordinator {
+    pub fn new(runtime: JobsRuntime) -> Self {
+        let backend = JobsBackendAdapter::shared_emulated(&runtime);
+        Self::with_backend(runtime, backend)
+    }
+
+    pub fn with_backend(runtime: JobsRuntime, backend: JobsBackendAdapter) -> Self {
+        let _ = runtime;
+        Self {
+            snapshot: backend.snapshot(),
+            backend,
+        }
+    }
+
+    pub fn ready_jobs(&self) -> &[QueuedJobRecord] {
+        &self.snapshot.ready
+    }
+
+    pub fn scheduled_jobs(&self) -> &[QueuedJobRecord] {
+        &self.snapshot.scheduled
+    }
+
+    pub fn in_flight_jobs(&self) -> &[JobLease] {
+        &self.snapshot.in_flight
+    }
+
+    pub fn dead_letters(&self) -> &[DeadLetterOutcome] {
+        &self.snapshot.dead_letters
+    }
+
+    pub fn leadership(&self) -> Option<&SchedulerLeadership> {
+        self.snapshot.leadership.as_ref()
+    }
+
+    pub fn refresh(&mut self) {
+        self.snapshot = self.backend.snapshot();
+    }
+
+    pub fn enqueue(&mut self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
+        self.backend.enqueue(spec, now)?;
+        self.refresh();
+        Ok(())
+    }
+
+    pub fn acquire_scheduler_leadership(
+        &mut self,
+        node_id: impl Into<String>,
+        now: JobInstant,
+        lease_ttl: Duration,
+    ) -> Result<SchedulerLeadership, JobsModelError> {
+        let leadership =
+            self.backend
+                .acquire_scheduler_leadership(node_id.into(), now, lease_ttl)?;
+        self.refresh();
+        Ok(leadership)
+    }
+
+    pub fn promote_due_jobs(
+        &mut self,
+        node_id: &str,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        let promoted = self.backend.promote_due_jobs(node_id, now)?;
+        self.refresh();
+        Ok(promoted)
+    }
+
+    pub fn lease_ready_jobs(
+        &mut self,
+        queue: &JobQueueName,
+        worker_id: impl Into<String>,
+        now: JobInstant,
+        lease_ttl: Duration,
+        max_jobs: usize,
+    ) -> Result<Vec<JobLease>, JobsModelError> {
+        let leased =
+            self.backend
+                .lease_ready_jobs(queue, worker_id.into(), now, lease_ttl, max_jobs)?;
+        self.refresh();
+        Ok(leased)
+    }
+
+    pub fn acknowledge_completed(
+        &mut self,
+        lease: &JobLease,
+        now: JobInstant,
+    ) -> Result<(), JobsModelError> {
+        self.backend.acknowledge_completed(lease, now)?;
+        self.refresh();
+        Ok(())
+    }
+
+    pub fn acknowledge_failed(
+        &mut self,
+        lease: &JobLease,
+        now: JobInstant,
+        reason: DeadLetterReason,
+        error_message: impl Into<String>,
+    ) -> Result<JobFailureDisposition, JobsModelError> {
+        let outcome = self
+            .backend
+            .acknowledge_failed(lease, now, reason, error_message.into())?;
+        self.refresh();
+        Ok(outcome)
+    }
+
+    pub fn dispatch_event<P>(
+        &mut self,
+        domain: &JobsDomain,
+        event: &DomainEventEnvelope<P>,
+        now: JobInstant,
+    ) -> Result<Vec<JobId>, JobsModelError> {
+        let mut planned = Vec::new();
+
+        for subscription in domain
+            .domain_event_subscriptions
+            .iter()
+            .filter(|subscription| subscription.event_type == event.event_type)
+        {
+            if !domain
+                .handlers
+                .iter()
+                .any(|handler| handler.id == subscription.handler)
+            {
+                return Err(JobsModelError::MissingEventHandler {
+                    handler_id: subscription.handler.to_string(),
+                });
+            }
+
+            let spec = JobSpec::new(
+                JobId::new(format!(
+                    "event:{}:{}",
+                    event.event_id.as_str(),
+                    subscription.id.as_str()
+                ))?,
+                JobName::new(format!("event-handler:{}", subscription.handler.as_str()))?,
+                subscription.queue.clone(),
+                format!(
+                    "dispatch {} for {}:{}",
+                    event.event_type, event.aggregate_kind, event.aggregate_id
+                ),
+            )?
+            .with_retry_policy(subscription.retry_policy.clone());
+            let spec = match subscription.idempotency_key.clone() {
+                Some(key) => spec.with_idempotency_key(key),
+                None => spec,
+            };
+            let job_id = spec.job_id.clone();
+            self.backend.enqueue(spec, now)?;
+            planned.push(job_id);
+        }
+
+        self.refresh();
+        Ok(planned)
     }
 }
 
@@ -1599,5 +1946,44 @@ mod tests {
             coordinator.ready_jobs()[0].spec.queue,
             runtime.describe().domain_events_queue
         );
+    }
+
+    #[test]
+    fn distributed_coordinators_share_backend_across_fresh_handles() {
+        let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
+        let mut left = runtime.coordinator();
+        let mut right = runtime.coordinator();
+
+        left.enqueue(
+            JobSpec::new(
+                JobId::new("job-shared").unwrap(),
+                JobName::new("shared-work").unwrap(),
+                runtime.describe().work_queue.clone(),
+                "shared backend work item",
+            )
+            .unwrap()
+            .with_idempotency_key(IdempotencyKey::new("shared-work:v1").unwrap()),
+            JobInstant::from_unix_seconds(10),
+        )
+        .unwrap();
+
+        right.refresh();
+        assert_eq!(right.ready_jobs().len(), 1);
+        assert_eq!(right.ready_jobs()[0].spec.job_id.as_str(), "job-shared");
+
+        let leased = right
+            .lease_ready_jobs(
+                &runtime.describe().work_queue,
+                "worker-shared",
+                JobInstant::from_unix_seconds(10),
+                Duration::from_secs(30),
+                1,
+            )
+            .unwrap();
+        assert_eq!(leased.len(), 1);
+
+        left.refresh();
+        assert_eq!(left.ready_jobs().len(), 0);
+        assert_eq!(left.in_flight_jobs().len(), 1);
     }
 }

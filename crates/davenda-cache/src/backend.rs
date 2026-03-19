@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheLookupState, CacheMetrics,
@@ -12,6 +15,11 @@ pub enum CacheBackendKind {
     Redis,
     Valkey,
 }
+
+static CACHE_BACKEND_DEPLOYMENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static DISTRIBUTED_CACHE_REGISTRY: OnceLock<
+    Mutex<HashMap<(CacheBackendKind, u64), Arc<dyn DistributedCacheRuntime>>>,
+> = OnceLock::new();
 
 #[derive(Debug, Clone, Default)]
 struct CacheBackendState {
@@ -100,40 +108,182 @@ impl CacheBackendState {
     }
 }
 
-#[derive(Debug, Clone)]
-enum CacheBackendStorage {
-    Local(CacheBackendState),
-    Shared(Arc<Mutex<CacheBackendState>>),
+pub trait DistributedCacheRuntime: Send + Sync + 'static {
+    fn insert(&self, entry: CacheEntry);
+    fn lookup(&self, key: &CacheKey, now: CacheInstant) -> CacheLookup;
+    fn invalidate(&self, tags: &InvalidationSet) -> Vec<CacheKey>;
+    fn begin_fill(
+        &self,
+        key: &CacheKey,
+        mode: RequestCoalescingMode,
+        holder: String,
+    ) -> FillDecision;
+    fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError>;
+    fn metrics(&self) -> CacheMetrics;
 }
 
-impl CacheBackendStorage {
-    fn local() -> Self {
-        Self::Local(CacheBackendState::new())
+#[derive(Debug)]
+struct EmulatedDistributedCacheRuntime {
+    state: Mutex<CacheBackendState>,
+}
+
+impl EmulatedDistributedCacheRuntime {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(CacheBackendState::new()),
+        }
+    }
+}
+
+impl DistributedCacheRuntime for EmulatedDistributedCacheRuntime {
+    fn insert(&self, entry: CacheEntry) {
+        let mut guard = self.state.lock().expect("cache backend mutex poisoned");
+        guard.insert(entry);
     }
 
-    fn shared() -> Self {
-        Self::Shared(Arc::new(Mutex::new(CacheBackendState::new())))
+    fn lookup(&self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
+        let mut guard = self.state.lock().expect("cache backend mutex poisoned");
+        guard.lookup(key, now)
     }
 
-    fn with_state<R>(&self, f: impl FnOnce(&CacheBackendState) -> R) -> R {
-        match self {
-            Self::Local(state) => f(state),
-            Self::Shared(state) => {
-                let guard = state.lock().expect("cache backend mutex poisoned");
-                f(&guard)
-            }
+    fn invalidate(&self, tags: &InvalidationSet) -> Vec<CacheKey> {
+        let mut guard = self.state.lock().expect("cache backend mutex poisoned");
+        guard.invalidate(tags)
+    }
+
+    fn begin_fill(
+        &self,
+        key: &CacheKey,
+        mode: RequestCoalescingMode,
+        holder: String,
+    ) -> FillDecision {
+        let mut guard = self.state.lock().expect("cache backend mutex poisoned");
+        guard.begin_fill(key, mode, holder)
+    }
+
+    fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
+        let mut guard = self.state.lock().expect("cache backend mutex poisoned");
+        guard.complete_fill(lease)
+    }
+
+    fn metrics(&self) -> CacheMetrics {
+        let guard = self.state.lock().expect("cache backend mutex poisoned");
+        guard.metrics
+    }
+}
+
+#[derive(Clone)]
+pub struct DistributedCacheClient {
+    kind: CacheBackendKind,
+    runtime: Arc<dyn DistributedCacheRuntime>,
+}
+
+impl DistributedCacheClient {
+    pub fn new(kind: CacheBackendKind, runtime: Arc<dyn DistributedCacheRuntime>) -> Self {
+        Self { kind, runtime }
+    }
+
+    fn emulated(kind: CacheBackendKind, deployment_id: u64) -> Self {
+        let registry = DISTRIBUTED_CACHE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = registry
+            .lock()
+            .expect("distributed cache registry mutex poisoned");
+        let runtime = guard
+            .entry((kind, deployment_id))
+            .or_insert_with(|| Arc::new(EmulatedDistributedCacheRuntime::new()))
+            .clone();
+
+        Self::new(kind, runtime)
+    }
+
+    pub fn kind(&self) -> CacheBackendKind {
+        self.kind
+    }
+
+    pub fn insert(&self, entry: CacheEntry) {
+        self.runtime.insert(entry);
+    }
+
+    pub fn lookup(&self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
+        self.runtime.lookup(key, now)
+    }
+
+    pub fn invalidate(&self, tags: &InvalidationSet) -> Vec<CacheKey> {
+        self.runtime.invalidate(tags)
+    }
+
+    pub fn begin_fill(
+        &self,
+        key: &CacheKey,
+        mode: RequestCoalescingMode,
+        holder: impl Into<String>,
+    ) -> FillDecision {
+        self.runtime.begin_fill(key, mode, holder.into())
+    }
+
+    pub fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
+        self.runtime.complete_fill(lease)
+    }
+
+    pub fn metrics(&self) -> CacheMetrics {
+        self.runtime.metrics()
+    }
+}
+
+impl fmt::Debug for DistributedCacheClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DistributedCacheClient")
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LocalCacheBackendAdapter {
+    state: CacheBackendState,
+}
+
+impl LocalCacheBackendAdapter {
+    fn new() -> Self {
+        Self {
+            state: CacheBackendState::new(),
         }
     }
 
-    fn with_state_mut<R>(&mut self, f: impl FnOnce(&mut CacheBackendState) -> R) -> R {
-        match self {
-            Self::Local(state) => f(state),
-            Self::Shared(state) => {
-                let mut guard = state.lock().expect("cache backend mutex poisoned");
-                f(&mut guard)
-            }
-        }
+    fn insert(&mut self, entry: CacheEntry) {
+        self.state.insert(entry);
     }
+
+    fn lookup(&mut self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
+        self.state.lookup(key, now)
+    }
+
+    fn invalidate(&mut self, tags: &InvalidationSet) -> Vec<CacheKey> {
+        self.state.invalidate(tags)
+    }
+
+    fn begin_fill(
+        &mut self,
+        key: &CacheKey,
+        mode: RequestCoalescingMode,
+        holder: impl Into<String>,
+    ) -> FillDecision {
+        self.state.begin_fill(key, mode, holder)
+    }
+
+    fn complete_fill(&mut self, lease: &FillLease) -> Result<(), CacheModelError> {
+        self.state.complete_fill(lease)
+    }
+
+    fn metrics(&self) -> CacheMetrics {
+        self.state.metrics
+    }
+}
+
+#[derive(Debug, Clone)]
+enum CacheBackendStorage {
+    Local(LocalCacheBackendAdapter),
+    Distributed(DistributedCacheClient),
 }
 
 #[derive(Debug, Clone)]
@@ -145,15 +295,27 @@ pub struct CacheBackendAdapter {
 
 impl CacheBackendAdapter {
     pub fn new(topology: CacheTopology) -> Self {
+        Self::for_deployment(topology, issue_cache_backend_deployment_id())
+    }
+
+    pub fn distributed(topology: CacheTopology, client: DistributedCacheClient) -> Self {
+        Self {
+            kind: client.kind(),
+            topology,
+            storage: CacheBackendStorage::Distributed(client),
+        }
+    }
+
+    pub(crate) fn for_deployment(topology: CacheTopology, deployment_id: u64) -> Self {
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
             None => CacheBackendKind::Local,
         };
         let storage = if topology.supports_shared_invalidation() {
-            CacheBackendStorage::shared()
+            CacheBackendStorage::Distributed(DistributedCacheClient::emulated(kind, deployment_id))
         } else {
-            CacheBackendStorage::local()
+            CacheBackendStorage::Local(LocalCacheBackendAdapter::new())
         };
 
         Self {
@@ -172,19 +334,28 @@ impl CacheBackendAdapter {
     }
 
     pub fn is_shared(&self) -> bool {
-        matches!(self.storage, CacheBackendStorage::Shared(_))
+        matches!(self.storage, CacheBackendStorage::Distributed(_))
     }
 
     pub fn insert(&mut self, entry: CacheEntry) {
-        self.storage.with_state_mut(|state| state.insert(entry));
+        match &mut self.storage {
+            CacheBackendStorage::Local(adapter) => adapter.insert(entry),
+            CacheBackendStorage::Distributed(client) => client.insert(entry),
+        }
     }
 
     pub fn lookup(&mut self, key: &CacheKey, now: CacheInstant) -> CacheLookup {
-        self.storage.with_state_mut(|state| state.lookup(key, now))
+        match &mut self.storage {
+            CacheBackendStorage::Local(adapter) => adapter.lookup(key, now),
+            CacheBackendStorage::Distributed(client) => client.lookup(key, now),
+        }
     }
 
     pub fn invalidate(&mut self, tags: &InvalidationSet) -> Vec<CacheKey> {
-        self.storage.with_state_mut(|state| state.invalidate(tags))
+        match &mut self.storage {
+            CacheBackendStorage::Local(adapter) => adapter.invalidate(tags),
+            CacheBackendStorage::Distributed(client) => client.invalidate(tags),
+        }
     }
 
     pub fn begin_fill(
@@ -193,16 +364,27 @@ impl CacheBackendAdapter {
         mode: RequestCoalescingMode,
         holder: impl Into<String>,
     ) -> FillDecision {
-        self.storage
-            .with_state_mut(|state| state.begin_fill(key, mode, holder))
+        match &mut self.storage {
+            CacheBackendStorage::Local(adapter) => adapter.begin_fill(key, mode, holder),
+            CacheBackendStorage::Distributed(client) => client.begin_fill(key, mode, holder),
+        }
     }
 
     pub fn complete_fill(&mut self, lease: &FillLease) -> Result<(), CacheModelError> {
-        self.storage
-            .with_state_mut(|state| state.complete_fill(lease))
+        match &mut self.storage {
+            CacheBackendStorage::Local(adapter) => adapter.complete_fill(lease),
+            CacheBackendStorage::Distributed(client) => client.complete_fill(lease),
+        }
     }
 
     pub fn metrics(&self) -> CacheMetrics {
-        self.storage.with_state(|state| state.metrics)
+        match &self.storage {
+            CacheBackendStorage::Local(adapter) => adapter.metrics(),
+            CacheBackendStorage::Distributed(client) => client.metrics(),
+        }
     }
+}
+
+fn issue_cache_backend_deployment_id() -> u64 {
+    CACHE_BACKEND_DEPLOYMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }

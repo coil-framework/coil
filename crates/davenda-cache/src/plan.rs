@@ -1,8 +1,12 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::{
     ApplicationCachePolicy, CacheKey, CacheModelError, CacheNamespace, CacheScope, CacheTopology,
     DistributedCacheBackend, FreshnessPolicy, HttpCachePolicy, InvalidationSet,
     RequestCoalescingMode, ResponseValidators, VariationKey,
 };
+
+static CACHE_PLANNER_DEPLOYMENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachePlanRequest {
@@ -140,14 +144,18 @@ impl CachePlan {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct CachePlanner {
     topology: CacheTopology,
+    deployment_id: u64,
 }
 
 impl CachePlanner {
     pub fn new(topology: CacheTopology) -> Self {
-        Self { topology }
+        Self {
+            topology,
+            deployment_id: CACHE_PLANNER_DEPLOYMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        }
     }
 
     pub fn topology(&self) -> CacheTopology {
@@ -155,7 +163,7 @@ impl CachePlanner {
     }
 
     pub fn runtime(&self) -> crate::CacheRuntime {
-        crate::CacheRuntime::new(self.topology)
+        crate::CacheRuntime::for_deployment(self.topology, self.deployment_id)
     }
 
     pub fn plan(&self, request: CachePlanRequest) -> Result<CachePlan, CacheModelError> {
@@ -199,3 +207,11 @@ impl CachePlanner {
         Ok(CachePlan { application, http })
     }
 }
+
+impl PartialEq for CachePlanner {
+    fn eq(&self, other: &Self) -> bool {
+        self.topology == other.topology
+    }
+}
+
+impl Eq for CachePlanner {}

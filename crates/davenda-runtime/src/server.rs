@@ -166,7 +166,7 @@ impl SharedBackendClients {
 type RouteAuthorizationFuture<'a> =
     Pin<Box<dyn Future<Output = Result<bool, RuntimeServerError>> + Send + 'a>>;
 
-trait LiveRouteCapabilityAuthorizer: Send + Sync {
+pub(crate) trait LiveRouteCapabilityAuthorizer: Send + Sync {
     fn check_capability<'a>(
         &'a self,
         subject: &'a davenda_auth::DefaultSubject,

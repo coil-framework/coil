@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -129,55 +130,232 @@ impl SessionStoreState {
     }
 }
 
+trait DistributedSessionStoreRuntime: Send + Sync + 'static {
+    fn issue(&self, record: BrowserSessionRecord);
+    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord>;
+    fn delete(&self, session_id: &str);
+    fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError>;
+    fn touch_active_session(
+        &self,
+        session_id: &str,
+        idle_timeout: Duration,
+        now: BrowserInstant,
+    ) -> Result<Option<String>, RuntimeBrowserError>;
+}
+
+#[derive(Debug)]
+struct EmulatedDistributedSessionStoreRuntime {
+    state: Mutex<SessionStoreState>,
+}
+
+impl EmulatedDistributedSessionStoreRuntime {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(SessionStoreState::default()),
+        }
+    }
+}
+
+impl DistributedSessionStoreRuntime for EmulatedDistributedSessionStoreRuntime {
+    fn issue(&self, record: BrowserSessionRecord) {
+        let mut guard = self.state.lock().expect("session backend mutex poisoned");
+        guard.issue(record);
+    }
+
+    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+        let guard = self.state.lock().expect("session backend mutex poisoned");
+        guard.session(session_id)
+    }
+
+    fn delete(&self, session_id: &str) {
+        let mut guard = self.state.lock().expect("session backend mutex poisoned");
+        guard.sessions.remove(session_id);
+    }
+
+    fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
+        let mut guard = self.state.lock().expect("session backend mutex poisoned");
+        guard.revoke(session_id, now)
+    }
+
+    fn touch_active_session(
+        &self,
+        session_id: &str,
+        idle_timeout: Duration,
+        now: BrowserInstant,
+    ) -> Result<Option<String>, RuntimeBrowserError> {
+        let mut guard = self.state.lock().expect("session backend mutex poisoned");
+        guard.touch_active_session(session_id, idle_timeout, now)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionStoreNamespace {
+    customer_app: String,
+    kind: SessionStoreBackendKind,
+    session_cookie_name: String,
+}
+
+impl Hash for SessionStoreNamespace {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.customer_app.hash(state);
+        self.kind.hash(state);
+        self.session_cookie_name.hash(state);
+    }
+}
+
+static DISTRIBUTED_SESSION_STORE_REGISTRY: OnceLock<
+    Mutex<HashMap<SessionStoreNamespace, Arc<dyn DistributedSessionStoreRuntime>>>,
+> = OnceLock::new();
+
+#[derive(Clone)]
+struct DistributedSessionStoreClient {
+    kind: SessionStoreBackendKind,
+    runtime: Arc<dyn DistributedSessionStoreRuntime>,
+}
+
+impl DistributedSessionStoreClient {
+    fn shared_emulated(namespace: SessionStoreNamespace) -> Self {
+        let registry =
+            DISTRIBUTED_SESSION_STORE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = registry
+            .lock()
+            .expect("distributed session registry mutex poisoned");
+        let kind = namespace.kind;
+        let runtime = guard
+            .entry(namespace)
+            .or_insert_with(|| Arc::new(EmulatedDistributedSessionStoreRuntime::new()))
+            .clone();
+
+        Self { kind, runtime }
+    }
+
+    fn issue(&self, record: BrowserSessionRecord) {
+        self.runtime.issue(record);
+    }
+
+    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
+        self.runtime.session(session_id)
+    }
+
+    fn delete(&self, session_id: &str) {
+        self.runtime.delete(session_id);
+    }
+
+    fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
+        self.runtime.revoke(session_id, now)
+    }
+
+    fn touch_active_session(
+        &self,
+        session_id: &str,
+        idle_timeout: Duration,
+        now: BrowserInstant,
+    ) -> Result<Option<String>, RuntimeBrowserError> {
+        self.runtime
+            .touch_active_session(session_id, idle_timeout, now)
+    }
+}
+
+impl std::fmt::Debug for DistributedSessionStoreClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DistributedSessionStoreClient")
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
 enum SessionStoreBackend {
     Local(SessionStoreState),
-    Shared(Arc<Mutex<SessionStoreState>>),
+    Distributed(DistributedSessionStoreClient),
 }
 
 impl SessionStoreBackend {
-    fn new(topology: davenda_core::SessionStoreTopology) -> (SessionStoreBackendKind, Self) {
-        match topology {
+    fn new(
+        customer_app: &str,
+        services: &davenda_core::SessionSecurityServices,
+    ) -> (SessionStoreBackendKind, Self) {
+        match services.store {
             davenda_core::SessionStoreTopology::Memory => (
                 SessionStoreBackendKind::Local,
                 Self::Local(SessionStoreState::default()),
             ),
             davenda_core::SessionStoreTopology::Database => (
                 SessionStoreBackendKind::Database,
-                Self::Shared(Arc::new(Mutex::new(SessionStoreState::default()))),
+                Self::Distributed(DistributedSessionStoreClient::shared_emulated(
+                    SessionStoreNamespace {
+                        customer_app: customer_app.to_string(),
+                        kind: SessionStoreBackendKind::Database,
+                        session_cookie_name: services.session_cookie.name.clone(),
+                    },
+                )),
             ),
             davenda_core::SessionStoreTopology::Redis => (
                 SessionStoreBackendKind::Redis,
-                Self::Shared(Arc::new(Mutex::new(SessionStoreState::default()))),
+                Self::Distributed(DistributedSessionStoreClient::shared_emulated(
+                    SessionStoreNamespace {
+                        customer_app: customer_app.to_string(),
+                        kind: SessionStoreBackendKind::Redis,
+                        session_cookie_name: services.session_cookie.name.clone(),
+                    },
+                )),
             ),
             davenda_core::SessionStoreTopology::Valkey => (
                 SessionStoreBackendKind::Valkey,
-                Self::Shared(Arc::new(Mutex::new(SessionStoreState::default()))),
+                Self::Distributed(DistributedSessionStoreClient::shared_emulated(
+                    SessionStoreNamespace {
+                        customer_app: customer_app.to_string(),
+                        kind: SessionStoreBackendKind::Valkey,
+                        session_cookie_name: services.session_cookie.name.clone(),
+                    },
+                )),
             ),
         }
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Self::Shared(_))
+        matches!(self, Self::Distributed(_))
     }
 
-    fn with_state<R>(&self, f: impl FnOnce(&SessionStoreState) -> R) -> R {
+    fn issue(&mut self, record: BrowserSessionRecord) {
         match self {
-            Self::Local(state) => f(state),
-            Self::Shared(state) => {
-                let guard = state.lock().expect("session backend mutex poisoned");
-                f(&guard)
-            }
+            Self::Local(state) => state.issue(record),
+            Self::Distributed(client) => client.issue(record),
         }
     }
 
-    fn with_state_mut<R>(&mut self, f: impl FnOnce(&mut SessionStoreState) -> R) -> R {
+    fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
         match self {
-            Self::Local(state) => f(state),
-            Self::Shared(state) => {
-                let mut guard = state.lock().expect("session backend mutex poisoned");
-                f(&mut guard)
+            Self::Local(state) => state.session(session_id),
+            Self::Distributed(client) => client.session(session_id),
+        }
+    }
+
+    fn delete(&mut self, session_id: &str) {
+        match self {
+            Self::Local(state) => {
+                state.sessions.remove(session_id);
             }
+            Self::Distributed(client) => client.delete(session_id),
+        }
+    }
+
+    fn revoke(&mut self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
+        match self {
+            Self::Local(state) => state.revoke(session_id, now),
+            Self::Distributed(client) => client.revoke(session_id, now),
+        }
+    }
+
+    fn touch_active_session(
+        &mut self,
+        session_id: &str,
+        idle_timeout: Duration,
+        now: BrowserInstant,
+    ) -> Result<Option<String>, RuntimeBrowserError> {
+        match self {
+            Self::Local(state) => state.touch_active_session(session_id, idle_timeout, now),
+            Self::Distributed(client) => client.touch_active_session(session_id, idle_timeout, now),
         }
     }
 }
@@ -291,7 +469,8 @@ pub struct BrowserHost {
 
 impl BrowserHost {
     pub(crate) fn new(customer_app: String, services: BrowserSecurityServices) -> Self {
-        let (session_store_kind, sessions) = SessionStoreBackend::new(services.sessions.store);
+        let (session_store_kind, sessions) =
+            SessionStoreBackend::new(&customer_app, &services.sessions);
         Self {
             customer_app,
             services,
@@ -325,7 +504,7 @@ impl BrowserHost {
             revoked_at: None,
         };
         let issued = self.issue_cookie_for_record(record.clone(), cookie_secret)?;
-        self.sessions.with_state_mut(|state| state.issue(record));
+        self.sessions.issue(record);
         Ok(issued)
     }
 
@@ -336,30 +515,24 @@ impl BrowserHost {
         now: BrowserInstant,
     ) -> Result<RotatedBrowserSession, RuntimeBrowserError> {
         let session_id = validate_browser_value("session_id", session_id.to_string())?;
-        let principal_id = self.sessions.with_state_mut(|state| {
-            let existing =
-                state
-                    .session(&session_id)
-                    .ok_or_else(|| RuntimeBrowserError::UnknownSession {
-                        session_id: session_id.clone(),
-                    })?;
-
-            match existing.status_at(now) {
-                BrowserSessionStatus::Active => {
-                    state.revoke(&session_id, now)?;
-                    Ok(existing.principal_id.clone())
-                }
-                BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
-                    state.sessions.remove(&session_id);
-                    Err(RuntimeBrowserError::ExpiredSession {
-                        session_id: session_id.clone(),
-                    })
-                }
-                BrowserSessionStatus::Revoked => Err(RuntimeBrowserError::RevokedSession {
-                    session_id: session_id.clone(),
-                }),
+        let existing = self.sessions.session(&session_id).ok_or_else(|| {
+            RuntimeBrowserError::UnknownSession {
+                session_id: session_id.clone(),
             }
         })?;
+        let principal_id = match existing.status_at(now) {
+            BrowserSessionStatus::Active => {
+                self.sessions.revoke(&session_id, now)?;
+                existing.principal_id.clone()
+            }
+            BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
+                self.sessions.delete(&session_id);
+                return Err(RuntimeBrowserError::ExpiredSession { session_id });
+            }
+            BrowserSessionStatus::Revoked => {
+                return Err(RuntimeBrowserError::RevokedSession { session_id });
+            }
+        };
 
         let issued =
             self.issue_session(SessionIssueRequest { principal_id }, cookie_secret, now)?;
@@ -375,8 +548,7 @@ impl BrowserHost {
         now: BrowserInstant,
     ) -> Result<(), RuntimeBrowserError> {
         let session_id = validate_browser_value("session_id", session_id.to_string())?;
-        self.sessions
-            .with_state_mut(|state| state.revoke(&session_id, now))
+        self.sessions.revoke(&session_id, now)
     }
 
     pub fn issue_csrf_token(
@@ -423,7 +595,7 @@ impl BrowserHost {
     }
 
     pub fn session(&self, session_id: &str) -> Option<BrowserSessionRecord> {
-        self.sessions.with_state(|state| state.session(session_id))
+        self.sessions.session(session_id)
     }
 
     pub fn resolve_request(
@@ -526,9 +698,11 @@ impl BrowserHost {
         cookie_secret: &[u8],
         now: BrowserInstant,
     ) -> Result<(Option<String>, String), RuntimeBrowserError> {
-        let principal_id = self.sessions.with_state_mut(|state| {
-            state.touch_active_session(session_id, self.services.sessions.idle_timeout, now)
-        })?;
+        let principal_id = self.sessions.touch_active_session(
+            session_id,
+            self.services.sessions.idle_timeout,
+            now,
+        )?;
         let cookie_value = CookieSigner::new(self.services.sessions.session_cookie.clone())
             .sign(cookie_secret, session_id)
             .map_err(map_session_cookie_error)?;
@@ -630,5 +804,73 @@ fn map_session_cookie_error(error: BrowserSecurityError) -> RuntimeBrowserError 
 fn map_flash_cookie_error(error: BrowserSecurityError) -> RuntimeBrowserError {
     RuntimeBrowserError::InvalidFlashCookie {
         reason: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use davenda_core::{
+        BrowserSecurityServices, CookiePolicy, CookieProtection, CsrfProtection,
+        SessionSecurityServices, SessionStoreTopology,
+    };
+
+    fn services(store: SessionStoreTopology) -> BrowserSecurityServices {
+        BrowserSecurityServices {
+            sessions: SessionSecurityServices {
+                store,
+                idle_timeout: Duration::from_secs(300),
+                absolute_timeout: Duration::from_secs(3600),
+                session_cookie: CookiePolicy {
+                    name: "session".to_string(),
+                    domain: None,
+                    path: "/".to_string(),
+                    same_site: davenda_config::SameSitePolicy::Lax,
+                    secure: true,
+                    http_only: true,
+                    protection: CookieProtection::Signed,
+                },
+                flash_cookie: CookiePolicy {
+                    name: "flash".to_string(),
+                    domain: None,
+                    path: "/".to_string(),
+                    same_site: davenda_config::SameSitePolicy::Lax,
+                    secure: true,
+                    http_only: true,
+                    protection: CookieProtection::Signed,
+                },
+            },
+            csrf: CsrfProtection {
+                enabled: true,
+                field_name: "_csrf".to_string(),
+                header_name: "x-csrf-token".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn database_session_hosts_share_backend_across_fresh_handles() {
+        let services = services(SessionStoreTopology::Database);
+        let mut left = BrowserHost::new("browser-db-shared".to_string(), services.clone());
+        let right = BrowserHost::new("browser-db-shared".to_string(), services);
+
+        let issued = left
+            .issue_session(
+                SessionIssueRequest::new()
+                    .for_principal("member-db")
+                    .unwrap(),
+                b"01234567012345670123456701234567",
+                BrowserInstant::from_unix_seconds(100),
+            )
+            .unwrap();
+
+        assert_eq!(left.session_store_kind(), SessionStoreBackendKind::Database);
+        assert!(left.session_store_is_shared());
+        assert_eq!(
+            right
+                .session(&issued.record.session_id)
+                .and_then(|record| record.principal_id),
+            Some("member-db".to_string())
+        );
     }
 }

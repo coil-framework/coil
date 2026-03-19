@@ -2,6 +2,16 @@
 name = "davenda-cli"
 version = "0.1.0"
 edition = "2024"
+default-run = "platform"
 
 [dependencies]
+async-trait = "0.1"
+davenda-auth = { path = "../davenda-auth" }
+futures = "0.3"
 thiserror = "1.0"
+serde_json = "1.0"
+zanzibar = { workspace = true }
+
+[[bin]]
+name = "platform"
+path = "src/main.rs"

@@ -1,6 +1,8 @@
 use super::*;
 use davenda_cache::{CacheBackendAdapter, CacheBackendKind, DistributedCacheClient};
 use davenda_jobs::JobsBackendAdapter;
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeBackendMaterializer {
@@ -33,12 +35,10 @@ impl RuntimeBackendMaterializer {
         match self.plans.distributed_cache.as_ref() {
             Some(target) => CacheRuntime::with_backend(
                 planner.topology(),
-                CacheBackendAdapter::distributed(
+                shared_cache_backend(
                     planner.topology(),
-                    DistributedCacheClient::scoped_shared(
-                        cache_backend_kind(target.backend),
-                        self.scope.clone(),
-                    ),
+                    cache_backend_kind(target.backend),
+                    self.scope.clone(),
                 ),
             ),
             None => planner.runtime(),
@@ -50,10 +50,49 @@ impl RuntimeBackendMaterializer {
         customer_app: &str,
         runtime: &JobsRuntimeServices,
     ) -> JobsCoordinator {
-        let backend =
-            JobsBackendAdapter::shared_scoped(runtime, format!("{}:{customer_app}", self.scope));
+        let backend = shared_jobs_backend(runtime, format!("{}:{customer_app}", self.scope));
         runtime.coordinator_with_backend(backend)
     }
+}
+
+pub(crate) fn shared_cache_backend(
+    topology: CacheTopology,
+    backend: CacheBackendKind,
+    scope: String,
+) -> CacheBackendAdapter {
+    static REGISTRY: OnceLock<Mutex<BTreeMap<String, CacheBackendAdapter>>> = OnceLock::new();
+
+    let key = format!("{topology:?}:{backend:?}:{scope}");
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry
+        .lock()
+        .expect("shared cache backend registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| {
+            CacheBackendAdapter::distributed(
+                topology,
+                DistributedCacheClient::scoped_shared(backend, scope.clone()),
+            )
+        })
+        .clone()
+}
+
+pub(crate) fn shared_jobs_backend(
+    runtime: &JobsRuntimeServices,
+    scope: String,
+) -> JobsBackendAdapter {
+    static REGISTRY: OnceLock<Mutex<BTreeMap<String, JobsBackendAdapter>>> = OnceLock::new();
+
+    let key = format!("{runtime:?}:{scope}");
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry
+        .lock()
+        .expect("shared jobs backend registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| JobsBackendAdapter::shared_scoped(runtime, scope.clone()))
+        .clone()
 }
 
 fn cache_backend_kind(backend: davenda_cache::DistributedCacheBackend) -> CacheBackendKind {

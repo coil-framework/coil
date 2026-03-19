@@ -217,7 +217,8 @@ impl DistributedSessionStoreClient {
         Self::local_for_testing(kind)
     }
 
-    pub fn local_for_testing(kind: SessionStoreBackendKind) -> Self {
+    #[doc(hidden)]
+    pub(crate) fn local_for_testing(kind: SessionStoreBackendKind) -> Self {
         Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
     }
 

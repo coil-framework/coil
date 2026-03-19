@@ -1,4 +1,5 @@
 use super::*;
+use crate::backends::shared_jobs_backend;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredModuleJob {
@@ -182,9 +183,8 @@ impl JobsHost {
         registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
         jobs_domain: JobsDomain,
     ) -> Self {
-        let coordinator = runtime.coordinator_with_backend(
-            davenda_jobs::JobsBackendAdapter::shared_scoped(&runtime, backend_scope),
-        );
+        let coordinator =
+            runtime.coordinator_with_backend(shared_jobs_backend(&runtime, backend_scope));
         Self {
             customer_app,
             scheduler_node_id,

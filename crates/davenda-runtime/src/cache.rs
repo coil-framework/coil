@@ -1,5 +1,5 @@
 use super::*;
-use davenda_cache::CacheBackendAdapter;
+use crate::backends::shared_cache_backend;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeCacheError {
@@ -23,9 +23,21 @@ impl CacheHost {
         planner: CachePlanner,
     ) -> Self {
         let runtime = if planner.topology().supports_shared_invalidation() {
+            let backend = match planner
+                .topology()
+                .l2()
+                .expect("shared cache backend requires distributed l2")
+            {
+                davenda_cache::DistributedCacheBackend::Redis => {
+                    davenda_cache::CacheBackendKind::Redis
+                }
+                davenda_cache::DistributedCacheBackend::Valkey => {
+                    davenda_cache::CacheBackendKind::Valkey
+                }
+            };
             CacheRuntime::with_backend(
                 planner.topology(),
-                CacheBackendAdapter::scoped_shared(planner.topology(), backend_scope),
+                shared_cache_backend(planner.topology(), backend, backend_scope),
             )
         } else {
             planner.runtime()

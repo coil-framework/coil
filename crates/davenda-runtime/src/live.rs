@@ -3,7 +3,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 mod response;
 
-pub(crate) use response::LiveResponseComposition;
+pub(crate) use response::{LiveResponseAnnotations, LiveResponseComposition};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveExecutionReceipts {
@@ -88,14 +88,6 @@ impl LiveExecutionReceipts {
         merged
     }
 
-    pub(crate) fn compose_page_html(&self, html: String) -> String {
-        self.compose_html_output(html)
-    }
-
-    pub(crate) fn compose_fragment_html(&self, html: String) -> String {
-        self.compose_html_output(html)
-    }
-
     pub(crate) fn compose_json_payload(
         &self,
         mut payload: BTreeMap<String, String>,
@@ -107,171 +99,6 @@ impl LiveExecutionReceipts {
         }
 
         payload
-    }
-
-    pub(crate) fn compose_cache_headers(
-        &self,
-        mut headers: BTreeMap<String, String>,
-    ) -> BTreeMap<String, String> {
-        if let Some(cache_hint) = self.merged_cache_hint() {
-            let merged_cache_control = headers
-                .get("Cache-Control")
-                .map(|value| merge_cache_control_value(value, &cache_hint))
-                .unwrap_or_else(|| render_cache_control(&cache_hint));
-            headers.insert("Cache-Control".to_string(), merged_cache_control);
-
-            let merged_surrogate_tags = headers
-                .get("Surrogate-Key")
-                .map(|value| merge_surrogate_tags(value, &cache_hint))
-                .unwrap_or_else(|| {
-                    cache_hint
-                        .tags
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                });
-            if !merged_surrogate_tags.is_empty() {
-                headers.insert("Surrogate-Key".to_string(), merged_surrogate_tags);
-            }
-        }
-
-        headers
-    }
-
-    pub(crate) fn response_headers(&self) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-
-        if let Some(receipt) = &self.request_surface {
-            append_receipt_headers(&mut headers, "request", receipt);
-        }
-
-        if !self.render_hooks.is_empty() {
-            headers.insert(
-                HeaderName::from_static("x-davenda-wasm-render-hook-count"),
-                HeaderValue::from_str(&self.render_hooks.len().to_string())
-                    .expect("render hook count is a valid header value"),
-            );
-            headers.insert(
-                HeaderName::from_static("x-davenda-wasm-render-hook-handlers"),
-                HeaderValue::from_str(
-                    &self
-                        .render_hooks
-                        .iter()
-                        .map(|receipt| receipt.handler_id.to_string())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                )
-                .expect("render hook handler list is a valid header value"),
-            );
-            for receipt in &self.render_hooks {
-                append_receipt_headers(&mut headers, "render-hook", receipt);
-            }
-        }
-
-        if !self.admin_widgets.is_empty() {
-            headers.insert(
-                HeaderName::from_static("x-davenda-wasm-admin-widget-count"),
-                HeaderValue::from_str(&self.admin_widgets.len().to_string())
-                    .expect("admin widget count is a valid header value"),
-            );
-            headers.insert(
-                HeaderName::from_static("x-davenda-wasm-admin-widget-handlers"),
-                HeaderValue::from_str(
-                    &self
-                        .admin_widgets
-                        .iter()
-                        .map(|receipt| receipt.handler_id.to_string())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                )
-                .expect("admin widget handler list is a valid header value"),
-            );
-            for receipt in &self.admin_widgets {
-                append_receipt_headers(&mut headers, "admin-widget", receipt);
-            }
-        }
-
-        if let Some(metadata) = self.merged_metadata() {
-            if let Some(title) = metadata.title.as_ref() {
-                insert_header(&mut headers, "x-davenda-wasm-metadata-title", title.clone());
-            }
-            if let Some(description) = metadata.description.as_ref() {
-                insert_header(
-                    &mut headers,
-                    "x-davenda-wasm-metadata-description",
-                    description.clone(),
-                );
-            }
-            if let Some(canonical_url) = metadata.canonical_url.as_ref() {
-                insert_header(
-                    &mut headers,
-                    "x-davenda-wasm-metadata-canonical",
-                    canonical_url.clone(),
-                );
-            }
-            if !metadata.alternate_urls.is_empty() {
-                insert_header(
-                    &mut headers,
-                    "x-davenda-wasm-metadata-alternates",
-                    metadata
-                        .alternate_urls
-                        .iter()
-                        .map(|(locale, url)| format!("{locale}={url}"))
-                        .collect::<Vec<_>>()
-                        .join(","),
-                );
-            }
-            if !metadata.robots.is_empty() {
-                insert_header(
-                    &mut headers,
-                    "x-davenda-wasm-metadata-robots",
-                    metadata
-                        .robots
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(","),
-                );
-            }
-            if !metadata.json_ld.is_empty() {
-                insert_header(
-                    &mut headers,
-                    "x-davenda-wasm-metadata-json-ld-count",
-                    metadata.json_ld.len().to_string(),
-                );
-            }
-        }
-
-        if let Some(cache_hint) = self.merged_cache_hint() {
-            insert_header(
-                &mut headers,
-                "x-davenda-wasm-cache-visibility",
-                match cache_hint.visibility {
-                    CacheVisibility::Public => "public".to_string(),
-                    CacheVisibility::Private => "private".to_string(),
-                },
-            );
-            insert_header(
-                &mut headers,
-                "x-davenda-wasm-cache-control",
-                render_cache_control(&cache_hint),
-            );
-            if !cache_hint.tags.is_empty() {
-                insert_header(
-                    &mut headers,
-                    "x-davenda-wasm-cache-tags",
-                    cache_hint
-                        .tags
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(","),
-                );
-            }
-        }
-
-        headers
     }
 
     fn compose_html_output(&self, html: String) -> String {
@@ -293,18 +120,27 @@ impl LiveExecutionReceipts {
         plan: &RuntimePlan,
         execution: &RequestExecution,
     ) -> Result<LiveResponseComposition, RuntimeServerError> {
+        let annotations = LiveResponseAnnotations::default()
+            .request_surface(self.request_surface.clone())
+            .render_hooks(self.render_hooks.clone())
+            .admin_widgets(self.admin_widgets.clone())
+            .metadata(self.merged_metadata())
+            .cache_hint(self.merged_cache_hint())
+            .cache_headers(execution.cache_plan.headers.clone())
+            .route(execution.route.route_name.clone())
+            .locale(execution.locale.clone());
         let mut response = match &execution.response {
             HandlerResponse::Page(page) => {
                 let html =
                     plan.render_page_response(execution, page, self.merged_metadata().as_ref())?;
                 let status = self
                     .response_status(StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK));
-                LiveResponseComposition::html(status, self.compose_page_html(html))
+                LiveResponseComposition::html(status, self.compose_html_output(html))
             }
             HandlerResponse::Fragment(fragment) => {
                 let html = plan.render_fragment_response(execution, fragment)?;
                 let status = self.response_status(StatusCode::OK);
-                LiveResponseComposition::html(status, self.compose_fragment_html(html))
+                LiveResponseComposition::html(status, self.compose_html_output(html))
             }
             HandlerResponse::Redirect(redirect) => {
                 let status = StatusCode::from_u16(redirect.status).unwrap_or(StatusCode::SEE_OTHER);
@@ -326,13 +162,7 @@ impl LiveExecutionReceipts {
                 ),
         };
 
-        response = response.extend_headers(self.response_headers());
-        response = response.extend_key_value_headers(
-            self.compose_cache_headers(execution.cache_plan.headers.clone()),
-        );
-        response = response
-            .with_header("x-davenda-route", execution.route.route_name.clone())
-            .with_header("x-davenda-locale", execution.locale.clone());
+        response = response.with_annotation(annotations);
 
         for cookie in execution.response_cookies.clone() {
             response = response.with_cookie(cookie);

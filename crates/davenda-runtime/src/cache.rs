@@ -1,5 +1,5 @@
 use super::*;
-use crate::backends::shared_cache_backend;
+use crate::backends::shared_cache_runtime;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeCacheError {
@@ -35,9 +35,9 @@ impl CacheHost {
                     davenda_cache::CacheBackendKind::Valkey
                 }
             };
-            CacheRuntime::with_backend(
+            CacheRuntime::with_shared_runtime(
                 planner.topology(),
-                shared_cache_backend(planner.topology(), backend, backend_scope),
+                shared_cache_runtime(planner.topology(), backend, backend_scope),
             )
         } else {
             planner.runtime()

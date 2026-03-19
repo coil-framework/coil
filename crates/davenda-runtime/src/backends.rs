@@ -1,6 +1,5 @@
 use super::*;
-use davenda_cache::{CacheBackendAdapter, CacheBackendKind, DistributedCacheClient};
-use davenda_jobs::JobsBackendAdapter;
+use davenda_cache::{CacheBackendKind, DistributedCacheClient};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -19,23 +18,22 @@ impl RuntimeBackendMaterializer {
         &self,
         customer_app: String,
         services: BrowserSecurityServices,
-    ) -> BrowserHost {
+    ) -> Result<BrowserHost, BrowserHostBuildError> {
         match self.plans.session_store.as_ref() {
             Some(target) => BrowserHost::with_session_store_client(
                 customer_app.clone(),
                 services.clone(),
                 DistributedSessionStoreClient::shared(target.kind, self.scope.clone()),
-            )
-            .expect("materialized session store target must match browser services"),
+            ),
             None => BrowserHost::new_with_scope(customer_app, services, self.scope.clone()),
         }
     }
 
     pub(crate) fn cache_runtime(&self, planner: CachePlanner) -> CacheRuntime {
         match self.plans.distributed_cache.as_ref() {
-            Some(target) => CacheRuntime::with_backend(
+            Some(target) => CacheRuntime::with_shared_runtime(
                 planner.topology(),
-                shared_cache_backend(
+                shared_cache_runtime(
                     planner.topology(),
                     cache_backend_kind(target.backend),
                     self.scope.clone(),
@@ -50,48 +48,49 @@ impl RuntimeBackendMaterializer {
         customer_app: &str,
         runtime: &JobsRuntimeServices,
     ) -> JobsCoordinator {
-        let backend = shared_jobs_backend(runtime, format!("{}:{customer_app}", self.scope));
-        runtime.coordinator_with_backend(backend)
+        runtime.coordinator_with_shared_runtime(shared_jobs_runtime(
+            runtime,
+            format!("{}:{customer_app}", self.scope),
+        ))
     }
 }
 
-pub(crate) fn shared_cache_backend(
+pub(crate) fn shared_cache_runtime(
     topology: CacheTopology,
     backend: CacheBackendKind,
     scope: String,
-) -> CacheBackendAdapter {
-    static REGISTRY: OnceLock<Mutex<BTreeMap<String, CacheBackendAdapter>>> = OnceLock::new();
+) -> std::sync::Arc<dyn davenda_cache::DistributedCacheRuntime> {
+    static REGISTRY: OnceLock<
+        Mutex<BTreeMap<String, std::sync::Arc<dyn davenda_cache::DistributedCacheRuntime>>>,
+    > = OnceLock::new();
 
     let key = format!("{topology:?}:{backend:?}:{scope}");
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
     let mut guard = registry
         .lock()
-        .expect("shared cache backend registry mutex poisoned");
+        .expect("shared cache runtime registry mutex poisoned");
     guard
         .entry(key)
-        .or_insert_with(|| {
-            CacheBackendAdapter::distributed(
-                topology,
-                DistributedCacheClient::scoped_shared(backend, scope.clone()),
-            )
-        })
+        .or_insert_with(|| DistributedCacheClient::emulated_shared_runtime(backend))
         .clone()
 }
 
-pub(crate) fn shared_jobs_backend(
+pub(crate) fn shared_jobs_runtime(
     runtime: &JobsRuntimeServices,
     scope: String,
-) -> JobsBackendAdapter {
-    static REGISTRY: OnceLock<Mutex<BTreeMap<String, JobsBackendAdapter>>> = OnceLock::new();
+) -> std::sync::Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+    static REGISTRY: OnceLock<
+        Mutex<BTreeMap<String, std::sync::Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>,
+    > = OnceLock::new();
 
     let key = format!("{runtime:?}:{scope}");
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
     let mut guard = registry
         .lock()
-        .expect("shared jobs backend registry mutex poisoned");
+        .expect("shared jobs runtime registry mutex poisoned");
     guard
         .entry(key)
-        .or_insert_with(|| JobsBackendAdapter::shared_scoped(runtime, scope.clone()))
+        .or_insert_with(|| davenda_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
         .clone()
 }
 

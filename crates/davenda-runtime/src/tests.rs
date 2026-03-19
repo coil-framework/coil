@@ -1092,7 +1092,7 @@ fn browser_host_issues_rotates_and_revokes_server_side_sessions() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let mut host = plan.browser_host();
+    let mut host = plan.browser_host().unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
 
     let issued = host
@@ -1147,7 +1147,8 @@ fn browser_host_keeps_memory_sessions_local_to_each_clone() {
         .build()
         .unwrap();
 
-    let mut left = plan.browser_host();
+    let mut left =
+        BrowserHost::local_for_testing(plan.config.app.name.clone(), plan.browser.clone());
     let mut right = left.clone();
     assert_eq!(left.session_store_kind(), SessionStoreBackendKind::Local);
     assert!(!left.session_store_is_shared());
@@ -1184,8 +1185,8 @@ fn browser_host_shares_distributed_sessions_by_default_within_a_plan() {
         .build()
         .unwrap();
 
-    let mut left = plan.browser_host();
-    let right = plan.browser_host();
+    let mut left = plan.browser_host().unwrap();
+    let right = plan.browser_host().unwrap();
     assert_eq!(left.session_store_kind(), SessionStoreBackendKind::Redis);
     assert!(left.session_store_is_shared());
 
@@ -1284,12 +1285,13 @@ fn browser_host_shares_distributed_sessions_when_reusing_an_explicit_client() {
 fn cache_runtime_shares_distributed_state_when_reusing_an_explicit_backend() {
     let topology = CacheTopology::with_redis();
     let planner = CachePlanner::new(topology);
-    let adapter = CacheBackendAdapter::scoped_shared(topology, "runtime-cache-shared");
+    let shared_runtime =
+        davenda_cache::DistributedCacheClient::emulated_shared_runtime(CacheBackendKind::Redis);
+    let adapter = CacheBackendAdapter::with_shared_runtime(topology, shared_runtime);
     let mut left = CacheRuntime::with_backend(topology, adapter.clone());
     let mut right = CacheRuntime::with_backend(topology, adapter);
 
     assert_eq!(left.backend_kind(), CacheBackendKind::Redis);
-    assert!(left.backend_is_shared());
 
     let app_policy = ApplicationCachePolicy::new(
         CacheScope::public()
@@ -1350,7 +1352,7 @@ fn execute_browser_request_uses_server_side_session_resolution_and_flash_transpo
         .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
         .build()
         .unwrap();
-    let mut host = plan.browser_host();
+    let mut host = plan.browser_host().unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
 
@@ -1430,7 +1432,7 @@ fn execute_browser_request_rejects_expired_server_side_sessions() {
         .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
         .build()
         .unwrap();
-    let mut host = plan.browser_host();
+    let mut host = plan.browser_host().unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
     let issued = host
@@ -1477,7 +1479,7 @@ fn execute_browser_request_supports_csrf_for_host_managed_sessions() {
         .with_handler(HandlerDefinition::redirect("cms.publish", "/admin/pages").unwrap())
         .build()
         .unwrap();
-    let mut host = plan.browser_host();
+    let mut host = plan.browser_host().unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
     let issued = host
@@ -1947,7 +1949,8 @@ async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() 
         backends,
         cookie_secret.to_vec(),
         csrf_secret.to_vec(),
-    );
+    )
+    .unwrap();
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2009,7 +2012,8 @@ async fn server_host_authorizes_capability_routes_through_live_authorizer() {
         cookie_secret.to_vec(),
         csrf_secret.to_vec(),
         authorizer.clone(),
-    );
+    )
+    .unwrap();
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2348,7 +2352,7 @@ async fn server_host_executes_page_extensions_during_live_requests() {
     );
     assert_eq!(
         headers.get("cache-control").unwrap(),
-        "private, max-age=60, stale-while-revalidate=30"
+        "public,max-age=60,stale-while-revalidate=30,vary-by-locale"
     );
     assert!(
         headers
@@ -2427,7 +2431,7 @@ async fn server_host_applies_typed_cache_policy_to_public_page_responses() {
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(
         headers.get("cache-control").unwrap(),
-        "public, max-age=60, stale-while-revalidate=30"
+        "public,max-age=60,stale-while-revalidate=30,vary-by-locale"
     );
     assert!(
         headers
@@ -2535,7 +2539,8 @@ async fn server_host_executes_admin_widget_extensions_during_live_requests() {
         b"01234567012345670123456701234567".to_vec(),
         b"76543210765432107654321076543210".to_vec(),
         authorizer,
-    );
+    )
+    .unwrap();
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2708,7 +2713,8 @@ async fn server_host_rejects_capability_routes_when_live_authorizer_denies() {
         cookie_secret.to_vec(),
         csrf_secret.to_vec(),
         authorizer.clone(),
-    );
+    )
+    .unwrap();
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

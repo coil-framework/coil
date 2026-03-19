@@ -3,7 +3,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 mod response;
 
-pub(crate) use response::{LiveResponseAnnotations, LiveResponseComposition};
+pub(crate) use response::{LiveCacheHeaders, LiveResponseAnnotations, LiveResponseComposition};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveExecutionReceipts {
@@ -120,13 +120,17 @@ impl LiveExecutionReceipts {
         plan: &RuntimePlan,
         execution: &RequestExecution,
     ) -> Result<LiveResponseComposition, RuntimeServerError> {
+        let cache_hint = self.merged_cache_hint();
         let annotations = LiveResponseAnnotations::default()
             .request_surface(self.request_surface.clone())
             .render_hooks(self.render_hooks.clone())
             .admin_widgets(self.admin_widgets.clone())
             .metadata(self.merged_metadata())
-            .cache_hint(self.merged_cache_hint())
-            .cache_headers(execution.cache_plan.headers.clone())
+            .cache_hint(cache_hint.clone())
+            .cache_headers(LiveCacheHeaders::from_parts(
+                execution.cache_plan.headers.clone(),
+                cache_hint.as_ref(),
+            ))
             .route(execution.route.route_name.clone())
             .locale(execution.locale.clone());
         let mut response = match &execution.response {
@@ -235,108 +239,6 @@ fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
         FileDeliveryMode::AppProxy => "app_proxy",
         FileDeliveryMode::LocalOnly => "local_only",
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CacheControlPolicy {
-    visibility: CacheVisibility,
-    max_age_seconds: u64,
-    stale_while_revalidate_seconds: Option<u64>,
-}
-
-impl CacheControlPolicy {
-    fn parse(value: &str) -> Option<Self> {
-        let mut visibility = None;
-        let mut max_age_seconds = None;
-        let mut stale_while_revalidate_seconds = None;
-
-        for directive in value.split(',') {
-            let directive = directive.trim();
-            if directive.is_empty() {
-                continue;
-            }
-            if directive == "no-store" {
-                return None;
-            }
-            if directive == "public" {
-                visibility = Some(CacheVisibility::Public);
-                continue;
-            }
-            if directive == "private" {
-                visibility = Some(CacheVisibility::Private);
-                continue;
-            }
-            if let Some(value) = directive.strip_prefix("max-age=") {
-                max_age_seconds = value.parse::<u64>().ok();
-                continue;
-            }
-            if let Some(value) = directive.strip_prefix("stale-while-revalidate=") {
-                stale_while_revalidate_seconds = value.parse::<u64>().ok();
-            }
-        }
-
-        Some(Self {
-            visibility: visibility?,
-            max_age_seconds: max_age_seconds?,
-            stale_while_revalidate_seconds,
-        })
-    }
-
-    fn merge_from_hint(&mut self, cache_hint: &TypedCacheHint) {
-        self.visibility = match (self.visibility, cache_hint.visibility) {
-            (CacheVisibility::Private, _) | (_, CacheVisibility::Private) => {
-                CacheVisibility::Private
-            }
-            _ => CacheVisibility::Public,
-        };
-        self.max_age_seconds = self.max_age_seconds.min(cache_hint.max_age_seconds);
-        self.stale_while_revalidate_seconds = match (
-            self.stale_while_revalidate_seconds,
-            cache_hint.stale_while_revalidate_seconds,
-        ) {
-            (Some(left), Some(right)) => Some(left.min(right)),
-            (Some(left), None) => Some(left),
-            (None, Some(right)) => Some(right),
-            (None, None) => None,
-        };
-    }
-
-    fn render(self) -> String {
-        let mut directives = Vec::new();
-        directives.push(match self.visibility {
-            CacheVisibility::Public => "public".to_string(),
-            CacheVisibility::Private => "private".to_string(),
-        });
-        directives.push(format!("max-age={}", self.max_age_seconds));
-        if let Some(value) = self.stale_while_revalidate_seconds {
-            directives.push(format!("stale-while-revalidate={value}"));
-        }
-        directives.join(", ")
-    }
-}
-
-fn merge_cache_control_value(existing: &str, cache_hint: &TypedCacheHint) -> String {
-    if existing.trim() == "no-store" {
-        return "no-store".to_string();
-    }
-
-    let Some(mut policy) = CacheControlPolicy::parse(existing) else {
-        return existing.to_string();
-    };
-    policy.merge_from_hint(cache_hint);
-    policy.render()
-}
-
-fn merge_surrogate_tags(existing: &str, cache_hint: &TypedCacheHint) -> String {
-    let mut tags = BTreeSet::new();
-    tags.extend(
-        existing
-            .split_whitespace()
-            .filter(|tag| !tag.is_empty())
-            .map(str::to_string),
-    );
-    tags.extend(cache_hint.tags.iter().cloned());
-    tags.into_iter().collect::<Vec<_>>().join(" ")
 }
 
 fn render_cache_control(cache_hint: &TypedCacheHint) -> String {

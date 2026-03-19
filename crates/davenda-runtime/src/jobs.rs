@@ -1,5 +1,5 @@
 use super::*;
-use crate::backends::shared_jobs_backend;
+use crate::backends::shared_jobs_runtime;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredModuleJob {
@@ -184,7 +184,7 @@ impl JobsHost {
         jobs_domain: JobsDomain,
     ) -> Self {
         let coordinator =
-            runtime.coordinator_with_backend(shared_jobs_backend(&runtime, backend_scope));
+            runtime.coordinator_with_shared_runtime(shared_jobs_runtime(&runtime, backend_scope));
         Self {
             customer_app,
             scheduler_node_id,

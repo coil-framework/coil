@@ -92,7 +92,7 @@ impl RuntimePlan {
         ))
     }
 
-    pub fn browser_host(&self) -> BrowserHost {
+    pub fn browser_host(&self) -> Result<BrowserHost, BrowserHostBuildError> {
         BrowserHost::new_with_scope(
             self.config.app.name.clone(),
             self.browser.clone(),
@@ -136,12 +136,12 @@ impl RuntimePlan {
         cookie_secret: &[u8],
         csrf_secret: &[u8],
     ) -> Result<HttpServerHost, RuntimeServerError> {
-        Ok(HttpServerHost::new(
+        HttpServerHost::new(
             self.clone(),
             self.shared_backend_clients(resolver)?,
             cookie_secret.to_vec(),
             csrf_secret.to_vec(),
-        ))
+        )
     }
 
     pub(crate) fn cache_namespace(&self) -> Result<CacheNamespace, CacheModelError> {

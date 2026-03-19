@@ -38,6 +38,8 @@ pub enum RuntimeServerError {
     Render(#[from] RuntimeRenderError),
     #[error(transparent)]
     WasmExecution(#[from] LiveWasmExecutionError),
+    #[error(transparent)]
+    BrowserHostBuild(#[from] BrowserHostBuildError),
     #[error("live request authorization does not support auth package `{package}`")]
     UnsupportedAuthPackage { package: String },
     #[error("live request authorization failed: {reason}")]
@@ -501,7 +503,7 @@ impl HttpServerHost {
         backends: SharedBackendClients,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
-    ) -> Self {
+    ) -> Result<Self, RuntimeServerError> {
         let materializer =
             RuntimeBackendMaterializer::new(plan.shared_backend_scope.clone(), backends.clone());
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
@@ -511,18 +513,19 @@ impl HttpServerHost {
                 backends.database.url.clone(),
                 plan.auth_package_name.clone(),
             ));
-        let browser = materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone());
+        let browser =
+            materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
         let _shared_cache_runtime = materializer.cache_runtime(plan.cache_planner);
         let _shared_jobs_coordinator =
             materializer.jobs_coordinator(&plan.config.app.name, &plan.jobs);
-        Self::new_with_browser_and_authorizer(
+        Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
             backends,
             cookie_secret,
             csrf_secret,
             route_authorizer,
-        )
+        ))
     }
 
     pub fn new_with_browser_host(
@@ -531,7 +534,7 @@ impl HttpServerHost {
         backends: SharedBackendClients,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
-    ) -> Self {
+    ) -> Result<Self, RuntimeServerError> {
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
@@ -539,14 +542,14 @@ impl HttpServerHost {
                 backends.database.url.clone(),
                 plan.auth_package_name.clone(),
             ));
-        Self::new_with_browser_and_authorizer(
+        Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
             backends,
             cookie_secret,
             csrf_secret,
             route_authorizer,
-        )
+        ))
     }
 
     #[allow(dead_code)]
@@ -556,16 +559,16 @@ impl HttpServerHost {
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
         route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
-    ) -> Self {
-        let browser = plan.browser_host();
-        Self::new_with_browser_and_authorizer(
+    ) -> Result<Self, RuntimeServerError> {
+        let browser = plan.browser_host()?;
+        Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
             backends,
             cookie_secret,
             csrf_secret,
             route_authorizer,
-        )
+        ))
     }
 
     fn new_with_browser_and_authorizer(

@@ -212,11 +212,13 @@ impl DistributedSessionStoreClient {
         Self { kind, runtime }
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn in_memory(kind: SessionStoreBackendKind) -> Self {
         Self::local_for_testing(kind)
     }
 
+    #[cfg(test)]
     #[doc(hidden)]
     pub(crate) fn local_for_testing(kind: SessionStoreBackendKind) -> Self {
         Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
@@ -294,7 +296,41 @@ enum SessionStoreBackend {
 }
 
 impl SessionStoreBackend {
-    fn new(
+    fn shared(
+        customer_app: &str,
+        services: &davenda_core::SessionSecurityServices,
+        backend_scope: &str,
+    ) -> Result<(SessionStoreBackendKind, Self), BrowserHostBuildError> {
+        match services.store {
+            davenda_core::SessionStoreTopology::Memory => {
+                Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost)
+            }
+            davenda_core::SessionStoreTopology::Database => Ok((
+                SessionStoreBackendKind::Database,
+                Self::Distributed(DistributedSessionStoreClient::shared(
+                    SessionStoreBackendKind::Database,
+                    format!("{backend_scope}:{customer_app}"),
+                )),
+            )),
+            davenda_core::SessionStoreTopology::Redis => Ok((
+                SessionStoreBackendKind::Redis,
+                Self::Distributed(DistributedSessionStoreClient::shared(
+                    SessionStoreBackendKind::Redis,
+                    format!("{backend_scope}:{customer_app}"),
+                )),
+            )),
+            davenda_core::SessionStoreTopology::Valkey => Ok((
+                SessionStoreBackendKind::Valkey,
+                Self::Distributed(DistributedSessionStoreClient::shared(
+                    SessionStoreBackendKind::Valkey,
+                    format!("{backend_scope}:{customer_app}"),
+                )),
+            )),
+        }
+    }
+
+    #[cfg(test)]
+    fn local(
         customer_app: &str,
         services: &davenda_core::SessionSecurityServices,
     ) -> (SessionStoreBackendKind, Self) {
@@ -497,6 +533,8 @@ pub enum RuntimeBrowserError {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BrowserHostBuildError {
+    #[error("memory session stores are test-only and cannot back a live browser host")]
+    MemoryStoreRequiresTestOnlyBrowserHost,
     #[error("memory session stores cannot use a distributed session client")]
     MemoryStoreCannotUseDistributedClient,
     #[error("session store client kind mismatch: expected `{expected:?}`, got `{actual:?}`")]
@@ -519,10 +557,25 @@ impl BrowserHost {
         customer_app: String,
         services: BrowserSecurityServices,
         backend_scope: impl Into<String>,
-    ) -> Self {
+    ) -> Result<Self, BrowserHostBuildError> {
         let backend_scope = backend_scope.into();
         let (session_store_kind, sessions) =
-            SessionStoreBackend::new(&backend_scope, &services.sessions);
+            SessionStoreBackend::shared(&customer_app, &services.sessions, &backend_scope)?;
+        Ok(Self {
+            customer_app,
+            services,
+            session_store_kind,
+            sessions,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn local_for_testing(
+        customer_app: String,
+        services: BrowserSecurityServices,
+    ) -> Self {
+        let (session_store_kind, sessions) =
+            SessionStoreBackend::local(&customer_app, &services.sessions);
         Self {
             customer_app,
             services,
@@ -936,12 +989,14 @@ mod tests {
             "browser-db-shared".to_string(),
             services.clone(),
             "browser-db-shared",
-        );
+        )
+        .unwrap();
         let right = BrowserHost::new_with_scope(
             "browser-db-shared".to_string(),
             services,
             "browser-db-shared",
-        );
+        )
+        .unwrap();
 
         let issued = left
             .issue_session(
@@ -998,6 +1053,19 @@ mod tests {
                 .session(&issued.record.session_id)
                 .and_then(|record| record.principal_id),
             Some("member-db".to_string())
+        );
+    }
+
+    #[test]
+    fn live_browser_rejects_memory_session_stores() {
+        let services = services(SessionStoreTopology::Memory);
+        let error =
+            BrowserHost::new_with_scope("browser-memory".to_string(), services, "browser-memory")
+                .unwrap_err();
+
+        assert_eq!(
+            error,
+            BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost
         );
     }
 }

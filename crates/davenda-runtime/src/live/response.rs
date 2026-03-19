@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
@@ -6,10 +6,7 @@ use axum::response::Response;
 
 use davenda_wasm::{CacheVisibility, ExecutionReceipt, TypedCacheHint, TypedMetadata};
 
-use super::{
-    append_receipt_headers, insert_header, merge_cache_control_value, merge_surrogate_tags,
-    render_cache_control,
-};
+use super::{append_receipt_headers, insert_header, render_cache_control};
 
 #[derive(Debug, Clone)]
 pub(crate) struct LiveResponseComposition {
@@ -27,9 +24,64 @@ pub(crate) struct LiveResponseAnnotations {
     admin_widgets: Vec<ExecutionReceipt>,
     metadata: Option<TypedMetadata>,
     cache_hint: Option<TypedCacheHint>,
-    cache_headers: BTreeMap<String, String>,
+    cache_headers: LiveCacheHeaders,
     route: Option<String>,
     locale: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LiveCacheHeaders {
+    passthrough: BTreeMap<String, String>,
+    cache_control: Option<String>,
+    surrogate_key: Option<String>,
+}
+
+impl LiveCacheHeaders {
+    pub(crate) fn from_parts(
+        headers: BTreeMap<String, String>,
+        cache_hint: Option<&TypedCacheHint>,
+    ) -> Self {
+        let mut passthrough = headers;
+        let cache_control = match cache_hint {
+            Some(cache_hint) => Some(render_cache_control(cache_hint)),
+            None => passthrough.remove("Cache-Control"),
+        };
+        let surrogate_key = match cache_hint {
+            Some(cache_hint) => {
+                let rendered = cache_hint
+                    .tags
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if rendered.is_empty() {
+                    passthrough.remove("Surrogate-Key")
+                } else {
+                    Some(rendered)
+                }
+            }
+            None => passthrough.remove("Surrogate-Key"),
+        };
+
+        Self {
+            passthrough,
+            cache_control,
+            surrogate_key,
+        }
+    }
+
+    fn render_headers(&self) -> BTreeMap<String, String> {
+        let mut rendered = self.passthrough.clone();
+        if let Some(cache_control) = &self.cache_control {
+            rendered.insert("Cache-Control".to_string(), cache_control.clone());
+        }
+        if let Some(surrogate_key) = &self.surrogate_key {
+            rendered.insert("Surrogate-Key".to_string(), surrogate_key.clone());
+        }
+        rendered
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +210,7 @@ impl LiveResponseAnnotations {
         self
     }
 
-    pub(crate) fn cache_headers(mut self, headers: BTreeMap<String, String>) -> Self {
+    pub(crate) fn cache_headers(mut self, headers: LiveCacheHeaders) -> Self {
         self.cache_headers = headers;
         self
     }
@@ -350,52 +402,110 @@ fn render_annotations(headers: &mut HeaderMap, annotations: &LiveResponseAnnotat
         insert_header(headers, "x-davenda-locale", locale.clone());
     }
 
-    if !annotations.cache_headers.is_empty() {
-        let merged =
-            render_cache_headers(&annotations.cache_headers, annotations.cache_hint.as_ref());
-        for (name, value) in merged {
-            if let (Ok(header_name), Ok(header_value)) = (
-                HeaderName::try_from(name.as_str()),
-                HeaderValue::from_str(&value),
-            ) {
-                headers.insert(header_name, header_value);
-            }
+    for (name, value) in annotations.cache_headers.render_headers() {
+        if let (Ok(header_name), Ok(header_value)) = (
+            HeaderName::try_from(name.as_str()),
+            HeaderValue::from_str(&value),
+        ) {
+            headers.insert(header_name, header_value);
         }
     }
 }
 
-fn render_cache_headers(
-    headers: &BTreeMap<String, String>,
-    cache_hint: Option<&TypedCacheHint>,
-) -> BTreeMap<String, String> {
-    let mut rendered = headers.clone();
-    if let Some(cache_hint) = cache_hint {
-        if let Some(existing) = rendered.get("Cache-Control").cloned() {
-            rendered.insert(
-                "Cache-Control".to_string(),
-                merge_cache_control_value(&existing, cache_hint),
-            );
-        } else {
-            rendered.insert(
-                "Cache-Control".to_string(),
-                render_cache_control(cache_hint),
-            );
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use davenda_wasm::{CacheVisibility, TypedCacheHint, TypedMetadata};
 
-        let merged_surrogate_tags = rendered
-            .get("Surrogate-Key")
-            .map(|value| merge_surrogate_tags(value, cache_hint))
-            .unwrap_or_else(|| {
-                cache_hint
-                    .tags
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            });
-        if !merged_surrogate_tags.is_empty() {
-            rendered.insert("Surrogate-Key".to_string(), merged_surrogate_tags);
-        }
+    #[test]
+    fn cache_headers_use_structured_cache_hint_over_raw_string_values() {
+        let cache_hint = TypedCacheHint::new(
+            CacheVisibility::Private,
+            120,
+            Some(30),
+            true,
+            false,
+            true,
+            ["route-cache", "locale-cache"],
+        )
+        .unwrap();
+        let headers = LiveCacheHeaders::from_parts(
+            BTreeMap::from([
+                (
+                    "Cache-Control".to_string(),
+                    "public, max-age=3600".to_string(),
+                ),
+                ("Surrogate-Key".to_string(), "stale legacy".to_string()),
+                ("X-Trace".to_string(), "preserve".to_string()),
+            ]),
+            Some(&cache_hint),
+        );
+
+        assert_eq!(
+            headers.render_headers().get("Cache-Control"),
+            Some(
+                &"private,max-age=120,stale-while-revalidate=30,vary-by-locale,vary-by-session"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            headers.render_headers().get("Surrogate-Key"),
+            Some(&"locale-cache route-cache".to_string())
+        );
+        assert_eq!(
+            headers.render_headers().get("X-Trace"),
+            Some(&"preserve".to_string())
+        );
     }
-    rendered
+
+    #[test]
+    fn response_composition_materializes_typed_annotations_once() {
+        let cache_hint = TypedCacheHint::new(
+            CacheVisibility::Public,
+            60,
+            None,
+            false,
+            false,
+            false,
+            ["page-cache"],
+        )
+        .unwrap();
+        let response = LiveResponseComposition::json(
+            StatusCode::OK,
+            BTreeMap::from([("ok".to_string(), "true".to_string())]),
+        )
+        .with_annotation(
+            LiveResponseAnnotations::default()
+                .metadata(Some(TypedMetadata::new().with_title("Demo").unwrap()))
+                .cache_hint(Some(cache_hint.clone()))
+                .cache_headers(LiveCacheHeaders::from_parts(
+                    BTreeMap::from([("X-Trace".to_string(), "preserve".to_string())]),
+                    Some(&cache_hint),
+                ))
+                .route("account.dashboard")
+                .locale("en-GB"),
+        );
+
+        let response = response.into_response();
+        assert_eq!(
+            response
+                .headers()
+                .get("x-davenda-wasm-metadata-title")
+                .unwrap(),
+            "Demo"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-davenda-wasm-cache-control")
+                .unwrap(),
+            "public,max-age=60"
+        );
+        assert_eq!(
+            response.headers().get("x-davenda-route").unwrap(),
+            "account.dashboard"
+        );
+        assert_eq!(response.headers().get("x-davenda-locale").unwrap(), "en-GB");
+        assert_eq!(response.headers().get("X-Trace").unwrap(), "preserve");
+    }
 }

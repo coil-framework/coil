@@ -386,9 +386,11 @@ name = "davenda-app"
 version = "0.1.0"
 dependencies = [
  "davenda-auth",
+ "davenda-config",
  "davenda-core",
  "davenda-i18n",
  "davenda-jobs",
+ "davenda-runtime",
  "davenda-template",
  "davenda-wasm",
  "thiserror 2.0.18",

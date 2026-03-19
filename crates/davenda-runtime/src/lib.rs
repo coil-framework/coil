@@ -4,13 +4,13 @@ use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
 use davenda_config::{ConfigError, PlatformConfig};
 use davenda_core::{
+    bootstrap_core_services, validate_module_capabilities, validate_module_installation,
     BrowserSecurityServices, BulkOperationDefinition, CapabilityValidationError,
     CliRuntimeServices, CookieSigner, DataRuntimeServices, EventSubscription, HttpFileDeliveryMode,
     HttpResponseContract, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, JobContract,
     JobsRuntimeServices, ModuleInstallationError, ModuleManifest, ObservabilityRuntimeServices,
     PlatformModule, RegistrationError, ReportDefinition, SearchIndexContribution,
     ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
-    bootstrap_core_services, validate_module_capabilities, validate_module_installation,
 };
 use davenda_data::{DataModelError, MigrationPlan};
 use davenda_observability::{
@@ -640,6 +640,11 @@ where
         M: PlatformModule + 'static,
     {
         self.modules.push(Box::new(module));
+        self
+    }
+
+    pub fn with_boxed_module(mut self, module: Box<dyn PlatformModule>) -> Self {
+        self.modules.push(module);
         self
     }
 
@@ -1481,12 +1486,11 @@ cdn_base_url = "https://cdn.example.com"
         );
         assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
         assert_eq!(plan.browser.csrf.field_name, "_csrf");
-        assert!(
-            plan.cli
-                .registry
-                .commands()
-                .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()])
-        );
+        assert!(plan
+            .cli
+            .registry
+            .commands()
+            .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()]));
         assert_eq!(plan.data.driver, davenda_config::DatabaseDriver::Postgres);
         assert_eq!(plan.data.schema, "public");
         assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);
@@ -1548,36 +1552,30 @@ cdn_base_url = "https://cdn.example.com"
                 .max_runtime,
             Duration::from_millis(50)
         );
-        assert!(
-            plan.services
-                .iter()
-                .any(|service| service.id == "module.admin.shell")
-        );
-        assert!(
-            plan.services
-                .iter()
-                .any(|service| service.id == "module.cms.pages")
-        );
-        assert!(
-            plan.services
-                .iter()
-                .any(|service| service.id == "module.commerce.checkout")
-        );
-        assert!(
-            plan.services
-                .iter()
-                .any(|service| service.id == "module.memberships.entitlements")
-        );
-        assert!(
-            plan.services
-                .iter()
-                .any(|service| service.id == "module.events.bookings")
-        );
-        assert!(
-            plan.services
-                .iter()
-                .any(|service| service.id == "module.media.assets")
-        );
+        assert!(plan
+            .services
+            .iter()
+            .any(|service| service.id == "module.admin.shell"));
+        assert!(plan
+            .services
+            .iter()
+            .any(|service| service.id == "module.cms.pages"));
+        assert!(plan
+            .services
+            .iter()
+            .any(|service| service.id == "module.commerce.checkout"));
+        assert!(plan
+            .services
+            .iter()
+            .any(|service| service.id == "module.memberships.entitlements"));
+        assert!(plan
+            .services
+            .iter()
+            .any(|service| service.id == "module.events.bookings"));
+        assert!(plan
+            .services
+            .iter()
+            .any(|service| service.id == "module.media.assets"));
         assert_eq!(plan.modules.len(), 6);
         assert_eq!(plan.modules[0].name, "admin");
         assert_eq!(plan.modules[1].name, "cms");
@@ -1585,20 +1583,18 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(plan.modules[3].name, "memberships");
         assert_eq!(plan.modules[4].name, "events");
         assert_eq!(plan.modules[5].name, "media");
-        assert!(
-            plan.install_migrations
-                .ordered_steps()
-                .iter()
-                .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string()))
-        );
+        assert!(plan
+            .install_migrations
+            .ordered_steps()
+            .iter()
+            .any(|step| step.owner == davenda_data::MigrationOwner::Module("cms".to_string())));
         assert!(plan.install_migrations.ordered_steps().iter().any(|step| {
             step.owner == davenda_data::MigrationOwner::Module("memberships".to_string())
         }));
-        assert!(
-            plan.module_jobs
-                .iter()
-                .any(|registered| registered.job.name == "events.reminders")
-        );
+        assert!(plan
+            .module_jobs
+            .iter()
+            .any(|registered| registered.job.name == "events.reminders"));
         assert!(plan.module_event_subscriptions.iter().any(|registered| {
             registered.subscription.event == "commerce.order.paid"
                 && registered.module == "memberships"

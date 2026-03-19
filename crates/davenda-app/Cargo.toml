@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 davenda-auth = { path = "../davenda-auth" }
+davenda-config = { path = "../davenda-config" }
 davenda-core = { path = "../davenda-core" }
 davenda-i18n = { path = "../davenda-i18n" }
 davenda-jobs = { path = "../davenda-jobs" }
+davenda-runtime = { path = "../davenda-runtime" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "2.0.17"

@@ -2,13 +2,15 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use davenda_auth::AuthModelPackage;
+use davenda_config::PlatformConfig;
 use davenda_core::{
-    AdminResourceContribution, BulkOperationDefinition, CapabilityValidationError,
-    CoreServiceDependency, EventSubscription, JobContract, MigrationContract, ModuleDependencyKind,
-    ModuleManifest, ReportDefinition, RouteSurface, SearchIndexContribution,
-    validate_module_capabilities,
+    validate_module_capabilities, AdminResourceContribution, BulkOperationDefinition,
+    CapabilityValidationError, CoreServiceDependency, EventSubscription, JobContract,
+    MigrationContract, ModuleDependencyKind, ModuleManifest, PlatformModule, ReportDefinition,
+    RouteSurface, SearchIndexContribution,
 };
 use davenda_i18n::LocaleTag;
+use davenda_runtime::{RuntimeBuildError, RuntimeBuilder, RuntimePlan};
 use davenda_template::TemplateNamespace;
 use davenda_wasm::ExtensionInstallation;
 use thiserror::Error;
@@ -49,6 +51,11 @@ pub enum AppModelError {
         configured: String,
         actual: String,
     },
+    #[error("customer app manifest `{manifest}` does not match runtime config app `{configured}`")]
+    ConfigAppMismatch {
+        manifest: String,
+        configured: String,
+    },
     #[error(
         "extension `{extension_id}` is installed for customer app `{extension_customer_app}` but manifest is `{app_id}`"
     )]
@@ -59,6 +66,8 @@ pub enum AppModelError {
     },
     #[error("{0}")]
     ModuleCapabilityValidation(#[from] CapabilityValidationError),
+    #[error("{message}")]
+    RuntimeBuild { message: String },
 }
 
 macro_rules! token_type {
@@ -518,6 +527,39 @@ impl CustomerAppManifest {
             auth: self.auth.clone(),
         })
     }
+
+    pub fn build_runtime_plan<P>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage,
+    {
+        if config.app.name != self.id.as_str() {
+            return Err(AppModelError::ConfigAppMismatch {
+                manifest: self.id.to_string(),
+                configured: config.app.name,
+            });
+        }
+
+        let manifests = modules
+            .iter()
+            .map(|module| module.manifest())
+            .collect::<Vec<_>>();
+        let composition = self.compose(&auth_package, &manifests)?;
+
+        let mut builder = RuntimeBuilder::new(config, auth_package);
+        for module in modules {
+            builder = builder.with_boxed_module(module);
+        }
+
+        Ok(CustomerAppRuntimePlan {
+            composition,
+            runtime: builder.build()?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -540,6 +582,20 @@ pub struct CustomerAppComposition {
     pub content_models: Vec<ContentModel>,
     pub extensions: Vec<CustomerExtension>,
     pub auth: AuthStrategy,
+}
+
+#[derive(Debug, Clone)]
+pub struct CustomerAppRuntimePlan {
+    pub composition: CustomerAppComposition,
+    pub runtime: RuntimePlan,
+}
+
+impl From<RuntimeBuildError> for AppModelError {
+    fn from(error: RuntimeBuildError) -> Self {
+        Self::RuntimeBuild {
+            message: error.to_string(),
+        }
+    }
 }
 
 fn validate_token(field: &'static str, value: String) -> Result<String, AppModelError> {
@@ -591,6 +647,7 @@ mod tests {
     use super::*;
 
     use davenda_auth::{Capability, DefaultAuthModelPackage};
+    use davenda_config::PlatformConfig;
     use davenda_core::{
         AdminContributionKind, AdminNavigationSection, BulkOperationKind, BulkOperationScope,
         CapabilityContract, ReportDeliveryMode, ReportFormat, ReportSensitivity,
@@ -777,6 +834,116 @@ mod tests {
         ]
     }
 
+    #[derive(Debug)]
+    struct StaticModule {
+        manifest: ModuleManifest,
+    }
+
+    impl StaticModule {
+        fn new(manifest: ModuleManifest) -> Self {
+            Self { manifest }
+        }
+    }
+
+    impl PlatformModule for StaticModule {
+        fn manifest(&self) -> ModuleManifest {
+            self.manifest.clone()
+        }
+
+        fn register(
+            &self,
+            _registry: &mut davenda_core::ServiceRegistry,
+        ) -> Result<(), davenda_core::RegistrationError> {
+            Ok(())
+        }
+    }
+
+    fn runtime_config(app_id: &str) -> PlatformConfig {
+        PlatformConfig::from_toml_str(&format!(
+            r#"
+[app]
+name = "{app_id}"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+object_store = "s3"
+local_root = "/var/lib/platform"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+localized_routes = true
+
+[seo]
+canonical_host = "shop.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+
+[modules]
+enabled = ["cms", "commerce"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#
+        ))
+        .expect("runtime config is valid")
+    }
+
     #[test]
     fn manifest_requires_supported_default_locale_and_canonical_domain() {
         let invalid = CustomerAppManifest::new(
@@ -850,16 +1017,12 @@ mod tests {
         assert_eq!(composition.report_definitions.len(), 1);
         assert_eq!(composition.bulk_operations.len(), 1);
         assert_eq!(composition.migrations.len(), 2);
-        assert!(
-            composition
-                .required_core_services
-                .contains(&CoreServiceDependency::Seo)
-        );
-        assert!(
-            composition
-                .required_core_services
-                .contains(&CoreServiceDependency::Jobs)
-        );
+        assert!(composition
+            .required_core_services
+            .contains(&CoreServiceDependency::Seo));
+        assert!(composition
+            .required_core_services
+            .contains(&CoreServiceDependency::Jobs));
     }
 
     #[test]
@@ -907,5 +1070,27 @@ mod tests {
                 dependency: "cms".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
+        let runtime = app()
+            .build_runtime_plan(
+                runtime_config("harbor-shop"),
+                DefaultAuthModelPackage::default(),
+                module_manifests()
+                    .into_iter()
+                    .map(StaticModule::new)
+                    .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+                    .collect(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            runtime.composition.app_id,
+            CustomerAppId::new("harbor-shop").unwrap()
+        );
+        assert_eq!(runtime.runtime.config.app.name, "harbor-shop");
+        assert_eq!(runtime.runtime.modules.len(), 2);
     }
 }

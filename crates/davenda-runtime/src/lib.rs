@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use davenda_auth::AuthModelPackage;
 use davenda_cache::CacheTopology;
@@ -8,6 +8,10 @@ use davenda_core::{
     ModuleManifest, ObservabilityRuntimeServices, PlatformModule, RegistrationError,
     ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
     bootstrap_core_services, validate_module_capabilities,
+};
+use davenda_observability::{
+    CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
+    ObservabilityError,
 };
 use thiserror::Error;
 
@@ -236,6 +240,7 @@ pub struct RequestInput {
     pub session_cookie: Option<String>,
     pub csrf_token: Option<String>,
     pub csrf_action: Option<String>,
+    pub maintenance_bypass_token: Option<String>,
     pub principal_id: Option<String>,
     pub granted_capabilities: HashSet<davenda_auth::Capability>,
 }
@@ -257,6 +262,7 @@ impl RequestInput {
             session_cookie: None,
             csrf_token: None,
             csrf_action: None,
+            maintenance_bypass_token: None,
             principal_id: None,
             granted_capabilities: HashSet::new(),
         })
@@ -294,6 +300,11 @@ impl RequestInput {
 
     pub fn with_csrf_action(mut self, csrf_action: impl Into<String>) -> Self {
         self.csrf_action = Some(csrf_action.into());
+        self
+    }
+
+    pub fn with_maintenance_bypass_token(mut self, bypass_token: impl Into<String>) -> Self {
+        self.maintenance_bypass_token = Some(bypass_token.into());
         self
     }
 
@@ -344,6 +355,132 @@ pub struct RequestExecution {
     pub principal: PrincipalContext,
     pub cache: CacheDisposition,
     pub middleware: Vec<MiddlewareStage>,
+    pub response: HandlerResponse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileDeliveryMode {
+    PublicCdn,
+    SignedUrl,
+    AppProxy,
+    LocalOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageResponse {
+    pub template: String,
+    pub status: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FragmentResponse {
+    pub template: String,
+    pub fragment_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedirectResponse {
+    pub location: String,
+    pub status: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsonResponse {
+    pub status: u16,
+    pub payload: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileResponse {
+    pub logical_path: String,
+    pub content_type: String,
+    pub delivery_mode: FileDeliveryMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandlerResponse {
+    Page(PageResponse),
+    Fragment(FragmentResponse),
+    Redirect(RedirectResponse),
+    Json(JsonResponse),
+    File(FileResponse),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandlerDefinition {
+    pub route_name: String,
+    pub response: HandlerResponse,
+}
+
+impl HandlerDefinition {
+    pub fn page(
+        route_name: impl Into<String>,
+        template: impl Into<String>,
+    ) -> Result<Self, RouteBuildError> {
+        Ok(Self {
+            route_name: validate_route_name(route_name.into())?,
+            response: HandlerResponse::Page(PageResponse {
+                template: validate_template_name(template.into())?,
+                status: 200,
+            }),
+        })
+    }
+
+    pub fn fragment(
+        route_name: impl Into<String>,
+        template: impl Into<String>,
+        fragment_id: impl Into<String>,
+    ) -> Result<Self, RouteBuildError> {
+        Ok(Self {
+            route_name: validate_route_name(route_name.into())?,
+            response: HandlerResponse::Fragment(FragmentResponse {
+                template: validate_template_name(template.into())?,
+                fragment_id: validate_fragment_id(fragment_id.into())?,
+            }),
+        })
+    }
+
+    pub fn redirect(
+        route_name: impl Into<String>,
+        location: impl Into<String>,
+    ) -> Result<Self, RouteBuildError> {
+        Ok(Self {
+            route_name: validate_route_name(route_name.into())?,
+            response: HandlerResponse::Redirect(RedirectResponse {
+                location: validate_route_path(location.into())?,
+                status: 303,
+            }),
+        })
+    }
+
+    pub fn json(
+        route_name: impl Into<String>,
+        payload: BTreeMap<String, String>,
+    ) -> Result<Self, RouteBuildError> {
+        Ok(Self {
+            route_name: validate_route_name(route_name.into())?,
+            response: HandlerResponse::Json(JsonResponse {
+                status: 200,
+                payload,
+            }),
+        })
+    }
+
+    pub fn file(
+        route_name: impl Into<String>,
+        logical_path: impl Into<String>,
+        content_type: impl Into<String>,
+        delivery_mode: FileDeliveryMode,
+    ) -> Result<Self, RouteBuildError> {
+        Ok(Self {
+            route_name: validate_route_name(route_name.into())?,
+            response: HandlerResponse::File(FileResponse {
+                logical_path: validate_template_name(logical_path.into())?,
+                content_type: validate_template_name(content_type.into())?,
+                delivery_mode,
+            }),
+        })
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -388,6 +525,12 @@ pub enum RequestExecutionError {
     InvalidCsrfToken { route: String },
     #[error("session cookie failed validation: {0}")]
     InvalidSessionCookie(String),
+    #[error("route `{route}` is disabled by maintenance mode")]
+    MaintenanceMode { route: String },
+    #[error("route `{route}` is disabled because feature flag `{feature_flag}` is not enabled")]
+    FeatureFlagDisabled { route: String, feature_flag: String },
+    #[error("route `{route}` has no registered handler")]
+    HandlerNotRegistered { route: String },
 }
 
 pub struct RuntimeBuilder<P> {
@@ -395,6 +538,9 @@ pub struct RuntimeBuilder<P> {
     auth_package: P,
     modules: Vec<Box<dyn PlatformModule>>,
     routes: Vec<RouteDefinition>,
+    handlers: Vec<HandlerDefinition>,
+    feature_flags: Vec<FeatureFlag>,
+    maintenance_mode: Option<MaintenanceMode>,
 }
 
 impl<P> RuntimeBuilder<P>
@@ -407,6 +553,9 @@ where
             auth_package,
             modules: Vec::new(),
             routes: Vec::new(),
+            handlers: Vec::new(),
+            feature_flags: Vec::new(),
+            maintenance_mode: None,
         }
     }
 
@@ -423,6 +572,21 @@ where
         self
     }
 
+    pub fn with_handler(mut self, handler: HandlerDefinition) -> Self {
+        self.handlers.push(handler);
+        self
+    }
+
+    pub fn with_feature_flag(mut self, feature_flag: FeatureFlag) -> Self {
+        self.feature_flags.push(feature_flag);
+        self
+    }
+
+    pub fn with_maintenance_mode(mut self, maintenance_mode: MaintenanceMode) -> Self {
+        self.maintenance_mode = Some(maintenance_mode);
+        self
+    }
+
     pub fn build(self) -> Result<RuntimePlan, RuntimeBuildError> {
         self.config.validate().map_err(ConfigError::Validation)?;
 
@@ -435,8 +599,18 @@ where
 
         let bootstrap = bootstrap_core_services(&self.config)?;
         let mut registry = bootstrap.registry;
+        let mut observability = bootstrap.observability;
         let mut module_manifests = Vec::new();
         let http = build_http_runtime_plan(&self.auth_package, &self.routes)?;
+        let handlers = build_handler_registry(&self.routes, self.handlers)?;
+
+        for feature_flag in self.feature_flags {
+            observability.flags.insert(feature_flag)?;
+        }
+
+        if let Some(maintenance_mode) = self.maintenance_mode {
+            observability.maintenance = maintenance_mode;
+        }
 
         for module in self.modules {
             let manifest = module.manifest();
@@ -452,8 +626,9 @@ where
             cache_topology: bootstrap.cache.topology,
             browser: bootstrap.browser,
             jobs: bootstrap.jobs,
-            observability: bootstrap.observability,
+            observability,
             http,
+            handlers,
             template: bootstrap.template,
             tls: bootstrap.tls,
             wasm: bootstrap.wasm,
@@ -472,6 +647,7 @@ pub struct RuntimePlan {
     pub jobs: JobsRuntimeServices,
     pub observability: ObservabilityRuntimeServices,
     pub http: HttpRuntimePlan,
+    pub handlers: BTreeMap<String, HandlerDefinition>,
     pub template: TemplateRuntimeServices,
     pub tls: TlsRuntimeServices,
     pub wasm: WasmRuntimeServices,
@@ -523,10 +699,12 @@ impl RuntimePlan {
             resolved_from_cookie,
         };
         let principal = PrincipalContext {
-            principal_id: request.principal_id,
-            granted_capabilities: request.granted_capabilities,
+            principal_id: request.principal_id.clone(),
+            granted_capabilities: request.granted_capabilities.clone(),
         };
 
+        self.enforce_maintenance_mode(&matched.route, request.method, &request)?;
+        self.enforce_feature_flags(&matched.route)?;
         self.enforce_route_auth(&matched.resolved, &session, &principal)?;
         self.enforce_browser_policy(
             &matched.route,
@@ -537,6 +715,14 @@ impl RuntimePlan {
             &session,
             csrf_secret,
         )?;
+        let response = self
+            .handlers
+            .get(&matched.resolved.route_name)
+            .cloned()
+            .map(|handler| handler.response)
+            .ok_or_else(|| RequestExecutionError::HandlerNotRegistered {
+                route: matched.resolved.route_name.clone(),
+            })?;
 
         Ok(RequestExecution {
             customer_app: self.config.app.name.clone(),
@@ -552,6 +738,7 @@ impl RuntimePlan {
             principal,
             cache: cache_disposition_for_route(request.method, &matched.resolved.auth, &session),
             middleware: self.http.middleware.clone(),
+            response,
         })
     }
 
@@ -599,6 +786,56 @@ impl RuntimePlan {
                     })
                 }
             }
+        }
+    }
+
+    fn enforce_feature_flags(&self, route: &RouteDefinition) -> Result<(), RequestExecutionError> {
+        let Some(feature_flag) = route.feature_flag.as_deref() else {
+            return Ok(());
+        };
+
+        let Some(feature_flag_id) = FeatureFlagId::new(feature_flag.to_string()).ok() else {
+            return Err(RequestExecutionError::FeatureFlagDisabled {
+                route: route.name.clone(),
+                feature_flag: feature_flag.to_string(),
+            });
+        };
+        let context = FeatureFlagContext {
+            environment: self.config.app.environment,
+            customer_app: CustomerAppId::new(self.config.app.name.clone()).ok(),
+            site: None,
+            brand: None,
+            cohorts: BTreeSet::new(),
+        };
+
+        match self.observability.flags.get(&feature_flag_id) {
+            Some(flag) if flag.enabled_for(&context) => Ok(()),
+            _ => Err(RequestExecutionError::FeatureFlagDisabled {
+                route: route.name.clone(),
+                feature_flag: feature_flag.to_string(),
+            }),
+        }
+    }
+
+    fn enforce_maintenance_mode(
+        &self,
+        route: &RouteDefinition,
+        method: HttpMethod,
+        request: &RequestInput,
+    ) -> Result<(), RequestExecutionError> {
+        let customer_app = CustomerAppId::new(self.config.app.name.clone()).ok();
+        let blocked = self.observability.maintenance.blocks_request(
+            customer_app.as_ref(),
+            method.is_state_changing(),
+            request.maintenance_bypass_token.as_deref(),
+        );
+
+        if blocked {
+            Err(RequestExecutionError::MaintenanceMode {
+                route: route.name.clone(),
+            })
+        } else {
+            Ok(())
         }
     }
 
@@ -673,8 +910,44 @@ pub enum RuntimeBuildError {
     Capability(#[from] CapabilityValidationError),
     #[error(transparent)]
     Route(#[from] RouteBuildError),
+    #[error(transparent)]
+    Observability(#[from] ObservabilityError),
     #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
     AuthPackageMismatch { configured: String, actual: String },
+    #[error("handler `{route}` is registered more than once")]
+    DuplicateHandler { route: String },
+    #[error("handler `{route}` does not match a registered route")]
+    UnknownHandlerRoute { route: String },
+}
+
+fn build_handler_registry(
+    routes: &[RouteDefinition],
+    handlers: Vec<HandlerDefinition>,
+) -> Result<BTreeMap<String, HandlerDefinition>, RuntimeBuildError> {
+    let known_routes = routes
+        .iter()
+        .map(|route| route.name.as_str())
+        .collect::<HashSet<_>>();
+    let mut registry = BTreeMap::new();
+
+    for handler in handlers {
+        if !known_routes.contains(handler.route_name.as_str()) {
+            return Err(RuntimeBuildError::UnknownHandlerRoute {
+                route: handler.route_name,
+            });
+        }
+
+        if registry
+            .insert(handler.route_name.clone(), handler.clone())
+            .is_some()
+        {
+            return Err(RuntimeBuildError::DuplicateHandler {
+                route: handler.route_name,
+            });
+        }
+    }
+
+    Ok(registry)
 }
 
 #[cfg(test)]
@@ -689,6 +962,9 @@ mod tests {
     use davenda_events::EventsModule;
     use davenda_media::MediaModule;
     use davenda_memberships::MembershipsModule;
+    use davenda_observability::{
+        CustomerAppId as FlagCustomerAppId, FeatureFlag, MaintenanceAudience, MaintenanceImpact,
+    };
     use davenda_template::TemplateNamespace;
     use davenda_wasm::ExtensionPointKind;
     use std::time::Duration;
@@ -933,6 +1209,9 @@ cdn_base_url = "https://cdn.example.com"
                     .with_area(RouteArea::Account)
                     .requiring_session(),
             )
+            .with_handler(
+                HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap(),
+            )
             .build()
             .unwrap();
 
@@ -962,6 +1241,13 @@ cdn_base_url = "https://cdn.example.com"
         assert_eq!(execution.cache, CacheDisposition::Private);
         assert_eq!(execution.trace.transport_scheme, "https");
         assert_eq!(execution.middleware, plan.http.middleware);
+        assert_eq!(
+            execution.response,
+            HandlerResponse::Page(PageResponse {
+                template: "account/dashboard".to_string(),
+                status: 200,
+            })
+        );
     }
 
     #[test]
@@ -974,6 +1260,7 @@ cdn_base_url = "https://cdn.example.com"
                     .with_area(RouteArea::Admin)
                     .requiring_session(),
             )
+            .with_handler(HandlerDefinition::redirect("cms.publish", "/admin/pages").unwrap())
             .build()
             .unwrap();
 
@@ -1015,6 +1302,13 @@ cdn_base_url = "https://cdn.example.com"
 
         assert_eq!(execution.cache, CacheDisposition::Uncacheable);
         assert_eq!(execution.route.route_name, "cms.publish");
+        assert_eq!(
+            execution.response,
+            HandlerResponse::Redirect(RedirectResponse {
+                location: "/admin/pages".to_string(),
+                status: 303,
+            })
+        );
     }
 
     #[test]
@@ -1026,6 +1320,9 @@ cdn_base_url = "https://cdn.example.com"
                     .unwrap()
                     .with_area(RouteArea::Admin)
                     .requiring_capability(davenda_auth::Capability::CmsPageRead),
+            )
+            .with_handler(
+                HandlerDefinition::fragment("cms.preview", "cms/preview", "preview-pane").unwrap(),
             )
             .build()
             .unwrap();
@@ -1064,6 +1361,131 @@ cdn_base_url = "https://cdn.example.com"
 
         assert_eq!(allowed.route.route_name, "cms.preview");
         assert_eq!(allowed.cache, CacheDisposition::Private);
+        assert_eq!(
+            allowed.response,
+            HandlerResponse::Fragment(FragmentResponse {
+                template: "cms/preview".to_string(),
+                fragment_id: "preview-pane".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn execute_request_blocks_routes_when_feature_flag_is_disabled() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let feature_flag = FeatureFlag::new("beta-events", false)
+            .unwrap()
+            .with_rule(
+                davenda_observability::FlagTarget::CustomerApp(
+                    FlagCustomerAppId::new("other-app").unwrap(),
+                ),
+                true,
+            )
+            .unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_route(
+                RouteDefinition::new("events.beta", HttpMethod::Get, "/events/beta")
+                    .unwrap()
+                    .with_feature_flag("beta-events"),
+            )
+            .with_handler(HandlerDefinition::page("events.beta", "events/beta").unwrap())
+            .with_feature_flag(feature_flag)
+            .build()
+            .unwrap();
+
+        let error = plan.execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/events/beta").unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        );
+
+        assert_eq!(
+            error.unwrap_err(),
+            RequestExecutionError::FeatureFlagDisabled {
+                route: "events.beta".to_string(),
+                feature_flag: "beta-events".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn execute_request_respects_maintenance_mode_with_operator_bypass() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let maintenance = davenda_observability::MaintenanceMode {
+            enabled: true,
+            audience: MaintenanceAudience::CustomerApp(
+                FlagCustomerAppId::new("showcase-events").unwrap(),
+            ),
+            impact: MaintenanceImpact::MutatingTrafficOnly,
+            bypass_token: Some("ops-bypass".to_string()),
+            allowed_background_work: BTreeSet::new(),
+        };
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_route(
+                RouteDefinition::new(
+                    "admin.bulk-publish",
+                    HttpMethod::Post,
+                    "/admin/bulk/publish",
+                )
+                .unwrap()
+                .with_area(RouteArea::Admin)
+                .requiring_session(),
+            )
+            .with_handler(
+                HandlerDefinition::json(
+                    "admin.bulk-publish",
+                    BTreeMap::from([("status".to_string(), "queued".to_string())]),
+                )
+                .unwrap(),
+            )
+            .with_maintenance_mode(maintenance)
+            .build()
+            .unwrap();
+
+        let cookie_secret = b"01234567012345670123456701234567";
+        let csrf_secret = b"76543210765432107654321076543210";
+        let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+            .sign(cookie_secret, "session-123")
+            .unwrap();
+        let token = plan
+            .browser
+            .csrf
+            .issue_token(csrf_secret, "session-123", "admin.bulk-publish")
+            .unwrap();
+
+        let blocked = plan.execute_request(
+            RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/bulk/publish")
+                .unwrap()
+                .with_session_cookie(session_cookie.clone())
+                .with_csrf_token(token.clone()),
+            cookie_secret,
+            csrf_secret,
+        );
+        assert_eq!(
+            blocked.unwrap_err(),
+            RequestExecutionError::MaintenanceMode {
+                route: "admin.bulk-publish".to_string(),
+            }
+        );
+
+        let allowed = plan
+            .execute_request(
+                RequestInput::new(HttpMethod::Post, "www.example.com", "/admin/bulk/publish")
+                    .unwrap()
+                    .with_session_cookie(session_cookie)
+                    .with_csrf_token(token)
+                    .with_maintenance_bypass_token("ops-bypass"),
+                cookie_secret,
+                csrf_secret,
+            )
+            .unwrap();
+        assert_eq!(
+            allowed.response,
+            HandlerResponse::Json(JsonResponse {
+                status: 200,
+                payload: BTreeMap::from([("status".to_string(), "queued".to_string())]),
+            })
+        );
     }
 }
 
@@ -1134,4 +1556,12 @@ fn validate_host(value: String) -> Result<String, RouteBuildError> {
     } else {
         Ok(trimmed.to_string())
     }
+}
+
+fn validate_template_name(value: String) -> Result<String, RouteBuildError> {
+    validate_route_name(value)
+}
+
+fn validate_fragment_id(value: String) -> Result<String, RouteBuildError> {
+    validate_route_name(value)
 }

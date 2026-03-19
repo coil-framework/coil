@@ -1,0 +1,335 @@
+use std::fmt;
+
+use ipnet::IpNet;
+use thiserror::Error;
+
+use super::*;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigValidationErrors(pub Vec<ConfigValidationError>);
+
+impl fmt::Display for ConfigValidationErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let joined = self
+            .0
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ");
+        f.write_str(&joined)
+    }
+}
+
+impl std::error::Error for ConfigValidationErrors {}
+
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum ConfigValidationError {
+    #[error("app.name must not be empty")]
+    EmptyAppName,
+    #[error("server.bind must not be empty")]
+    EmptyServerBind,
+    #[error("server.trusted_proxies contains invalid entry `{value}`")]
+    InvalidTrustedProxy { value: String },
+    #[error("{field} must be greater than zero")]
+    InvalidSessionTimeout { field: &'static str },
+    #[error(
+        "http.session.absolute_timeout_secs ({absolute_timeout_secs}) must be at least idle_timeout_secs ({idle_timeout_secs})"
+    )]
+    AbsoluteSessionTimeoutTooShort {
+        idle_timeout_secs: u64,
+        absolute_timeout_secs: u64,
+    },
+    #[error("{cookie}.name must not be empty")]
+    EmptyCookieName { cookie: &'static str },
+    #[error("{cookie}.path must start with `/`, got `{path}`")]
+    InvalidCookiePath { cookie: &'static str, path: String },
+    #[error("{cookie} must be secure when same_site=none")]
+    SameSiteNoneRequiresSecure { cookie: &'static str },
+    #[error("http.csrf.field_name must not be empty when CSRF is enabled")]
+    EmptyCsrfFieldName,
+    #[error("http.csrf.header_name must not be empty when CSRF is enabled")]
+    EmptyCsrfHeaderName,
+    #[error("at least one supported locale must be configured")]
+    MissingSupportedLocales,
+    #[error("default locale `{default_locale}` is not in supported_locales {supported_locales:?}")]
+    DefaultLocaleNotSupported {
+        default_locale: String,
+        supported_locales: Vec<String>,
+    },
+    #[error(
+        "fallback locale `{fallback_locale}` is not in supported_locales {supported_locales:?}"
+    )]
+    FallbackLocaleNotSupported {
+        fallback_locale: String,
+        supported_locales: Vec<String>,
+    },
+    #[error("seo.canonical_host must not be empty")]
+    EmptyCanonicalHost,
+    #[error("auth.package must not be empty")]
+    EmptyAuthPackage,
+    #[error("auth.tenant_id must be greater than zero, got {tenant_id}")]
+    InvalidAuthTenantId { tenant_id: i64 },
+    #[error("wasm.default_time_limit_ms must be greater than zero")]
+    InvalidWasmTimeLimit,
+    #[error("storage.local_root must not be empty")]
+    EmptyLocalStorageRoot,
+    #[error("database.schema must not be empty")]
+    EmptyDatabaseSchema,
+    #[error("database.migrations_table must not be empty")]
+    EmptyMigrationsTable,
+    #[error(
+        "database pool sizing is invalid: min_connections={min_connections} max_connections={max_connections}"
+    )]
+    InvalidDatabasePoolSize {
+        min_connections: u16,
+        max_connections: u16,
+    },
+    #[error("assets.publish_manifest requires assets.cdn_base_url")]
+    MissingCdnBaseUrl,
+    #[error("assets.cdn_base_url must start with http:// or https://, got `{url}`")]
+    InvalidCdnBaseUrl { url: String },
+    #[error("at least one module must be enabled")]
+    NoModulesEnabled,
+    #[error("tls.challenge is required when tls.mode=acme")]
+    MissingTlsChallenge,
+    #[error("tls.challenge is not valid when tls.mode={mode:?}")]
+    TlsChallengeNotAllowed { mode: TlsMode },
+    #[error("dns-01 ACME requires a DNS automation provider")]
+    MissingDnsAutomationProvider,
+    #[error("tls.mode={mode:?} cannot be used with provider {provider:?}")]
+    IncompatibleTlsProvider {
+        mode: TlsMode,
+        provider: TlsProvider,
+    },
+    #[error("tls.mode=cloudflare-origin requires provider=cloudflare-origin-ca")]
+    CloudflareOriginRequiresOriginCa,
+    #[error("tls.mode=manual requires provider=manual-import")]
+    ManualTlsRequiresManualProvider,
+    #[error(
+        "http.session.store={store:?} requires cache.l2={store:?} semantics, got {cache_backend:?}"
+    )]
+    SessionStoreRequiresDistributedCache {
+        store: SessionStore,
+        cache_backend: Option<DistributedCache>,
+    },
+}
+
+impl PlatformConfig {
+    pub fn validate(&self) -> Result<(), ConfigValidationErrors> {
+        let mut errors = Vec::new();
+
+        if self.app.name.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyAppName);
+        }
+
+        if self.server.bind.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyServerBind);
+        }
+
+        for trusted_proxy in &self.server.trusted_proxies {
+            if trusted_proxy.parse::<IpNet>().is_err() {
+                errors.push(ConfigValidationError::InvalidTrustedProxy {
+                    value: trusted_proxy.clone(),
+                });
+            }
+        }
+
+        if self.http.session.idle_timeout_secs == 0 {
+            errors.push(ConfigValidationError::InvalidSessionTimeout {
+                field: "http.session.idle_timeout_secs",
+            });
+        }
+
+        if self.http.session.absolute_timeout_secs == 0 {
+            errors.push(ConfigValidationError::InvalidSessionTimeout {
+                field: "http.session.absolute_timeout_secs",
+            });
+        }
+
+        if self.http.session.absolute_timeout_secs < self.http.session.idle_timeout_secs {
+            errors.push(ConfigValidationError::AbsoluteSessionTimeoutTooShort {
+                idle_timeout_secs: self.http.session.idle_timeout_secs,
+                absolute_timeout_secs: self.http.session.absolute_timeout_secs,
+            });
+        }
+
+        for (cookie_name, cookie) in [
+            ("http.session_cookie", &self.http.session_cookie),
+            ("http.flash_cookie", &self.http.flash_cookie),
+        ] {
+            if cookie.name.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptyCookieName {
+                    cookie: cookie_name,
+                });
+            }
+
+            if cookie.path.trim().is_empty() || !cookie.path.starts_with('/') {
+                errors.push(ConfigValidationError::InvalidCookiePath {
+                    cookie: cookie_name,
+                    path: cookie.path.clone(),
+                });
+            }
+
+            if cookie.same_site == SameSitePolicy::None && !cookie.secure {
+                errors.push(ConfigValidationError::SameSiteNoneRequiresSecure {
+                    cookie: cookie_name,
+                });
+            }
+        }
+
+        if self.http.csrf.enabled {
+            if self.http.csrf.field_name.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptyCsrfFieldName);
+            }
+
+            if self.http.csrf.header_name.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptyCsrfHeaderName);
+            }
+        }
+
+        if self.i18n.supported_locales.is_empty() {
+            errors.push(ConfigValidationError::MissingSupportedLocales);
+        } else {
+            if !self
+                .i18n
+                .supported_locales
+                .contains(&self.i18n.default_locale)
+            {
+                errors.push(ConfigValidationError::DefaultLocaleNotSupported {
+                    default_locale: self.i18n.default_locale.clone(),
+                    supported_locales: self.i18n.supported_locales.clone(),
+                });
+            }
+
+            if !self
+                .i18n
+                .supported_locales
+                .contains(&self.i18n.fallback_locale)
+            {
+                errors.push(ConfigValidationError::FallbackLocaleNotSupported {
+                    fallback_locale: self.i18n.fallback_locale.clone(),
+                    supported_locales: self.i18n.supported_locales.clone(),
+                });
+            }
+        }
+
+        if self.seo.canonical_host.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyCanonicalHost);
+        }
+
+        if self.auth.package.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyAuthPackage);
+        }
+
+        if self.auth.tenant_id <= 0 {
+            errors.push(ConfigValidationError::InvalidAuthTenantId {
+                tenant_id: self.auth.tenant_id,
+            });
+        }
+
+        if self.wasm.default_time_limit_ms == 0 {
+            errors.push(ConfigValidationError::InvalidWasmTimeLimit);
+        }
+
+        if self.storage.local_root.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyLocalStorageRoot);
+        }
+
+        if self.database.schema.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyDatabaseSchema);
+        }
+
+        if self.database.migrations_table.trim().is_empty() {
+            errors.push(ConfigValidationError::EmptyMigrationsTable);
+        }
+
+        if self.database.max_connections == 0
+            || self.database.min_connections > self.database.max_connections
+        {
+            errors.push(ConfigValidationError::InvalidDatabasePoolSize {
+                min_connections: self.database.min_connections,
+                max_connections: self.database.max_connections,
+            });
+        }
+
+        if self.assets.publish_manifest {
+            match self.assets.cdn_base_url.as_deref() {
+                Some(url) if url.starts_with("https://") || url.starts_with("http://") => {}
+                Some(url) => errors.push(ConfigValidationError::InvalidCdnBaseUrl {
+                    url: url.to_string(),
+                }),
+                None => errors.push(ConfigValidationError::MissingCdnBaseUrl),
+            }
+        }
+
+        if self.modules.enabled.is_empty() {
+            errors.push(ConfigValidationError::NoModulesEnabled);
+        }
+
+        match self.http.session.store {
+            SessionStore::Redis => {
+                if self.cache.l2 != Some(DistributedCache::Redis) {
+                    errors.push(
+                        ConfigValidationError::SessionStoreRequiresDistributedCache {
+                            store: self.http.session.store,
+                            cache_backend: self.cache.l2,
+                        },
+                    );
+                }
+            }
+            SessionStore::Valkey => {
+                if self.cache.l2 != Some(DistributedCache::Valkey) {
+                    errors.push(
+                        ConfigValidationError::SessionStoreRequiresDistributedCache {
+                            store: self.http.session.store,
+                            cache_backend: self.cache.l2,
+                        },
+                    );
+                }
+            }
+            SessionStore::Memory | SessionStore::Database => {}
+        }
+
+        match self.tls.mode {
+            TlsMode::External => {
+                if self.tls.challenge.is_some() {
+                    errors.push(ConfigValidationError::TlsChallengeNotAllowed {
+                        mode: self.tls.mode,
+                    });
+                }
+            }
+            TlsMode::Acme => {
+                if self.tls.challenge.is_none() {
+                    errors.push(ConfigValidationError::MissingTlsChallenge);
+                }
+
+                if self.tls.provider == Some(TlsProvider::CloudflareOriginCa) {
+                    errors.push(ConfigValidationError::IncompatibleTlsProvider {
+                        mode: self.tls.mode,
+                        provider: TlsProvider::CloudflareOriginCa,
+                    });
+                }
+
+                if self.tls.challenge == Some(AcmeChallenge::Dns01) && self.tls.provider.is_none() {
+                    errors.push(ConfigValidationError::MissingDnsAutomationProvider);
+                }
+            }
+            TlsMode::CloudflareOrigin => {
+                if self.tls.provider != Some(TlsProvider::CloudflareOriginCa) {
+                    errors.push(ConfigValidationError::CloudflareOriginRequiresOriginCa);
+                }
+            }
+            TlsMode::Manual => {
+                if self.tls.provider != Some(TlsProvider::ManualImport) {
+                    errors.push(ConfigValidationError::ManualTlsRequiresManualProvider);
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationErrors(errors))
+        }
+    }
+}

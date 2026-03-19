@@ -379,6 +379,7 @@ dependencies = [
  "davenda-core",
  "davenda-data",
  "davenda-jobs",
+ "davenda-wasm",
 ]
 
 [[package]]

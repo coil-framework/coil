@@ -17,6 +17,9 @@ use davenda_observability::{
     CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
     ObservabilityError,
 };
+use davenda_wasm::{
+    ContractVersion, ExtensionPointKind, ExtensionRegistry, InstalledExtension, WasmModelError,
+};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -613,6 +616,7 @@ pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
     auth_package: P,
     modules: Vec<Box<dyn PlatformModule>>,
+    extensions: Vec<InstalledExtension>,
     routes: Vec<RouteDefinition>,
     handlers: Vec<HandlerDefinition>,
     feature_flags: Vec<FeatureFlag>,
@@ -628,6 +632,7 @@ where
             config,
             auth_package,
             modules: Vec::new(),
+            extensions: Vec::new(),
             routes: Vec::new(),
             handlers: Vec::new(),
             feature_flags: Vec::new(),
@@ -645,6 +650,11 @@ where
 
     pub fn with_boxed_module(mut self, module: Box<dyn PlatformModule>) -> Self {
         self.modules.push(module);
+        self
+    }
+
+    pub fn with_installed_extension(mut self, extension: InstalledExtension) -> Self {
+        self.extensions.push(extension);
         self
     }
 
@@ -798,6 +808,31 @@ where
                     })
                 })
                 .collect::<Vec<_>>();
+        let registered_extension_slots = collect_extension_slots(&module_manifests)?;
+        let mut extension_registry = ExtensionRegistry::new(ContractVersion::new(1, 0, 0));
+        let mut installed_extensions = Vec::new();
+
+        for extension in self.extensions {
+            if extension.customer_app_id() != self.config.app.name {
+                return Err(RuntimeBuildError::ExtensionCustomerAppMismatch {
+                    extension_id: extension.manifest().id.to_string(),
+                    configured: self.config.app.name.clone(),
+                    actual: extension.customer_app_id().to_string(),
+                });
+            }
+
+            installed_extensions.push(InstalledExtensionSummary {
+                extension_id: extension.manifest().id.to_string(),
+                display_name: extension.manifest().display_name.clone(),
+                customer_app_id: extension.customer_app_id().to_string(),
+                handler_count: extension.installed_handler_count(),
+            });
+            extension_registry.install(extension)?;
+        }
+
+        for handler in extension_registry.registered_handlers() {
+            validate_extension_handler_slot(handler, &registered_extension_slots)?;
+        }
 
         Ok(RuntimePlan {
             config: self.config,
@@ -816,6 +851,9 @@ where
             services: registry.services().cloned().collect(),
             modules: module_manifests,
             install_migrations,
+            extension_registry,
+            registered_extension_slots,
+            installed_extensions,
             module_jobs,
             module_event_subscriptions,
             module_search_contributions,
@@ -843,11 +881,30 @@ pub struct RuntimePlan {
     pub services: Vec<ServiceDescriptor>,
     pub modules: Vec<ModuleManifest>,
     pub install_migrations: MigrationPlan,
+    pub extension_registry: ExtensionRegistry,
+    pub registered_extension_slots: Vec<RegisteredExtensionSlot>,
+    pub installed_extensions: Vec<InstalledExtensionSummary>,
     pub module_jobs: Vec<RegisteredModuleJob>,
     pub module_event_subscriptions: Vec<RegisteredEventSubscription>,
     pub module_search_contributions: Vec<RegisteredSearchContribution>,
     pub module_report_definitions: Vec<RegisteredReportDefinition>,
     pub module_bulk_operations: Vec<RegisteredBulkOperation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredExtensionSlot {
+    pub module: String,
+    pub kind: ExtensionPointKind,
+    pub surface: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledExtensionSummary {
+    pub extension_id: String,
+    pub display_name: String,
+    pub customer_app_id: String,
+    pub handler_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1316,12 +1373,104 @@ pub enum RuntimeBuildError {
     Route(#[from] RouteBuildError),
     #[error(transparent)]
     Observability(#[from] ObservabilityError),
+    #[error(transparent)]
+    Wasm(#[from] WasmModelError),
     #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
     AuthPackageMismatch { configured: String, actual: String },
+    #[error(
+        "installed extension `{extension_id}` targets customer app `{actual}` but runtime config is `{configured}`"
+    )]
+    ExtensionCustomerAppMismatch {
+        extension_id: String,
+        configured: String,
+        actual: String,
+    },
     #[error("handler `{route}` is registered more than once")]
     DuplicateHandler { route: String },
     #[error("handler `{route}` does not match a registered route")]
     UnknownHandlerRoute { route: String },
+    #[error(
+        "extension slot `{surface}` for `{kind:?}` is declared by both `{first_module}` and `{second_module}`"
+    )]
+    DuplicateExtensionSlot {
+        kind: ExtensionPointKind,
+        surface: String,
+        first_module: String,
+        second_module: String,
+    },
+    #[error(
+        "installed extension `{extension_id}` handler `{handler_id}` targets `{point}` surface `{surface}` without a declared slot"
+    )]
+    UnknownExtensionSlot {
+        extension_id: String,
+        handler_id: String,
+        point: ExtensionPointKind,
+        surface: String,
+    },
+}
+
+fn collect_extension_slots(
+    manifests: &[ModuleManifest],
+) -> Result<Vec<RegisteredExtensionSlot>, RuntimeBuildError> {
+    let mut slots = Vec::new();
+    let mut seen = BTreeMap::<(ExtensionPointKind, String), String>::new();
+
+    for manifest in manifests {
+        for slot in &manifest.extension_slots {
+            let kind = extension_point_kind_for_slot(slot);
+            let key = (kind, slot.surface.clone());
+            if let Some(existing_module) = seen.insert(key.clone(), manifest.name.clone()) {
+                return Err(RuntimeBuildError::DuplicateExtensionSlot {
+                    kind,
+                    surface: key.1,
+                    first_module: existing_module,
+                    second_module: manifest.name.clone(),
+                });
+            }
+
+            slots.push(RegisteredExtensionSlot {
+                module: manifest.name.clone(),
+                kind,
+                surface: slot.surface.clone(),
+                description: slot.description.clone(),
+            });
+        }
+    }
+
+    Ok(slots)
+}
+
+fn validate_extension_handler_slot(
+    handler: &davenda_wasm::RegisteredExtensionHandler,
+    slots: &[RegisteredExtensionSlot],
+) -> Result<(), RuntimeBuildError> {
+    if slots
+        .iter()
+        .any(|slot| slot.kind == handler.point && slot.surface == handler.surface)
+    {
+        Ok(())
+    } else {
+        Err(RuntimeBuildError::UnknownExtensionSlot {
+            extension_id: handler.extension_id.to_string(),
+            handler_id: handler.handler_id.to_string(),
+            point: handler.point,
+            surface: handler.surface.clone(),
+        })
+    }
+}
+
+fn extension_point_kind_for_slot(
+    slot: &davenda_core::ExtensionSlotDescriptor,
+) -> ExtensionPointKind {
+    match slot.kind {
+        davenda_core::ExtensionSlotKind::Page => ExtensionPointKind::Page,
+        davenda_core::ExtensionSlotKind::Api => ExtensionPointKind::Api,
+        davenda_core::ExtensionSlotKind::Job => ExtensionPointKind::Job,
+        davenda_core::ExtensionSlotKind::ScheduledJob => ExtensionPointKind::ScheduledJob,
+        davenda_core::ExtensionSlotKind::Webhook => ExtensionPointKind::Webhook,
+        davenda_core::ExtensionSlotKind::AdminWidget => ExtensionPointKind::AdminWidget,
+        davenda_core::ExtensionSlotKind::RenderHook => ExtensionPointKind::RenderHook,
+    }
 }
 
 fn build_handler_registry(
@@ -1370,7 +1519,11 @@ mod tests {
         CustomerAppId as FlagCustomerAppId, FeatureFlag, MaintenanceAudience, MaintenanceImpact,
     };
     use davenda_template::TemplateNamespace;
-    use davenda_wasm::ExtensionPointKind;
+    use davenda_wasm::{
+        AdminWidgetExtensionPoint, ContractVersion, ExtensionInstallation, ExtensionManifest,
+        ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest,
+        HostCapabilityGrant, HostGrantSet, InstalledExtension, ResourceLimits,
+    };
     use std::time::Duration;
 
     const VALID_CONFIG: &str = r#"
@@ -1453,6 +1606,47 @@ tracing = true
 publish_manifest = true
 cdn_base_url = "https://cdn.example.com"
 "#;
+
+    fn installed_admin_widget_extension() -> InstalledExtension {
+        InstalledExtension::install(
+            ExtensionManifest::new(
+                davenda_wasm::ExtensionId::new("admin.waitlist").unwrap(),
+                "Waitlist Dashboard Widgets",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
+                vec![HandlerManifest::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    "exports.waitlist_summary",
+                    ExtensionPoint::AdminWidget(
+                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )
+                .unwrap()],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "showcase-events",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn runtime_builder_creates_a_runtime_plan() {
@@ -1936,6 +2130,54 @@ cdn_base_url = "https://cdn.example.com"
                 dependency,
             }) if module == "memberships" && dependency == "commerce"
         ));
+    }
+
+    #[test]
+    fn runtime_builder_registers_installed_extensions_against_declared_slots() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_installed_extension(installed_admin_widget_extension())
+            .build()
+            .unwrap();
+
+        assert_eq!(plan.installed_extensions.len(), 1);
+        assert_eq!(plan.installed_extensions[0].extension_id, "admin.waitlist");
+        assert!(plan.registered_extension_slots.iter().any(|slot| {
+            slot.module == "admin"
+                && slot.kind == ExtensionPointKind::AdminWidget
+                && slot.surface == "admin.dashboard.summary"
+        }));
+        assert_eq!(
+            plan.extension_registry
+                .admin_widget_handlers("admin.dashboard.summary")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn runtime_builder_rejects_extensions_without_declared_slots() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_installed_extension(installed_admin_widget_extension())
+            .build()
+            .unwrap_err();
+
+        match error {
+            RuntimeBuildError::UnknownExtensionSlot {
+                extension_id,
+                handler_id,
+                point,
+                surface,
+            } => {
+                assert_eq!(extension_id, "admin.waitlist");
+                assert_eq!(handler_id, "waitlist-summary");
+                assert_eq!(point, ExtensionPointKind::AdminWidget);
+                assert_eq!(surface, "admin.dashboard.summary");
+            }
+            other => panic!("expected unknown extension slot, got {other:?}"),
+        }
     }
 
     #[test]

@@ -14,6 +14,7 @@ use davenda_core::{
     RouteSurface, RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
+use davenda_wasm::ExtensionRegistry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminModelError {
@@ -403,6 +404,32 @@ impl AdminShell {
         Ok(workflows)
     }
 
+    pub fn compose_extension_widgets(
+        registry: &ExtensionRegistry,
+    ) -> Result<Vec<AdminWidgetDescriptor>, AdminModelError> {
+        let mut widgets = Vec::new();
+
+        for handler in registry.registered_handlers() {
+            if handler.point != davenda_wasm::ExtensionPointKind::AdminWidget {
+                continue;
+            }
+
+            widgets.push(AdminWidgetDescriptor::new(
+                AdminWidgetId::new(format!(
+                    "ext.{}.{}",
+                    handler.extension_id, handler.handler_id
+                ))?,
+                format!("{} widget", handler.extension_id),
+                map_extension_widget_slot(&handler.surface),
+                Some(Capability::AdminShellAccess),
+                None,
+            )?);
+        }
+
+        ensure_unique_widgets(&widgets)?;
+        Ok(widgets)
+    }
+
     pub fn navigation_by_section(
         &self,
         operator: &OperatorAccessContext,
@@ -527,16 +554,14 @@ impl AdminModule {
                     )
                     .expect("constant widget is valid"),
                 ],
-                vec![
-                    WorkflowAction::new(
-                        WorkflowId::new("system.modules.apply").expect("valid id"),
-                        "Apply module changes",
-                        BulkActionKind::Custom,
-                        Capability::SystemModuleManage,
-                        "Module changes scheduled",
-                    )
-                    .expect("constant workflow is valid"),
-                ],
+                vec![WorkflowAction::new(
+                    WorkflowId::new("system.modules.apply").expect("valid id"),
+                    "Apply module changes",
+                    BulkActionKind::Custom,
+                    Capability::SystemModuleManage,
+                    "Module changes scheduled",
+                )
+                .expect("constant workflow is valid")],
             )
             .expect("constant shell is valid"),
         }
@@ -778,6 +803,18 @@ fn map_bulk_action_kind(kind: CoreBulkOperationKind) -> BulkActionKind {
     }
 }
 
+fn map_extension_widget_slot(surface: &str) -> WidgetSlot {
+    if surface.contains("header") {
+        WidgetSlot::Header
+    } else if surface.contains("sidebar") {
+        WidgetSlot::Sidebar
+    } else if surface.contains("footer") {
+        WidgetSlot::Footer
+    } else {
+        WidgetSlot::Summary
+    }
+}
+
 fn validate_token(field: &'static str, value: String) -> Result<String, AdminModelError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -821,6 +858,42 @@ fn require_non_empty(field: &'static str, value: String) -> Result<String, Admin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use davenda_wasm::{
+        AdminWidgetExtensionPoint, ContractVersion, ExtensionInstallation, ExtensionManifest,
+        ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest,
+        HostCapabilityGrant, HostGrantSet, InstalledExtension, ResourceLimits,
+    };
+
+    fn installed_admin_extension() -> InstalledExtension {
+        InstalledExtension::install(
+            ExtensionManifest::new(
+                davenda_wasm::ExtensionId::new("admin.waitlist").unwrap(),
+                "Waitlist Dashboard Widgets",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
+                vec![HandlerManifest::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    "exports.waitlist_summary",
+                    ExtensionPoint::AdminWidget(
+                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )
+                .unwrap()],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn admin_shell_filters_resources_and_widgets_by_capability() {
@@ -918,11 +991,9 @@ mod tests {
             manifest.required_capabilities,
             vec![Capability::AdminShellAccess, Capability::AdminAuditRead]
         );
-        assert!(
-            manifest
-                .optional_capabilities
-                .contains(&Capability::SystemModuleManage)
-        );
+        assert!(manifest
+            .optional_capabilities
+            .contains(&Capability::SystemModuleManage));
         assert_eq!(
             manifest.core_service_dependencies,
             vec![
@@ -938,12 +1009,10 @@ mod tests {
         assert_eq!(manifest.http_surfaces.len(), 2);
         assert_eq!(manifest.jobs.len(), 1);
         assert_eq!(manifest.event_subscriptions.len(), 1);
-        assert!(
-            manifest
-                .extension_slots
-                .iter()
-                .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget)
-        );
+        assert!(manifest
+            .extension_slots
+            .iter()
+            .any(|slot| slot.kind == ExtensionSlotKind::AdminWidget));
         assert_eq!(
             module
                 .install_migration_plan()
@@ -965,16 +1034,12 @@ mod tests {
         let mut registry = ServiceRegistry::new();
         module.register(&mut registry).unwrap();
 
-        assert!(
-            registry
-                .services()
-                .any(|service| service.id == "module.admin.shell")
-        );
-        assert!(
-            registry
-                .services()
-                .any(|service| service.id == "module.admin.accessibility")
-        );
+        assert!(registry
+            .services()
+            .any(|service| service.id == "module.admin.shell"));
+        assert!(registry
+            .services()
+            .any(|service| service.id == "module.admin.accessibility"));
     }
 
     #[test]
@@ -1040,5 +1105,23 @@ mod tests {
             WorkflowId::new("bulk.events.check-in").unwrap()
         );
         assert_eq!(workflows[0].bulk_action, BulkActionKind::CheckIn);
+    }
+
+    #[test]
+    fn admin_shell_composes_extension_widgets_from_registry() {
+        let mut registry = ExtensionRegistry::new(ContractVersion::new(1, 0, 0));
+        registry.install(installed_admin_extension()).unwrap();
+
+        let widgets = AdminShell::compose_extension_widgets(&registry).unwrap();
+        assert_eq!(widgets.len(), 1);
+        assert_eq!(
+            widgets[0].id,
+            AdminWidgetId::new("ext.admin.waitlist.waitlist-summary").unwrap()
+        );
+        assert_eq!(widgets[0].slot, WidgetSlot::Summary);
+        assert_eq!(
+            widgets[0].required_capability,
+            Some(Capability::AdminShellAccess)
+        );
     }
 }

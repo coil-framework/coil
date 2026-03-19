@@ -33,9 +33,28 @@ pub enum WasmModelError {
     DuplicateInstalledHandler {
         handler_id: String,
     },
+    DuplicateInstalledExtension {
+        extension_id: String,
+    },
+    MixedCustomerAppInstallation {
+        extension_id: String,
+        expected: String,
+        actual: String,
+    },
     GrantNotDeclared {
         handler_id: String,
         grant: HostCapabilityGrant,
+    },
+    HostApiVersionMismatch {
+        extension_id: String,
+        expected: ContractVersion,
+        actual: ContractVersion,
+    },
+    DuplicateExtensionTarget {
+        point: ExtensionPointKind,
+        target: String,
+        existing_handler: String,
+        conflicting_handler: String,
     },
     LimitOverrideExceedsDeclared {
         handler_id: String,
@@ -118,9 +137,37 @@ impl fmt::Display for WasmModelError {
             Self::DuplicateInstalledHandler { handler_id } => {
                 write!(f, "handler `{handler_id}` is installed more than once")
             }
+            Self::DuplicateInstalledExtension { extension_id } => {
+                write!(f, "extension `{extension_id}` is installed more than once")
+            }
+            Self::MixedCustomerAppInstallation {
+                extension_id,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "extension `{extension_id}` targets customer app `{actual}` but the registry is already bound to `{expected}`"
+            ),
             Self::GrantNotDeclared { handler_id, grant } => write!(
                 f,
                 "handler `{handler_id}` was granted `{grant}` without declaring it in the manifest"
+            ),
+            Self::HostApiVersionMismatch {
+                extension_id,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "extension `{extension_id}` requires host API `{actual}` but runtime provides `{expected}`"
+            ),
+            Self::DuplicateExtensionTarget {
+                point,
+                target,
+                existing_handler,
+                conflicting_handler,
+            } => write!(
+                f,
+                "extension target `{target}` for `{point}` is already claimed by `{existing_handler}` and cannot also register `{conflicting_handler}`"
             ),
             Self::LimitOverrideExceedsDeclared { handler_id, field } => write!(
                 f,
@@ -197,6 +244,10 @@ impl ContractVersion {
             minor,
             patch,
         }
+    }
+
+    pub const fn is_compatible_with(self, host: Self) -> bool {
+        self.major == host.major && self.minor == host.minor && self.patch <= host.patch
     }
 }
 
@@ -965,6 +1016,10 @@ impl InstalledExtension {
         &self.customer_app_id
     }
 
+    pub fn installed_handler_count(&self) -> usize {
+        self.handlers.len()
+    }
+
     pub fn prepare_invocation(
         &self,
         handler_id: &HandlerId,
@@ -1006,6 +1061,374 @@ impl InstalledExtension {
             limits: installed_handler.effective_limits,
             context,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredExtensionHandler {
+    pub extension_id: ExtensionId,
+    pub handler_id: HandlerId,
+    pub point: ExtensionPointKind,
+    pub surface: String,
+    pub selector: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionRegistry {
+    host_api_version: ContractVersion,
+    customer_app_id: Option<String>,
+    extensions: BTreeMap<ExtensionId, InstalledExtension>,
+    registered_handlers: Vec<RegisteredExtensionHandler>,
+    page_handlers: BTreeMap<(String, HttpMethod), RegisteredExtensionHandler>,
+    api_handlers: BTreeMap<(String, HttpMethod), RegisteredExtensionHandler>,
+    job_handlers: BTreeMap<String, RegisteredExtensionHandler>,
+    scheduled_job_handlers: BTreeMap<String, RegisteredExtensionHandler>,
+    webhook_handlers: BTreeMap<(String, String), RegisteredExtensionHandler>,
+    admin_widget_handlers: BTreeMap<String, Vec<RegisteredExtensionHandler>>,
+    render_hook_handlers: BTreeMap<String, Vec<RegisteredExtensionHandler>>,
+}
+
+impl ExtensionRegistry {
+    pub fn new(host_api_version: ContractVersion) -> Self {
+        Self {
+            host_api_version,
+            customer_app_id: None,
+            extensions: BTreeMap::new(),
+            registered_handlers: Vec::new(),
+            page_handlers: BTreeMap::new(),
+            api_handlers: BTreeMap::new(),
+            job_handlers: BTreeMap::new(),
+            scheduled_job_handlers: BTreeMap::new(),
+            webhook_handlers: BTreeMap::new(),
+            admin_widget_handlers: BTreeMap::new(),
+            render_hook_handlers: BTreeMap::new(),
+        }
+    }
+
+    pub fn customer_app_id(&self) -> Option<&str> {
+        self.customer_app_id.as_deref()
+    }
+
+    pub fn host_api_version(&self) -> ContractVersion {
+        self.host_api_version
+    }
+
+    pub fn install(&mut self, extension: InstalledExtension) -> Result<(), WasmModelError> {
+        let extension_id = extension.manifest.id.clone();
+        if self.extensions.contains_key(&extension_id) {
+            return Err(WasmModelError::DuplicateInstalledExtension {
+                extension_id: extension_id.to_string(),
+            });
+        }
+
+        if !extension
+            .manifest
+            .host_api_version
+            .is_compatible_with(self.host_api_version)
+        {
+            return Err(WasmModelError::HostApiVersionMismatch {
+                extension_id: extension_id.to_string(),
+                expected: self.host_api_version,
+                actual: extension.manifest.host_api_version,
+            });
+        }
+
+        if let Some(expected_app_id) = &self.customer_app_id {
+            if expected_app_id != &extension.customer_app_id {
+                return Err(WasmModelError::MixedCustomerAppInstallation {
+                    extension_id: extension_id.to_string(),
+                    expected: expected_app_id.clone(),
+                    actual: extension.customer_app_id.clone(),
+                });
+            }
+        } else {
+            self.customer_app_id = Some(extension.customer_app_id.clone());
+        }
+
+        for handler_id in extension.handlers.keys() {
+            let manifest_handler = extension
+                .manifest
+                .handler(handler_id)
+                .expect("installed handlers must exist in the manifest");
+
+            match &manifest_handler.point {
+                ExtensionPoint::Page(page) => {
+                    for method in &page.methods {
+                        let key = (page.route.clone(), *method);
+                        let selector = format!("{method} {}", page.route);
+                        let binding = RegisteredExtensionHandler {
+                            extension_id: extension_id.clone(),
+                            handler_id: handler_id.clone(),
+                            point: ExtensionPointKind::Page,
+                            surface: page.route.clone(),
+                            selector: selector.clone(),
+                        };
+                        register_unique_target(
+                            &mut self.page_handlers,
+                            key,
+                            binding,
+                            selector,
+                            ExtensionPointKind::Page,
+                        )?;
+                        self.registered_handlers.push(RegisteredExtensionHandler {
+                            extension_id: extension_id.clone(),
+                            handler_id: handler_id.clone(),
+                            point: ExtensionPointKind::Page,
+                            surface: page.route.clone(),
+                            selector: format!("{method} {}", page.route),
+                        });
+                    }
+                }
+                ExtensionPoint::Api(api) => {
+                    for method in &api.methods {
+                        let key = (api.route.clone(), *method);
+                        let selector = format!("{method} {}", api.route);
+                        let binding = RegisteredExtensionHandler {
+                            extension_id: extension_id.clone(),
+                            handler_id: handler_id.clone(),
+                            point: ExtensionPointKind::Api,
+                            surface: api.route.clone(),
+                            selector: selector.clone(),
+                        };
+                        register_unique_target(
+                            &mut self.api_handlers,
+                            key,
+                            binding,
+                            selector,
+                            ExtensionPointKind::Api,
+                        )?;
+                        self.registered_handlers.push(RegisteredExtensionHandler {
+                            extension_id: extension_id.clone(),
+                            handler_id: handler_id.clone(),
+                            point: ExtensionPointKind::Api,
+                            surface: api.route.clone(),
+                            selector: format!("{method} {}", api.route),
+                        });
+                    }
+                }
+                ExtensionPoint::Job(job) => {
+                    let binding = RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::Job,
+                        surface: job.job_name.clone(),
+                        selector: job.job_name.clone(),
+                    };
+                    register_unique_target(
+                        &mut self.job_handlers,
+                        job.job_name.clone(),
+                        binding,
+                        job.job_name.clone(),
+                        ExtensionPointKind::Job,
+                    )?;
+                    self.registered_handlers.push(RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::Job,
+                        surface: job.job_name.clone(),
+                        selector: job.job_name.clone(),
+                    });
+                }
+                ExtensionPoint::ScheduledJob(job) => {
+                    let binding = RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::ScheduledJob,
+                        surface: job.job_name.clone(),
+                        selector: job.job_name.clone(),
+                    };
+                    register_unique_target(
+                        &mut self.scheduled_job_handlers,
+                        job.job_name.clone(),
+                        binding,
+                        job.job_name.clone(),
+                        ExtensionPointKind::ScheduledJob,
+                    )?;
+                    self.registered_handlers.push(RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::ScheduledJob,
+                        surface: job.job_name.clone(),
+                        selector: job.job_name.clone(),
+                    });
+                }
+                ExtensionPoint::Webhook(webhook) => {
+                    let selector = format!("{}/{}", webhook.source, webhook.event);
+                    let binding = RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::Webhook,
+                        surface: webhook.source.clone(),
+                        selector: selector.clone(),
+                    };
+                    register_unique_target(
+                        &mut self.webhook_handlers,
+                        (webhook.source.clone(), webhook.event.clone()),
+                        binding,
+                        selector,
+                        ExtensionPointKind::Webhook,
+                    )?;
+                    self.registered_handlers.push(RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::Webhook,
+                        surface: webhook.source.clone(),
+                        selector: format!("{}/{}", webhook.source, webhook.event),
+                    });
+                }
+                ExtensionPoint::AdminWidget(widget) => {
+                    let binding = RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::AdminWidget,
+                        surface: widget.slot.clone(),
+                        selector: widget.slot.clone(),
+                    };
+                    self.registered_handlers.push(binding.clone());
+                    self.admin_widget_handlers
+                        .entry(widget.slot.clone())
+                        .or_default()
+                        .push(binding);
+                }
+                ExtensionPoint::RenderHook(hook) => {
+                    let binding = RegisteredExtensionHandler {
+                        extension_id: extension_id.clone(),
+                        handler_id: handler_id.clone(),
+                        point: ExtensionPointKind::RenderHook,
+                        surface: hook.slot.clone(),
+                        selector: hook.slot.clone(),
+                    };
+                    self.registered_handlers.push(binding.clone());
+                    self.render_hook_handlers
+                        .entry(hook.slot.clone())
+                        .or_default()
+                        .push(binding);
+                }
+            }
+        }
+
+        self.extensions.insert(extension_id, extension);
+        Ok(())
+    }
+
+    pub fn extensions(&self) -> impl Iterator<Item = &InstalledExtension> {
+        self.extensions.values()
+    }
+
+    pub fn registered_handlers(&self) -> &[RegisteredExtensionHandler] {
+        &self.registered_handlers
+    }
+
+    pub fn admin_widget_handlers(&self, slot: &str) -> &[RegisteredExtensionHandler] {
+        self.admin_widget_handlers
+            .get(slot)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub fn render_hook_handlers(&self, slot: &str) -> &[RegisteredExtensionHandler] {
+        self.render_hook_handlers
+            .get(slot)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub fn prepare_page_invocation(
+        &self,
+        route: &str,
+        method: HttpMethod,
+        context: InvocationContext,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        self.page_handlers
+            .get(&(route.to_string(), method))
+            .map(|handler| self.prepare(handler, context))
+            .transpose()
+    }
+
+    pub fn prepare_api_invocation(
+        &self,
+        route: &str,
+        method: HttpMethod,
+        context: InvocationContext,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        self.api_handlers
+            .get(&(route.to_string(), method))
+            .map(|handler| self.prepare(handler, context))
+            .transpose()
+    }
+
+    pub fn prepare_job_invocation(
+        &self,
+        job_name: &str,
+        context: InvocationContext,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        self.job_handlers
+            .get(job_name)
+            .map(|handler| self.prepare(handler, context))
+            .transpose()
+    }
+
+    pub fn prepare_scheduled_job_invocation(
+        &self,
+        job_name: &str,
+        context: InvocationContext,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        self.scheduled_job_handlers
+            .get(job_name)
+            .map(|handler| self.prepare(handler, context))
+            .transpose()
+    }
+
+    pub fn prepare_webhook_invocation(
+        &self,
+        source: &str,
+        event: &str,
+        context: InvocationContext,
+    ) -> Result<Option<InvocationPlan>, WasmModelError> {
+        self.webhook_handlers
+            .get(&(source.to_string(), event.to_string()))
+            .map(|handler| self.prepare(handler, context))
+            .transpose()
+    }
+
+    pub fn prepare_admin_widget_invocations(
+        &self,
+        slot: &str,
+        context: InvocationContext,
+    ) -> Result<Vec<InvocationPlan>, WasmModelError> {
+        self.prepare_many(self.admin_widget_handlers(slot), context)
+    }
+
+    pub fn prepare_render_hook_invocations(
+        &self,
+        slot: &str,
+        context: InvocationContext,
+    ) -> Result<Vec<InvocationPlan>, WasmModelError> {
+        self.prepare_many(self.render_hook_handlers(slot), context)
+    }
+
+    fn prepare(
+        &self,
+        handler: &RegisteredExtensionHandler,
+        context: InvocationContext,
+    ) -> Result<InvocationPlan, WasmModelError> {
+        let extension = self
+            .extensions
+            .get(&handler.extension_id)
+            .expect("registered handlers always belong to an installed extension");
+        extension.prepare_invocation(&handler.handler_id, context)
+    }
+
+    fn prepare_many(
+        &self,
+        handlers: &[RegisteredExtensionHandler],
+        context: InvocationContext,
+    ) -> Result<Vec<InvocationPlan>, WasmModelError> {
+        let mut plans = Vec::new();
+        for handler in handlers {
+            plans.push(self.prepare(handler, context.clone())?);
+        }
+        Ok(plans)
     }
 }
 
@@ -1340,23 +1763,40 @@ impl InvocationPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostCall {
-    DataRead { resource: String },
-    DataWrite { resource: String },
+    DataRead {
+        resource: String,
+    },
+    DataWrite {
+        resource: String,
+    },
     AuthCheck,
     AuthList,
     AuthLookup,
     AuthTupleWrite,
-    StorageRead { class: StorageClassGrant },
-    StorageWrite { class: StorageClassGrant, bytes: u64 },
-    RenderFragment { slot: String },
-    MetadataWrite { kind: MetadataGrant },
+    StorageRead {
+        class: StorageClassGrant,
+    },
+    StorageWrite {
+        class: StorageClassGrant,
+        bytes: u64,
+    },
+    RenderFragment {
+        slot: String,
+    },
+    MetadataWrite {
+        kind: MetadataGrant,
+    },
     CacheHintWrite,
     OutboundHttp {
         integration: String,
         response_bytes: u64,
     },
-    SecretRead { secret: String },
-    EnqueueJob { queue: String },
+    SecretRead {
+        secret: String,
+    },
+    EnqueueJob {
+        queue: String,
+    },
 }
 
 impl HostCall {
@@ -1374,7 +1814,9 @@ impl HostCall {
             Self::AuthTupleWrite => HostCapabilityGrant::AuthTupleWrite,
             Self::StorageRead { class } => HostCapabilityGrant::StorageRead { class: *class },
             Self::StorageWrite { class, .. } => HostCapabilityGrant::StorageWrite { class: *class },
-            Self::RenderFragment { slot } => HostCapabilityGrant::RenderFragment { slot: slot.clone() },
+            Self::RenderFragment { slot } => {
+                HostCapabilityGrant::RenderFragment { slot: slot.clone() }
+            }
             Self::MetadataWrite { kind } => HostCapabilityGrant::MetadataWrite { kind: *kind },
             Self::CacheHintWrite => HostCapabilityGrant::CacheHintWrite,
             Self::OutboundHttp { integration, .. } => HostCapabilityGrant::OutboundHttp {
@@ -1496,8 +1938,7 @@ impl WasmExecutionSession {
                         field: "max_outbound_requests",
                     });
                 }
-                if self.usage.outbound_response_bytes
-                    > self.plan.limits.max_outbound_response_bytes
+                if self.usage.outbound_response_bytes > self.plan.limits.max_outbound_response_bytes
                 {
                     return Err(WasmModelError::ResourceLimitExceeded {
                         handler_id: self.plan.handler_id.to_string(),
@@ -1549,9 +1990,18 @@ impl WasmExecutionSession {
                     ExtensionPointKind::ScheduledJob,
                     InvocationOutcome::ScheduledJobCompleted
                 )
-                | (ExtensionPointKind::Webhook, InvocationOutcome::WebhookAccepted)
-                | (ExtensionPointKind::AdminWidget, InvocationOutcome::AdminWidget)
-                | (ExtensionPointKind::RenderHook, InvocationOutcome::RenderHook)
+                | (
+                    ExtensionPointKind::Webhook,
+                    InvocationOutcome::WebhookAccepted
+                )
+                | (
+                    ExtensionPointKind::AdminWidget,
+                    InvocationOutcome::AdminWidget
+                )
+                | (
+                    ExtensionPointKind::RenderHook,
+                    InvocationOutcome::RenderHook
+                )
         );
 
         if !valid {
@@ -1698,6 +2148,28 @@ fn validate_invocation_target(
     Ok(())
 }
 
+fn register_unique_target<K>(
+    registry: &mut BTreeMap<K, RegisteredExtensionHandler>,
+    key: K,
+    binding: RegisteredExtensionHandler,
+    target: String,
+    point: ExtensionPointKind,
+) -> Result<(), WasmModelError>
+where
+    K: Ord,
+{
+    if let Some(existing) = registry.insert(key, binding.clone()) {
+        return Err(WasmModelError::DuplicateExtensionTarget {
+            point,
+            target,
+            existing_handler: format!("{}::{}", existing.extension_id, existing.handler_id),
+            conflicting_handler: format!("{}::{}", binding.extension_id, binding.handler_id),
+        });
+    }
+
+    Ok(())
+}
+
 fn require_non_empty(field: &'static str, value: String) -> Result<String, WasmModelError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -1771,6 +2243,31 @@ mod tests {
         .unwrap()
     }
 
+    fn admin_widget_manifest() -> ExtensionManifest {
+        ExtensionManifest::new(
+            ExtensionId::new("admin.waitlist").unwrap(),
+            "Waitlist Dashboard Widgets",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
+            vec![HandlerManifest::new(
+                HandlerId::new("waitlist-summary").unwrap(),
+                "exports.waitlist_summary",
+                ExtensionPoint::AdminWidget(
+                    AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                ),
+                HostGrantSet::from_grants([
+                    HostCapabilityGrant::AuthCheck,
+                    HostCapabilityGrant::DataRead {
+                        resource: "events.waitlist".to_string(),
+                    },
+                ]),
+            )
+            .unwrap()],
+        )
+        .unwrap()
+    }
+
     #[test]
     fn manifest_rejects_visual_render_grants_on_job_handlers() {
         let handler = HandlerManifest::new(
@@ -1839,21 +2336,19 @@ mod tests {
         let manifest = page_manifest();
         let installation = ExtensionInstallation::new(
             "customer-app",
-            vec![
-                HandlerInstallation::new(
-                    HandlerId::new("waitlist-page").unwrap(),
-                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
-                )
-                .with_limit_override(ResourceLimits::new(
-                    Duration::from_secs(5),
-                    default_limits().max_memory_bytes,
-                    default_limits().max_outbound_requests,
-                    default_limits().max_outbound_response_bytes,
-                    default_limits().max_storage_writes,
-                    default_limits().max_storage_bytes,
-                    default_limits().max_concurrency,
-                )),
-            ],
+            vec![HandlerInstallation::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+            )
+            .with_limit_override(ResourceLimits::new(
+                Duration::from_secs(5),
+                default_limits().max_memory_bytes,
+                default_limits().max_outbound_requests,
+                default_limits().max_outbound_response_bytes,
+                default_limits().max_storage_writes,
+                default_limits().max_storage_bytes,
+                default_limits().max_concurrency,
+            ))],
         )
         .unwrap();
 
@@ -1874,26 +2369,24 @@ mod tests {
             manifest,
             ExtensionInstallation::new(
                 "customer-app",
-                vec![
-                    HandlerInstallation::new(
-                        HandlerId::new("waitlist-page").unwrap(),
-                        HostGrantSet::from_grants([
-                            HostCapabilityGrant::AuthCheck,
-                            HostCapabilityGrant::DataRead {
-                                resource: "events.waitlist".to_string(),
-                            },
-                        ]),
-                    )
-                    .with_limit_override(ResourceLimits::new(
-                        Duration::from_secs(1),
-                        32 * 1024 * 1024,
-                        2,
-                        2 * 1024 * 1024,
-                        1,
-                        2 * 1024 * 1024,
-                        8,
-                    )),
-                ],
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-page").unwrap(),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )
+                .with_limit_override(ResourceLimits::new(
+                    Duration::from_secs(1),
+                    32 * 1024 * 1024,
+                    2,
+                    2 * 1024 * 1024,
+                    1,
+                    2 * 1024 * 1024,
+                    8,
+                ))],
             )
             .unwrap(),
         )
@@ -1936,24 +2429,22 @@ mod tests {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::Webhook),
-            vec![
-                HandlerManifest::new(
-                    HandlerId::new("webhook-ingest").unwrap(),
-                    "exports.handle_webhook",
-                    ExtensionPoint::Webhook(
-                        WebhookExtensionPoint::new("ticketing", "reservation.updated").unwrap(),
-                    ),
-                    HostGrantSet::from_grants([
-                        HostCapabilityGrant::DataWrite {
-                            resource: "events.reservation".to_string(),
-                        },
-                        HostCapabilityGrant::EnqueueJob {
-                            queue: "follow-up".to_string(),
-                        },
-                    ]),
-                )
-                .unwrap(),
-            ],
+            vec![HandlerManifest::new(
+                HandlerId::new("webhook-ingest").unwrap(),
+                "exports.handle_webhook",
+                ExtensionPoint::Webhook(
+                    WebhookExtensionPoint::new("ticketing", "reservation.updated").unwrap(),
+                ),
+                HostGrantSet::from_grants([
+                    HostCapabilityGrant::DataWrite {
+                        resource: "events.reservation".to_string(),
+                    },
+                    HostCapabilityGrant::EnqueueJob {
+                        queue: "follow-up".to_string(),
+                    },
+                ]),
+            )
+            .unwrap()],
         )
         .unwrap();
 
@@ -2043,29 +2534,27 @@ mod tests {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             default_limits(),
-            vec![
-                HandlerManifest::new(
-                    HandlerId::new("waitlist-page").unwrap(),
-                    "exports.page_waitlist",
-                    ExtensionPoint::Page(
-                        PageExtensionPoint::new(
-                            "/events/waitlist",
-                            [HttpMethod::Get, HttpMethod::Post],
-                        )
-                        .unwrap(),
-                    ),
-                    HostGrantSet::from_grants([
-                        HostCapabilityGrant::AuthCheck,
-                        HostCapabilityGrant::OutboundHttp {
-                            integration: "crm".to_string(),
-                        },
-                        HostCapabilityGrant::StorageWrite {
-                            class: StorageClassGrant::PrivateShared,
-                        },
-                    ]),
-                )
-                .unwrap(),
-            ],
+            vec![HandlerManifest::new(
+                HandlerId::new("waitlist-page").unwrap(),
+                "exports.page_waitlist",
+                ExtensionPoint::Page(
+                    PageExtensionPoint::new(
+                        "/events/waitlist",
+                        [HttpMethod::Get, HttpMethod::Post],
+                    )
+                    .unwrap(),
+                ),
+                HostGrantSet::from_grants([
+                    HostCapabilityGrant::AuthCheck,
+                    HostCapabilityGrant::OutboundHttp {
+                        integration: "crm".to_string(),
+                    },
+                    HostCapabilityGrant::StorageWrite {
+                        class: StorageClassGrant::PrivateShared,
+                    },
+                ]),
+            )
+            .unwrap()],
         )
         .unwrap();
         let plan = InstalledExtension::install(
@@ -2139,17 +2628,15 @@ mod tests {
             ContractVersion::new(1, 0, 0),
             ContractVersion::new(1, 0, 0),
             ResourceLimits::baseline_for(ExtensionPointKind::Job),
-            vec![
-                HandlerManifest::new(
-                    HandlerId::new("reconcile-job").unwrap(),
-                    "exports.reconcile",
-                    ExtensionPoint::Job(JobExtensionPoint::new("reconcile", "jobs.work").unwrap()),
-                    HostGrantSet::from_grants([HostCapabilityGrant::DataWrite {
-                        resource: "billing.invoice".to_string(),
-                    }]),
-                )
-                .unwrap(),
-            ],
+            vec![HandlerManifest::new(
+                HandlerId::new("reconcile-job").unwrap(),
+                "exports.reconcile",
+                ExtensionPoint::Job(JobExtensionPoint::new("reconcile", "jobs.work").unwrap()),
+                HostGrantSet::from_grants([HostCapabilityGrant::DataWrite {
+                    resource: "billing.invoice".to_string(),
+                }]),
+            )
+            .unwrap()],
         )
         .unwrap();
         let plan = InstalledExtension::install(
@@ -2208,26 +2695,24 @@ mod tests {
             manifest,
             ExtensionInstallation::new(
                 "customer-app",
-                vec![
-                    HandlerInstallation::new(
-                        HandlerId::new("waitlist-page").unwrap(),
-                        HostGrantSet::from_grants([
-                            HostCapabilityGrant::AuthCheck,
-                            HostCapabilityGrant::DataRead {
-                                resource: "events.waitlist".to_string(),
-                            },
-                        ]),
-                    )
-                    .with_limit_override(ResourceLimits::new(
-                        Duration::from_secs(2),
-                        64 * 1024 * 1024,
-                        4,
-                        4 * 1024 * 1024,
-                        2,
-                        8 * 1024 * 1024,
-                        2,
-                    )),
-                ],
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-page").unwrap(),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )
+                .with_limit_override(ResourceLimits::new(
+                    Duration::from_secs(2),
+                    64 * 1024 * 1024,
+                    4,
+                    4 * 1024 * 1024,
+                    2,
+                    8 * 1024 * 1024,
+                    2,
+                ))],
             )
             .unwrap(),
         )
@@ -2256,5 +2741,190 @@ mod tests {
                 field: "max_concurrency",
             }
         );
+    }
+
+    #[test]
+    fn extension_registry_rejects_host_api_mismatch_and_duplicate_targets() {
+        let mismatched = InstalledExtension::install(
+            ExtensionManifest::new(
+                ExtensionId::new("admin.waitlist.future").unwrap(),
+                "Future Host API",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(2, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
+                vec![HandlerManifest::new(
+                    HandlerId::new("future-widget").unwrap(),
+                    "exports.future_widget",
+                    ExtensionPoint::AdminWidget(
+                        AdminWidgetExtensionPoint::new("admin.dashboard.summary").unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )
+                .unwrap()],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("future-widget").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut registry = ExtensionRegistry::new(ContractVersion::new(1, 0, 0));
+        let error = registry.install(mismatched).unwrap_err();
+        assert_eq!(
+            error,
+            WasmModelError::HostApiVersionMismatch {
+                extension_id: "admin.waitlist.future".to_string(),
+                expected: ContractVersion::new(1, 0, 0),
+                actual: ContractVersion::new(2, 0, 0),
+            }
+        );
+
+        let first = InstalledExtension::install(
+            admin_widget_manifest(),
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        registry.install(first).unwrap();
+
+        let duplicate = InstalledExtension::install(
+            ExtensionManifest::new(
+                ExtensionId::new("admin.waitlist.duplicate").unwrap(),
+                "Duplicate Widget",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::AdminWidget),
+                vec![HandlerManifest::new(
+                    HandlerId::new("waitlist-summary-alt").unwrap(),
+                    "exports.waitlist_summary_alt",
+                    ExtensionPoint::Page(
+                        PageExtensionPoint::new("/events/waitlist", [HttpMethod::Get]).unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )
+                .unwrap()],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-summary-alt").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        registry.install(duplicate).unwrap();
+
+        let conflicting_page = InstalledExtension::install(
+            ExtensionManifest::new(
+                ExtensionId::new("events.waitlist.duplicate").unwrap(),
+                "Duplicate Waitlist Route",
+                ContractVersion::new(1, 0, 0),
+                ContractVersion::new(1, 0, 0),
+                ResourceLimits::baseline_for(ExtensionPointKind::Page),
+                vec![HandlerManifest::new(
+                    HandlerId::new("waitlist-page-alt").unwrap(),
+                    "exports.page_waitlist_alt",
+                    ExtensionPoint::Page(
+                        PageExtensionPoint::new("/events/waitlist", [HttpMethod::Get]).unwrap(),
+                    ),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )
+                .unwrap()],
+            )
+            .unwrap(),
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-page-alt").unwrap(),
+                    HostGrantSet::from_grants([HostCapabilityGrant::AuthCheck]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = registry.install(conflicting_page).unwrap_err();
+        assert_eq!(
+            error,
+            WasmModelError::DuplicateExtensionTarget {
+                point: ExtensionPointKind::Page,
+                target: "GET /events/waitlist".to_string(),
+                existing_handler: "admin.waitlist.duplicate::waitlist-summary-alt".to_string(),
+                conflicting_handler: "events.waitlist.duplicate::waitlist-page-alt".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn extension_registry_prepares_admin_widget_invocations() {
+        let installed = InstalledExtension::install(
+            admin_widget_manifest(),
+            ExtensionInstallation::new(
+                "customer-app",
+                vec![HandlerInstallation::new(
+                    HandlerId::new("waitlist-summary").unwrap(),
+                    HostGrantSet::from_grants([
+                        HostCapabilityGrant::AuthCheck,
+                        HostCapabilityGrant::DataRead {
+                            resource: "events.waitlist".to_string(),
+                        },
+                    ]),
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut registry = ExtensionRegistry::new(ContractVersion::new(1, 0, 0));
+        registry.install(installed).unwrap();
+
+        let plans = registry
+            .prepare_admin_widget_invocations(
+                "admin.dashboard.summary",
+                InvocationContext::new(
+                    CustomerAppContext::new("customer-app").unwrap(),
+                    PrincipalRef::user("operator-7").unwrap(),
+                    TraceContext::new("trace-admin").unwrap(),
+                    InvocationInput::AdminWidget(
+                        AdminWidgetInvocation::new("admin.dashboard.summary").unwrap(),
+                    ),
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(registry.customer_app_id(), Some("customer-app"));
+        assert_eq!(
+            registry
+                .admin_widget_handlers("admin.dashboard.summary")
+                .len(),
+            1
+        );
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].extension_id,
+            ExtensionId::new("admin.waitlist").unwrap()
+        );
+        assert_eq!(plans[0].point, ExtensionPointKind::AdminWidget);
     }
 }

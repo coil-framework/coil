@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use super::*;
 use davenda_core::BrowserSecurityError;
 
@@ -22,6 +20,7 @@ pub use session::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use davenda_core::{
         BrowserSecurityServices, CookiePolicy, CookieProtection, CsrfProtection,
         SessionSecurityServices, SessionStoreTopology,

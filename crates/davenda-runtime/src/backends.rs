@@ -107,6 +107,7 @@ impl fmt::Debug for RuntimeBackendMaterializer {
     }
 }
 
+#[cfg(test)]
 fn cache_backend_kind(backend: davenda_cache::DistributedCacheBackend) -> CacheBackendKind {
     match backend {
         davenda_cache::DistributedCacheBackend::Redis => CacheBackendKind::Redis,

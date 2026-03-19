@@ -11,6 +11,7 @@ davenda-core = { path = "../davenda-core" }
 davenda-data = { path = "../davenda-data" }
 davenda-jobs = { path = "../davenda-jobs" }
 davenda-observability = { path = "../davenda-observability" }
+davenda-ops = { path = "../davenda-ops" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "1.0"

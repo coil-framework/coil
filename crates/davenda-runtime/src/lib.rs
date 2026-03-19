@@ -24,6 +24,10 @@ use davenda_observability::{
     CustomerAppId, FeatureFlag, FeatureFlagContext, FeatureFlagId, MaintenanceMode,
     ObservabilityError,
 };
+use davenda_ops::{
+    BulkOperationPlan, BulkOperationRequest, OpsCatalog, OpsModelError, OpsPlanner,
+    ReportExportPlan, ReportExportRequest,
+};
 use davenda_wasm::{
     ContractVersion, ExtensionPointKind, ExtensionRegistry, InstalledExtension, WasmModelError,
 };
@@ -815,6 +819,7 @@ where
                     })
                 })
                 .collect::<Vec<_>>();
+        let ops_catalog = OpsCatalog::from_manifests(&module_manifests)?;
         let (registered_runtime_jobs, registered_runtime_event_subscriptions, jobs_domain) =
             build_runtime_jobs_domain(&bootstrap.jobs, &module_jobs, &module_event_subscriptions)?;
         let registered_extension_slots = collect_extension_slots(&module_manifests)?;
@@ -871,6 +876,7 @@ where
             registered_runtime_jobs,
             registered_runtime_event_subscriptions,
             jobs_domain,
+            ops_catalog,
         })
     }
 }
@@ -904,6 +910,7 @@ pub struct RuntimePlan {
     pub registered_runtime_jobs: Vec<RuntimeJobDefinition>,
     pub registered_runtime_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
     pub jobs_domain: JobsDomain,
+    pub ops_catalog: OpsCatalog,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1088,6 +1095,16 @@ pub struct JobsHost {
 }
 
 impl JobsHost {
+    pub fn enqueue_spec(
+        &mut self,
+        spec: JobSpec,
+        now: JobInstant,
+    ) -> Result<JobId, RuntimeJobsError> {
+        let job_id = spec.job_id.clone();
+        self.coordinator.enqueue(spec, now)?;
+        Ok(job_id)
+    }
+
     pub fn enqueue_job(
         &mut self,
         request: JobDispatchRequest,
@@ -1295,6 +1312,66 @@ impl JobsHost {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedReportExport {
+    pub plan: ReportExportPlan,
+    pub queued_job_id: JobId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedBulkOperation {
+    pub plan: BulkOperationPlan,
+    pub queued_job_id: JobId,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpsHost {
+    planner: OpsPlanner,
+    jobs: JobsHost,
+}
+
+impl OpsHost {
+    pub fn planner(&self) -> &OpsPlanner {
+        &self.planner
+    }
+
+    pub fn jobs(&self) -> &JobsHost {
+        &self.jobs
+    }
+
+    pub fn jobs_mut(&mut self) -> &mut JobsHost {
+        &mut self.jobs
+    }
+
+    pub fn queue_report_export(
+        &mut self,
+        request: ReportExportRequest,
+    ) -> Result<QueuedReportExport, RuntimeOpsError> {
+        let requested_at = request.requested_at;
+        let plan = self.planner.plan_report_export(request)?;
+        let queued_job_id = self.jobs.enqueue_spec(plan.job.clone(), requested_at)?;
+
+        Ok(QueuedReportExport {
+            plan,
+            queued_job_id,
+        })
+    }
+
+    pub fn queue_bulk_operation(
+        &mut self,
+        request: BulkOperationRequest,
+    ) -> Result<QueuedBulkOperation, RuntimeOpsError> {
+        let requested_at = request.requested_at;
+        let plan = self.planner.plan_bulk_operation(request)?;
+        let queued_job_id = self.jobs.enqueue_spec(plan.job.clone(), requested_at)?;
+
+        Ok(QueuedBulkOperation {
+            plan,
+            queued_job_id,
+        })
+    }
+}
+
 impl RuntimePlan {
     pub fn jobs_host(
         &self,
@@ -1314,6 +1391,16 @@ impl RuntimePlan {
             coordinator: self.jobs.coordinator(),
             next_job_sequence: 0,
             next_event_sequence: 0,
+        })
+    }
+
+    pub fn ops_host(
+        &self,
+        scheduler_node_id: impl Into<String>,
+    ) -> Result<OpsHost, RuntimeOpsError> {
+        Ok(OpsHost {
+            planner: OpsPlanner::new(self.jobs.clone(), self.ops_catalog.clone())?,
+            jobs: self.jobs_host(scheduler_node_id)?,
         })
     }
 
@@ -1757,6 +1844,14 @@ pub enum RuntimeJobsError {
     MissingIdempotencyKey { job: String },
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeOpsError {
+    #[error(transparent)]
+    Ops(#[from] OpsModelError),
+    #[error(transparent)]
+    Jobs(#[from] RuntimeJobsError),
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeBuildError {
     #[error(transparent)]
@@ -1777,6 +1872,8 @@ pub enum RuntimeBuildError {
     Wasm(#[from] WasmModelError),
     #[error(transparent)]
     Jobs(#[from] JobsModelError),
+    #[error(transparent)]
+    Ops(#[from] OpsModelError),
     #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
     AuthPackageMismatch { configured: String, actual: String },
     #[error(
@@ -2101,7 +2198,7 @@ fn build_handler_registry(
 mod tests {
     use super::*;
     use davenda_admin::AdminModule;
-    use davenda_auth::DefaultAuthModelPackage;
+    use davenda_auth::{Capability, DefaultAuthModelPackage};
     use davenda_cache::DistributedCacheBackend;
     use davenda_cms::CmsModule;
     use davenda_commerce::CommerceModule;
@@ -2111,6 +2208,10 @@ mod tests {
     use davenda_memberships::MembershipsModule;
     use davenda_observability::{
         CustomerAppId as FlagCustomerAppId, FeatureFlag, MaintenanceAudience, MaintenanceImpact,
+    };
+    use davenda_ops::{
+        BulkExecutionId, BulkOperationId, BulkOperationRequest, OpsModule, ReportExportId,
+        ReportExportRequest, ReportId,
     };
     use davenda_template::TemplateNamespace;
     use davenda_wasm::{
@@ -2452,6 +2553,18 @@ cdn_base_url = "https://cdn.example.com"
         assert!(plan.module_bulk_operations.iter().any(|registered| {
             registered.module == "events" && registered.definition.id == "bulk.events.check-in"
         }));
+        assert!(
+            plan.ops_catalog
+                .reports
+                .definition(&ReportId::new("report.memberships.summary").unwrap())
+                .is_some()
+        );
+        assert!(
+            plan.ops_catalog
+                .bulk
+                .definition(&BulkOperationId::new("bulk.events.check-in").unwrap())
+                .is_some()
+        );
     }
 
     #[test]
@@ -2971,6 +3084,108 @@ cdn_base_url = "https://cdn.example.com"
             }
             other => panic!("expected duplicate runtime job error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ops_host_queues_report_exports_into_the_jobs_runtime() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
+            .with_module(MembershipsModule::new())
+            .with_module(OpsModule::new())
+            .build()
+            .unwrap();
+        let mut ops = plan.ops_host("scheduler-a").unwrap();
+
+        let queued = ops
+            .queue_report_export(
+                ReportExportRequest::new(
+                    ReportExportId::new("export-memberships-1").unwrap(),
+                    ReportId::new("report.memberships.summary").unwrap(),
+                    "operator-1",
+                    JobInstant::from_unix_seconds(100),
+                )
+                .unwrap()
+                .with_capability(Capability::MembershipSubscriptionManage)
+                .with_idempotency_key(IdempotencyKey::new("report:memberships:summary:1").unwrap()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            queued.plan.definition.id.as_str(),
+            "report.memberships.summary"
+        );
+        assert_eq!(queued.queued_job_id.as_str(), "export-memberships-1");
+        assert_eq!(ops.jobs().coordinator().ready_jobs().len(), 1);
+        assert_eq!(
+            ops.jobs().coordinator().ready_jobs()[0]
+                .spec
+                .job_name
+                .as_str(),
+            "report.export.report.memberships.summary"
+        );
+    }
+
+    #[test]
+    fn ops_host_enforces_bulk_capabilities_before_queueing_jobs() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(AdminModule::new())
+            .with_module(CmsModule::new())
+            .with_module(CommerceModule::new())
+            .with_module(EventsModule::new())
+            .with_module(OpsModule::new())
+            .build()
+            .unwrap();
+        let mut ops = plan.ops_host("scheduler-a").unwrap();
+
+        let denied = ops
+            .queue_bulk_operation(
+                BulkOperationRequest::new(
+                    BulkExecutionId::new("bulk-check-in-1").unwrap(),
+                    BulkOperationId::new("bulk.events.check-in").unwrap(),
+                    "operator-1",
+                    JobInstant::from_unix_seconds(100),
+                    25,
+                )
+                .unwrap()
+                .with_idempotency_key(IdempotencyKey::new("bulk:events:check-in:1").unwrap()),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            denied,
+            RuntimeOpsError::Ops(OpsModelError::MissingCapability {
+                operation: "bulk operation",
+                required: Capability::EventsBookingCheckIn,
+            })
+        ));
+
+        let queued = ops
+            .queue_bulk_operation(
+                BulkOperationRequest::new(
+                    BulkExecutionId::new("bulk-check-in-2").unwrap(),
+                    BulkOperationId::new("bulk.events.check-in").unwrap(),
+                    "operator-1",
+                    JobInstant::from_unix_seconds(110),
+                    25,
+                )
+                .unwrap()
+                .with_capability(Capability::EventsBookingCheckIn)
+                .with_idempotency_key(IdempotencyKey::new("bulk:events:check-in:2").unwrap()),
+            )
+            .unwrap();
+
+        assert_eq!(queued.queued_job_id.as_str(), "bulk-check-in-2");
+        assert_eq!(ops.jobs().coordinator().ready_jobs().len(), 1);
+        assert_eq!(
+            ops.jobs().coordinator().ready_jobs()[0]
+                .spec
+                .job_name
+                .as_str(),
+            "bulk.bulk.events.check-in"
+        );
     }
 
     #[test]

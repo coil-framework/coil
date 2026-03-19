@@ -578,6 +578,7 @@ dependencies = [
  "davenda-media",
  "davenda-memberships",
  "davenda-observability",
+ "davenda-ops",
  "davenda-template",
  "davenda-wasm",
  "thiserror 1.0.69",

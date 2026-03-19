@@ -6,7 +6,7 @@ use axum::response::Response;
 
 use davenda_wasm::{CacheVisibility, ExecutionReceipt, TypedCacheHint, TypedMetadata};
 
-use super::{FileDeliveryMode, append_receipt_headers, insert_header, render_cache_control};
+use super::{FileDeliveryMode, render_cache_control};
 
 #[derive(Debug, Clone)]
 pub(crate) struct LiveResponseComposition {
@@ -30,9 +30,21 @@ pub(crate) struct LiveResponseAnnotations {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveCacheHeaders {
-    passthrough: Vec<(HeaderName, HeaderValue)>,
+    passthrough: Vec<LiveHeader>,
     cache_control: Option<HeaderValue>,
     surrogate_key: Option<HeaderValue>,
+}
+
+#[derive(Debug, Clone)]
+struct LiveHeader {
+    name: HeaderName,
+    value: HeaderValue,
+}
+
+impl LiveHeader {
+    fn new(name: HeaderName, value: HeaderValue) -> Self {
+        Self { name, value }
+    }
 }
 
 impl LiveCacheHeaders {
@@ -73,7 +85,7 @@ impl LiveCacheHeaders {
                 HeaderName::try_from(name.as_str()),
                 HeaderValue::from_str(&value),
             ) {
-                passthrough.push((header_name, header_value));
+                passthrough.push(LiveHeader::new(header_name, header_value));
             }
         }
 
@@ -84,22 +96,21 @@ impl LiveCacheHeaders {
         }
     }
 
-    fn apply_to(&self, headers: &mut HeaderMap) {
-        for (name, value) in &self.passthrough {
-            headers.insert(name.clone(), value.clone());
-        }
+    fn rendered_headers(&self) -> Vec<LiveHeader> {
+        let mut headers = self.passthrough.clone();
         if let Some(cache_control) = &self.cache_control {
-            headers.insert(
+            headers.push(LiveHeader::new(
                 HeaderName::from_static("cache-control"),
                 cache_control.clone(),
-            );
+            ));
         }
         if let Some(surrogate_key) = &self.surrogate_key {
-            headers.insert(
+            headers.push(LiveHeader::new(
                 HeaderName::from_static("surrogate-key"),
                 surrogate_key.clone(),
-            );
+            ));
         }
+        headers
     }
 }
 
@@ -219,7 +230,9 @@ impl LiveResponseComposition {
             }
         };
 
-        render_annotations(response.headers_mut(), &self.annotations);
+        for header in self.annotations.rendered_headers() {
+            response.headers_mut().insert(header.name, header.value);
+        }
         for cookie in self.cookies {
             if let Ok(value) = HeaderValue::from_str(&cookie) {
                 response
@@ -272,6 +285,86 @@ impl LiveResponseAnnotations {
         self.locale = Some(locale.into());
         self
     }
+
+    fn rendered_headers(&self) -> Vec<LiveHeader> {
+        let mut headers = Vec::new();
+
+        if let Some(receipt) = &self.request_surface {
+            headers.extend(receipt_headers("request", receipt));
+        }
+
+        if !self.render_hooks.is_empty() {
+            headers.push(LiveHeader::new(
+                HeaderName::from_static("x-davenda-wasm-render-hook-count"),
+                HeaderValue::from_str(&self.render_hooks.len().to_string())
+                    .expect("render hook count is a valid header value"),
+            ));
+            headers.push(LiveHeader::new(
+                HeaderName::from_static("x-davenda-wasm-render-hook-handlers"),
+                HeaderValue::from_str(
+                    &self
+                        .render_hooks
+                        .iter()
+                        .map(|receipt| receipt.handler_id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )
+                .expect("render hook handler list is a valid header value"),
+            ));
+            for receipt in &self.render_hooks {
+                headers.extend(receipt_headers("render-hook", receipt));
+            }
+        }
+
+        if !self.admin_widgets.is_empty() {
+            headers.push(LiveHeader::new(
+                HeaderName::from_static("x-davenda-wasm-admin-widget-count"),
+                HeaderValue::from_str(&self.admin_widgets.len().to_string())
+                    .expect("admin widget count is a valid header value"),
+            ));
+            headers.push(LiveHeader::new(
+                HeaderName::from_static("x-davenda-wasm-admin-widget-handlers"),
+                HeaderValue::from_str(
+                    &self
+                        .admin_widgets
+                        .iter()
+                        .map(|receipt| receipt.handler_id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )
+                .expect("admin widget handler list is a valid header value"),
+            ));
+            for receipt in &self.admin_widgets {
+                headers.extend(receipt_headers("admin-widget", receipt));
+            }
+        }
+
+        if let Some(metadata) = &self.metadata {
+            headers.extend(metadata_headers(metadata));
+        }
+
+        if let Some(cache_hint) = &self.cache_hint {
+            headers.extend(cache_hint_headers(cache_hint));
+        }
+
+        if let Some(route) = self.route.as_ref() {
+            headers.push(header_value(
+                "x-davenda-route",
+                route.clone(),
+                "route is a valid header value",
+            ));
+        }
+        if let Some(locale) = self.locale.as_ref() {
+            headers.push(header_value(
+                "x-davenda-locale",
+                locale.clone(),
+                "locale is a valid header value",
+            ));
+        }
+
+        headers.extend(self.cache_headers.rendered_headers());
+        headers
+    }
 }
 
 fn body_response(
@@ -317,144 +410,129 @@ fn escape_json(value: &str) -> String {
     escaped
 }
 
-fn render_annotations(headers: &mut HeaderMap, annotations: &LiveResponseAnnotations) {
-    if let Some(receipt) = &annotations.request_surface {
-        append_receipt_headers(headers, "request", receipt);
-    }
+fn receipt_headers(prefix: &str, receipt: &ExecutionReceipt) -> Vec<LiveHeader> {
+    vec![
+        header_value(
+            &format!("x-davenda-wasm-{prefix}-handler"),
+            receipt.handler_id.to_string(),
+            "receipt handler id is a valid header value",
+        ),
+        header_value(
+            &format!("x-davenda-wasm-{prefix}-point"),
+            format!("{:?}", receipt.point),
+            "receipt point is a valid header value",
+        ),
+        header_value(
+            &format!("x-davenda-wasm-{prefix}-outcome"),
+            format!("{:?}", receipt.outcome),
+            "receipt outcome is a valid header value",
+        ),
+        header_value(
+            &format!("x-davenda-wasm-{prefix}-runtime-ms"),
+            receipt.runtime.as_millis().to_string(),
+            "receipt runtime is a valid header value",
+        ),
+        header_value(
+            &format!("x-davenda-wasm-{prefix}-host-calls"),
+            receipt.host_calls.len().to_string(),
+            "receipt host call count is a valid header value",
+        ),
+    ]
+}
 
-    if !annotations.render_hooks.is_empty() {
-        headers.insert(
-            HeaderName::from_static("x-davenda-wasm-render-hook-count"),
-            HeaderValue::from_str(&annotations.render_hooks.len().to_string())
-                .expect("render hook count is a valid header value"),
-        );
-        headers.insert(
-            HeaderName::from_static("x-davenda-wasm-render-hook-handlers"),
-            HeaderValue::from_str(
-                &annotations
-                    .render_hooks
-                    .iter()
-                    .map(|receipt| receipt.handler_id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(","),
-            )
-            .expect("render hook handler list is a valid header value"),
-        );
-        for receipt in &annotations.render_hooks {
-            append_receipt_headers(headers, "render-hook", receipt);
-        }
+fn metadata_headers(metadata: &TypedMetadata) -> Vec<LiveHeader> {
+    let mut headers = Vec::new();
+    if let Some(title) = metadata.title.as_ref() {
+        headers.push(header_value(
+            "x-davenda-wasm-metadata-title",
+            title.clone(),
+            "metadata title is a valid header value",
+        ));
     }
-
-    if !annotations.admin_widgets.is_empty() {
-        headers.insert(
-            HeaderName::from_static("x-davenda-wasm-admin-widget-count"),
-            HeaderValue::from_str(&annotations.admin_widgets.len().to_string())
-                .expect("admin widget count is a valid header value"),
-        );
-        headers.insert(
-            HeaderName::from_static("x-davenda-wasm-admin-widget-handlers"),
-            HeaderValue::from_str(
-                &annotations
-                    .admin_widgets
-                    .iter()
-                    .map(|receipt| receipt.handler_id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(","),
-            )
-            .expect("admin widget handler list is a valid header value"),
-        );
-        for receipt in &annotations.admin_widgets {
-            append_receipt_headers(headers, "admin-widget", receipt);
-        }
+    if let Some(description) = metadata.description.as_ref() {
+        headers.push(header_value(
+            "x-davenda-wasm-metadata-description",
+            description.clone(),
+            "metadata description is a valid header value",
+        ));
     }
-
-    if let Some(metadata) = &annotations.metadata {
-        if let Some(title) = metadata.title.as_ref() {
-            insert_header(headers, "x-davenda-wasm-metadata-title", title.clone());
-        }
-        if let Some(description) = metadata.description.as_ref() {
-            insert_header(
-                headers,
-                "x-davenda-wasm-metadata-description",
-                description.clone(),
-            );
-        }
-        if let Some(canonical_url) = metadata.canonical_url.as_ref() {
-            insert_header(
-                headers,
-                "x-davenda-wasm-metadata-canonical",
-                canonical_url.clone(),
-            );
-        }
-        if !metadata.alternate_urls.is_empty() {
-            insert_header(
-                headers,
-                "x-davenda-wasm-metadata-alternates",
-                metadata
-                    .alternate_urls
-                    .iter()
-                    .map(|(locale, url)| format!("{locale}={url}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
-        }
-        if !metadata.robots.is_empty() {
-            insert_header(
-                headers,
-                "x-davenda-wasm-metadata-robots",
-                metadata
-                    .robots
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
-        }
-        if !metadata.json_ld.is_empty() {
-            insert_header(
-                headers,
-                "x-davenda-wasm-metadata-json-ld-count",
-                metadata.json_ld.len().to_string(),
-            );
-        }
+    if let Some(canonical_url) = metadata.canonical_url.as_ref() {
+        headers.push(header_value(
+            "x-davenda-wasm-metadata-canonical",
+            canonical_url.clone(),
+            "metadata canonical URL is a valid header value",
+        ));
     }
+    if !metadata.alternate_urls.is_empty() {
+        headers.push(header_value(
+            "x-davenda-wasm-metadata-alternates",
+            metadata
+                .alternate_urls
+                .iter()
+                .map(|(locale, url)| format!("{locale}={url}"))
+                .collect::<Vec<_>>()
+                .join(","),
+            "metadata alternates are a valid header value",
+        ));
+    }
+    if !metadata.robots.is_empty() {
+        headers.push(header_value(
+            "x-davenda-wasm-metadata-robots",
+            metadata
+                .robots
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+            "metadata robots are a valid header value",
+        ));
+    }
+    if !metadata.json_ld.is_empty() {
+        headers.push(header_value(
+            "x-davenda-wasm-metadata-json-ld-count",
+            metadata.json_ld.len().to_string(),
+            "metadata JSON-LD count is a valid header value",
+        ));
+    }
+    headers
+}
 
-    if let Some(cache_hint) = &annotations.cache_hint {
-        insert_header(
-            headers,
+fn cache_hint_headers(cache_hint: &TypedCacheHint) -> Vec<LiveHeader> {
+    let mut headers = vec![
+        header_value(
             "x-davenda-wasm-cache-visibility",
             match cache_hint.visibility {
                 CacheVisibility::Public => "public".to_string(),
                 CacheVisibility::Private => "private".to_string(),
             },
-        );
-        insert_header(
-            headers,
+            "cache visibility is a valid header value",
+        ),
+        header_value(
             "x-davenda-wasm-cache-control",
             render_cache_control(cache_hint),
-        );
-        if !cache_hint.tags.is_empty() {
-            insert_header(
-                headers,
-                "x-davenda-wasm-cache-tags",
-                cache_hint
-                    .tags
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
-        }
+            "cache control is a valid header value",
+        ),
+    ];
+    if !cache_hint.tags.is_empty() {
+        headers.push(header_value(
+            "x-davenda-wasm-cache-tags",
+            cache_hint
+                .tags
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(","),
+            "cache tags are a valid header value",
+        ));
     }
+    headers
+}
 
-    if let Some(route) = annotations.route.as_ref() {
-        insert_header(headers, "x-davenda-route", route.clone());
-    }
-    if let Some(locale) = annotations.locale.as_ref() {
-        insert_header(headers, "x-davenda-locale", locale.clone());
-    }
-
-    annotations.cache_headers.apply_to(headers);
+fn header_value(name: &str, value: String, reason: &'static str) -> LiveHeader {
+    LiveHeader::new(
+        HeaderName::try_from(name).expect("header name is static and valid"),
+        HeaderValue::from_str(&value).expect(reason),
+    )
 }
 
 fn file_delivery_mode_name(mode: FileDeliveryMode) -> &'static str {
@@ -496,7 +574,9 @@ mod tests {
         );
 
         let mut rendered = HeaderMap::new();
-        headers.apply_to(&mut rendered);
+        for header in headers.rendered_headers() {
+            rendered.insert(header.name, header.value);
+        }
 
         assert_eq!(
             rendered.get("cache-control").unwrap(),

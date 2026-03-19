@@ -224,8 +224,10 @@ impl DistributedSessionStoreClient {
         Self::new(kind, Arc::new(SharedDistributedSessionStoreRuntime::new()))
     }
 
-    pub fn shared(kind: SessionStoreBackendKind, scope: impl Into<String>) -> Self {
-        Self::new(kind, shared_session_store_runtime(kind, scope.into()))
+    pub(crate) fn shared_runtime(
+        _kind: SessionStoreBackendKind,
+    ) -> Arc<dyn DistributedSessionStoreRuntime> {
+        Arc::new(SharedDistributedSessionStoreRuntime::new())
     }
 
     pub fn kind(&self) -> SessionStoreBackendKind {
@@ -271,7 +273,8 @@ impl std::fmt::Debug for DistributedSessionStoreClient {
     }
 }
 
-fn shared_session_store_runtime(
+#[cfg(test)]
+fn shared_test_runtime(
     kind: SessionStoreBackendKind,
     scope: String,
 ) -> Arc<dyn DistributedSessionStoreRuntime> {
@@ -282,7 +285,7 @@ fn shared_session_store_runtime(
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
     let mut guard = registry
         .lock()
-        .expect("shared session store registry mutex poisoned");
+        .expect("test session store registry mutex poisoned");
     guard
         .entry(key)
         .or_insert_with(|| Arc::new(SharedDistributedSessionStoreRuntime::new()))
@@ -296,6 +299,7 @@ enum SessionStoreBackend {
 }
 
 impl SessionStoreBackend {
+    #[cfg(test)]
     fn shared(
         customer_app: &str,
         services: &davenda_core::SessionSecurityServices,
@@ -307,23 +311,32 @@ impl SessionStoreBackend {
             }
             davenda_core::SessionStoreTopology::Database => Ok((
                 SessionStoreBackendKind::Database,
-                Self::Distributed(DistributedSessionStoreClient::shared(
+                Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Database,
-                    format!("{backend_scope}:{customer_app}"),
+                    shared_test_runtime(
+                        SessionStoreBackendKind::Database,
+                        format!("{backend_scope}:{customer_app}"),
+                    ),
                 )),
             )),
             davenda_core::SessionStoreTopology::Redis => Ok((
                 SessionStoreBackendKind::Redis,
-                Self::Distributed(DistributedSessionStoreClient::shared(
+                Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Redis,
-                    format!("{backend_scope}:{customer_app}"),
+                    shared_test_runtime(
+                        SessionStoreBackendKind::Redis,
+                        format!("{backend_scope}:{customer_app}"),
+                    ),
                 )),
             )),
             davenda_core::SessionStoreTopology::Valkey => Ok((
                 SessionStoreBackendKind::Valkey,
-                Self::Distributed(DistributedSessionStoreClient::shared(
+                Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Valkey,
-                    format!("{backend_scope}:{customer_app}"),
+                    shared_test_runtime(
+                        SessionStoreBackendKind::Valkey,
+                        format!("{backend_scope}:{customer_app}"),
+                    ),
                 )),
             )),
         }
@@ -331,7 +344,7 @@ impl SessionStoreBackend {
 
     #[cfg(test)]
     fn local(
-        customer_app: &str,
+        _customer_app: &str,
         services: &davenda_core::SessionSecurityServices,
     ) -> (SessionStoreBackendKind, Self) {
         match services.store {
@@ -341,23 +354,25 @@ impl SessionStoreBackend {
             ),
             davenda_core::SessionStoreTopology::Database => (
                 SessionStoreBackendKind::Database,
-                Self::Distributed(DistributedSessionStoreClient::shared(
+                Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Database,
-                    customer_app.to_string(),
+                    DistributedSessionStoreClient::shared_runtime(
+                        SessionStoreBackendKind::Database,
+                    ),
                 )),
             ),
             davenda_core::SessionStoreTopology::Redis => (
                 SessionStoreBackendKind::Redis,
-                Self::Distributed(DistributedSessionStoreClient::shared(
+                Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Redis,
-                    customer_app.to_string(),
+                    DistributedSessionStoreClient::shared_runtime(SessionStoreBackendKind::Redis),
                 )),
             ),
             davenda_core::SessionStoreTopology::Valkey => (
                 SessionStoreBackendKind::Valkey,
-                Self::Distributed(DistributedSessionStoreClient::shared(
+                Self::Distributed(DistributedSessionStoreClient::new(
                     SessionStoreBackendKind::Valkey,
-                    customer_app.to_string(),
+                    DistributedSessionStoreClient::shared_runtime(SessionStoreBackendKind::Valkey),
                 )),
             ),
         }

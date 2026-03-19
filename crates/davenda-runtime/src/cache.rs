@@ -1,10 +1,31 @@
 use super::*;
-use crate::backends::shared_cache_runtime;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeCacheError {
     #[error(transparent)]
     Cache(#[from] CacheModelError),
+}
+
+pub(crate) fn shared_distributed_runtime(
+    topology: CacheTopology,
+    backend: davenda_cache::CacheBackendKind,
+    scope: impl Into<String>,
+) -> Arc<dyn davenda_cache::DistributedCacheRuntime> {
+    static REGISTRY: OnceLock<
+        Mutex<BTreeMap<String, Arc<dyn davenda_cache::DistributedCacheRuntime>>>,
+    > = OnceLock::new();
+
+    let key = format!("{topology:?}:{backend:?}:{}", scope.into());
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry
+        .lock()
+        .expect("shared cache runtime registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| davenda_cache::DistributedCacheClient::emulated_shared_runtime(backend))
+        .clone()
 }
 
 #[derive(Debug, Clone)]
@@ -37,7 +58,7 @@ impl CacheHost {
             };
             CacheRuntime::with_shared_runtime(
                 planner.topology(),
-                shared_cache_runtime(planner.topology(), backend, backend_scope),
+                shared_distributed_runtime(planner.topology(), backend, backend_scope),
             )
         } else {
             planner.runtime()

@@ -1,5 +1,5 @@
 use super::*;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::StatusCode;
 
 mod response;
 
@@ -193,43 +193,6 @@ impl LiveExecutionReceipts {
         outputs
     }
 }
-
-fn append_receipt_headers(headers: &mut HeaderMap, prefix: &str, receipt: &ExecutionReceipt) {
-    insert_header(
-        headers,
-        &format!("x-davenda-wasm-{prefix}-handler"),
-        receipt.handler_id.to_string(),
-    );
-    insert_header(
-        headers,
-        &format!("x-davenda-wasm-{prefix}-point"),
-        format!("{:?}", receipt.point),
-    );
-    insert_header(
-        headers,
-        &format!("x-davenda-wasm-{prefix}-outcome"),
-        format!("{:?}", receipt.outcome),
-    );
-    insert_header(
-        headers,
-        &format!("x-davenda-wasm-{prefix}-runtime-ms"),
-        receipt.runtime.as_millis().to_string(),
-    );
-    insert_header(
-        headers,
-        &format!("x-davenda-wasm-{prefix}-host-calls"),
-        receipt.host_calls.len().to_string(),
-    );
-}
-
-fn insert_header(headers: &mut HeaderMap, name: &str, value: String) {
-    if let Ok(header_name) = HeaderName::try_from(name) {
-        if let Ok(header_value) = HeaderValue::from_str(&value) {
-            headers.insert(header_name, header_value);
-        }
-    }
-}
-
 fn render_cache_control(cache_hint: &TypedCacheHint) -> String {
     let mut directives = Vec::new();
     directives.push(match cache_hint.visibility {

@@ -137,6 +137,10 @@ impl RuntimePlan {
         cookie_secret: &[u8],
         csrf_secret: &[u8],
     ) -> Result<HttpServerHost, RuntimeServerError> {
+        if self.browser.sessions.store == davenda_core::SessionStoreTopology::Memory {
+            return Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost.into());
+        }
+
         HttpServerHost::new(
             self.clone(),
             self.shared_backend_clients(resolver)?,

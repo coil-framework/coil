@@ -1,5 +1,6 @@
 use super::*;
-use crate::backends::shared_jobs_runtime;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredModuleJob {
@@ -158,6 +159,25 @@ pub struct DomainEventDispatch {
     pub enqueued_jobs: Vec<JobId>,
 }
 
+pub(crate) fn shared_coordinator_runtime(
+    runtime: &JobsRuntimeServices,
+    scope: impl Into<String>,
+) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+    static REGISTRY: OnceLock<
+        Mutex<BTreeMap<String, Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>,
+    > = OnceLock::new();
+
+    let key = format!("{runtime:?}:{}", scope.into());
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry
+        .lock()
+        .expect("shared jobs runtime registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| davenda_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
+        .clone()
+}
+
 #[derive(Debug, Clone)]
 pub struct JobsHost {
     pub customer_app: String,
@@ -183,8 +203,8 @@ impl JobsHost {
         registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
         jobs_domain: JobsDomain,
     ) -> Self {
-        let coordinator =
-            runtime.coordinator_with_shared_runtime(shared_jobs_runtime(&runtime, backend_scope));
+        let coordinator = runtime
+            .coordinator_with_shared_runtime(shared_coordinator_runtime(&runtime, backend_scope));
         Self {
             customer_app,
             scheduler_node_id,

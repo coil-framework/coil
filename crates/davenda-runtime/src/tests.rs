@@ -1179,6 +1179,32 @@ fn browser_host_keeps_memory_sessions_local_to_each_clone() {
 }
 
 #[test]
+fn server_host_rejects_memory_session_stores_for_live_wiring() {
+    let config = PlatformConfig::from_toml_str(
+        &VALID_CONFIG.replace("store = \"redis\"", "store = \"memory\""),
+    )
+    .unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+
+    let error = plan
+        .server_host(
+            &crate::server::StaticSecretResolver::new(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeServerError::BrowserHostBuild(
+            BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost
+        )
+    ));
+}
+
+#[test]
 fn browser_host_shares_distributed_sessions_by_default_within_a_plan() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -2958,6 +2984,61 @@ fn runtime_backend_materializer_uses_shared_jobs_backends_even_when_not_flagged_
 
     assert_eq!(right.ready_jobs().len(), 1);
     assert_eq!(right.ready_jobs()[0].spec.job_id.as_str(), "job-shared");
+}
+
+#[test]
+fn runtime_backend_materializer_reuses_explicit_session_runtime_for_browser_hosts() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+
+    let materializer = crate::backends::RuntimeBackendMaterializer::new(
+        plan.shared_backend_scope.clone(),
+        SharedBackendClients {
+            database: DatabaseClientTarget {
+                driver: davenda_config::DatabaseDriver::Postgres,
+                url: None,
+                min_connections: 1,
+                max_connections: 1,
+                statement_timeout_secs: 30,
+            },
+            distributed_cache: None,
+            jobs: JobsClientTarget {
+                backend: davenda_config::JobBackend::Redis,
+                shared: true,
+            },
+            session_store: Some(SessionStoreClientTarget {
+                kind: SessionStoreBackendKind::Redis,
+                shared: true,
+            }),
+            object_store: None,
+        },
+    );
+
+    let mut left = materializer
+        .browser_host(plan.config.app.name.clone(), plan.browser.clone())
+        .unwrap();
+    let right = materializer
+        .browser_host(plan.config.app.name.clone(), plan.browser.clone())
+        .unwrap();
+
+    let issued = left
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-runtime")
+                .unwrap(),
+            b"01234567012345670123456701234567",
+            BrowserInstant::from_unix_seconds(100),
+        )
+        .unwrap();
+
+    assert_eq!(
+        right
+            .session(&issued.record.session_id)
+            .and_then(|record| record.principal_id),
+        Some("member-runtime".to_string())
+    );
 }
 
 #[test]

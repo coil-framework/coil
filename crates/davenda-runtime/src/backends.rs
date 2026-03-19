@@ -1,17 +1,21 @@
 use super::*;
-use davenda_cache::{CacheBackendKind, DistributedCacheClient};
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use davenda_cache::CacheBackendKind;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeBackendMaterializer {
     scope: String,
     plans: SharedBackendClients,
+    session_runtimes: Arc<SessionRuntimeRegistry>,
 }
 
 impl RuntimeBackendMaterializer {
     pub(crate) fn new(scope: String, plans: SharedBackendClients) -> Self {
-        Self { scope, plans }
+        Self {
+            scope,
+            plans,
+            session_runtimes: Arc::new(SessionRuntimeRegistry::default()),
+        }
     }
 
     pub(crate) fn browser_host(
@@ -23,7 +27,11 @@ impl RuntimeBackendMaterializer {
             Some(target) => BrowserHost::with_session_store_client(
                 customer_app.clone(),
                 services.clone(),
-                DistributedSessionStoreClient::shared(target.kind, self.scope.clone()),
+                DistributedSessionStoreClient::new(
+                    target.kind,
+                    self.session_runtimes
+                        .runtime_for(target.kind, format!("{}:{customer_app}", self.scope)),
+                ),
             ),
             None => Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost),
         }
@@ -33,7 +41,7 @@ impl RuntimeBackendMaterializer {
         match self.plans.distributed_cache.as_ref() {
             Some(target) => CacheRuntime::with_shared_runtime(
                 planner.topology(),
-                shared_cache_runtime(
+                crate::cache::shared_distributed_runtime(
                     planner.topology(),
                     cache_backend_kind(target.backend),
                     self.scope.clone(),
@@ -45,58 +53,49 @@ impl RuntimeBackendMaterializer {
 
     pub(crate) fn jobs_coordinator(
         &self,
-        customer_app: &str,
+        _customer_app: &str,
         runtime: &JobsRuntimeServices,
     ) -> JobsCoordinator {
-        runtime.coordinator_with_shared_runtime(shared_jobs_runtime(
+        runtime.coordinator_with_shared_runtime(crate::jobs::shared_coordinator_runtime(
             runtime,
-            format!("{}:{customer_app}", self.scope),
+            self.scope.clone(),
         ))
     }
-}
-
-pub(crate) fn shared_cache_runtime(
-    topology: CacheTopology,
-    backend: CacheBackendKind,
-    scope: String,
-) -> std::sync::Arc<dyn davenda_cache::DistributedCacheRuntime> {
-    static REGISTRY: OnceLock<
-        Mutex<BTreeMap<String, std::sync::Arc<dyn davenda_cache::DistributedCacheRuntime>>>,
-    > = OnceLock::new();
-
-    let key = format!("{topology:?}:{backend:?}:{scope}");
-    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry
-        .lock()
-        .expect("shared cache runtime registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| DistributedCacheClient::emulated_shared_runtime(backend))
-        .clone()
-}
-
-pub(crate) fn shared_jobs_runtime(
-    runtime: &JobsRuntimeServices,
-    scope: String,
-) -> std::sync::Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
-    static REGISTRY: OnceLock<
-        Mutex<BTreeMap<String, std::sync::Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>,
-    > = OnceLock::new();
-
-    let key = format!("{runtime:?}:{scope}");
-    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry
-        .lock()
-        .expect("shared jobs runtime registry mutex poisoned");
-    guard
-        .entry(key)
-        .or_insert_with(|| davenda_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
-        .clone()
 }
 
 fn cache_backend_kind(backend: davenda_cache::DistributedCacheBackend) -> CacheBackendKind {
     match backend {
         davenda_cache::DistributedCacheBackend::Redis => CacheBackendKind::Redis,
         davenda_cache::DistributedCacheBackend::Valkey => CacheBackendKind::Valkey,
+    }
+}
+
+#[derive(Default)]
+struct SessionRuntimeRegistry {
+    runtimes: Mutex<BTreeMap<String, Arc<dyn DistributedSessionStoreRuntime>>>,
+}
+
+impl SessionRuntimeRegistry {
+    fn runtime_for(
+        &self,
+        kind: SessionStoreBackendKind,
+        scope: String,
+    ) -> Arc<dyn DistributedSessionStoreRuntime> {
+        let key = format!("{kind:?}:{scope}");
+        let mut guard = self
+            .runtimes
+            .lock()
+            .expect("session runtime registry mutex poisoned");
+        guard
+            .entry(key)
+            .or_insert_with(|| DistributedSessionStoreClient::shared_runtime(kind))
+            .clone()
+    }
+}
+
+impl std::fmt::Debug for SessionRuntimeRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionRuntimeRegistry")
+            .finish_non_exhaustive()
     }
 }

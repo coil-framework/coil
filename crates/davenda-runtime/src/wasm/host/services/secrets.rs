@@ -8,6 +8,7 @@ use super::super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SecretBackendMode {
     Runtime,
+    #[cfg(test)]
     Test,
 }
 
@@ -61,6 +62,7 @@ impl RuntimeSecretBackend {
         if let Some(value) = self.values.get(secret) {
             let source = match self.mode {
                 SecretBackendMode::Runtime => format!("runtime:{}:{secret}", self.scope),
+                #[cfg(test)]
                 SecretBackendMode::Test => format!("in-memory:{secret}"),
             };
             return Ok(SecretExecution {

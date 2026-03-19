@@ -38,7 +38,6 @@ impl RuntimeOutboundHttpBackend {
         )
     }
 
-    #[cfg(test)]
     pub(super) fn with_settings(
         allow_network: bool,
         targets: BTreeMap<String, String>,

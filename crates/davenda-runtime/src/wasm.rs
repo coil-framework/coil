@@ -138,6 +138,19 @@ impl WasmHost {
         Ok(receipts)
     }
 
+    pub fn execute_admin_widget_slot(
+        &self,
+        slot: &str,
+        execution: &RequestExecution,
+    ) -> Result<Vec<ExecutionReceipt>, LiveWasmExecutionError> {
+        let sessions = self.begin_admin_widget_invocations(slot, execution)?;
+        let mut receipts = Vec::with_capacity(sessions.len());
+        for session in sessions {
+            receipts.push(self.execute_installed_session(session)?);
+        }
+        Ok(receipts)
+    }
+
     fn execute_installed_session(
         &self,
         session: WasmExecutionSession,

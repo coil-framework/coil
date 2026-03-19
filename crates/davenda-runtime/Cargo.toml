@@ -20,6 +20,8 @@ davenda-storage = { path = "../davenda-storage" }
 davenda-template = { path = "../davenda-template" }
 davenda-tls = { path = "../davenda-tls" }
 davenda-wasm = { path = "../davenda-wasm" }
+ipnet = "2"
+sha2 = "0.10"
 thiserror = "1.0"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
@@ -33,3 +35,4 @@ davenda-events = { path = "../davenda-events" }
 davenda-media = { path = "../davenda-media" }
 davenda-memberships = { path = "../davenda-memberships" }
 davenda-observability = { path = "../davenda-observability" }
+wat = "1"

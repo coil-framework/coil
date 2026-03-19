@@ -38,11 +38,12 @@ use davenda_tls::{
     HostnameBinding, SecretMaterialRef, TlsInstant,
 };
 use davenda_wasm::{
-    AdminWidgetExtensionPoint, ContractVersion, ExtensionInstallation, ExtensionManifest,
-    ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest, HostCall,
-    HostCapabilityGrant, HostGrantSet, InstalledExtension, InvocationInput, InvocationOutcome,
-    JobExtensionPoint, PageExtensionPoint, PrincipalKind, RenderHookExtensionPoint, ResourceLimits,
-    ScheduledJobExtensionPoint, WasmModelError, WebhookExtensionPoint,
+    AdminWidgetExtensionPoint, ApiExtensionPoint, ContractVersion, ExtensionInstallation,
+    ExtensionManifest, ExtensionPoint, ExtensionPointKind, HandlerId, HandlerInstallation,
+    HandlerManifest, HostCall, HostCapabilityGrant, HostGrantSet, InstalledExtension,
+    InvocationInput, InvocationOutcome, JobExtensionPoint, PageExtensionPoint, PrincipalKind,
+    RenderHookExtensionPoint, ResourceLimits, ScheduledJobExtensionPoint, WasmModelError,
+    WebhookExtensionPoint,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -280,6 +281,21 @@ fn installed_page_extension_for_app(route: &str, customer_app_id: &str) -> Insta
     .unwrap()
 }
 
+fn installed_page_extension_for_app_with_artifact(
+    extension_dir: &Path,
+    route: &str,
+    customer_app_id: &str,
+) -> InstalledExtension {
+    write_guest_artifact(
+        extension_dir,
+        "account.runtime",
+        "exports.account_dashboard",
+        &[],
+        InvocationOutcome::Page,
+    );
+    installed_page_extension_for_app(route, customer_app_id)
+}
+
 fn installed_webhook_extension() -> InstalledExtension {
     InstalledExtension::install(
         ExtensionManifest::new(
@@ -319,6 +335,88 @@ fn installed_webhook_extension() -> InstalledExtension {
         .unwrap(),
     )
     .unwrap()
+}
+
+fn installed_admin_widget_extension_with_artifact(extension_dir: &Path) -> InstalledExtension {
+    write_guest_artifact(
+        extension_dir,
+        "admin.waitlist",
+        "exports.waitlist_summary",
+        &[(0, 0), (1, 0)],
+        InvocationOutcome::AdminWidget,
+    );
+    installed_admin_widget_extension()
+}
+
+fn installed_render_hook_extension_with_artifact(extension_dir: &Path) -> InstalledExtension {
+    write_guest_artifact(
+        extension_dir,
+        "cms.loyalty",
+        "exports.loyalty_badge",
+        &[(0, 0)],
+        InvocationOutcome::RenderHook,
+    );
+    installed_render_hook_extension()
+}
+
+fn installed_api_extension_with_artifact(
+    extension_dir: &Path,
+    route: &str,
+    customer_app_id: &str,
+) -> InstalledExtension {
+    write_guest_artifact(
+        extension_dir,
+        "api.account",
+        "exports.account_json",
+        &[(0, 0)],
+        InvocationOutcome::ApiJson,
+    );
+
+    InstalledExtension::install(
+        ExtensionManifest::new(
+            davenda_wasm::ExtensionId::new("api.account").unwrap(),
+            "Account API",
+            ContractVersion::new(1, 0, 0),
+            ContractVersion::new(1, 0, 0),
+            ResourceLimits::baseline_for(ExtensionPointKind::Api),
+            vec![
+                HandlerManifest::new(
+                    HandlerId::new("account-json").unwrap(),
+                    "exports.account_json",
+                    ExtensionPoint::Api(
+                        ApiExtensionPoint::new(route, [davenda_wasm::HttpMethod::Get]).unwrap(),
+                    ),
+                    HostGrantSet::new(),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+        ExtensionInstallation::new(
+            customer_app_id,
+            vec![HandlerInstallation::new(
+                HandlerId::new("account-json").unwrap(),
+                HostGrantSet::new(),
+            )],
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn write_guest_artifact(
+    extension_dir: &Path,
+    extension_id: &str,
+    export: &str,
+    host_calls: &[(i32, i64)],
+    outcome: InvocationOutcome,
+) {
+    let wasm = wat::parse_str(guest_module(export, host_calls, outcome)).unwrap();
+    let path = extension_dir.join(format!("{extension_id}.wasm"));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, wasm).unwrap();
 }
 
 fn installed_scheduled_job_extension() -> InstalledExtension {
@@ -1981,7 +2079,11 @@ async fn server_host_executes_page_extensions_during_live_requests() {
                 .requiring_session(),
         )
         .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
-        .with_installed_extension(installed_page_extension_for_app("/account", app_name))
+        .with_installed_extension(installed_page_extension_for_app_with_artifact(
+            &extension_dir,
+            "/account",
+            app_name,
+        ))
         .build()
         .unwrap();
 
@@ -2023,6 +2125,7 @@ async fn server_host_executes_page_extensions_during_live_requests() {
 
     let response = server.respond(request).await.unwrap();
     let status = response.status();
+    let headers = response.headers().clone();
     let body = String::from_utf8(
         to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2031,8 +2134,16 @@ async fn server_host_executes_page_extensions_during_live_requests() {
     )
     .unwrap();
 
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(body.contains("account.runtime"));
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get("x-davenda-wasm-request-handler").unwrap(),
+        "account-dashboard"
+    );
+    assert_eq!(
+        headers.get("x-davenda-wasm-request-outcome").unwrap(),
+        "Page"
+    );
+    assert!(body.contains("data-route=\"account.dashboard\""));
 
     fs::remove_dir_all(&extension_dir).unwrap();
 }
@@ -2044,7 +2155,9 @@ async fn server_host_executes_render_hooks_during_html_render() {
     let config = config_with_extension_directory(&extension_dir);
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CmsModule::new())
-        .with_installed_extension(installed_render_hook_extension())
+        .with_installed_extension(installed_render_hook_extension_with_artifact(
+            &extension_dir,
+        ))
         .build()
         .unwrap();
     let resolver = StaticSecretResolver::new()
@@ -2072,6 +2185,7 @@ async fn server_host_executes_render_hooks_during_html_render() {
 
     let response = server.respond(request).await.unwrap();
     let status = response.status();
+    let headers = response.headers().clone();
     let body = String::from_utf8(
         to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2080,8 +2194,175 @@ async fn server_host_executes_render_hooks_during_html_render() {
     )
     .unwrap();
 
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(body.contains("cms.loyalty"));
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get("x-davenda-wasm-render-hook-count").unwrap(),
+        "1"
+    );
+    assert_eq!(
+        headers.get("x-davenda-wasm-render-hook-handlers").unwrap(),
+        "loyalty-badge"
+    );
+    assert!(body.contains("rel=\"canonical\""));
+
+    fs::remove_dir_all(&extension_dir).unwrap();
+}
+
+#[tokio::test]
+async fn server_host_executes_admin_widget_extensions_during_live_requests() {
+    let extension_dir = unique_temp_extension_dir("admin-widget-wasm");
+    fs::create_dir_all(&extension_dir).unwrap();
+    let config = config_with_extension_directory(&extension_dir);
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_installed_extension(installed_admin_widget_extension_with_artifact(
+            &extension_dir,
+        ))
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get("x-davenda-wasm-admin-widget-count").unwrap(),
+        "1"
+    );
+    assert_eq!(
+        headers.get("x-davenda-wasm-admin-widget-handlers").unwrap(),
+        "waitlist-summary"
+    );
+
+    fs::remove_dir_all(&extension_dir).unwrap();
+}
+
+#[tokio::test]
+async fn server_host_executes_api_extensions_during_live_requests() {
+    let extension_dir = unique_temp_extension_dir("api-wasm");
+    fs::create_dir_all(&extension_dir).unwrap();
+    let config = config_with_extension_directory(&extension_dir);
+    let api_slots = StaticManifestModule::new(
+        ModuleManifest::new("api.runtime.slot").with_extension_slots(vec![
+            ExtensionSlotDescriptor::new(
+                ExtensionSlotKind::Api,
+                "/api/account",
+                "Allows API extensions to participate in the live request path",
+            ),
+        ]),
+    );
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(api_slots)
+        .with_route(
+            RouteDefinition::new("account.api", HttpMethod::Get, "/api/account")
+                .unwrap()
+                .with_area(RouteArea::Api)
+                .requiring_session(),
+        )
+        .with_handler(
+            HandlerDefinition::json(
+                "account.api",
+                BTreeMap::from([("status".to_string(), "ok".to_string())]),
+            )
+            .unwrap(),
+        )
+        .with_installed_extension(installed_api_extension_with_artifact(
+            &extension_dir,
+            "/api/account",
+            "showcase-events",
+        ))
+        .build()
+        .unwrap();
+
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-4")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/account")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get("x-davenda-wasm-request-handler").unwrap(),
+        "account-json"
+    );
+    assert_eq!(
+        headers.get("x-davenda-wasm-request-outcome").unwrap(),
+        "ApiJson"
+    );
 
     fs::remove_dir_all(&extension_dir).unwrap();
 }

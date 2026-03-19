@@ -13,7 +13,9 @@ use axum::response::IntoResponse;
 use axum::routing::any;
 use axum::{Router, serve};
 use davenda_cache::DistributedCacheBackend;
-use davenda_config::{DatabaseDriver, DistributedCache, JobBackend, ObjectStoreKind, SecretRef};
+use davenda_config::{
+    DatabaseDriver, DistributedCache, JobBackend, ObjectStoreKind, SecretRef, SessionStore,
+};
 use tower::ServiceExt;
 
 use super::*;
@@ -104,6 +106,12 @@ pub struct JobsClientTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionStoreClientTarget {
+    pub kind: SessionStoreBackendKind,
+    pub shared: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectStoreClientTarget {
     pub kind: ObjectStoreKind,
     pub credential_reference: Option<String>,
@@ -115,6 +123,7 @@ pub struct SharedBackendClients {
     pub database: DatabaseClientTarget,
     pub distributed_cache: Option<DistributedCacheClientTarget>,
     pub jobs: JobsClientTarget,
+    pub session_store: Option<SessionStoreClientTarget>,
     pub object_store: Option<ObjectStoreClientTarget>,
 }
 
@@ -143,6 +152,21 @@ impl SharedBackendClients {
             backend: config.jobs.backend,
             shared: true,
         };
+        let session_store = match config.http.session.store {
+            SessionStore::Memory => None,
+            SessionStore::Database => Some(SessionStoreClientTarget {
+                kind: SessionStoreBackendKind::Database,
+                shared: true,
+            }),
+            SessionStore::Redis => Some(SessionStoreClientTarget {
+                kind: SessionStoreBackendKind::Redis,
+                shared: true,
+            }),
+            SessionStore::Valkey => Some(SessionStoreClientTarget {
+                kind: SessionStoreBackendKind::Valkey,
+                shared: true,
+            }),
+        };
         let object_store_credentials = config
             .storage
             .object_store_secret
@@ -162,6 +186,7 @@ impl SharedBackendClients {
             database,
             distributed_cache,
             jobs,
+            session_store,
             object_store,
         })
     }
@@ -459,12 +484,23 @@ impl HttpServerHost {
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
     ) -> Self {
+        let materializer = RuntimeBackendMaterializer::new(backends.clone());
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
                 plan.auth_package_name.clone(),
             ));
-        Self::new_with_authorizer(plan, backends, cookie_secret, csrf_secret, route_authorizer)
+        let browser = materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone());
+        let _shared_cache_runtime = materializer.cache_runtime(plan.cache_planner);
+        let _shared_jobs_coordinator = materializer.jobs_coordinator(&plan.jobs);
+        Self::new_with_browser_and_authorizer(
+            plan,
+            browser,
+            backends,
+            cookie_secret,
+            csrf_secret,
+            route_authorizer,
+        )
     }
 
     pub fn new_with_browser_host(
@@ -706,30 +742,17 @@ fn execution_response(
     plan: &RuntimePlan,
     execution: RequestExecution,
 ) -> Result<Response<Body>, RuntimeServerError> {
-    let wasm = plan.wasm_host();
-    wasm.execute_request_surface(&execution)?;
+    let receipts = LiveExecutionReceipts::collect(plan, &execution)?;
 
     let mut response = match &execution.response {
-        HandlerResponse::Page(page) => {
-            for slot in render_hook_slots_for_execution(plan, &execution) {
-                wasm.execute_render_hook_slot(slot.as_str(), &execution)?;
-            }
-
-            html_response(
-                StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK),
-                plan.render_page_response(&execution, &page)?,
-            )
-        }
-        HandlerResponse::Fragment(fragment) => {
-            for slot in render_hook_slots_for_execution(plan, &execution) {
-                wasm.execute_render_hook_slot(slot.as_str(), &execution)?;
-            }
-
-            html_response(
-                StatusCode::OK,
-                plan.render_fragment_response(&execution, &fragment)?,
-            )
-        }
+        HandlerResponse::Page(page) => html_response(
+            StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK),
+            plan.render_page_response(&execution, &page)?,
+        ),
+        HandlerResponse::Fragment(fragment) => html_response(
+            StatusCode::OK,
+            plan.render_fragment_response(&execution, &fragment)?,
+        ),
         HandlerResponse::Redirect(redirect) => {
             let mut response = Response::new(Body::empty());
             *response.status_mut() =
@@ -787,6 +810,8 @@ fn execution_response(
             response
         }
     };
+
+    receipts.decorate_response_headers(response.headers_mut());
 
     response.headers_mut().insert(
         "x-davenda-route",
@@ -938,26 +963,6 @@ fn html_response(status: StatusCode, body: String) -> Response<Body> {
     response
 }
 
-fn render_hook_slots_for_execution(
-    plan: &RuntimePlan,
-    execution: &RequestExecution,
-) -> Vec<String> {
-    let module = plan
-        .http
-        .routes
-        .iter()
-        .find(|route| route.name == execution.route.route_name)
-        .and_then(|route| route.module.as_deref());
-
-    plan.registered_extension_slots
-        .iter()
-        .filter(|slot| {
-            slot.kind == ExtensionPointKind::RenderHook && Some(slot.module.as_str()) == module
-        })
-        .map(|slot| slot.surface.clone())
-        .collect()
-}
-
 fn escape_json(value: &str) -> String {
     let mut escaped = String::new();
     for ch in value.chars() {
@@ -977,10 +982,11 @@ impl fmt::Display for SharedBackendClients {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "db={:?} cache={:?} jobs={:?} object_store={:?}",
+            "db={:?} cache={:?} jobs={:?} sessions={:?} object_store={:?}",
             self.database.driver,
             self.distributed_cache.as_ref().map(|cache| cache.backend),
             self.jobs.backend,
+            self.session_store.as_ref().map(|store| store.kind),
             self.object_store.as_ref().map(|store| store.kind)
         )
     }

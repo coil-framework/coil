@@ -1,4 +1,7 @@
-use super::*;
+use davenda_config::PlatformConfig;
+use davenda_core::ModuleManifest;
+use std::collections::BTreeMap;
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HttpMethod {
@@ -316,6 +319,35 @@ pub struct ResolvedRouteMatch {
     pub resolved: ResolvedRoute,
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RouteBuildError {
+    #[error("route names must not be empty")]
+    EmptyRouteName,
+    #[error("route paths must start with `/`, got `{path}`")]
+    InvalidRoutePath { path: String },
+    #[error("host pattern must not be empty")]
+    EmptyHostPattern,
+    #[error("route `{name}` is registered more than once for method {method:?}")]
+    DuplicateRoute { name: String, method: HttpMethod },
+    #[error(
+        "route `{name}` requires capability `{capability}` but the auth package does not bind it"
+    )]
+    MissingCapabilityBinding {
+        name: String,
+        capability: davenda_auth::Capability,
+    },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RouteUrlError {
+    #[error("route `{route}` is not registered")]
+    UnknownRoute { route: String },
+    #[error("route `{route}` requires parameter `{parameter}`")]
+    MissingRouteParameter { route: String, parameter: String },
+    #[error("route `{route}` does not support locale `{locale}`")]
+    UnsupportedLocale { route: String, locale: String },
+}
+
 fn route_capability_resource(
     namespace: davenda_auth::Namespace,
     module: Option<&str>,
@@ -363,371 +395,6 @@ fn route_capability_resource(
         }
         davenda_auth::Namespace::AdminModule => davenda_auth::Entity::admin_module(resource_id),
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RequestInput {
-    pub method: HttpMethod,
-    pub host: String,
-    pub path: String,
-    pub scheme: String,
-    pub forwarded_proto: Option<String>,
-    pub request_id: Option<String>,
-    pub session_id: Option<String>,
-    pub session_cookie: Option<String>,
-    pub flash_cookie: Option<String>,
-    pub csrf_token: Option<String>,
-    pub csrf_action: Option<String>,
-    pub maintenance_bypass_token: Option<String>,
-    pub principal_id: Option<String>,
-    pub granted_capabilities: HashSet<davenda_auth::Capability>,
-}
-
-impl RequestInput {
-    pub fn new(
-        method: HttpMethod,
-        host: impl Into<String>,
-        path: impl Into<String>,
-    ) -> Result<Self, RouteBuildError> {
-        Ok(Self {
-            method,
-            host: validate_host(host.into())?,
-            path: validate_route_path(path.into())?,
-            scheme: "https".to_string(),
-            forwarded_proto: None,
-            request_id: None,
-            session_id: None,
-            session_cookie: None,
-            flash_cookie: None,
-            csrf_token: None,
-            csrf_action: None,
-            maintenance_bypass_token: None,
-            principal_id: None,
-            granted_capabilities: HashSet::new(),
-        })
-    }
-
-    pub fn with_scheme(mut self, scheme: impl Into<String>) -> Self {
-        self.scheme = scheme.into();
-        self
-    }
-
-    pub fn with_forwarded_proto(mut self, proto: impl Into<String>) -> Self {
-        self.forwarded_proto = Some(proto.into());
-        self
-    }
-
-    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
-        self.request_id = Some(request_id.into());
-        self
-    }
-
-    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
-        self.session_id = Some(session_id.into());
-        self
-    }
-
-    pub fn with_session_cookie(mut self, session_cookie: impl Into<String>) -> Self {
-        self.session_cookie = Some(session_cookie.into());
-        self
-    }
-
-    pub fn with_flash_cookie(mut self, flash_cookie: impl Into<String>) -> Self {
-        self.flash_cookie = Some(flash_cookie.into());
-        self
-    }
-
-    pub fn with_csrf_token(mut self, csrf_token: impl Into<String>) -> Self {
-        self.csrf_token = Some(csrf_token.into());
-        self
-    }
-
-    pub fn with_csrf_action(mut self, csrf_action: impl Into<String>) -> Self {
-        self.csrf_action = Some(csrf_action.into());
-        self
-    }
-
-    pub fn with_maintenance_bypass_token(mut self, bypass_token: impl Into<String>) -> Self {
-        self.maintenance_bypass_token = Some(bypass_token.into());
-        self
-    }
-
-    pub fn with_principal(mut self, principal_id: impl Into<String>) -> Self {
-        self.principal_id = Some(principal_id.into());
-        self
-    }
-
-    pub fn grant_capability(mut self, capability: davenda_auth::Capability) -> Self {
-        self.granted_capabilities.insert(capability);
-        self
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RequestTraceContext {
-    pub request_id: String,
-    pub transport_scheme: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionContext {
-    pub session_id: Option<String>,
-    pub resolved_from_cookie: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrincipalContext {
-    pub principal_id: Option<String>,
-    pub granted_capabilities: HashSet<davenda_auth::Capability>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheDisposition {
-    Public,
-    Private,
-    Uncacheable,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RequestExecution {
-    pub customer_app: String,
-    pub method: HttpMethod,
-    pub host: String,
-    pub path: String,
-    pub route: ResolvedRoute,
-    pub route_area: RouteArea,
-    pub locale: String,
-    pub trace: RequestTraceContext,
-    pub session: SessionContext,
-    pub principal: PrincipalContext,
-    pub cache: CacheDisposition,
-    pub cache_plan: ExecutedCachePlan,
-    pub middleware: Vec<MiddlewareStage>,
-    pub response: HandlerResponse,
-    pub flash_messages: Vec<FlashMessage>,
-    pub response_cookies: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutedCachePlan {
-    pub plan: CachePlan,
-    pub headers: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileDeliveryMode {
-    PublicCdn,
-    SignedUrl,
-    AppProxy,
-    LocalOnly,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PageResponse {
-    pub template: String,
-    pub status: u16,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FragmentResponse {
-    pub template: String,
-    pub fragment_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RedirectResponse {
-    pub location: String,
-    pub status: u16,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JsonResponse {
-    pub status: u16,
-    pub payload: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileResponse {
-    pub logical_path: String,
-    pub content_type: String,
-    pub delivery_mode: FileDeliveryMode,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HandlerResponse {
-    Page(PageResponse),
-    Fragment(FragmentResponse),
-    Redirect(RedirectResponse),
-    Json(JsonResponse),
-    File(FileResponse),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HandlerDefinition {
-    pub route_name: String,
-    pub response: HandlerResponse,
-}
-
-impl HandlerDefinition {
-    pub fn page(
-        route_name: impl Into<String>,
-        template: impl Into<String>,
-    ) -> Result<Self, RouteBuildError> {
-        Ok(Self {
-            route_name: validate_route_name(route_name.into())?,
-            response: HandlerResponse::Page(PageResponse {
-                template: validate_template_name(template.into())?,
-                status: 200,
-            }),
-        })
-    }
-
-    pub fn fragment(
-        route_name: impl Into<String>,
-        template: impl Into<String>,
-        fragment_id: impl Into<String>,
-    ) -> Result<Self, RouteBuildError> {
-        Ok(Self {
-            route_name: validate_route_name(route_name.into())?,
-            response: HandlerResponse::Fragment(FragmentResponse {
-                template: validate_template_name(template.into())?,
-                fragment_id: validate_fragment_id(fragment_id.into())?,
-            }),
-        })
-    }
-
-    pub fn redirect(
-        route_name: impl Into<String>,
-        location: impl Into<String>,
-    ) -> Result<Self, RouteBuildError> {
-        Ok(Self {
-            route_name: validate_route_name(route_name.into())?,
-            response: HandlerResponse::Redirect(RedirectResponse {
-                location: validate_route_path(location.into())?,
-                status: 303,
-            }),
-        })
-    }
-
-    pub fn json(
-        route_name: impl Into<String>,
-        payload: BTreeMap<String, String>,
-    ) -> Result<Self, RouteBuildError> {
-        Ok(Self {
-            route_name: validate_route_name(route_name.into())?,
-            response: HandlerResponse::Json(JsonResponse {
-                status: 200,
-                payload,
-            }),
-        })
-    }
-
-    pub fn file(
-        route_name: impl Into<String>,
-        logical_path: impl Into<String>,
-        content_type: impl Into<String>,
-        delivery_mode: FileDeliveryMode,
-    ) -> Result<Self, RouteBuildError> {
-        Ok(Self {
-            route_name: validate_route_name(route_name.into())?,
-            response: HandlerResponse::File(FileResponse {
-                logical_path: validate_template_name(logical_path.into())?,
-                content_type: validate_template_name(content_type.into())?,
-                delivery_mode,
-            }),
-        })
-    }
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum RouteBuildError {
-    #[error("route names must not be empty")]
-    EmptyRouteName,
-    #[error("route paths must start with `/`, got `{path}`")]
-    InvalidRoutePath { path: String },
-    #[error("host pattern must not be empty")]
-    EmptyHostPattern,
-    #[error("route `{name}` is registered more than once for method {method:?}")]
-    DuplicateRoute { name: String, method: HttpMethod },
-    #[error(
-        "route `{name}` requires capability `{capability}` but the auth package does not bind it"
-    )]
-    MissingCapabilityBinding {
-        name: String,
-        capability: davenda_auth::Capability,
-    },
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum RequestExecutionError {
-    #[error("no route matches {method:?} {host}{path}")]
-    RouteNotFound {
-        method: HttpMethod,
-        host: String,
-        path: String,
-    },
-    #[error("route `{route}` requires a resolved session")]
-    SessionRequired { route: String },
-    #[error("route `{route}` requires capability `{capability}`")]
-    CapabilityRequired {
-        route: String,
-        capability: davenda_auth::Capability,
-    },
-    #[error("route `{route}` requires a CSRF token")]
-    MissingCsrfToken { route: String },
-    #[error("route `{route}` requires a session before CSRF can be validated")]
-    MissingSessionForCsrf { route: String },
-    #[error("route `{route}` supplied an invalid CSRF token")]
-    InvalidCsrfToken { route: String },
-    #[error("session cookie failed validation: {0}")]
-    InvalidSessionCookie(String),
-    #[error("flash cookie failed validation: {0}")]
-    InvalidFlashCookie(String),
-    #[error("session `{session_id}` is not present in the server-side store")]
-    UnknownSession { session_id: String },
-    #[error("session `{session_id}` has expired")]
-    ExpiredSession { session_id: String },
-    #[error("session `{session_id}` has been revoked")]
-    RevokedSession { session_id: String },
-    #[error("route `{route}` is disabled by maintenance mode")]
-    MaintenanceMode { route: String },
-    #[error("route `{route}` is disabled because feature flag `{feature_flag}` is not enabled")]
-    FeatureFlagDisabled { route: String, feature_flag: String },
-    #[error("route `{route}` has no registered handler")]
-    HandlerNotRegistered { route: String },
-    #[error(transparent)]
-    Cache(#[from] CacheModelError),
-}
-
-impl RequestExecutionError {
-    pub(crate) fn from_browser_error(error: RuntimeBrowserError) -> Self {
-        match error {
-            RuntimeBrowserError::InvalidSessionCookie { reason } => {
-                Self::InvalidSessionCookie(reason)
-            }
-            RuntimeBrowserError::InvalidFlashCookie { reason } => Self::InvalidFlashCookie(reason),
-            RuntimeBrowserError::UnknownSession { session_id } => {
-                Self::UnknownSession { session_id }
-            }
-            RuntimeBrowserError::ExpiredSession { session_id } => {
-                Self::ExpiredSession { session_id }
-            }
-            RuntimeBrowserError::RevokedSession { session_id } => {
-                Self::RevokedSession { session_id }
-            }
-            other => Self::InvalidFlashCookie(other.to_string()),
-        }
-    }
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum RouteUrlError {
-    #[error("route `{route}` is not registered")]
-    UnknownRoute { route: String },
-    #[error("route `{route}` requires parameter `{parameter}`")]
-    MissingRouteParameter { route: String, parameter: String },
-    #[error("route `{route}` does not support locale `{locale}`")]
-    UnsupportedLocale { route: String, locale: String },
 }
 
 fn match_route_path(pattern: &str, actual: &str) -> Option<BTreeMap<String, String>> {
@@ -792,7 +459,7 @@ fn render_route_path(
     }
 }
 
-fn validate_route_name(value: String) -> Result<String, RouteBuildError> {
+pub(super) fn validate_route_name(value: String) -> Result<String, RouteBuildError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         Err(RouteBuildError::EmptyRouteName)
@@ -801,7 +468,7 @@ fn validate_route_name(value: String) -> Result<String, RouteBuildError> {
     }
 }
 
-fn validate_route_path(value: String) -> Result<String, RouteBuildError> {
+pub(super) fn validate_route_path(value: String) -> Result<String, RouteBuildError> {
     let trimmed = value.trim();
     if trimmed.starts_with('/') && !trimmed.is_empty() {
         Ok(trimmed.to_string())
@@ -812,7 +479,7 @@ fn validate_route_path(value: String) -> Result<String, RouteBuildError> {
     }
 }
 
-fn validate_host(value: String) -> Result<String, RouteBuildError> {
+pub(super) fn validate_host(value: String) -> Result<String, RouteBuildError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         Err(RouteBuildError::EmptyHostPattern)
@@ -821,10 +488,10 @@ fn validate_host(value: String) -> Result<String, RouteBuildError> {
     }
 }
 
-fn validate_template_name(value: String) -> Result<String, RouteBuildError> {
+pub(super) fn validate_template_name(value: String) -> Result<String, RouteBuildError> {
     validate_route_name(value)
 }
 
-fn validate_fragment_id(value: String) -> Result<String, RouteBuildError> {
+pub(super) fn validate_fragment_id(value: String) -> Result<String, RouteBuildError> {
     validate_route_name(value)
 }

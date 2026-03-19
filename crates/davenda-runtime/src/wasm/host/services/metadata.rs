@@ -152,8 +152,8 @@ impl MetadataAuditStore {
 
     fn location_label(&self) -> String {
         match self {
-            Self::Sqlite(store) => store.path.display().to_string(),
-            Self::Postgres(store) => store.location_label(),
+            Self::Sqlite(store) => format!("sqlite:{}", store.path.display()),
+            Self::Postgres(store) => format!("postgres:{}", store.location_label()),
         }
     }
 
@@ -562,6 +562,7 @@ mod audit_tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     fn execution_context(trace_id: &str, request_id: Option<&str>) -> InvocationContext {
         let trace = if let Some(request_id) = request_id {
@@ -635,5 +636,30 @@ mod audit_tests {
         let last_only = reopened.recent_records(1).unwrap();
         assert_eq!(last_only.len(), 1);
         assert_eq!(last_only[0].kind, "seo_head");
+    }
+
+    #[test]
+    fn runtime_metadata_backend_labels_the_selected_backend_and_location() {
+        let runtime = DataRuntime {
+            driver: davenda_config::DatabaseDriver::Postgres,
+            connection_secret_ref: None,
+            connection_secret: None,
+            schema: "public".to_string(),
+            migrations_table: "migrations".to_string(),
+            pool: davenda_data::ConnectionPoolProfile {
+                min_connections: 1,
+                max_connections: 4,
+                statement_timeout: Duration::from_secs(30),
+            },
+        };
+        let backend = RuntimeMetadataBackend {
+            store: MetadataAuditStore::postgres(runtime),
+        };
+
+        assert_eq!(backend.backend_kind(), MetadataAuditBackendKind::Postgres);
+        assert_eq!(
+            backend.location_label(),
+            "postgres:public.metadata_audit_entries"
+        );
     }
 }

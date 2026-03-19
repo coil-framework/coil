@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
+use aes_gcm::aead::Aead;
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use davenda_a11y::{NavigationContract, ThemeAccessibilityContract};
@@ -27,7 +29,7 @@ use davenda_tls::TlsRuntime;
 use davenda_wasm::{ExtensionPointKind, ResourceLimits};
 use hmac::{Hmac, Mac};
 use rand::{RngCore, rngs::OsRng};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -105,6 +107,7 @@ pub enum SessionStoreTopology {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CookieProtection {
     Signed,
+    Encrypted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,12 +178,14 @@ impl CookieSigner {
     }
 
     pub fn sign(&self, secret: &[u8], value: &str) -> Result<String, BrowserSecurityError> {
+        ensure_cookie_protection(&self.policy, CookieProtection::Signed)?;
         let payload = URL_SAFE_NO_PAD.encode(value.as_bytes());
         let signature = sign_payload(secret, payload.as_bytes())?;
         Ok(format!("v1.{payload}.{signature}"))
     }
 
     pub fn verify(&self, secret: &[u8], encoded: &str) -> Result<String, BrowserSecurityError> {
+        ensure_cookie_protection(&self.policy, CookieProtection::Signed)?;
         let mut parts = encoded.split('.');
         let version = parts.next();
         let payload = parts.next();
@@ -198,6 +203,70 @@ impl CookieSigner {
             .map_err(|_| BrowserSecurityError::InvalidCookieFormat)?;
 
         String::from_utf8(bytes).map_err(|_| BrowserSecurityError::InvalidCookieFormat)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CookieSealer {
+    pub policy: CookiePolicy,
+}
+
+impl CookieSealer {
+    pub fn new(policy: CookiePolicy) -> Self {
+        Self { policy }
+    }
+
+    pub fn seal(&self, secret: &[u8], value: &str) -> Result<String, BrowserSecurityError> {
+        ensure_cookie_protection(&self.policy, CookieProtection::Encrypted)?;
+        if secret.is_empty() {
+            return Err(BrowserSecurityError::EmptySecret);
+        }
+
+        let cipher = cipher_for_secret(secret);
+        let mut nonce = [0u8; 12];
+        OsRng.fill_bytes(&mut nonce);
+        let ciphertext = cipher
+            .encrypt(Nonce::from_slice(&nonce), value.as_bytes())
+            .map_err(|_| BrowserSecurityError::InvalidEncryptedCookiePayload)?;
+
+        Ok(format!(
+            "v1.{}.{}",
+            URL_SAFE_NO_PAD.encode(nonce),
+            URL_SAFE_NO_PAD.encode(ciphertext)
+        ))
+    }
+
+    pub fn open(&self, secret: &[u8], encoded: &str) -> Result<String, BrowserSecurityError> {
+        ensure_cookie_protection(&self.policy, CookieProtection::Encrypted)?;
+        if secret.is_empty() {
+            return Err(BrowserSecurityError::EmptySecret);
+        }
+
+        let mut parts = encoded.split('.');
+        let version = parts.next();
+        let nonce = parts.next();
+        let ciphertext = parts.next();
+
+        if version != Some("v1") || parts.next().is_some() {
+            return Err(BrowserSecurityError::InvalidEncryptedCookieFormat);
+        }
+
+        let nonce = nonce.ok_or(BrowserSecurityError::InvalidEncryptedCookieFormat)?;
+        let ciphertext = ciphertext.ok_or(BrowserSecurityError::InvalidEncryptedCookieFormat)?;
+        let nonce = URL_SAFE_NO_PAD
+            .decode(nonce)
+            .map_err(|_| BrowserSecurityError::InvalidEncryptedCookieFormat)?;
+        let ciphertext = URL_SAFE_NO_PAD
+            .decode(ciphertext)
+            .map_err(|_| BrowserSecurityError::InvalidEncryptedCookieFormat)?;
+
+        let cipher = cipher_for_secret(secret);
+        let plaintext = cipher
+            .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+            .map_err(|_| BrowserSecurityError::InvalidEncryptedCookiePayload)?;
+
+        String::from_utf8(plaintext)
+            .map_err(|_| BrowserSecurityError::InvalidEncryptedCookiePayload)
     }
 }
 
@@ -282,10 +351,19 @@ pub struct BrowserSecurityServices {
 pub enum BrowserSecurityError {
     #[error("browser security operations require a non-empty secret")]
     EmptySecret,
+    #[error("cookie policy expects {expected:?} protection but was used as {actual:?}")]
+    UnexpectedCookieProtection {
+        expected: CookieProtection,
+        actual: CookieProtection,
+    },
     #[error("cookie value is not in the expected signed format")]
     InvalidCookieFormat,
     #[error("signed cookie failed verification")]
     InvalidCookieSignature,
+    #[error("encrypted cookie is not in the expected format")]
+    InvalidEncryptedCookieFormat,
+    #[error("encrypted cookie failed decryption")]
+    InvalidEncryptedCookiePayload,
     #[error("CSRF protection is disabled for this runtime")]
     CsrfDisabled,
     #[error("CSRF token is not in the expected format")]
@@ -2366,6 +2444,54 @@ cdn_base_url = "https://cdn.example.com"
     }
 
     #[test]
+    fn encrypted_cookie_round_trips_and_rejects_tampering() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let bootstrap = bootstrap_core_services(&config).unwrap();
+        let sealer = CookieSealer::new(CookiePolicy {
+            protection: CookieProtection::Encrypted,
+            ..bootstrap.browser.sessions.flash_cookie.clone()
+        });
+        let secret = b"fedcba9876543210fedcba9876543210";
+
+        let sealed = sealer.seal(secret, "flash:welcome-back").unwrap();
+        assert_eq!(sealer.open(secret, &sealed).unwrap(), "flash:welcome-back");
+
+        let mut tampered = sealed.clone();
+        let last = tampered.pop().unwrap();
+        tampered.push(if last == 'A' { 'B' } else { 'A' });
+        assert!(sealer.open(secret, &tampered).is_err());
+    }
+
+    #[test]
+    fn cookie_primitives_enforce_declared_protection_mode() {
+        let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+        let bootstrap = bootstrap_core_services(&config).unwrap();
+        let signed = bootstrap.browser.sessions.session_cookie.clone();
+        let encrypted = CookiePolicy {
+            protection: CookieProtection::Encrypted,
+            ..bootstrap.browser.sessions.flash_cookie.clone()
+        };
+        let secret = b"0123456789abcdef0123456789abcdef";
+
+        assert_eq!(
+            CookieSigner::new(encrypted.clone())
+                .sign(secret, "value")
+                .unwrap_err(),
+            BrowserSecurityError::UnexpectedCookieProtection {
+                expected: CookieProtection::Signed,
+                actual: CookieProtection::Encrypted,
+            }
+        );
+        assert_eq!(
+            CookieSealer::new(signed).seal(secret, "value").unwrap_err(),
+            BrowserSecurityError::UnexpectedCookieProtection {
+                expected: CookieProtection::Encrypted,
+                actual: CookieProtection::Signed,
+            }
+        );
+    }
+
+    #[test]
     fn csrf_tokens_bind_to_session_and_action() {
         let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
         let bootstrap = bootstrap_core_services(&config).unwrap();
@@ -2623,9 +2749,29 @@ fn sign_payload(secret: &[u8], payload: &[u8]) -> Result<String, BrowserSecurity
         return Err(BrowserSecurityError::EmptySecret);
     }
 
-    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC accepts arbitrary key lengths");
+    let mut mac =
+        <HmacSha256 as Mac>::new_from_slice(secret).expect("HMAC accepts arbitrary key lengths");
     mac.update(payload);
     Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
+}
+
+fn ensure_cookie_protection(
+    policy: &CookiePolicy,
+    expected: CookieProtection,
+) -> Result<(), BrowserSecurityError> {
+    if policy.protection == expected {
+        Ok(())
+    } else {
+        Err(BrowserSecurityError::UnexpectedCookieProtection {
+            expected,
+            actual: policy.protection,
+        })
+    }
+}
+
+fn cipher_for_secret(secret: &[u8]) -> Aes256Gcm {
+    let key = Sha256::digest(secret);
+    Aes256Gcm::new_from_slice(&key).expect("sha256 produces a 256-bit key")
 }
 
 fn verify_payload(
@@ -2640,7 +2786,8 @@ fn verify_payload(
     let signature = URL_SAFE_NO_PAD
         .decode(signature)
         .map_err(|_| BrowserSecurityError::InvalidCookieSignature)?;
-    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC accepts arbitrary key lengths");
+    let mut mac =
+        <HmacSha256 as Mac>::new_from_slice(secret).expect("HMAC accepts arbitrary key lengths");
     mac.update(payload);
     mac.verify_slice(&signature)
         .map_err(|_| BrowserSecurityError::InvalidCookieSignature)

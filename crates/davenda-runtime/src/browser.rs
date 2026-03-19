@@ -336,30 +336,37 @@ impl BrowserHost {
         now: BrowserInstant,
     ) -> Result<RotatedBrowserSession, RuntimeBrowserError> {
         let session_id = validate_browser_value("session_id", session_id.to_string())?;
-        let existing = self.sessions.get_mut(&session_id).ok_or_else(|| {
-            RuntimeBrowserError::UnknownSession {
-                session_id: session_id.clone(),
+        let principal_id = self.sessions.with_state_mut(|state| {
+            let existing =
+                state
+                    .session(&session_id)
+                    .ok_or_else(|| RuntimeBrowserError::UnknownSession {
+                        session_id: session_id.clone(),
+                    })?;
+
+            match existing.status_at(now) {
+                BrowserSessionStatus::Active => {
+                    state.revoke(&session_id, now)?;
+                    Ok(existing.principal_id.clone())
+                }
+                BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
+                    state.sessions.remove(&session_id);
+                    Err(RuntimeBrowserError::ExpiredSession {
+                        session_id: session_id.clone(),
+                    })
+                }
+                BrowserSessionStatus::Revoked => Err(RuntimeBrowserError::RevokedSession {
+                    session_id: session_id.clone(),
+                }),
             }
         })?;
 
-        match existing.status_at(now) {
-            BrowserSessionStatus::Active => {
-                let principal_id = existing.principal_id.clone();
-                existing.revoked_at = Some(now);
-                let issued =
-                    self.issue_session(SessionIssueRequest { principal_id }, cookie_secret, now)?;
-                Ok(RotatedBrowserSession {
-                    previous_session_id: session_id,
-                    issued,
-                })
-            }
-            BrowserSessionStatus::IdleExpired | BrowserSessionStatus::AbsoluteExpired => {
-                Err(RuntimeBrowserError::ExpiredSession { session_id })
-            }
-            BrowserSessionStatus::Revoked => {
-                Err(RuntimeBrowserError::RevokedSession { session_id })
-            }
-        }
+        let issued =
+            self.issue_session(SessionIssueRequest { principal_id }, cookie_secret, now)?;
+        Ok(RotatedBrowserSession {
+            previous_session_id: session_id,
+            issued,
+        })
     }
 
     pub fn revoke_session(

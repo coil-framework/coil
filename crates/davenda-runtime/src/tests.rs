@@ -7,7 +7,10 @@ use davenda_assets::{
     AssetDeliveryTarget, AssetId, ContentFingerprint, DeliveryAudience, DeploymentArtifact,
     DeploymentRelease, FingerprintAlgorithm, ManagedAsset, ReleaseId, RevisionId,
 };
-use davenda_auth::{Capability, DefaultAuthModelPackage};
+use davenda_auth::{
+    AuthModelManifest, AuthModelPackage, Capability, CapabilityBinding, DefaultAuthModelPackage,
+    PackageMode, default_capability_bindings, default_schema,
+};
 use davenda_cache::{
     CacheBackendAdapter, CacheBackendKind, CacheLookupState, DistributedCacheBackend,
     InvalidationTag,
@@ -152,8 +155,50 @@ publish_manifest = true
 cdn_base_url = "https://cdn.example.com"
 "#;
 
+#[derive(Debug, Clone)]
+struct SelectedAuthModelPackage {
+    manifest: AuthModelManifest,
+    schema: zanzibar::Schema,
+    capability_bindings: std::collections::HashMap<Capability, CapabilityBinding>,
+}
+
+impl SelectedAuthModelPackage {
+    fn new(name: &str, mode: PackageMode) -> Self {
+        let mut manifest = davenda_auth::default_manifest();
+        manifest.name = name.to_string();
+        manifest.mode = mode;
+        Self {
+            manifest,
+            schema: default_schema(),
+            capability_bindings: default_capability_bindings(),
+        }
+    }
+}
+
+impl AuthModelPackage for SelectedAuthModelPackage {
+    fn manifest(&self) -> &AuthModelManifest {
+        &self.manifest
+    }
+
+    fn schema(&self) -> &zanzibar::Schema {
+        &self.schema
+    }
+
+    fn capability_bindings(&self) -> &std::collections::HashMap<Capability, CapabilityBinding> {
+        &self.capability_bindings
+    }
+}
+
 fn single_node_valid_config() -> PlatformConfig {
     PlatformConfig::from_toml_str(VALID_CONFIG).unwrap()
+}
+
+fn config_with_auth_package(package: &str) -> PlatformConfig {
+    PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+        "package = \"platform-default-auth\"",
+        &format!("package = \"{package}\""),
+    ))
+    .unwrap()
 }
 
 fn installed_admin_widget_extension() -> InstalledExtension {
@@ -2231,6 +2276,78 @@ async fn server_host_authorizes_capability_routes_through_live_authorizer() {
         vec![LiveAuthorizationCheck {
             subject: davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
                 "editor-live-1",
+            )),
+            capability: Capability::CmsPageRead,
+            object: davenda_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn server_host_authorizes_capability_routes_with_a_replacement_auth_package() {
+    let config = config_with_auth_package("platform-extended-auth");
+    let package = SelectedAuthModelPackage::new("platform-extended-auth", PackageMode::Extend);
+    let plan = RuntimeBuilder::new(config, package)
+        .with_module(CmsModule::new())
+        .build()
+        .unwrap();
+    assert_eq!(plan.auth_package_name, "platform-extended-auth");
+    assert_eq!(plan.auth_package.manifest().mode, PackageMode::Extend);
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            "postgres://platform:secret@db.internal/platform",
+        )
+        .unwrap();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
+        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("editor-live-extend")),
+        Capability::CmsPageRead,
+        davenda_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
+    ));
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        cookie_secret.to_vec(),
+        csrf_secret.to_vec(),
+        authorizer.clone(),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("editor-live-extend")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/pages/preview")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        authorizer.checks(),
+        vec![LiveAuthorizationCheck {
+            subject: davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
+                "editor-live-extend",
             )),
             capability: Capability::CmsPageRead,
             object: davenda_auth::Entity::page("http.surface.module.cms.page.cms.preview"),

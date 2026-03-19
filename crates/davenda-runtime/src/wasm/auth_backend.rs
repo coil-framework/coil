@@ -264,6 +264,96 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    const TEST_CONFIG: &str = r#"
+[app]
+name = "showcase-events"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+deployment = "distributed"
+object_store = "s3"
+local_root = "/var/lib/platform"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+localized_routes = true
+
+[seo]
+canonical_host = "www.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 101
+
+[modules]
+enabled = ["cms-pages", "admin-shell", "memberships", "events", "media-library"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#;
+
+    fn config_with_auth_package(package: &str) -> davenda_config::PlatformConfig {
+        davenda_config::PlatformConfig::from_toml_str(
+            &TEST_CONFIG.replace("platform-default-auth", package),
+        )
+        .unwrap()
+    }
+
     #[derive(Debug, Clone)]
     struct TestAuthModelPackage {
         manifest: davenda_auth::AuthModelManifest,
@@ -347,7 +437,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     #[async_trait::async_trait]
     impl RebacEngine for MemoryRebacEngine {
         async fn apply_schema(
@@ -487,16 +576,30 @@ mod tests {
         InvocationContext::new(
             CustomerAppContext::new("showcase-events")
                 .unwrap()
-                    .with_tenant_id("101")
-                    .unwrap()
-                    .with_locale("en-GB")
-                    .unwrap(),
-                PrincipalRef::user(principal_id).unwrap(),
-                TraceContext::new("trace-auth").unwrap(),
-                InvocationInput::Api(
-                    ApiInvocation::new("/auth", davenda_wasm::HttpMethod::Get).unwrap(),
-                ),
+                .with_tenant_id("101")
+                .unwrap()
+                .with_locale("en-GB")
+                .unwrap(),
+            PrincipalRef::user(principal_id).unwrap(),
+            TraceContext::new("trace-auth").unwrap(),
+            InvocationInput::Api(ApiInvocation::new("/auth", davenda_wasm::HttpMethod::Get).unwrap()),
         )
+    }
+
+    #[test]
+    fn runtime_auth_backend_new_accepts_replacement_packages_without_hard_failing() {
+        let package = TestAuthModelPackage::new(
+            "platform-extended-auth",
+            davenda_auth::PackageMode::Replace,
+        );
+        let plan = RuntimeBuilder::new(config_with_auth_package("platform-extended-auth"), package)
+            .build()
+            .unwrap();
+        let backend = RuntimeAuthBackend::new(&plan).unwrap();
+
+        assert_eq!(backend.package().manifest().name, "platform-extended-auth");
+        assert_eq!(backend.package().manifest().mode, davenda_auth::PackageMode::Replace);
+        assert!(backend.auth.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]

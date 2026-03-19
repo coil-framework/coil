@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use zanzibar::Schema;
 
@@ -140,7 +141,7 @@ impl CapabilityBinding {
     }
 }
 
-pub trait AuthModelPackage {
+pub trait AuthModelPackage: Send + Sync {
     fn manifest(&self) -> &AuthModelManifest;
     fn schema(&self) -> &Schema;
     fn capability_bindings(&self) -> &HashMap<Capability, CapabilityBinding>;
@@ -167,5 +168,37 @@ pub trait AuthModelPackage {
                 expected: binding.resource_namespaces.clone(),
             })
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct AuthModelPackageSelection {
+    package: Arc<dyn AuthModelPackage>,
+}
+
+impl AuthModelPackageSelection {
+    pub fn new<P>(package: P) -> Self
+    where
+        P: AuthModelPackage + 'static,
+    {
+        Self {
+            package: Arc::new(package),
+        }
+    }
+
+    pub fn manifest(&self) -> &AuthModelManifest {
+        self.package.manifest()
+    }
+
+    pub fn package(&self) -> &dyn AuthModelPackage {
+        self.package.as_ref()
+    }
+}
+
+impl fmt::Debug for AuthModelPackageSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthModelPackageSelection")
+            .field("manifest", &self.package.manifest())
+            .finish()
     }
 }

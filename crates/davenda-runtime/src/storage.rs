@@ -1,6 +1,6 @@
 use super::*;
 use davenda_assets::ManagedAsset;
-use davenda_auth::{Capability, DavendaAuth, DefaultSubject};
+use davenda_auth::{AuthModelPackage, Capability, DavendaAuth, DefaultSubject};
 use zanzibar::RebacEngine;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -172,6 +172,7 @@ impl StorageHost {
     pub async fn managed_asset_publication_gate<E>(
         &self,
         auth: &DavendaAuth<E>,
+        package: &impl AuthModelPackage,
         subject: &DefaultSubject,
         asset: &ManagedAsset,
     ) -> Result<ManagedAssetPublicationGate, RuntimeStorageError>
@@ -180,21 +181,21 @@ impl StorageHost {
     {
         let asset_entity = asset.auth_entity();
         let can_publish = auth
-            .check_default_capability(subject, Capability::AssetPublish, &asset_entity)
+            .check_capability(package, subject, Capability::AssetPublish, &asset_entity)
             .await
             .map_err(|_| RuntimeStorageError::PublicationAuthorizationDenied {
                 asset_id: asset.id().to_string(),
                 reason: Capability::AssetPublish.to_string(),
             })?;
         let can_replace = auth
-            .check_default_capability(subject, Capability::AssetReplace, &asset_entity)
+            .check_capability(package, subject, Capability::AssetReplace, &asset_entity)
             .await
             .map_err(|_| RuntimeStorageError::PublicationAuthorizationDenied {
                 asset_id: asset.id().to_string(),
                 reason: Capability::AssetReplace.to_string(),
             })?;
         let can_manage_storage = auth
-            .check_default_capability(subject, Capability::AssetManageStorage, &asset_entity)
+            .check_capability(package, subject, Capability::AssetManageStorage, &asset_entity)
             .await
             .map_err(|_| RuntimeStorageError::PublicationAuthorizationDenied {
                 asset_id: asset.id().to_string(),

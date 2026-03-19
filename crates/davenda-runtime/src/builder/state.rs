@@ -30,7 +30,7 @@ pub(crate) struct RuntimeBuilderParts<P> {
 
 impl<P> RuntimeBuilder<P>
 where
-    P: AuthModelPackage,
+    P: AuthModelPackage + 'static,
 {
     pub fn new(config: PlatformConfig, auth_package: P) -> Self {
         Self {

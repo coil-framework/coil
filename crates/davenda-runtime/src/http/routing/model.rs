@@ -291,7 +291,7 @@ impl ResolvedRoute {
         package: &P,
     ) -> Result<Option<davenda_auth::Entity>, davenda_auth::DavendaAuthError>
     where
-        P: davenda_auth::AuthModelPackage,
+        P: davenda_auth::AuthModelPackage + ?Sized,
     {
         let RouteAuthGate::Capability(capability) = self.auth else {
             return Ok(None);

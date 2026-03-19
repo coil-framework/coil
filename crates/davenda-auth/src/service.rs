@@ -35,7 +35,7 @@ where
 
     pub async fn apply_model_package<P>(&self, package: &P) -> Result<(), RebacError>
     where
-        P: AuthModelPackage,
+        P: AuthModelPackage + ?Sized,
     {
         self.engine
             .apply_schema(self.tenant_id, package.schema().clone())
@@ -76,7 +76,7 @@ where
         object: &Entity,
     ) -> Result<bool, DavendaAuthError>
     where
-        P: AuthModelPackage,
+        P: AuthModelPackage + ?Sized,
     {
         let binding = package.resolve_binding(capability, object)?;
         let subject = subject.to_subject();
@@ -111,7 +111,7 @@ where
         object: &Entity,
     ) -> Result<CapabilityExplanation, DavendaAuthError>
     where
-        P: AuthModelPackage,
+        P: AuthModelPackage + ?Sized,
     {
         self.explain_capability_with_options(
             package,
@@ -132,7 +132,7 @@ where
         options: ExplainOptions,
     ) -> Result<CapabilityExplanation, DavendaAuthError>
     where
-        P: AuthModelPackage,
+        P: AuthModelPackage + ?Sized,
     {
         let tuples = self
             .engine

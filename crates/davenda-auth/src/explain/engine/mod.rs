@@ -17,7 +17,7 @@ pub(crate) fn build_capability_explanation<P>(
     options: ExplainOptions,
 ) -> Result<CapabilityExplanation, DavendaAuthError>
 where
-    P: AuthModelPackage,
+    P: AuthModelPackage + ?Sized,
 {
     let binding = package.resolve_binding(capability, object)?.clone();
     let trace = build_relation_trace(

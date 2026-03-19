@@ -5,7 +5,7 @@ use davenda_assets::{
     ActiveAssetManifest, AssetDeliveryPlan, AssetModelError, ContentFingerprint, DeliveryContext,
     DeploymentRelease, ManagedAssetRevision, RevisionId,
 };
-use davenda_auth::AuthModelPackage;
+use davenda_auth::{AuthModelPackage, AuthModelPackageSelection};
 use davenda_cache::{
     ApplicationCachePolicy, CacheInstant, CacheKey, CacheLookup, CacheMetrics, CacheModelError,
     CacheNamespace, CachePlan, CachePlanRequest, CachePlanner, CacheRuntime, CacheScope,

@@ -8,7 +8,7 @@ pub(crate) fn build_runtime_plan<P>(
     builder: RuntimeBuilder<P>,
 ) -> Result<RuntimePlan, RuntimeBuildError>
 where
-    P: AuthModelPackage,
+    P: AuthModelPackage + 'static,
 {
     let RuntimeBuilderParts {
         config,
@@ -193,9 +193,12 @@ where
     let (registered_runtime_jobs, registered_runtime_event_subscriptions, jobs_domain) =
         build_runtime_jobs_domain(&bootstrap.jobs, &module_jobs, &module_event_subscriptions)?;
 
+    let auth_package = AuthModelPackageSelection::new(auth_package);
+
     Ok(RuntimePlan {
         config,
         auth_package_name: auth_package.manifest().name.clone(),
+        auth_package,
         shared_backend_scope: next_runtime_plan_scope(),
         cache_topology: bootstrap.cache.topology,
         cache_planner: bootstrap.cache.planner,

@@ -53,8 +53,6 @@ pub enum RuntimeServerError {
     BrowserHostBuild(#[from] BrowserHostBuildError),
     #[error("request body exceeds configured maximum of {limit} bytes")]
     RequestBodyTooLarge { limit: usize },
-    #[error("live request authorization does not support auth package `{package}`")]
-    UnsupportedAuthPackage { package: String },
     #[error("live request authorization failed: {reason}")]
     Authorization { reason: String },
 }
@@ -98,7 +96,7 @@ impl HttpServerHost {
                 plan.data.clone(),
                 plan.tenant_id(),
                 backends.database.url.clone(),
-                plan.auth_package_name.clone(),
+                plan.auth_package.clone(),
             ));
         let browser =
             materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
@@ -124,7 +122,7 @@ impl HttpServerHost {
                 plan.data.clone(),
                 plan.tenant_id(),
                 backends.database.url.clone(),
-                plan.auth_package_name.clone(),
+                plan.auth_package.clone(),
             ));
         Ok(Self::new_with_browser_and_authorizer(
             plan,

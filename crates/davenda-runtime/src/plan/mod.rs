@@ -11,6 +11,7 @@ pub(crate) use testing::{shared_cache_runtime_for_test, shared_jobs_runtime_for_
 pub struct RuntimePlan {
     pub config: PlatformConfig,
     pub auth_package_name: String,
+    pub auth_package: AuthModelPackageSelection,
     pub shared_backend_scope: String,
     pub cache_topology: CacheTopology,
     pub cache_planner: CachePlanner,
@@ -46,6 +47,10 @@ pub struct RuntimePlan {
 }
 
 impl RuntimePlan {
+    pub fn auth_package(&self) -> &dyn AuthModelPackage {
+        self.auth_package.package()
+    }
+
     pub fn tenant_id(&self) -> i64 {
         self.config.auth.tenant_id
     }

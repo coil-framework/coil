@@ -624,7 +624,7 @@ async fn server_host_adapts_live_requests_into_runtime_execution() {
 }
 
 #[tokio::test]
-async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() {
+async fn server_host_uses_live_browser_host_wiring_for_shared_sessions() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -648,29 +648,12 @@ async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() 
             "postgres://platform:secret@db.internal/platform",
         )
         .unwrap();
-    let backends = plan.shared_backend_clients(&resolver).unwrap();
-    let session_client =
-        DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Redis);
-    let browser = BrowserHost::with_session_store_client(
-        plan.config.app.name.clone(),
-        plan.browser.clone(),
-        session_client.clone(),
-    )
-    .unwrap();
-    let mut sibling = BrowserHost::with_session_store_client(
-        plan.config.app.name.clone(),
-        plan.browser.clone(),
-        session_client,
-    )
-    .unwrap();
-    let server = HttpServerHost::new_with_browser_host(
-        plan,
-        browser,
-        backends,
-        cookie_secret.to_vec(),
-        csrf_secret.to_vec(),
-    )
-    .unwrap();
+    let server = plan
+        .server_host(&resolver, cookie_secret, csrf_secret)
+        .unwrap();
+    let sibling = plan
+        .server_host(&resolver, cookie_secret, csrf_secret)
+        .unwrap();
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -682,7 +665,6 @@ async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() 
             SessionIssueRequest::new()
                 .for_principal("member-live-2")
                 .unwrap(),
-            cookie_secret,
             now,
         )
         .unwrap();

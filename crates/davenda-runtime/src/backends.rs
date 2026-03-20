@@ -1,5 +1,6 @@
 use super::*;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
@@ -9,13 +10,18 @@ use davenda_cache::CacheBackendKind;
 pub(crate) struct RuntimeBackendMaterializer {
     namespace: String,
     plans: SharedBackendClients,
+    browser_shared_state_root: PathBuf,
     #[cfg(test)]
     cache_runtime: Option<Arc<dyn davenda_cache::DistributedCacheRuntime>>,
     jobs_runtime: Arc<Mutex<Option<Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>>,
 }
 
 impl RuntimeBackendMaterializer {
-    pub(crate) fn new(namespace: String, plans: SharedBackendClients) -> Self {
+    pub(crate) fn new(
+        namespace: String,
+        plans: SharedBackendClients,
+        browser_shared_state_root: PathBuf,
+    ) -> Self {
         #[cfg(test)]
         let cache_runtime = plans.distributed_cache.as_ref().map(|target| {
             crate::plan::shared_cache_runtime_for_test(
@@ -27,6 +33,7 @@ impl RuntimeBackendMaterializer {
         Self {
             namespace,
             plans,
+            browser_shared_state_root,
             #[cfg(test)]
             cache_runtime,
             jobs_runtime: Arc::new(Mutex::new(None)),
@@ -47,17 +54,12 @@ impl RuntimeBackendMaterializer {
                     format!("{}:{customer_app}", self.namespace),
                 );
                 #[cfg(not(test))]
-                {
-                    // Live browser sessions require an explicit shared-store
-                    // runtime; the materializer does not build a fallback.
-                    return Err(
-                        BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime {
-                            kind: target.kind,
-                        },
-                    );
-                }
+                let session_runtime = crate::browser::live_shared_runtime(
+                    target.kind,
+                    format!("{}:{customer_app}", self.namespace),
+                    self.browser_shared_state_root.clone(),
+                )?;
 
-                #[cfg(test)]
                 BrowserHost::with_session_store_client(
                     customer_app.clone(),
                     services.clone(),
@@ -110,6 +112,7 @@ impl fmt::Debug for RuntimeBackendMaterializer {
         let mut debug = f.debug_struct("RuntimeBackendMaterializer");
         debug.field("namespace", &self.namespace);
         debug.field("plans", &self.plans);
+        debug.field("browser_shared_state_root", &self.browser_shared_state_root);
         #[cfg(test)]
         debug.field(
             "cache_runtime",

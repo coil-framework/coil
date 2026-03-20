@@ -2244,6 +2244,7 @@ fn runtime_backend_materializer_uses_shared_jobs_backends_even_when_not_flagged_
             session_store: None,
             object_store: None,
         },
+        PathBuf::from(&plan.config.storage.local_root),
     );
 
     let mut left = materializer.jobs_coordinator(&plan.config.app.name, &plan.jobs);
@@ -2292,6 +2293,7 @@ fn runtime_backend_materializer_reuses_explicit_session_runtime_for_browser_host
             }),
             object_store: None,
         },
+        PathBuf::from(&plan.config.storage.local_root),
     );
 
     let mut left = materializer
@@ -2349,9 +2351,14 @@ fn runtime_backend_materializer_shares_session_state_across_instances() {
     let left_materializer = crate::backends::RuntimeBackendMaterializer::new(
         plan.shared_backend_namespace(),
         clients.clone(),
+        PathBuf::from(&plan.config.storage.local_root),
     );
     let right_materializer =
-        crate::backends::RuntimeBackendMaterializer::new(plan.shared_backend_namespace(), clients);
+        crate::backends::RuntimeBackendMaterializer::new(
+            plan.shared_backend_namespace(),
+            clients,
+            PathBuf::from(&plan.config.storage.local_root),
+        );
 
     let mut left = left_materializer
         .browser_host(plan.config.app.name.clone(), plan.browser.clone())

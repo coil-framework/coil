@@ -45,6 +45,12 @@ pub enum RuntimeBrowserError {
         kind: SessionStoreBackendKind,
         scope: String,
     },
+    #[error("live browser session store `{kind:?}` for `{scope}` failed: {reason}")]
+    LiveSharedSessionStoreFailure {
+        kind: SessionStoreBackendKind,
+        scope: String,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -57,6 +63,15 @@ pub enum BrowserHostBuildError {
         "live browser session stores require an explicit distributed runtime; `{kind:?}` is not live-supported"
     )]
     LiveSharedSessionStoreRequiresExplicitRuntime { kind: SessionStoreBackendKind },
+    #[error(
+        "live browser session store `{kind:?}` for `{scope}` could not be initialized at `{path}`: {reason}"
+    )]
+    LiveSharedSessionStoreInitializationFailed {
+        kind: SessionStoreBackendKind,
+        scope: String,
+        path: String,
+        reason: String,
+    },
     #[error("session store client kind mismatch: expected `{expected:?}`, got `{actual:?}`")]
     SessionStoreClientKindMismatch {
         expected: SessionStoreBackendKind,

@@ -4,10 +4,10 @@ use std::fmt;
 use davenda_auth::AuthModelPackage;
 use davenda_config::PlatformConfig;
 use davenda_core::{
-    validate_module_capabilities, AdminResourceContribution, BulkOperationDefinition,
-    CapabilityValidationError, CoreServiceDependency, EventSubscription, JobContract,
-    MigrationContract, ModuleDependency, ModuleDependencyKind, ModuleManifest, PlatformModule,
-    ReportDefinition, RouteSurface, SearchIndexContribution,
+    AdminResourceContribution, BulkOperationDefinition, CapabilityValidationError,
+    CoreServiceDependency, EventSubscription, JobContract, MigrationContract, ModuleDependency,
+    ModuleDependencyKind, ModuleManifest, PlatformModule, ReportDefinition, RouteSurface,
+    SearchIndexContribution, validate_module_capabilities,
 };
 use davenda_data::{MigrationOwner, MigrationPlan};
 use davenda_i18n::LocaleTag;

@@ -552,6 +552,7 @@ dependencies = [
 name = "davenda-app"
 version = "0.1.0"
 dependencies = [
+ "davenda-assets",
  "davenda-auth",
  "davenda-cli",
  "davenda-config",
@@ -561,8 +562,10 @@ dependencies = [
  "davenda-jobs",
  "davenda-report",
  "davenda-runtime",
+ "davenda-storage",
  "davenda-template",
  "davenda-wasm",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
@@ -573,6 +576,8 @@ dependencies = [
  "davenda-auth",
  "davenda-config",
  "davenda-storage",
+ "sha2",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

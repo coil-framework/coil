@@ -20,6 +20,8 @@ pub enum AppModelError {
     DuplicateContentField { model_id: String, field_id: String },
     #[error("extension `{extension_id}` is declared more than once")]
     DuplicateExtension { extension_id: String },
+    #[error("`{field}` is not a valid relative path: `{value}`")]
+    InvalidRelativePath { field: &'static str, value: String },
     #[error("customer app `{app_id}` installs extensions but no extension packages were supplied")]
     ExtensionPackagesRequired { app_id: String },
     #[error("default locale `{default_locale}` is not in the supported locale set")]
@@ -116,6 +118,8 @@ pub enum AppModelError {
     ModuleCapabilityValidation(#[from] CapabilityValidationError),
     #[error("{0}")]
     Report(#[from] ReportModelError),
+    #[error("{0}")]
+    Assets(#[from] davenda_assets::AssetModelError),
     #[error("{0}")]
     Wasm(#[from] WasmModelError),
     #[error("{message}")]

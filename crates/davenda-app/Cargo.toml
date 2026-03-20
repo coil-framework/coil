@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 davenda-auth = { path = "../davenda-auth" }
+davenda-assets = { path = "../davenda-assets" }
 davenda-cli = { path = "../davenda-cli" }
 davenda-config = { path = "../davenda-config" }
 davenda-core = { path = "../davenda-core" }
@@ -16,3 +17,7 @@ davenda-runtime = { path = "../davenda-runtime" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }
 thiserror = "2.0.17"
+
+[dev-dependencies]
+davenda-storage = { path = "../davenda-storage" }
+tempfile = "3"

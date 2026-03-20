@@ -2,9 +2,11 @@ use super::*;
 use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 use davenda_config::{ObjectStoreKind, SingleNodeStorageMode, StorageClass, StorageDeployment};
 use davenda_storage::{
-    DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind, StoragePlanner,
-    StoragePolicyOverride, StoragePolicySet, StorageTopology, SyncMode,
+    DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind,
+    StorageExecutor, StoragePlanner, StoragePolicyOverride, StoragePolicySet, StorageTopology,
+    SyncMode,
 };
+use std::fs;
 
 fn object_store_planner() -> StoragePlanner {
     StoragePlanner::new(
@@ -118,6 +120,61 @@ fn deployment_release_rejects_duplicate_logical_paths() {
             logical_path: "theme/app.css".to_string(),
         }
     );
+}
+
+#[test]
+fn theme_asset_publication_plan_publishes_and_syncs_source_roots() {
+    let workspace = tempfile::tempdir().unwrap();
+    let storage_root = tempfile::tempdir().unwrap();
+    let theme_root = workspace.path().join("theme/assets");
+    fs::create_dir_all(&theme_root).unwrap();
+    fs::write(theme_root.join("site.css"), b"body { color: #111; }").unwrap();
+    fs::write(theme_root.join("logo.svg"), b"<svg viewBox=\"0 0 1 1\" />").unwrap();
+
+    let plan = ThemeAssetPublicationPlan::from_roots(
+        ReleaseId::new("release-theme-assets").unwrap(),
+        workspace.path(),
+        ["theme/assets"],
+    )
+    .unwrap();
+
+    let planner = StoragePlanner::new(
+        StorageTopology {
+            local_root: storage_root.path().display().to_string(),
+            default_class: StorageClass::PublicUpload,
+            deployment: StorageDeployment::Distributed,
+            single_node_escape_hatch: SingleNodeStorageMode::Disabled,
+            object_store: Some(ObjectStoreTarget {
+                kind: ObjectStoreKind::S3,
+            }),
+        },
+        StoragePolicySet::default(),
+    );
+    let executor = StorageExecutor::from_topology(planner.topology());
+    let receipt = plan
+        .publish_and_sync(&planner, "https://cdn.example.com/assets", &executor)
+        .unwrap();
+
+    assert_eq!(
+        receipt.manifest().release_id().as_str(),
+        "release-theme-assets"
+    );
+    assert_eq!(receipt.manifest().entries().count(), 2);
+    assert_eq!(receipt.writes().len(), 2);
+
+    let css = receipt.manifest().resolve("theme/assets/site.css").unwrap();
+    assert!(matches!(
+        css.delivery().target(),
+        AssetDeliveryTarget::Cdn { public_url, object_key }
+            if public_url.starts_with("https://cdn.example.com/assets/deploy/theme/assets/site.")
+                && public_url.ends_with(".css")
+                && object_key.starts_with("deploy/theme/assets/site.")
+                && object_key.ends_with(".css")
+    ));
+    let read_back = executor
+        .execute_read(css.delivery().storage_plan())
+        .unwrap();
+    assert_eq!(read_back.bytes, b"body { color: #111; }");
 }
 
 #[test]

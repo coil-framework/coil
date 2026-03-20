@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 davenda-auth = { path = "../davenda-auth" }
 davenda-storage = { path = "../davenda-storage" }
+sha2 = "0.10"
 thiserror = "1.0"
 
 [dev-dependencies]
 davenda-config = { path = "../davenda-config" }
+tempfile = "3"

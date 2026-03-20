@@ -15,4 +15,4 @@ pub use ids::{
     AppDomain, ContentFieldId, ContentModelId, CustomerAppId, ExtensionId, InstalledModuleSpec,
     ModuleId, ThemeId,
 };
-pub use theme::ThemeProfile;
+pub use theme::{ThemeAssetRoot, ThemeProfile};

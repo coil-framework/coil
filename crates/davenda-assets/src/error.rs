@@ -1,10 +1,12 @@
-use davenda_storage::{DeliveryMode, StoragePlanningError, StoragePolicy};
+use davenda_storage::{DeliveryMode, StorageExecutionError, StoragePlanningError, StoragePolicy};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AssetModelError {
     #[error(transparent)]
     Storage(#[from] StoragePlanningError),
+    #[error(transparent)]
+    Execution(#[from] StorageExecutionError),
     #[error("`{field}` cannot be empty")]
     EmptyField { field: &'static str },
     #[error(
@@ -46,4 +48,10 @@ pub enum AssetModelError {
     MissingAppProxyBase { logical_path: String },
     #[error("asset `{asset_id}` has no live revision to unpublish")]
     CannotUnpublishWithoutLiveRevision { asset_id: String },
+    #[error("theme asset root `{root}` is missing")]
+    MissingThemeAssetRoot { root: String },
+    #[error("theme asset source `{path}` could not be read: {message}")]
+    ThemeAssetReadFailed { path: String, message: String },
+    #[error("theme asset source was not found for logical path `{logical_path}`")]
+    MissingThemeAssetSource { logical_path: String },
 }

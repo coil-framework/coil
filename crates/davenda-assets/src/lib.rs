@@ -5,6 +5,7 @@ mod managed;
 mod release;
 #[cfg(test)]
 mod tests;
+mod theme;
 mod validation;
 
 pub use delivery::{
@@ -20,4 +21,5 @@ pub use managed::{
 pub use release::{
     ActiveAssetManifest, DeploymentArtifact, DeploymentRelease, PublishedDeploymentArtifact,
 };
+pub use theme::{ThemeAssetPublicationPlan, ThemeAssetPublicationReceipt, ThemeAssetSource};
 pub(crate) use validation::{join_delivery_base, normalize_manifest_path, require_non_empty};

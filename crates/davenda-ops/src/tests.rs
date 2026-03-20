@@ -175,6 +175,66 @@ fn report_exports_are_planned_as_async_jobs_with_output_metadata() {
 }
 
 #[test]
+fn recovery_workflows_require_capability_idempotency_and_local_only_acknowledgement() {
+    let planner = OpsPlanner::new(
+        jobs_runtime(),
+        OpsCatalog::from_manifests(&sample_manifests()).expect("catalog"),
+    )
+    .expect("planner");
+    let request = RecoveryPlanRequest::new(
+        RecoveryExecutionId::new("recovery-1").expect("valid id"),
+        RecoveryWorkflowId::new("recovery.customer-app.full-restore").expect("valid id"),
+        "showcase-events",
+        "operator-3",
+        JobInstant::from_unix_seconds(300),
+    )
+    .expect("request");
+
+    let missing = planner.plan_recovery_workflow(request.clone()).unwrap_err();
+    assert!(matches!(
+        missing,
+        OpsModelError::MissingCapability {
+            operation: "recovery workflow",
+            required: Capability::SystemModuleManage
+        }
+    ));
+
+    let missing_ack = planner
+        .plan_recovery_workflow(
+            request
+                .clone()
+                .with_capability(Capability::SystemModuleManage)
+                .with_idempotency_key(
+                    IdempotencyKey::new("recovery:showcase-events:v1").expect("valid key"),
+                )
+                .with_local_only_sensitive_data(false),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        missing_ack,
+        OpsModelError::MissingOperatorAcknowledgement { .. }
+    ));
+
+    let plan = planner
+        .plan_recovery_workflow(
+            request
+                .with_capability(Capability::SystemModuleManage)
+                .with_idempotency_key(
+                    IdempotencyKey::new("recovery:showcase-events:v2").expect("valid key"),
+                )
+                .with_local_only_sensitive_data(true),
+        )
+        .expect("recovery plan");
+
+    assert_eq!(plan.definition.id.as_str(), "recovery.customer-app.full-restore");
+    assert_eq!(plan.customer_app_id, "showcase-events");
+    assert!(plan.requires_host_local_restore);
+    assert!(plan.planned_job.idempotency_key.is_some());
+    assert!(plan.stages.contains(&RecoveryStage::RestoreDatabase));
+    assert!(plan.stages.contains(&RecoveryStage::RestoreLocalOnlySensitive));
+}
+
+#[test]
 fn bulk_operations_require_their_capability_and_idempotency() {
     let planner = OpsPlanner::new(
         jobs_runtime(),
@@ -238,12 +298,12 @@ fn search_and_report_definitions_are_registry_ready() {
             .any(|dependency| dependency.module == "admin")
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 3);
-    assert_eq!(manifest.http_surfaces.len(), 3);
-    assert_eq!(manifest.jobs.len(), 3);
+    assert_eq!(manifest.route_surfaces.len(), 4);
+    assert_eq!(manifest.http_surfaces.len(), 4);
+    assert_eq!(manifest.jobs.len(), 4);
     assert_eq!(manifest.event_subscriptions.len(), 3);
-    assert_eq!(manifest.admin_resources.len(), 3);
-    assert_eq!(manifest.report_definitions.len(), 1);
+    assert_eq!(manifest.admin_resources.len(), 4);
+    assert_eq!(manifest.report_definitions.len(), 2);
     assert_eq!(manifest.bulk_operations.len(), 2);
     assert!(
         manifest

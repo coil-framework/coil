@@ -1,5 +1,6 @@
 use crate::OpsModelError;
 use crate::bulk::BulkCatalog;
+use crate::recovery::RecoveryCatalog;
 use crate::reports::ReportCatalog;
 use crate::search::SearchCatalog;
 use davenda_core::ModuleManifest;
@@ -9,14 +10,21 @@ pub struct OpsCatalog {
     pub search: SearchCatalog,
     pub reports: ReportCatalog,
     pub bulk: BulkCatalog,
+    pub recovery: RecoveryCatalog,
 }
 
 impl OpsCatalog {
-    pub fn new(search: SearchCatalog, reports: ReportCatalog, bulk: BulkCatalog) -> Self {
+    pub fn new(
+        search: SearchCatalog,
+        reports: ReportCatalog,
+        bulk: BulkCatalog,
+        recovery: RecoveryCatalog,
+    ) -> Self {
         Self {
             search,
             reports,
             bulk,
+            recovery,
         }
     }
 
@@ -25,6 +33,7 @@ impl OpsCatalog {
             search: SearchCatalog::standard(),
             reports: ReportCatalog::standard(),
             bulk: BulkCatalog::standard(),
+            recovery: RecoveryCatalog::standard(),
         }
     }
 
@@ -33,6 +42,7 @@ impl OpsCatalog {
             search: SearchCatalog::from_manifests(manifests)?,
             reports: ReportCatalog::from_manifests(manifests)?,
             bulk: BulkCatalog::from_manifests(manifests)?,
+            recovery: RecoveryCatalog::standard(),
         };
         catalog.validate()?;
         Ok(catalog)
@@ -42,6 +52,7 @@ impl OpsCatalog {
         self.search.validate()?;
         self.reports.validate()?;
         self.bulk.validate()?;
+        self.recovery.validate()?;
         Ok(())
     }
 }

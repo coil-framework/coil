@@ -151,6 +151,8 @@ fn route_surfaces() -> Vec<RouteSurface> {
             .gated_by(Capability::AdminShellAccess),
         RouteSurface::new("ops.reports", RouteSurfaceKind::AdminPage, "/admin/reports")
             .gated_by(Capability::AdminAuditRead),
+        RouteSurface::new("ops.recovery", RouteSurfaceKind::AdminPage, "/admin/recovery")
+            .gated_by(Capability::SystemModuleManage),
         RouteSurface::new("ops.bulk", RouteSurfaceKind::AdminAction, "/admin/bulk")
             .gated_by(Capability::SystemModuleManage),
     ]
@@ -175,6 +177,12 @@ fn jobs() -> Vec<JobContract> {
             JobTriggerKind::Operator,
             true,
             "Executes audited bulk workflows behind idempotent job envelopes",
+        ),
+        JobContract::new(
+            "ops.recovery.rehydrate",
+            JobTriggerKind::Operator,
+            true,
+            "Rebuilds derived state and recovery steps after source-of-truth restore completes",
         ),
     ]
 }
@@ -215,6 +223,11 @@ fn integration_points() -> Vec<IntegrationPoint> {
             IntegrationKind::StoragePolicy,
             "ops.report-output",
             "Routes generated report artifacts through the shared storage-policy and delivery model",
+        ),
+        IntegrationPoint::new(
+            IntegrationKind::StoragePolicy,
+            "ops.recovery",
+            "Coordinates recovery ordering across Postgres, managed object storage, and local-only sensitive exceptions",
         ),
     ]
 }
@@ -270,21 +283,49 @@ fn admin_resources() -> Vec<AdminResourceContribution> {
             AdminContributionKind::Workflow,
             Capability::SystemModuleManage,
         ),
+        AdminResourceContribution::new(
+            "ops.recovery",
+            "/admin/recovery",
+            "Recovery",
+            "Recovery",
+            AdminNavigationSection::System,
+            AdminContributionKind::Workflow,
+            Capability::SystemModuleManage,
+        ),
     ]
 }
 
 fn report_definitions() -> Vec<ManifestReportDefinition> {
-    vec![ManifestReportDefinition::new(
-        "report.ops.search-health",
-        "Search health",
-        Some("Operational visibility into index freshness, drift, and rebuild lag".to_string()),
-        Capability::AdminAuditRead,
-        ManifestReportFormat::Json,
-        ManifestReportSensitivity::Internal,
-        ManifestReportDeliveryMode::SignedUrl,
-        "reports/ops/search",
-        default_retry_policy(),
-    )]
+    vec![
+        ManifestReportDefinition::new(
+            "report.ops.search-health",
+            "Search health",
+            Some(
+                "Operational visibility into index freshness, drift, and rebuild lag"
+                    .to_string(),
+            ),
+            Capability::AdminAuditRead,
+            ManifestReportFormat::Json,
+            ManifestReportSensitivity::Internal,
+            ManifestReportDeliveryMode::SignedUrl,
+            "reports/ops/search",
+            default_retry_policy(),
+        ),
+        ManifestReportDefinition::new(
+            "report.ops.backup-readiness",
+            "Backup readiness",
+            Some(
+                "Summarizes whether source-of-truth data classes follow the platform recovery model"
+                    .to_string(),
+            ),
+            Capability::AdminAuditRead,
+            ManifestReportFormat::Json,
+            ManifestReportSensitivity::Internal,
+            ManifestReportDeliveryMode::SignedUrl,
+            "reports/ops/backup",
+            default_retry_policy(),
+        ),
+    ]
 }
 
 fn bulk_operations() -> Vec<ManifestBulkOperationDefinition> {
@@ -330,6 +371,15 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "ops/reports",
         )
         .gated_by(Capability::AdminAuditRead),
+        HttpSurfaceContribution::json(
+            "ops.recovery",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Admin,
+            "/admin/recovery",
+            202,
+            std::collections::BTreeMap::from([("status".to_string(), "queued".to_string())]),
+        )
+        .gated_by(Capability::SystemModuleManage),
         HttpSurfaceContribution::json(
             "ops.bulk",
             HttpSurfaceMethod::Post,

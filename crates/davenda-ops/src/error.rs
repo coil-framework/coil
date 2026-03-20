@@ -36,9 +36,17 @@ pub enum OpsModelError {
         operation_id: String,
         reason: String,
     },
+    InvalidRecoveryWorkflow {
+        workflow_id: String,
+        reason: String,
+    },
     InvalidItemCount {
         operation: &'static str,
         count: usize,
+    },
+    MissingOperatorAcknowledgement {
+        workflow_id: String,
+        requirement: String,
     },
     JobsPlan {
         error: JobsModelError,
@@ -80,8 +88,23 @@ impl fmt::Display for OpsModelError {
             } => {
                 write!(f, "bulk operation `{operation_id}` is invalid: {reason}")
             }
+            Self::InvalidRecoveryWorkflow {
+                workflow_id,
+                reason,
+            } => {
+                write!(f, "recovery workflow `{workflow_id}` is invalid: {reason}")
+            }
             Self::InvalidItemCount { operation, count } => {
                 write!(f, "{operation} cannot target `{count}` items")
+            }
+            Self::MissingOperatorAcknowledgement {
+                workflow_id,
+                requirement,
+            } => {
+                write!(
+                    f,
+                    "recovery workflow `{workflow_id}` requires operator acknowledgement: {requirement}"
+                )
             }
             Self::JobsPlan { error } => write!(f, "{error}"),
         }

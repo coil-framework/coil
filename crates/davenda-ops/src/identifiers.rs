@@ -31,3 +31,5 @@ token_type!(ReportId, "report_id");
 token_type!(ReportExportId, "report_export_id");
 token_type!(BulkOperationId, "bulk_operation_id");
 token_type!(BulkExecutionId, "bulk_execution_id");
+token_type!(RecoveryWorkflowId, "recovery_workflow_id");
+token_type!(RecoveryExecutionId, "recovery_execution_id");

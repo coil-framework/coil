@@ -33,6 +33,7 @@ mod catalog;
 mod error;
 mod identifiers;
 mod planner;
+mod recovery;
 mod reports;
 mod search;
 mod validation;
@@ -44,10 +45,12 @@ pub use bulk::{
 pub use catalog::OpsCatalog;
 pub use error::OpsModelError;
 pub use identifiers::{
-    BulkExecutionId, BulkOperationId, ReportExportId, ReportId, SearchFieldId, SearchIndexId,
+    BulkExecutionId, BulkOperationId, RecoveryExecutionId, RecoveryWorkflowId, ReportExportId,
+    ReportId, SearchFieldId, SearchIndexId,
 };
 pub use planner::OpsPlanner;
 pub(crate) use planner::default_retry_policy;
+pub use recovery::{RecoveryCatalog, RecoveryPlan, RecoveryPlanRequest, RecoveryStage, RecoveryWorkflowDefinition};
 pub use reports::{
     ReportCatalog, ReportDefinition, ReportDeliveryMode, ReportExportPlan, ReportExportRequest,
     ReportFormat, ReportParameter, ReportSensitivity,

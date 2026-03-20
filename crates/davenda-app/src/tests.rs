@@ -99,6 +99,7 @@ impl ObjectStoreTestServer {
                 }
             }
         });
+        thread::sleep(Duration::from_millis(25));
 
         Self {
             endpoint,

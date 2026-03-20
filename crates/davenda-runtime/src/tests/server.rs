@@ -562,6 +562,7 @@ async fn server_host_rejects_request_bodies_over_the_configured_limit_before_han
 #[tokio::test]
 async fn server_host_adapts_live_requests_into_runtime_execution() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_route(
             RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
@@ -570,6 +571,7 @@ async fn server_host_adapts_live_requests_into_runtime_execution() {
                 .requiring_session(),
         )
         .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .with_template(page_template(customer_namespace, "account/dashboard"))
         .build()
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
@@ -624,6 +626,7 @@ async fn server_host_adapts_live_requests_into_runtime_execution() {
 #[tokio::test]
 async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_route(
             RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
@@ -632,6 +635,7 @@ async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() 
                 .requiring_session(),
         )
         .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .with_template(page_template(customer_namespace, "account/dashboard"))
         .build()
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
@@ -702,8 +706,10 @@ async fn server_host_accepts_explicit_browser_host_wiring_for_shared_sessions() 
 #[tokio::test]
 async fn server_host_authorizes_capability_routes_through_live_authorizer() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CmsModule::new())
+        .with_template(fragment_template(customer_namespace, "cms/preview"))
         .build()
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
@@ -776,8 +782,10 @@ async fn server_host_authorizes_capability_routes_through_live_authorizer() {
 async fn server_host_authorizes_capability_routes_with_a_replacement_auth_package() {
     let config = config_with_auth_package("platform-extended-auth");
     let package = SelectedAuthModelPackage::new("platform-extended-auth", PackageMode::Extend);
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let plan = RuntimeBuilder::new(config, package)
         .with_module(CmsModule::new())
+        .with_template(fragment_template(customer_namespace, "cms/preview"))
         .build()
         .unwrap();
     assert_eq!(plan.auth_package_name, "platform-extended-auth");
@@ -1059,6 +1067,7 @@ async fn server_host_executes_page_extensions_during_live_requests() {
     let extension_dir = unique_temp_extension_dir("page-wasm");
     fs::create_dir_all(&extension_dir).unwrap();
     let config = config_with_app_name_and_extension_directory(&extension_dir, app_name);
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let page_slots = StaticManifestModule::new(
         ModuleManifest::new("account.runtime.slot").with_extension_slots(vec![
             ExtensionSlotDescriptor::new(
@@ -1077,6 +1086,7 @@ async fn server_host_executes_page_extensions_during_live_requests() {
                 .requiring_session(),
         )
         .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .with_template(page_template(customer_namespace, "account/dashboard"))
         .with_installed_extension(installed_page_extension_for_app_with_artifact(
             &extension_dir,
             "/account",
@@ -1178,6 +1188,7 @@ async fn server_host_applies_typed_cache_policy_to_public_page_responses() {
     let extension_dir = unique_temp_extension_dir("public-page-wasm");
     fs::create_dir_all(&extension_dir).unwrap();
     let config = config_with_app_name_and_extension_directory(&extension_dir, app_name);
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let page_slots = StaticManifestModule::new(
         ModuleManifest::new("events.runtime.slot").with_extension_slots(vec![
             ExtensionSlotDescriptor::new(
@@ -1191,6 +1202,7 @@ async fn server_host_applies_typed_cache_policy_to_public_page_responses() {
         .with_module(page_slots)
         .with_route(RouteDefinition::new("events.public", HttpMethod::Get, "/events").unwrap())
         .with_handler(HandlerDefinition::page("events.public", "events/list").unwrap())
+        .with_template(page_template(customer_namespace, "events/list"))
         .with_installed_extension(installed_page_extension_for_app_with_artifact(
             &extension_dir,
             "/events",
@@ -1254,8 +1266,10 @@ async fn server_host_executes_render_hooks_during_html_render() {
     let extension_dir = unique_temp_extension_dir("render-hook-wasm");
     fs::create_dir_all(&extension_dir).unwrap();
     let config = config_with_extension_directory(&extension_dir);
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CmsModule::new())
+        .with_template(page_template(customer_namespace, "cms/page"))
         .with_installed_extension(installed_render_hook_extension_with_artifact(
             &extension_dir,
         ))
@@ -1319,8 +1333,10 @@ async fn server_host_executes_admin_widget_extensions_during_live_requests() {
     let extension_dir = unique_temp_extension_dir("admin-widget-wasm");
     fs::create_dir_all(&extension_dir).unwrap();
     let config = config_with_extension_directory(&extension_dir);
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(AdminModule::new())
+        .with_template(page_template(customer_namespace, "admin/dashboard"))
         .with_installed_extension(installed_admin_widget_extension_with_artifact(
             &extension_dir,
         ))

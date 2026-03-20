@@ -33,7 +33,8 @@ use davenda_storage::{
     DeliveryMode, PathPolicyRule, StorageDeploymentScope, StoragePlanRequest, StoragePolicy,
 };
 use davenda_template::{
-    AttributeNode, ElementNode, Node, TemplateDefinition, TemplateName, TemplateNamespace,
+    AttributeNode, ElementNode, Node, TemplateDefinition, TemplateModelError, TemplateName,
+    TemplateNamespace,
 };
 use davenda_tls::{
     CertificateFingerprint, CertificateId, CertificateProviderKind, CertificateRecord,
@@ -1769,6 +1770,46 @@ fn execute_request_requires_capability_for_capability_gated_routes() {
             fragment_id: "preview-pane".to_string(),
         })
     );
+}
+
+#[test]
+fn render_fragment_response_fails_closed_when_the_template_is_missing() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("missing.preview", HttpMethod::Get, "/missing/preview")
+                .unwrap()
+                .localized(),
+        )
+        .with_handler(
+            HandlerDefinition::fragment("missing.preview", "missing/preview", "preview-pane")
+                .unwrap(),
+        )
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/en-GB/missing/preview")
+                .unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let fragment = match &execution.response {
+        HandlerResponse::Fragment(fragment) => fragment,
+        _ => panic!("expected fragment handler response"),
+    };
+
+    let error = plan
+        .render_fragment_response(&execution, fragment)
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeRenderError::Template(TemplateModelError::TemplateNotFound { .. })
+    ));
 }
 
 #[test]

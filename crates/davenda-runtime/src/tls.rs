@@ -1,8 +1,8 @@
 use super::*;
 use davenda_tls::{
-    AcmeTlsCertificateExecutor, CertificateMaterial, CloudflareTlsCertificateExecutor,
-    ManualCertificateBundle, ManualImportTlsCertificateExecutor, TlsCertificateExecutor,
-    TlsMaterialProtector,
+    CertificateMaterial, ManualCertificateBundle, ManualImportTlsCertificateExecutor,
+    TlsCertificateExecutor, TlsMaterialProtector, AcmeTlsCertificateExecutor,
+    CloudflareTlsCertificateExecutor,
 };
 use std::sync::Arc;
 
@@ -67,7 +67,11 @@ impl TlsHost {
         )?;
         let certificate_executor: Arc<dyn TlsCertificateExecutor> = match runtime.provider {
             Some(davenda_tls::CertificateProviderKind::Acme) => Arc::new(
-                AcmeTlsCertificateExecutor::new(control_plane.clone(), material_protector),
+                AcmeTlsCertificateExecutor::new(
+                    control_plane.clone(),
+                    material_protector,
+                    runtime.account_secret_ref.clone(),
+                ),
             ),
             Some(davenda_tls::CertificateProviderKind::CloudflareDns)
             | Some(davenda_tls::CertificateProviderKind::CloudflareOriginCa) => Arc::new(
@@ -77,6 +81,7 @@ impl TlsHost {
                         .expect("cloudflare provider is selected when creating executor"),
                     control_plane.clone(),
                     material_protector,
+                    runtime.account_secret_ref.clone(),
                 ),
             ),
             Some(davenda_tls::CertificateProviderKind::ManualImport) | None => Arc::new(

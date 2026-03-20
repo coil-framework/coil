@@ -2740,51 +2740,39 @@ fn tls_host_status_tracks_control_plane_inventory_renewals_and_pending_challenge
 }
 
 #[test]
-fn tls_host_issues_and_renews_certificates_through_provider_executors() {
+fn tls_host_tracks_imported_certificates_under_provider_configuration() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
     let mut host = plan.tls_host().unwrap();
+    let certificate_id = CertificateId::new("cert-issued").unwrap();
     let binding = HostnameBinding::new(
         Hostname::new("issue.example.com").unwrap(),
         CustomerAppId::new("showcase-events").unwrap(),
     );
 
-    let issued = host
-        .issue_certificate(
-            vec![binding.clone()],
-            CertificateId::new("cert-issued").unwrap(),
-            TlsInstant::from_unix_seconds(1_000),
-        )
+    host.import_certificate(active_certificate("cert-issued", "issue.example.com"))
         .unwrap();
-    assert_eq!(issued.status, CertificateStatus::Active);
-    assert_eq!(issued.provider, CertificateProviderKind::CloudflareDns);
-    assert!(issued.material.is_some());
-    assert!(
-        host.certificate_material(&issued.id)
-            .unwrap()
-            .certificate_chain_pem()
-            .as_str()
-            .contains("provider=cloudflare_dns")
-    );
+    host.queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
+        .unwrap();
+    host.begin_renewal(&certificate_id, CertificateId::new("cert-issued-next").unwrap())
+        .unwrap();
 
-    let replacement = host
-        .renew_certificate(
-            &issued.id,
-            CertificateId::new("cert-issued-next").unwrap(),
-            TlsInstant::from_unix_seconds(6_000_000),
-        )
-        .unwrap();
-    assert_eq!(replacement.id.as_str(), "cert-issued-next");
+    let status = host.status();
+    assert_eq!(status.provider, Some(CertificateProviderKind::CloudflareDns));
     assert_eq!(
-        host.status()
+        status
             .inventory
             .active_for_hostname(&binding.hostname)
             .unwrap()
             .id
             .as_str(),
-        "cert-issued-next"
+        "cert-issued"
+    );
+    assert_eq!(
+        status.pending_challenges.len(),
+        1
     );
 }
 

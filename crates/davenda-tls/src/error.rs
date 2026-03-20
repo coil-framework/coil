@@ -57,4 +57,14 @@ pub enum TlsModelError {
     CorruptDistributedControlPlaneState { namespace: String, reason: String },
     #[error("failed to persist distributed tls control-plane state `{namespace}`: {reason}")]
     DistributedControlPlaneStatePersistence { namespace: String, reason: String },
+    #[error("tls provider `{provider}` requires credential material")]
+    MissingProviderCredential { provider: String },
+    #[error("tls provider `{provider}` does not support challenge `{challenge}`")]
+    UnsupportedProviderChallenge { provider: String, challenge: String },
+    #[error("tls provider `{provider}` failed during `{operation}`: {reason}")]
+    ProviderRequestFailed {
+        provider: String,
+        operation: &'static str,
+        reason: String,
+    },
 }

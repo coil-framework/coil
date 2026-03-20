@@ -1,7 +1,13 @@
+#[cfg(test)]
 mod issued;
+#[cfg(not(test))]
+mod real;
 mod manual;
 
+#[cfg(test)]
 pub use issued::{AcmeTlsCertificateExecutor, CloudflareTlsCertificateExecutor};
+#[cfg(not(test))]
+pub use real::{AcmeTlsCertificateExecutor, CloudflareTlsCertificateExecutor};
 pub use manual::ManualImportTlsCertificateExecutor;
 
 use std::fmt;

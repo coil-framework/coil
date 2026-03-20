@@ -229,6 +229,7 @@ where
         extension_registry,
         registered_extension_slots,
         installed_extensions,
+        shared_jobs_runtime: SharedJobsRuntimeHandle::new(),
         module_jobs,
         module_event_subscriptions,
         module_data_repositories,

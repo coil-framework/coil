@@ -1,5 +1,7 @@
 use super::*;
 use url::Url;
+use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 mod execution;
 mod live;
@@ -8,6 +10,34 @@ mod testing;
 
 #[cfg(test)]
 pub(crate) use testing::{shared_cache_runtime_for_test, shared_jobs_runtime_for_test};
+
+#[derive(Clone, Default)]
+pub(crate) struct SharedJobsRuntimeHandle {
+    runtime: Arc<OnceLock<Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>,
+}
+
+impl SharedJobsRuntimeHandle {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn get_or_init(
+        &self,
+        runtime: &JobsRuntimeServices,
+    ) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+        self.runtime
+            .get_or_init(|| davenda_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
+            .clone()
+    }
+}
+
+impl fmt::Debug for SharedJobsRuntimeHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SharedJobsRuntimeHandle")
+            .field("initialized", &self.runtime.get().is_some())
+            .finish()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RuntimePlan {
@@ -37,6 +67,7 @@ pub struct RuntimePlan {
     pub extension_registry: ExtensionRegistry,
     pub registered_extension_slots: Vec<RegisteredExtensionSlot>,
     pub installed_extensions: Vec<InstalledExtensionSummary>,
+    pub(crate) shared_jobs_runtime: SharedJobsRuntimeHandle,
     pub module_jobs: Vec<RegisteredModuleJob>,
     pub module_event_subscriptions: Vec<RegisteredEventSubscription>,
     pub module_data_repositories: Vec<RegisteredDataRepository>,
@@ -96,30 +127,18 @@ impl RuntimePlan {
         let scheduler_node_id =
             validate_runtime_identifier("scheduler_node_id", scheduler_node_id.into())?;
         let namespace = self.shared_backend_namespace();
-        #[cfg(test)]
-        {
-            let shared_runtime = shared_jobs_runtime_for_test(&self.jobs, namespace.clone());
-            return Ok(JobsHost::new(
-                self.config.app.name.clone(),
-                scheduler_node_id,
-                self.jobs.clone(),
-                self.jobs.describe().clone(),
-                self.registered_runtime_jobs.clone(),
-                self.registered_runtime_event_subscriptions.clone(),
-                self.jobs_domain.clone(),
-                shared_runtime,
-                namespace,
-            ));
-        }
-
-        #[cfg(not(test))]
-        {
-            let _ = scheduler_node_id;
-            let _ = namespace;
-            // Live builds require an explicit distributed jobs runtime; no
-            // local SQLite or shared-volume coordinator is constructed here.
-            return Err(live::unconfigured_live_jobs_error(self.jobs.backend));
-        }
+        let shared_runtime = self.shared_jobs_runtime.get_or_init(&self.jobs);
+        Ok(JobsHost::new(
+            self.config.app.name.clone(),
+            scheduler_node_id,
+            self.jobs.clone(),
+            self.jobs.describe().clone(),
+            self.registered_runtime_jobs.clone(),
+            self.registered_runtime_event_subscriptions.clone(),
+            self.jobs_domain.clone(),
+            shared_runtime,
+            namespace,
+        ))
     }
 
     pub fn ops_host(

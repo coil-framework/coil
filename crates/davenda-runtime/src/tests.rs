@@ -2587,6 +2587,44 @@ fn ops_host_queues_report_exports_into_the_jobs_runtime() {
 }
 
 #[test]
+fn jobs_host_shares_live_runtime_state_across_plan_clones() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(MembershipsModule::new())
+        .with_module(OpsModule::new())
+        .build()
+        .unwrap();
+    let cloned_plan = plan.clone();
+    let mut ops = plan.ops_host("scheduler-a").unwrap();
+
+    ops.queue_report_export(
+        ReportExportRequest::new(
+            ReportExportId::new("export-memberships-2").unwrap(),
+            ReportId::new("report.memberships.summary").unwrap(),
+            "operator-1",
+            JobInstant::from_unix_seconds(120),
+        )
+        .unwrap()
+        .with_capability(Capability::MembershipSubscriptionManage)
+        .with_idempotency_key(IdempotencyKey::new("report:memberships:summary:2").unwrap()),
+    )
+    .unwrap();
+
+    let jobs = cloned_plan.jobs_host("scheduler-b").unwrap();
+    assert_eq!(jobs.coordinator().ready_jobs().len(), 1);
+    assert_eq!(
+        jobs.coordinator().ready_jobs()[0]
+            .spec
+            .job_name
+            .as_str(),
+        "report.export.report.memberships.summary"
+    );
+}
+
+#[test]
 fn ops_host_enforces_bulk_capabilities_before_queueing_jobs() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())

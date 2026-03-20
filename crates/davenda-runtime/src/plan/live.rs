@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(dead_code)]
 pub(crate) fn unconfigured_live_jobs_error(
     backend: davenda_config::JobBackend,
 ) -> RuntimeJobsError {

@@ -12,9 +12,13 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::path::PathBuf;
+#[cfg(test)]
+use std::time::Duration;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
+#[cfg(test)]
+use std::sync::OnceLock;
 
 #[cfg(test)]
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";
@@ -164,7 +168,7 @@ impl SessionStoreSnapshot {
 #[cfg(test)]
 #[derive(Debug)]
 struct TestOnlySqliteSharedSessionStore {
-    connection: Mutex<Connection>,
+    connection: Arc<Mutex<Connection>>,
     namespace: String,
 }
 
@@ -173,41 +177,10 @@ impl TestOnlySqliteSharedSessionStore {
     fn open(kind: SessionStoreBackendKind, namespace: String) -> Self {
         let namespace = std::env::var(SHARED_STATE_NAMESPACE_ENV).unwrap_or(namespace);
         let path = test_only_sqlite_database_path(kind, &namespace);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).unwrap_or_else(|error| {
-                panic!(
-                    "failed to create persistent session backend directory `{}`: {error}",
-                    parent.display()
-                )
-            });
-        }
-
-        let connection = Connection::open(&path).unwrap_or_else(|error| {
-            panic!(
-                "failed to open persistent session backend `{}`: {error}",
-                path.display()
-            )
-        });
-        connection
-            .execute_batch(
-                r#"
-                PRAGMA journal_mode = WAL;
-                PRAGMA synchronous = NORMAL;
-                CREATE TABLE IF NOT EXISTS session_state (
-                    namespace TEXT PRIMARY KEY,
-                    payload TEXT NOT NULL
-                );
-                "#,
-            )
-            .unwrap_or_else(|error| {
-                panic!(
-                    "failed to initialize persistent session backend `{}`: {error}",
-                    path.display()
-                )
-            });
+        let connection = shared_connection(&path);
 
         Self {
-            connection: Mutex::new(connection),
+            connection,
             namespace,
         }
     }
@@ -321,6 +294,62 @@ impl TestOnlySqliteSharedSessionStore {
 }
 
 #[cfg(test)]
+fn shared_connection(path: &PathBuf) -> Arc<Mutex<Connection>> {
+    static REGISTRY: OnceLock<Mutex<BTreeMap<PathBuf, Arc<Mutex<Connection>>>>> = OnceLock::new();
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry
+        .lock()
+        .expect("persistent session backend registry mutex poisoned");
+
+    guard
+        .entry(path.clone())
+        .or_insert_with(|| {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+                    panic!(
+                        "failed to create persistent session backend directory `{}`: {error}",
+                        parent.display()
+                    )
+                });
+            }
+
+            let connection = Connection::open(path).unwrap_or_else(|error| {
+                panic!(
+                    "failed to open persistent session backend `{}`: {error}",
+                    path.display()
+                )
+            });
+            connection
+                .execute_batch(
+                    r#"
+                    PRAGMA journal_mode = WAL;
+                    PRAGMA synchronous = NORMAL;
+                    CREATE TABLE IF NOT EXISTS session_state (
+                        namespace TEXT PRIMARY KEY,
+                        payload TEXT NOT NULL
+                    );
+                    "#,
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "failed to initialize persistent session backend `{}`: {error}",
+                        path.display()
+                    )
+                });
+            connection
+                .busy_timeout(Duration::from_secs(5))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "failed to configure persistent session backend busy timeout `{}`: {error}",
+                        path.display()
+                    )
+                });
+            Arc::new(Mutex::new(connection))
+        })
+        .clone()
+}
+
+#[cfg(test)]
 fn test_only_sqlite_database_path(kind: SessionStoreBackendKind, namespace: &str) -> PathBuf {
     test_only_sqlite_shared_state_root()
         .join("browser")
@@ -332,7 +361,9 @@ fn test_only_sqlite_database_path(kind: SessionStoreBackendKind, namespace: &str
 fn test_only_sqlite_shared_state_root() -> PathBuf {
     std::env::var_os(SHARED_STATE_DIR_ENV)
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("davenda-shared"))
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("davenda-shared-{}", std::process::id()))
+        })
 }
 
 #[cfg(test)]

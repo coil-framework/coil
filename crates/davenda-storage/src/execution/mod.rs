@@ -1,21 +1,20 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use thiserror::Error;
 
 use crate::{StorageBackendKind, StoragePlan, StorageTopology, WriteTarget};
 
-mod local;
 mod config;
+mod local;
 mod object_store;
 
 #[cfg(test)]
 mod tests;
 
+pub use config::{ObjectStoreClientConfig, ObjectStoreClientConfigError, ObjectStoreCredentials};
 use local::LocalDiskStorageClient;
-pub use config::ObjectStoreClientConfig;
-pub use object_store::HttpObjectStoreClient;
+pub use object_store::{S3CompatibleObjectStoreClient, SignedObjectUrl};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageDeliveryLocation {
@@ -25,6 +24,8 @@ pub enum StorageDeliveryLocation {
     },
     SignedObject {
         object_key: String,
+        signed_url: String,
+        expires_at_unix_seconds: u64,
     },
     AppProxy {
         path: String,
@@ -50,17 +51,30 @@ pub struct StorageReadReceipt {
 }
 
 pub trait ObjectStoreClient: fmt::Debug + Send + Sync {
-    fn backend_kind(&self) -> StorageBackendKind;
-    fn root(&self) -> &Path;
-    fn is_configured(&self) -> bool;
     fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError>;
     fn get(&self, object_key: &str) -> Result<(PathBuf, Vec<u8>), StorageExecutionError>;
+    fn signed_get_url(&self, object_key: &str) -> Result<SignedObjectUrl, StorageExecutionError>;
+}
+
+impl ObjectStoreClient for S3CompatibleObjectStoreClient {
+    fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError> {
+        self.put(object_key, bytes)
+    }
+
+    fn get(&self, object_key: &str) -> Result<(PathBuf, Vec<u8>), StorageExecutionError> {
+        self.get(object_key)
+    }
+
+    fn signed_get_url(&self, object_key: &str) -> Result<SignedObjectUrl, StorageExecutionError> {
+        self.signed_get_url(object_key)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct StorageExecutor {
     local_client: LocalDiskStorageClient,
-    object_store: Option<Arc<dyn ObjectStoreClient>>,
+    object_store_required: bool,
+    object_store: Option<S3CompatibleObjectStoreClient>,
 }
 
 impl StorageExecutor {
@@ -73,15 +87,15 @@ impl StorageExecutor {
         object_store: Option<ObjectStoreClientConfig>,
     ) -> Self {
         let local_root = PathBuf::from(&topology.local_root);
-        let object_store = topology.object_store.as_ref().map(|_| {
-            Arc::new(HttpObjectStoreClient::from_topology_and_object_store(
-                topology,
-                object_store.clone(),
-            )) as Arc<dyn ObjectStoreClient>
-        });
+        let object_store_required = topology.object_store.is_some();
+        let object_store = topology
+            .object_store
+            .as_ref()
+            .and_then(|_| object_store.map(S3CompatibleObjectStoreClient::new));
 
         Self {
             local_client: LocalDiskStorageClient::new(local_root),
+            object_store_required,
             object_store,
         }
     }
@@ -113,17 +127,8 @@ impl StorageExecutor {
                         logical_path: plan.logical_path.clone(),
                     }
                 })?;
-                let client = self.object_store.as_ref().ok_or_else(|| {
-                    StorageExecutionError::MissingObjectStoreBackend {
-                        logical_path: plan.logical_path.clone(),
-                    }
-                })?;
-                if !client.is_configured() {
-                    return Err(StorageExecutionError::MissingObjectStoreEndpoint {
-                        logical_path: plan.logical_path.clone(),
-                    });
-                }
-                client.put(object_key, bytes)?
+                self.object_store_client(&plan.logical_path)?
+                    .put(object_key, bytes)?
             }
         };
 
@@ -144,7 +149,7 @@ impl StorageExecutor {
             }
         })?;
 
-        let (path, bytes): (PathBuf, Vec<u8>) = match target.backend {
+        let (path, bytes) = match target.backend {
             StorageBackendKind::LocalDisk => {
                 let path = plan.local_path.as_ref().ok_or_else(|| {
                     StorageExecutionError::MissingLocalPath {
@@ -159,17 +164,8 @@ impl StorageExecutor {
                         logical_path: plan.logical_path.clone(),
                     }
                 })?;
-                let client = self.object_store.as_ref().ok_or_else(|| {
-                    StorageExecutionError::MissingObjectStoreBackend {
-                        logical_path: plan.logical_path.clone(),
-                    }
-                })?;
-                if !client.is_configured() {
-                    return Err(StorageExecutionError::MissingObjectStoreEndpoint {
-                        logical_path: plan.logical_path.clone(),
-                    });
-                }
-                client.get(object_key)?
+                self.object_store_client(&plan.logical_path)?
+                    .get(object_key)?
             }
         };
 
@@ -208,8 +204,13 @@ impl StorageExecutor {
                         logical_path: plan.logical_path.clone(),
                     }
                 })?;
+                let signed = self
+                    .object_store_client(&plan.logical_path)?
+                    .signed_get_url(object_key)?;
                 Ok(StorageDeliveryLocation::SignedObject {
-                    object_key: object_key.to_string(),
+                    object_key: signed.object_key,
+                    signed_url: signed.signed_url,
+                    expires_at_unix_seconds: signed.expires_at_unix_seconds,
                 })
             }
             crate::DeliveryMode::AppProxy => Ok(StorageDeliveryLocation::AppProxy {
@@ -228,6 +229,26 @@ impl StorageExecutor {
                 })
             }
         }
+    }
+
+    fn object_store_client(
+        &self,
+        logical_path: &str,
+    ) -> Result<&dyn ObjectStoreClient, StorageExecutionError> {
+        self.object_store
+            .as_ref()
+            .map(|client| client as &dyn ObjectStoreClient)
+            .ok_or_else(|| {
+                if self.object_store_required {
+                    StorageExecutionError::MissingObjectStoreConfiguration {
+                        logical_path: logical_path.to_string(),
+                    }
+                } else {
+                    StorageExecutionError::MissingObjectStoreBackend {
+                        logical_path: logical_path.to_string(),
+                    }
+                }
+            })
     }
 }
 
@@ -249,14 +270,20 @@ pub enum StorageExecutionError {
     MissingObjectKey { logical_path: String },
     #[error("storage plan for `{logical_path}` requires an object-store backend")]
     MissingObjectStoreBackend { logical_path: String },
+    #[error("storage plan for `{logical_path}` requires object-store client configuration")]
+    MissingObjectStoreConfiguration { logical_path: String },
     #[error("storage plan for `{logical_path}` requires a configured object-store endpoint")]
     MissingObjectStoreEndpoint { logical_path: String },
     #[error("storage plan for `{logical_path}` requires `cdn_base_url` to resolve public delivery")]
     MissingCdnBaseUrl { logical_path: String },
+    #[error("object-store configuration is invalid: {detail}")]
+    InvalidObjectStoreConfiguration { detail: String },
     #[error("storage path `{path}` is outside the configured storage root")]
     InvalidTargetPath { path: String },
     #[error("failed to read storage path `{path}`: {message}")]
     ReadFailed { path: String, message: String },
+    #[error("failed to generate a signed URL for `{object_key}`: {message}")]
+    SignedUrlGenerationFailed { object_key: String, message: String },
     #[error("failed to write storage path `{path}`: {message}")]
     WriteFailed { path: String, message: String },
 }

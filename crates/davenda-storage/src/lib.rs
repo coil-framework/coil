@@ -3,7 +3,8 @@ mod planner;
 mod policy;
 
 pub use execution::{
-    HttpObjectStoreClient, ObjectStoreClient, StorageDeliveryLocation,
+    ObjectStoreClient, ObjectStoreClientConfig, ObjectStoreClientConfigError,
+    ObjectStoreCredentials, S3CompatibleObjectStoreClient, StorageDeliveryLocation,
     StorageExecutionError, StorageExecutor, StorageReadReceipt, StorageWriteReceipt,
 };
 pub use planner::{

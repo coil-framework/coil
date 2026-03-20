@@ -25,19 +25,21 @@ impl ObjectStoreTestServer {
         let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
         let stop_thread = Arc::clone(&stop);
         let store_thread = Arc::clone(&store);
-        let handle = thread::spawn(move || loop {
-            if stop_thread.load(Ordering::SeqCst) {
-                break;
-            }
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    let store = Arc::clone(&store_thread);
-                    handle_request(stream, &store);
+        let handle = thread::spawn(move || {
+            loop {
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(10));
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let store = Arc::clone(&store_thread);
+                        handle_request(stream, &store);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("object-store test server failed: {error}"),
                 }
-                Err(error) => panic!("object-store test server failed: {error}"),
             }
         });
 
@@ -69,7 +71,15 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
     reader.read_line(&mut request_line).unwrap();
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("");
-    let path = parts.next().unwrap_or("/").trim_start_matches('/').to_string();
+    let path = parts
+        .next()
+        .unwrap_or("/")
+        .split('?')
+        .next()
+        .unwrap_or("/")
+        .trim_start_matches('/')
+        .trim_start_matches("runtime/")
+        .to_string();
 
     let mut content_length = 0usize;
     loop {
@@ -103,8 +113,13 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
         _ => ("405 Method Not Allowed", b"method not allowed".to_vec()),
     };
 
+    let etag_header = if method == "PUT" {
+        "ETag: \"test-etag\"\r\n"
+    } else {
+        ""
+    };
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{etag_header}Connection: close\r\n\r\n",
         response_body.len()
     );
     stream.write_all(response.as_bytes()).unwrap();
@@ -219,10 +234,15 @@ fn planner() -> StoragePlanner {
 fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
     let server = ObjectStoreTestServer::spawn();
     let planner = planner();
-    let executor = StorageExecutor::from_topology_and_object_store(
-        planner.topology(),
-        Some(ObjectStoreClientConfig::new(server.endpoint())),
-    );
+    let object_store = ObjectStoreClientConfig::new("runtime", "us-east-1")
+        .unwrap()
+        .with_endpoint_url(server.endpoint())
+        .unwrap()
+        .with_static_credentials("runtime-access", "runtime-secret")
+        .unwrap()
+        .with_signed_url_ttl_secs(600);
+    let executor =
+        StorageExecutor::from_topology_and_object_store(planner.topology(), Some(object_store));
     let public_plan = planner
         .plan_scalable_write(
             StoragePlanRequest::new("uploads/marketing/hero.webp")
@@ -255,12 +275,20 @@ fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
         )
         .unwrap();
     let private_object_key = private_plan.object_key.as_deref().unwrap();
-    assert_eq!(
-        executor.delivery_location(&private_plan, None).unwrap(),
+    let signed_delivery = executor.delivery_location(&private_plan, None).unwrap();
+    match signed_delivery {
         StorageDeliveryLocation::SignedObject {
-            object_key: private_object_key.to_string(),
+            object_key,
+            signed_url,
+            expires_at_unix_seconds,
+        } => {
+            assert_eq!(object_key, private_object_key.to_string());
+            assert!(signed_url.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
+            assert!(signed_url.contains("secure/reports/march.csv"));
+            assert!(expires_at_unix_seconds > 0);
         }
-    );
+        other => panic!("expected signed delivery, got {other:?}"),
+    }
 }
 
 #[test]

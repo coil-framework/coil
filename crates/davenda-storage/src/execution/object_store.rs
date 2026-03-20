@@ -1,181 +1,204 @@
-use std::io::Read;
-use std::path::{Path, PathBuf};
+use bytes::Bytes;
+use object_store::ObjectStoreExt;
+use object_store::aws::{AmazonS3, AmazonS3Builder};
+use object_store::path::Path as ObjectPath;
+use object_store::signer::Signer;
+use reqwest::Method;
+use std::future::Future;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ureq::AgentBuilder;
-use url::Url;
-
-use super::{ObjectStoreClientConfig, StorageBackendKind, StorageExecutionError};
+use super::{ObjectStoreClientConfig, ObjectStoreCredentials, StorageExecutionError};
 
 #[derive(Debug, Clone)]
-pub struct HttpObjectStoreClient {
-    endpoint: Option<Url>,
-    root: PathBuf,
-    credential: Option<String>,
+pub struct S3CompatibleObjectStoreClient {
+    state: ObjectStoreClientState,
+    signed_url_ttl: Duration,
 }
 
-impl HttpObjectStoreClient {
-    pub fn from_topology_and_object_store(
-        _topology: &crate::StorageTopology,
-        object_store: Option<ObjectStoreClientConfig>,
-    ) -> Self {
-        let (endpoint, root, credential) = match object_store {
-            Some(config) => {
-                let endpoint = Url::parse(config.endpoint_url.trim()).ok();
-                let root = endpoint
-                    .as_ref()
-                    .and_then(|url| {
-                        if url.scheme() == "file" {
-                            url.to_file_path().ok()
-                        } else {
-                            Some(PathBuf::from(url.path().trim_start_matches('/')))
-                        }
-                    })
-                    .unwrap_or_default();
-                (endpoint, root, config.credential)
-            }
-            None => (None, PathBuf::default(), None),
+impl S3CompatibleObjectStoreClient {
+    pub fn new(config: ObjectStoreClientConfig) -> Self {
+        let signed_url_ttl = Duration::from_secs(config.signed_url_ttl_secs.max(1));
+        let state = match build_store(&config) {
+            Ok(store) => ObjectStoreClientState::Ready { store },
+            Err(message) => ObjectStoreClientState::Invalid { message },
         };
 
         Self {
-            endpoint,
-            root,
-            credential,
+            state,
+            signed_url_ttl,
         }
     }
 
-    fn resolve(&self, object_key: &str) -> Result<Url, StorageExecutionError> {
-        let endpoint = self
-            .endpoint
-            .as_ref()
-            .ok_or_else(|| StorageExecutionError::MissingObjectStoreEndpoint {
-                logical_path: object_key.to_string(),
-            })?;
-        let mut url = endpoint.clone();
-        {
-            let mut segments = url
-                .path_segments_mut()
-                .map_err(|_| StorageExecutionError::InvalidTargetPath {
-                    path: object_key.to_string(),
-                })?;
-            for segment in normalize_object_key(object_key)?.split('/') {
-                segments.push(segment);
-            }
-        }
-        Ok(url)
-    }
-
-    fn object_path(&self, object_key: &str) -> Result<PathBuf, StorageExecutionError> {
-        Ok(self.root.join(normalize_object_key(object_key)?))
-    }
-}
-
-impl super::ObjectStoreClient for HttpObjectStoreClient {
-    fn backend_kind(&self) -> StorageBackendKind {
-        StorageBackendKind::S3Compatible
-    }
-
-    fn root(&self) -> &Path {
-        self.root.as_path()
-    }
-
-    fn is_configured(&self) -> bool {
-        self.endpoint.is_some()
-    }
-
-    fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError> {
-        if self
-            .endpoint
-            .as_ref()
-            .is_some_and(|endpoint| endpoint.scheme() == "file")
-        {
-            let path = self.object_path(object_key)?;
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| StorageExecutionError::WriteFailed {
-                    path: parent.display().to_string(),
-                    message: error.to_string(),
-                })?;
-            }
-            std::fs::write(&path, bytes).map_err(|error| StorageExecutionError::WriteFailed {
-                path: path.display().to_string(),
-                message: error.to_string(),
-            })?;
-            return Ok(path);
-        }
-
-        let url = self.resolve(object_key)?;
-        let agent = AgentBuilder::new().build();
-        let mut request = agent
-            .put(url.as_str())
-            .set("Content-Type", "application/octet-stream");
-        if let Some(credential) = &self.credential {
-            let authorization = format!("Bearer {credential}");
-            request = request.set("Authorization", &authorization);
-        }
-        let response = request.send_bytes(bytes).map_err(|error| StorageExecutionError::WriteFailed {
-            path: object_key.to_string(),
-            message: error.to_string(),
-        })?;
-
-        if !(200..300).contains(&response.status()) {
-            return Err(StorageExecutionError::WriteFailed {
+    pub fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError> {
+        let path = object_path(object_key)?;
+        let store = self.ready_store()?.clone();
+        let payload = Bytes::copy_from_slice(bytes);
+        run_object_store_future(async move { store.put(&path, payload.into()).await }).map_err(
+            |message| StorageExecutionError::WriteFailed {
                 path: object_key.to_string(),
-                message: format!("unexpected status {}", response.status()),
-            });
-        }
-
+                message,
+            },
+        )?;
         Ok(PathBuf::from(normalize_object_key(object_key)?))
     }
 
-    fn get(&self, object_key: &str) -> Result<(PathBuf, Vec<u8>), StorageExecutionError> {
-        if self
-            .endpoint
-            .as_ref()
-            .is_some_and(|endpoint| endpoint.scheme() == "file")
-        {
-            let path = self.object_path(object_key)?;
-            let bytes = std::fs::read(&path).map_err(|error| StorageExecutionError::ReadFailed {
-                path: path.display().to_string(),
-                message: error.to_string(),
-            })?;
-            return Ok((path, bytes));
-        }
-
-        let url = self.resolve(object_key)?;
-        let agent = AgentBuilder::new().build();
-        let mut request = agent.get(url.as_str());
-        if let Some(credential) = &self.credential {
-            let authorization = format!("Bearer {credential}");
-            request = request.set("Authorization", &authorization);
-        }
-        let response = request.call().map_err(|error| StorageExecutionError::ReadFailed {
+    pub fn get(&self, object_key: &str) -> Result<(PathBuf, Vec<u8>), StorageExecutionError> {
+        let path = object_path(object_key)?;
+        let store = self.ready_store()?.clone();
+        let bytes = run_object_store_future(async move {
+            let result = store.get(&path).await?;
+            result.bytes().await
+        })
+        .map_err(|message| StorageExecutionError::ReadFailed {
             path: object_key.to_string(),
-            message: error.to_string(),
+            message,
         })?;
-
-        if !(200..300).contains(&response.status()) {
-            return Err(StorageExecutionError::ReadFailed {
-                path: object_key.to_string(),
-                message: format!("unexpected status {}", response.status()),
-            });
-        }
-
-        let mut bytes = Vec::new();
-        response
-            .into_reader()
-            .read_to_end(&mut bytes)
-            .map_err(|error| StorageExecutionError::ReadFailed {
-                path: object_key.to_string(),
-                message: error.to_string(),
-            })?;
-        Ok((PathBuf::from(normalize_object_key(object_key)?), bytes))
+        Ok((
+            PathBuf::from(normalize_object_key(object_key)?),
+            bytes.to_vec(),
+        ))
     }
+
+    pub fn signed_get_url(
+        &self,
+        object_key: &str,
+    ) -> Result<SignedObjectUrl, StorageExecutionError> {
+        let path = object_path(object_key)?;
+        let store = self.ready_store()?.clone();
+        let signed_url_ttl = self.signed_url_ttl;
+        let signed_url = run_object_store_future(async move {
+            store.signed_url(Method::GET, &path, signed_url_ttl).await
+        })
+        .map_err(|message| StorageExecutionError::SignedUrlGenerationFailed {
+            object_key: object_key.to_string(),
+            message,
+        })?;
+        let expires_at_unix_seconds = SystemTime::now()
+            .checked_add(signed_url_ttl)
+            .and_then(|instant| instant.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        Ok(SignedObjectUrl {
+            object_key: normalize_object_key(object_key)?,
+            signed_url: signed_url.to_string(),
+            expires_at_unix_seconds,
+        })
+    }
+
+    fn ready_store(&self) -> Result<&AmazonS3, StorageExecutionError> {
+        match &self.state {
+            ObjectStoreClientState::Ready { store } => Ok(store),
+            ObjectStoreClientState::Invalid { message } => {
+                Err(StorageExecutionError::InvalidObjectStoreConfiguration {
+                    detail: message.clone(),
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedObjectUrl {
+    pub object_key: String,
+    pub signed_url: String,
+    pub expires_at_unix_seconds: u64,
+}
+
+#[derive(Debug, Clone)]
+enum ObjectStoreClientState {
+    Ready { store: AmazonS3 },
+    Invalid { message: String },
+}
+
+fn build_store(config: &ObjectStoreClientConfig) -> Result<AmazonS3, String> {
+    let mut builder = AmazonS3Builder::new()
+        .with_bucket_name(config.bucket.clone())
+        .with_region(config.region.clone())
+        .with_virtual_hosted_style_request(config.virtual_hosted_style_request);
+    if let Some(endpoint_url) = &config.endpoint_url {
+        builder = builder
+            .with_endpoint(endpoint_url.clone())
+            .with_allow_http(config.allow_http);
+    }
+    match &config.credentials {
+        ObjectStoreCredentials::Environment => {}
+        ObjectStoreCredentials::Static {
+            access_key_id,
+            secret_access_key,
+            session_token,
+        } => {
+            builder = builder
+                .with_access_key_id(access_key_id.clone())
+                .with_secret_access_key(secret_access_key.clone());
+            if let Some(session_token) = session_token {
+                builder = builder.with_token(session_token.clone());
+            }
+        }
+    }
+    builder.build().map_err(|error| error.to_string())
+}
+
+fn run_object_store_future<T, F>(future: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T, object_store::Error>> + Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => match handle.runtime_flavor() {
+            tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(|| {
+                handle.block_on(future).map_err(|error| error.to_string())
+            }),
+            tokio::runtime::RuntimeFlavor::CurrentThread => run_future_on_dedicated_runtime(future),
+            _ => run_future_on_dedicated_runtime(future),
+        },
+        Err(_) => run_future_on_ephemeral_runtime(future),
+    }
+}
+
+fn run_future_on_dedicated_runtime<T, F>(future: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T, object_store::Error>> + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        runtime.block_on(future).map_err(|error| error.to_string())
+    })
+    .join()
+    .map_err(|_| "object-store worker thread panicked".to_string())?
+}
+
+fn run_future_on_ephemeral_runtime<T, F>(future: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T, object_store::Error>> + Send + 'static,
+{
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    runtime.block_on(future).map_err(|error| error.to_string())
+}
+
+fn object_path(object_key: &str) -> Result<ObjectPath, StorageExecutionError> {
+    ObjectPath::parse(normalize_object_key(object_key)?).map_err(|error| {
+        StorageExecutionError::InvalidTargetPath {
+            path: error.to_string(),
+        }
+    })
 }
 
 fn normalize_object_key(object_key: &str) -> Result<String, StorageExecutionError> {
     let mut parts = Vec::new();
-    for component in Path::new(object_key).components() {
+    for component in std::path::Path::new(object_key).components() {
         match component {
-            std::path::Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            std::path::Component::Normal(part) => {
+                parts.push(part.to_string_lossy().into_owned());
+            }
             _ => {
                 return Err(StorageExecutionError::InvalidTargetPath {
                     path: object_key.to_string(),

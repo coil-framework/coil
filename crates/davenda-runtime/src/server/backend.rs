@@ -11,6 +11,8 @@ use std::fmt;
 pub enum SecretResolutionError {
     #[error("secret `{reference}` was not provided to the runtime")]
     MissingSecret { reference: String },
+    #[error("object-store secret `{reference}` is invalid: {message}")]
+    InvalidObjectStoreConfig { reference: String, message: String },
 }
 
 pub trait SecretResolver {
@@ -78,15 +80,41 @@ pub struct SessionStoreClientTarget {
 pub struct ObjectStoreClientTarget {
     pub kind: ObjectStoreKind,
     pub endpoint_url: Option<String>,
+    pub bucket: Option<String>,
+    pub region: Option<String>,
     pub credential_reference: Option<String>,
+    pub signed_url_ttl_secs: Option<u64>,
     pub local_root: String,
+    config: Option<ObjectStoreClientConfig>,
 }
 
 impl ObjectStoreClientTarget {
     pub fn object_store_client_config(&self) -> Option<ObjectStoreClientConfig> {
-        self.endpoint_url
+        self.config.clone()
+    }
+
+    fn new(
+        kind: ObjectStoreKind,
+        config: Option<ObjectStoreClientConfig>,
+        credential_reference: Option<String>,
+        local_root: String,
+    ) -> Self {
+        let endpoint_url = config
             .as_ref()
-            .map(|endpoint_url| ObjectStoreClientConfig::new(endpoint_url.clone()))
+            .and_then(|config| config.endpoint_url.clone());
+        let bucket = config.as_ref().map(|config| config.bucket.clone());
+        let region = config.as_ref().map(|config| config.region.clone());
+        let signed_url_ttl_secs = config.as_ref().map(|config| config.signed_url_ttl_secs);
+        Self {
+            kind,
+            endpoint_url,
+            bucket,
+            region,
+            credential_reference,
+            signed_url_ttl_secs,
+            local_root,
+            config,
+        }
     }
 }
 
@@ -139,21 +167,24 @@ impl SharedBackendClients {
                 shared: true,
             }),
         };
-        let object_store_credentials = config
-            .storage
-            .object_store_secret
-            .as_ref()
-            .map(|secret| resolver.resolve(secret))
-            .transpose()?;
         let object_store = config
             .storage
             .object_store
-            .map(|kind| ObjectStoreClientTarget {
-                kind,
-                endpoint_url: object_store_credentials.clone(),
-                credential_reference: object_store_credentials.clone(),
-                local_root: config.storage.local_root.clone(),
-            });
+            .map(|kind| {
+                let credential_reference = config
+                    .storage
+                    .object_store_secret
+                    .as_ref()
+                    .map(SecretRef::redacted);
+                let client_config = resolve_object_store_client_config(config, resolver)?;
+                Ok(ObjectStoreClientTarget::new(
+                    kind,
+                    client_config,
+                    credential_reference,
+                    config.storage.local_root.clone(),
+                ))
+            })
+            .transpose()?;
 
         Ok(Self {
             database,
@@ -177,6 +208,27 @@ impl fmt::Display for SharedBackendClients {
             self.object_store.as_ref().map(|store| store.kind)
         )
     }
+}
+
+fn resolve_object_store_client_config<R: SecretResolver>(
+    config: &PlatformConfig,
+    resolver: &R,
+) -> Result<Option<ObjectStoreClientConfig>, SecretResolutionError> {
+    config
+        .storage
+        .object_store_secret
+        .as_ref()
+        .map(|secret| {
+            resolver.resolve(secret).and_then(|value| {
+                ObjectStoreClientConfig::from_secret_value(&value).map_err(|error| {
+                    SecretResolutionError::InvalidObjectStoreConfig {
+                        reference: secret.redacted(),
+                        message: error.to_string(),
+                    }
+                })
+            })
+        })
+        .transpose()
 }
 
 fn distributed_cache_backend(cache: DistributedCache) -> DistributedCacheBackend {

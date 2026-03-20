@@ -20,7 +20,6 @@ use davenda_wasm::{
     ExtensionPoint, HandlerId, HandlerInstallation, HandlerManifest, HostCapabilityGrant,
     HostGrantSet, RenderHookExtensionPoint, ResourceLimits,
 };
-use tempfile::TempDir;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -29,6 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tempfile::TempDir;
 
 struct EnvVarGuard {
     key: &'static str,
@@ -43,6 +43,27 @@ impl Drop for EnvVarGuard {
                 None => std::env::remove_var(self.key),
             }
         }
+    }
+}
+
+fn set_object_store_secret(endpoint: &str) -> EnvVarGuard {
+    let previous = std::env::var_os("OBJECT_STORE_URL");
+    unsafe {
+        std::env::set_var(
+            "OBJECT_STORE_URL",
+            format!(
+                "endpoint_url = \"{endpoint}\"\n\
+bucket = \"runtime\"\n\
+region = \"us-east-1\"\n\
+access_key_id = \"runtime-access\"\n\
+secret_access_key = \"runtime-secret\"\n"
+            ),
+        );
+    }
+
+    EnvVarGuard {
+        key: "OBJECT_STORE_URL",
+        previous,
     }
 }
 
@@ -61,19 +82,21 @@ impl ObjectStoreTestServer {
         let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
         let stop_thread = Arc::clone(&stop);
         let store_thread = Arc::clone(&store);
-        let handle = thread::spawn(move || loop {
-            if stop_thread.load(Ordering::SeqCst) {
-                break;
-            }
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    let store = Arc::clone(&store_thread);
-                    handle_request(stream, &store);
+        let handle = thread::spawn(move || {
+            loop {
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(10));
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let store = Arc::clone(&store_thread);
+                        handle_request(stream, &store);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("object-store test server failed: {error}"),
                 }
-                Err(error) => panic!("object-store test server failed: {error}"),
             }
         });
 
@@ -99,12 +122,17 @@ impl Drop for ObjectStoreTestServer {
 }
 
 fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
+    stream.set_nonblocking(false).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut request_line = String::new();
     reader.read_line(&mut request_line).unwrap();
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("");
-    let path = parts.next().unwrap_or("/").trim_start_matches('/').to_string();
+    let path = parts
+        .next()
+        .unwrap_or("/")
+        .trim_start_matches('/')
+        .to_string();
 
     let mut content_length = 0usize;
     loop {
@@ -138,8 +166,13 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
         _ => ("405 Method Not Allowed", b"method not allowed".to_vec()),
     };
 
+    let etag_header = if method == "PUT" {
+        "ETag: \"test-etag\"\r\n"
+    } else {
+        ""
+    };
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{etag_header}Connection: close\r\n\r\n",
         response_body.len()
     );
     stream.write_all(response.as_bytes()).unwrap();
@@ -505,6 +538,7 @@ provider = "cloudflare-dns"
 [storage]
 default_class = "public_upload"
 object_store = "s3"
+object_store_secret = {{ kind = "env", var = "OBJECT_STORE_URL" }}
 local_root = "/tmp/davenda-app-tests"
 
 [cache]
@@ -696,14 +730,7 @@ fn composition_rejects_unknown_modules_and_missing_dependencies() {
 #[test]
 fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
     let server = ObjectStoreTestServer::spawn();
-    let previous = std::env::var_os("OBJECT_STORE_URL");
-    unsafe {
-        std::env::set_var("OBJECT_STORE_URL", server.endpoint());
-    }
-    let _guard = EnvVarGuard {
-        key: "OBJECT_STORE_URL",
-        previous,
-    };
+    let _guard = set_object_store_secret(server.endpoint());
     let workspace = theme_workspace();
     let runtime = app()
         .build_runtime_plan_with_extensions_at(
@@ -750,10 +777,7 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
         .theme_publication
         .as_ref()
         .expect("theme assets should be published when manifest publishing is enabled");
-    assert_eq!(
-        theme_publication.manifest().entries().count(),
-        2
-    );
+    assert_eq!(theme_publication.manifest().entries().count(), 2);
     assert_eq!(theme_publication.writes().len(), 2);
     assert!(!runtime.release_doctor.is_compatible());
     assert!(
@@ -918,6 +942,8 @@ fn release_doctor_reports_config_drift_and_unpinned_modules() {
 
 #[test]
 fn customer_app_reports_render_into_cli_surfaces() {
+    let server = ObjectStoreTestServer::spawn();
+    let _guard = set_object_store_secret(server.endpoint());
     let workspace = theme_workspace();
     let runtime = app()
         .build_runtime_plan_with_extensions_at(

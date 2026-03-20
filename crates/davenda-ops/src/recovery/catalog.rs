@@ -70,7 +70,9 @@ impl RecoveryCatalog {
     }
 
     pub fn definition(&self, id: &RecoveryWorkflowId) -> Option<&RecoveryWorkflowDefinition> {
-        self.definitions.iter().find(|definition| &definition.id == id)
+        self.definitions
+            .iter()
+            .find(|definition| &definition.id == id)
     }
 
     pub fn validate(&self) -> Result<(), OpsModelError> {

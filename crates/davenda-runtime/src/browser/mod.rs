@@ -2,17 +2,17 @@ use super::*;
 use davenda_core::BrowserSecurityError;
 
 mod flash;
-mod live;
 mod host;
+mod live;
 mod session;
 mod shared;
 mod support;
 #[cfg(test)]
 mod testing;
-#[cfg(test)]
-pub(crate) use testing::test_only_sqlite_shared_runtime;
 #[cfg(not(test))]
 pub(crate) use live::live_shared_runtime;
+#[cfg(test)]
+pub(crate) use testing::test_only_sqlite_shared_runtime;
 
 pub use flash::{FlashLevel, FlashMessage};
 pub use host::{BrowserHost, BrowserHostBuildError, ResolvedBrowserRequest, RuntimeBrowserError};

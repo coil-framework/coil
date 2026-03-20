@@ -50,7 +50,9 @@ pub use identifiers::{
 };
 pub use planner::OpsPlanner;
 pub(crate) use planner::default_retry_policy;
-pub use recovery::{RecoveryCatalog, RecoveryPlan, RecoveryPlanRequest, RecoveryStage, RecoveryWorkflowDefinition};
+pub use recovery::{
+    RecoveryCatalog, RecoveryPlan, RecoveryPlanRequest, RecoveryStage, RecoveryWorkflowDefinition,
+};
 pub use reports::{
     ReportCatalog, ReportDefinition, ReportDeliveryMode, ReportExportPlan, ReportExportRequest,
     ReportFormat, ReportParameter, ReportSensitivity,

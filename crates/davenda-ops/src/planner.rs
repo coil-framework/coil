@@ -206,8 +206,7 @@ impl OpsPlanner {
         if definition.requires_idempotency_key && request.idempotency_key.is_none() {
             return Err(OpsModelError::InvalidRecoveryWorkflow {
                 workflow_id: definition.id.to_string(),
-                reason: "idempotency key is required for retry-safe recovery execution"
-                    .to_string(),
+                reason: "idempotency key is required for retry-safe recovery execution".to_string(),
             });
         }
 

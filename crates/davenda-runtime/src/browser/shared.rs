@@ -12,13 +12,13 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::path::PathBuf;
-#[cfg(test)]
-use std::time::Duration;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
 #[cfg(test)]
 use std::sync::OnceLock;
+#[cfg(test)]
+use std::time::Duration;
 
 #[cfg(test)]
 const SHARED_STATE_DIR_ENV: &str = "DAVENDA_SHARED_STATE_DIR";

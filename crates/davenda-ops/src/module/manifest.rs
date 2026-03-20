@@ -151,8 +151,12 @@ fn route_surfaces() -> Vec<RouteSurface> {
             .gated_by(Capability::AdminShellAccess),
         RouteSurface::new("ops.reports", RouteSurfaceKind::AdminPage, "/admin/reports")
             .gated_by(Capability::AdminAuditRead),
-        RouteSurface::new("ops.recovery", RouteSurfaceKind::AdminPage, "/admin/recovery")
-            .gated_by(Capability::SystemModuleManage),
+        RouteSurface::new(
+            "ops.recovery",
+            RouteSurfaceKind::AdminPage,
+            "/admin/recovery",
+        )
+        .gated_by(Capability::SystemModuleManage),
         RouteSurface::new("ops.bulk", RouteSurfaceKind::AdminAction, "/admin/bulk")
             .gated_by(Capability::SystemModuleManage),
     ]

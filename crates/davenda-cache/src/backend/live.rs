@@ -22,7 +22,10 @@ pub fn live_shared_runtime(
     namespace: impl Into<String>,
     _root: impl Into<PathBuf>,
 ) -> Arc<dyn DistributedCacheRuntime> {
-    Arc::new(ProductionRedisSharedCacheRuntime::new(kind, namespace.into()))
+    Arc::new(ProductionRedisSharedCacheRuntime::new(
+        kind,
+        namespace.into(),
+    ))
 }
 
 #[cfg(not(test))]
@@ -74,7 +77,8 @@ impl DistributedCacheRuntime for ProductionRedisSharedCacheRuntime {
     }
 
     fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
-        self.store.with_state_mut(|state| state.complete_fill(lease))
+        self.store
+            .with_state_mut(|state| state.complete_fill(lease))
     }
 
     fn metrics(&self) -> CacheMetrics {
@@ -113,7 +117,10 @@ impl ProductionRedisSharedCacheStore {
         }
     }
 
-    fn read_state<T>(&self, op: impl FnOnce(&CacheBackendState) -> T) -> Result<T, CacheModelError> {
+    fn read_state<T>(
+        &self,
+        op: impl FnOnce(&CacheBackendState) -> T,
+    ) -> Result<T, CacheModelError> {
         let mut connection = self
             .connection
             .lock()
@@ -149,11 +156,14 @@ impl ProductionRedisSharedCacheStore {
         };
         let outcome = op(&mut state);
         if outcome.is_ok() {
-            let serialized = bincode::serialize(&state)
-                .unwrap_or_else(|error| panic!("failed to serialize redis cache backend state: {error}"));
+            let serialized = bincode::serialize(&state).unwrap_or_else(|error| {
+                panic!("failed to serialize redis cache backend state: {error}")
+            });
             connection
                 .set::<_, _, ()>(&self.key, serialized)
-                .unwrap_or_else(|error| panic!("failed to persist redis cache backend state: {error}"));
+                .unwrap_or_else(|error| {
+                    panic!("failed to persist redis cache backend state: {error}")
+                });
         }
         outcome
     }
@@ -180,7 +190,11 @@ pub fn live_shared_runtime(
     namespace: impl Into<String>,
     root: impl Into<PathBuf>,
 ) -> Arc<dyn DistributedCacheRuntime> {
-    Arc::new(LiveSharedCacheRuntime::new(kind, namespace.into(), root.into()))
+    Arc::new(LiveSharedCacheRuntime::new(
+        kind,
+        namespace.into(),
+        root.into(),
+    ))
 }
 
 #[derive(Debug)]
@@ -233,7 +247,8 @@ impl DistributedCacheRuntime for LiveSharedCacheRuntime {
     }
 
     fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
-        self.store.with_state_mut(|state| state.complete_fill(lease))
+        self.store
+            .with_state_mut(|state| state.complete_fill(lease))
     }
 
     fn metrics(&self) -> CacheMetrics {
@@ -301,7 +316,10 @@ impl LiveSharedCacheStore {
         }
     }
 
-    fn read_state<T>(&self, op: impl FnOnce(&CacheBackendState) -> T) -> Result<T, CacheModelError> {
+    fn read_state<T>(
+        &self,
+        op: impl FnOnce(&CacheBackendState) -> T,
+    ) -> Result<T, CacheModelError> {
         let connection = self
             .connection
             .lock()

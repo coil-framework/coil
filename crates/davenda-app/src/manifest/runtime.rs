@@ -259,12 +259,20 @@ impl CustomerAppManifest {
 
         let release_id = davenda_assets::ReleaseId::new(format!(
             "{}-{}-theme-assets",
-            self.id,
-            self.theme.active
+            self.id, self.theme.active
         ))?;
         let publication = self.theme.publication_plan(release_id, app_root)?;
+        let resolver = davenda_runtime::EnvironmentSecretResolver;
+        let object_store = runtime
+            .object_store_client_config(&resolver)
+            .map_err(|error| AppModelError::RuntimeBuild {
+                message: format!(
+                    "failed to resolve build-time storage backends for `{}`: {error}",
+                    self.id
+                ),
+            })?;
         let receipt = runtime
-            .storage_host()
+            .storage_host_with_object_store(object_store)
             .publish_theme_assets(&publication)
             .map_err(|error| AppModelError::RuntimeBuild {
                 message: format!("failed to publish theme assets for `{}`: {error}", self.id),

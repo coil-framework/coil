@@ -31,10 +31,7 @@ impl RecoveryPlanRequest {
         Ok(Self {
             execution_id,
             definition_id,
-            customer_app_id: require_non_empty(
-                "recovery_customer_app_id",
-                customer_app_id.into(),
-            )?,
+            customer_app_id: require_non_empty("recovery_customer_app_id", customer_app_id.into())?,
             requested_by: require_non_empty("recovery_requested_by", requested_by.into())?,
             requested_at,
             scheduled_for: None,

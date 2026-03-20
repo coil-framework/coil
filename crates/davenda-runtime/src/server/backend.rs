@@ -11,6 +11,8 @@ use std::fmt;
 pub enum SecretResolutionError {
     #[error("secret `{reference}` was not provided to the runtime")]
     MissingSecret { reference: String },
+    #[error("secret `{reference}` uses a source that is not available in this runtime context")]
+    UnsupportedSecretSource { reference: String },
     #[error("object-store secret `{reference}` is invalid: {message}")]
     InvalidObjectStoreConfig { reference: String, message: String },
 }
@@ -46,6 +48,24 @@ impl SecretResolver for StaticSecretResolver {
                 reference: secret.redacted(),
             }
         })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EnvironmentSecretResolver;
+
+impl SecretResolver for EnvironmentSecretResolver {
+    fn resolve(&self, secret: &SecretRef) -> Result<String, SecretResolutionError> {
+        match secret {
+            SecretRef::Env { var } => std::env::var(var).map_err(|_| {
+                SecretResolutionError::MissingSecret {
+                    reference: secret.redacted(),
+                }
+            }),
+            SecretRef::SecretManager { .. } => Err(SecretResolutionError::UnsupportedSecretSource {
+                reference: secret.redacted(),
+            }),
+        }
     }
 }
 
@@ -128,6 +148,13 @@ pub struct SharedBackendClients {
 }
 
 impl SharedBackendClients {
+    pub fn object_store_client_config<R: SecretResolver>(
+        config: &PlatformConfig,
+        resolver: &R,
+    ) -> Result<Option<ObjectStoreClientConfig>, SecretResolutionError> {
+        resolve_object_store_client_config(config, resolver)
+    }
+
     pub fn from_config<R: SecretResolver>(
         config: &PlatformConfig,
         resolver: &R,
@@ -176,7 +203,7 @@ impl SharedBackendClients {
                     .object_store_secret
                     .as_ref()
                     .map(SecretRef::redacted);
-                let client_config = resolve_object_store_client_config(config, resolver)?;
+                let client_config = Self::object_store_client_config(config, resolver)?;
                 Ok(ObjectStoreClientTarget::new(
                     kind,
                     client_config,

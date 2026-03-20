@@ -226,12 +226,18 @@ fn recovery_workflows_require_capability_idempotency_and_local_only_acknowledgem
         )
         .expect("recovery plan");
 
-    assert_eq!(plan.definition.id.as_str(), "recovery.customer-app.full-restore");
+    assert_eq!(
+        plan.definition.id.as_str(),
+        "recovery.customer-app.full-restore"
+    );
     assert_eq!(plan.customer_app_id, "showcase-events");
     assert!(plan.requires_host_local_restore);
     assert!(plan.planned_job.idempotency_key.is_some());
     assert!(plan.stages.contains(&RecoveryStage::RestoreDatabase));
-    assert!(plan.stages.contains(&RecoveryStage::RestoreLocalOnlySensitive));
+    assert!(
+        plan.stages
+            .contains(&RecoveryStage::RestoreLocalOnlySensitive)
+    );
 }
 
 #[test]

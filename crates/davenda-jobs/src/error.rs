@@ -128,10 +128,7 @@ impl fmt::Display for JobsModelError {
             Self::MissingEventHandler { handler_id } => {
                 write!(f, "event handler `{handler_id}` is not registered")
             }
-            Self::LiveSharedBackendRequiresExplicitRuntime {
-                backend,
-                namespace,
-            } => write!(
+            Self::LiveSharedBackendRequiresExplicitRuntime { backend, namespace } => write!(
                 f,
                 "live shared jobs backend `{backend:?}` for `{namespace}` requires an explicit distributed runtime"
             ),

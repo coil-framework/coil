@@ -22,9 +22,9 @@ use auth::DeferredPostgresRouteCapabilityAuthorizer;
 pub(crate) use auth::LiveRouteCapabilityAuthorizer;
 use auth::auth_explain_router;
 pub use backend::{
-    DatabaseClientTarget, DistributedCacheClientTarget, JobsClientTarget, ObjectStoreClientTarget,
-    SecretResolutionError, SecretResolver, SessionStoreClientTarget, SharedBackendClients,
-    StaticSecretResolver,
+    DatabaseClientTarget, DistributedCacheClientTarget, EnvironmentSecretResolver,
+    JobsClientTarget, ObjectStoreClientTarget, SecretResolutionError, SecretResolver,
+    SessionStoreClientTarget, SharedBackendClients, StaticSecretResolver,
 };
 use diagnostics::privileged_router as diagnostics_router;
 use observability::public_router as observability_router;
@@ -100,12 +100,11 @@ impl HttpServerHost {
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
     ) -> Result<Self, RuntimeServerError> {
-        let materializer =
-            RuntimeBackendMaterializer::new(
-                plan.shared_backend_namespace(),
-                backends.clone(),
-                plan.shared_state_root().clone(),
-            );
+        let materializer = RuntimeBackendMaterializer::new(
+            plan.shared_backend_namespace(),
+            backends.clone(),
+            plan.shared_state_root().clone(),
+        );
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
@@ -129,11 +128,7 @@ impl HttpServerHost {
             plan.extension_registry.clone(),
             plan.config.i18n.default_locale.clone(),
             plan.registered_runtime_jobs.clone(),
-            RuntimeWasmHostServices::with_runtime_secrets(
-                plan.clone(),
-                storage_host,
-                wasm_secrets,
-            ),
+            RuntimeWasmHostServices::with_runtime_secrets(plan.clone(), storage_host, wasm_secrets),
         );
         Ok(Self::new_with_browser_and_authorizer(
             plan,

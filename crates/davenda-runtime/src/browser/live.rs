@@ -1,14 +1,14 @@
+use super::RuntimeBrowserError;
 use super::host::BrowserHostBuildError;
 use super::session::{
     BrowserInstant, BrowserSessionRecord, DistributedSessionStoreRuntime, SessionStoreBackendKind,
 };
-use super::RuntimeBrowserError;
+use sqlx::{Postgres, Row as PgRow};
 use std::env;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use sqlx::{Postgres, Row as PgRow};
 
 pub(crate) fn live_shared_runtime(
     kind: SessionStoreBackendKind,
@@ -17,13 +17,10 @@ pub(crate) fn live_shared_runtime(
 ) -> Result<Arc<dyn DistributedSessionStoreRuntime>, BrowserHostBuildError> {
     let namespace = namespace.into();
     if kind == SessionStoreBackendKind::Local {
-        return Err(BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime {
-            kind,
-        });
+        return Err(BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime { kind });
     }
     Ok(Arc::new(ProductionPostgresSharedSessionStoreRuntime::new(
-        kind,
-        namespace,
+        kind, namespace,
     )?))
 }
 
@@ -33,7 +30,10 @@ struct ProductionPostgresSharedSessionStoreRuntime {
 }
 
 impl ProductionPostgresSharedSessionStoreRuntime {
-    fn new(kind: SessionStoreBackendKind, namespace: String) -> Result<Self, BrowserHostBuildError> {
+    fn new(
+        kind: SessionStoreBackendKind,
+        namespace: String,
+    ) -> Result<Self, BrowserHostBuildError> {
         Ok(Self {
             store: ProductionPostgresSharedSessionStore::open(kind, namespace)?,
         })
@@ -63,7 +63,8 @@ impl DistributedSessionStoreRuntime for ProductionPostgresSharedSessionStoreRunt
     }
 
     fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
-        self.store.with_state_mut(|state| state.revoke(session_id, now))
+        self.store
+            .with_state_mut(|state| state.revoke(session_id, now))
     }
 
     fn touch_active_session(
@@ -103,11 +104,13 @@ impl ProductionPostgresSharedSessionStore {
             .min_connections(1)
             .max_connections(4)
             .connect_lazy(&url)
-            .map_err(|reason| BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
-                kind,
-                scope: namespace.clone(),
-                path: url.clone(),
-                reason: reason.to_string(),
+            .map_err(|reason| {
+                BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
+                    kind,
+                    scope: namespace.clone(),
+                    path: url.clone(),
+                    reason: reason.to_string(),
+                }
             })?;
         let runtime = Runtime::new().map_err(|reason| {
             BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {

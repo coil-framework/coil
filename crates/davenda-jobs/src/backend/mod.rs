@@ -7,8 +7,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-mod shared;
 mod live;
+mod shared;
 mod state;
 mod testing;
 
@@ -210,7 +210,10 @@ impl JobsBackendAdapter {
     #[deprecated(
         note = "compatibility shim; behaves like local_for_testing(runtime). use with_shared_runtime(backend, topology, runtime) or local_for_testing(runtime)"
     )]
-    pub fn shared_scoped(runtime: &JobsRuntime, _scope: impl Into<String>) -> Result<Self, JobsModelError> {
+    pub fn shared_scoped(
+        runtime: &JobsRuntime,
+        _scope: impl Into<String>,
+    ) -> Result<Self, JobsModelError> {
         Self::local_for_testing(runtime)
     }
 

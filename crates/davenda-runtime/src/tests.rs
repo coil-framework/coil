@@ -1893,7 +1893,14 @@ fn runtime_plan_materializes_shared_backend_clients_from_config_secrets() {
             davenda_config::SecretRef::Env {
                 var: "OBJECT_STORE_URL".to_string(),
             },
-            "https://s3.internal/runtime",
+            r#"
+endpoint_url = "https://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#,
         )
         .unwrap();
 
@@ -1919,7 +1926,28 @@ fn runtime_plan_materializes_shared_backend_clients_from_config_secrets() {
             .object_store
             .as_ref()
             .and_then(|store| store.credential_reference.as_deref()),
-        Some("https://s3.internal/runtime")
+        Some("env:OBJECT_STORE_URL")
+    );
+    assert_eq!(
+        backends
+            .object_store
+            .as_ref()
+            .and_then(|store| store.endpoint_url.as_deref()),
+        Some("https://s3.internal")
+    );
+    assert_eq!(
+        backends
+            .object_store
+            .as_ref()
+            .and_then(|store| store.bucket.as_deref()),
+        Some("runtime")
+    );
+    assert_eq!(
+        backends
+            .object_store
+            .as_ref()
+            .and_then(|store| store.region.as_deref()),
+        Some("eu-west-2")
     );
 }
 
@@ -2353,12 +2381,11 @@ fn runtime_backend_materializer_shares_session_state_across_instances() {
         clients.clone(),
         PathBuf::from(&plan.config.storage.local_root),
     );
-    let right_materializer =
-        crate::backends::RuntimeBackendMaterializer::new(
-            plan.shared_backend_namespace(),
-            clients,
-            PathBuf::from(&plan.config.storage.local_root),
-        );
+    let right_materializer = crate::backends::RuntimeBackendMaterializer::new(
+        plan.shared_backend_namespace(),
+        clients,
+        PathBuf::from(&plan.config.storage.local_root),
+    );
 
     let mut left = left_materializer
         .browser_host(plan.config.app.name.clone(), plan.browser.clone())
@@ -2623,10 +2650,7 @@ fn jobs_host_shares_live_runtime_state_across_plan_clones() {
     let jobs = cloned_plan.jobs_host("scheduler-b").unwrap();
     assert_eq!(jobs.coordinator().ready_jobs().len(), 1);
     assert_eq!(
-        jobs.coordinator().ready_jobs()[0]
-            .spec
-            .job_name
-            .as_str(),
+        jobs.coordinator().ready_jobs()[0].spec.job_name.as_str(),
         "report.export.report.memberships.summary"
     );
 }
@@ -2756,11 +2780,17 @@ fn tls_host_tracks_imported_certificates_under_provider_configuration() {
         .unwrap();
     host.queue_renewal(&certificate_id, TlsInstant::from_unix_seconds(3_900_000))
         .unwrap();
-    host.begin_renewal(&certificate_id, CertificateId::new("cert-issued-next").unwrap())
-        .unwrap();
+    host.begin_renewal(
+        &certificate_id,
+        CertificateId::new("cert-issued-next").unwrap(),
+    )
+    .unwrap();
 
     let status = host.status();
-    assert_eq!(status.provider, Some(CertificateProviderKind::CloudflareDns));
+    assert_eq!(
+        status.provider,
+        Some(CertificateProviderKind::CloudflareDns)
+    );
     assert_eq!(
         status
             .inventory
@@ -2770,10 +2800,7 @@ fn tls_host_tracks_imported_certificates_under_provider_configuration() {
             .as_str(),
         "cert-issued"
     );
-    assert_eq!(
-        status.pending_challenges.len(),
-        1
-    );
+    assert_eq!(status.pending_challenges.len(), 1);
 }
 
 #[test]

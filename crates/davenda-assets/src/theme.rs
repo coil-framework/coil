@@ -231,22 +231,21 @@ fn load_theme_asset_artifact(
     let mut buffer = [0u8; 8192];
 
     loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| AssetModelError::ThemeAssetReadFailed {
-                path: path.display().to_string(),
-                message: error.to_string(),
-            })?;
+        let read =
+            reader
+                .read(&mut buffer)
+                .map_err(|error| AssetModelError::ThemeAssetReadFailed {
+                    path: path.display().to_string(),
+                    message: error.to_string(),
+                })?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
     }
 
-    let logical_path = crate::normalize_manifest_path(
-        "logical_path",
-        format!("{source_root}/{relative_path}"),
-    )?;
+    let logical_path =
+        crate::normalize_manifest_path("logical_path", format!("{source_root}/{relative_path}"))?;
     let fingerprint = ContentFingerprint::new(
         FingerprintAlgorithm::Sha256,
         format!("{:x}", hasher.finalize()),

@@ -2,13 +2,13 @@ use super::*;
 use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 use davenda_config::{ObjectStoreKind, SingleNodeStorageMode, StorageClass, StorageDeployment};
 use davenda_storage::{
-    execution::ObjectStoreClientConfig, DeliveryMode, DurableStore, ObjectStoreTarget,
-    Sensitivity, StorageBackendKind, StorageExecutor, StoragePlanner, StoragePolicyOverride,
-    StoragePolicySet, StorageTopology, SyncMode,
+    DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind,
+    StorageExecutor, StoragePlanner, StoragePolicyOverride, StoragePolicySet, StorageTopology,
+    SyncMode, execution::ObjectStoreClientConfig,
 };
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -30,19 +30,21 @@ impl ObjectStoreTestServer {
         let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
         let stop_thread = Arc::clone(&stop);
         let store_thread = Arc::clone(&store);
-        let handle = thread::spawn(move || loop {
-            if stop_thread.load(Ordering::SeqCst) {
-                break;
-            }
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    let store = Arc::clone(&store_thread);
-                    handle_request(stream, &store);
+        let handle = thread::spawn(move || {
+            loop {
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(10));
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let store = Arc::clone(&store_thread);
+                        handle_request(stream, &store);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("object-store test server failed: {error}"),
                 }
-                Err(error) => panic!("object-store test server failed: {error}"),
             }
         });
 
@@ -56,6 +58,15 @@ impl ObjectStoreTestServer {
     fn endpoint(&self) -> &str {
         &self.endpoint
     }
+}
+
+fn object_store_config(endpoint: &str) -> ObjectStoreClientConfig {
+    ObjectStoreClientConfig::new("runtime", "us-east-1")
+        .unwrap()
+        .with_endpoint_url(endpoint)
+        .unwrap()
+        .with_static_credentials("runtime-access", "runtime-secret")
+        .unwrap()
 }
 
 impl Drop for ObjectStoreTestServer {
@@ -74,7 +85,11 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
     reader.read_line(&mut request_line).unwrap();
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("");
-    let path = parts.next().unwrap_or("/").trim_start_matches('/').to_string();
+    let path = parts
+        .next()
+        .unwrap_or("/")
+        .trim_start_matches('/')
+        .to_string();
 
     let mut content_length = 0usize;
     loop {
@@ -108,8 +123,13 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
         _ => ("405 Method Not Allowed", b"method not allowed".to_vec()),
     };
 
+    let etag_header = if method == "PUT" {
+        "ETag: \"test-etag\"\r\n"
+    } else {
+        ""
+    };
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{etag_header}Connection: close\r\n\r\n",
         response_body.len()
     );
     stream.write_all(response.as_bytes()).unwrap();
@@ -263,7 +283,7 @@ fn theme_asset_publication_plan_publishes_and_syncs_source_roots() {
     );
     let executor = StorageExecutor::from_topology_and_object_store(
         planner.topology(),
-        Some(ObjectStoreClientConfig::new(server.endpoint())),
+        Some(object_store_config(server.endpoint())),
     );
     let receipt = plan
         .publish_and_sync(&planner, "https://cdn.example.com/assets", &executor)
@@ -322,7 +342,7 @@ fn theme_asset_publication_plan_reads_assets_from_disk_at_sync_time() {
     );
     let executor = StorageExecutor::from_topology_and_object_store(
         planner.topology(),
-        Some(ObjectStoreClientConfig::new(server.endpoint())),
+        Some(object_store_config(server.endpoint())),
     );
     let manifest = plan
         .publish(&planner, "https://cdn.example.com/assets")

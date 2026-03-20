@@ -8,18 +8,18 @@ use crate::error::JobsModelError;
 use crate::identifiers::{JobId, JobQueueName};
 use crate::model::{DeadLetterReason, JobInstant};
 use crate::runtime::JobSpec;
+#[cfg(test)]
+use rusqlite::{Connection, OptionalExtension, params};
+#[cfg(not(test))]
+use sqlx::{Postgres, Row};
 #[cfg(not(test))]
 use std::env;
 #[cfg(not(test))]
 use std::future::Future;
-#[cfg(not(test))]
-use sqlx::{Postgres, Row};
-#[cfg(not(test))]
-use tokio::runtime::Runtime;
-#[cfg(test)]
-use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(test)]
 use std::sync::Mutex;
+#[cfg(not(test))]
+use tokio::runtime::Runtime;
 
 #[cfg(not(test))]
 pub fn live_shared_runtime(
@@ -147,7 +147,9 @@ impl ProductionPostgresSharedJobsStore {
             .min_connections(1)
             .max_connections(4)
             .connect_lazy(&url)
-            .unwrap_or_else(|error| panic!("failed to open postgres jobs backend `{url}`: {error}"));
+            .unwrap_or_else(|error| {
+                panic!("failed to open postgres jobs backend `{url}`: {error}")
+            });
         let executor = Runtime::new()
             .unwrap_or_else(|error| panic!("failed to create postgres jobs runtime: {error}"));
         Self {
@@ -173,10 +175,12 @@ impl ProductionPostgresSharedJobsStore {
         )
         .execute(&self.pool)
         .await
-        .map_err(|error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-            backend: self.backend,
-            namespace: error.to_string(),
-        })?;
+        .map_err(
+            |error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+                backend: self.backend,
+                namespace: error.to_string(),
+            },
+        )?;
         Ok(())
     }
 
@@ -190,10 +194,12 @@ impl ProductionPostgresSharedJobsStore {
                 .bind(&self.namespace)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(|error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                    backend: self.backend,
-                    namespace: error.to_string(),
-                })?
+                .map_err(
+                    |error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+                        backend: self.backend,
+                        namespace: error.to_string(),
+                    },
+                )?
                 .map(|row| row.get::<String, _>("payload"));
 
             let snapshot = match payload {
@@ -293,10 +299,12 @@ impl ProductionPostgresSharedJobsStore {
 #[cfg(not(test))]
 fn jobs_backend_url(backend: davenda_config::JobBackend) -> String {
     match backend {
-        davenda_config::JobBackend::Redis => env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/davenda".to_string()),
-        davenda_config::JobBackend::Valkey => env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/davenda".to_string()),
+        davenda_config::JobBackend::Redis => {
+            env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/davenda".to_string())
+        }
+        davenda_config::JobBackend::Valkey => {
+            env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/davenda".to_string())
+        }
     }
 }
 

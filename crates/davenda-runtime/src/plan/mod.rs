@@ -1,18 +1,18 @@
 use super::*;
-use url::Url;
+use davenda_storage::execution::ObjectStoreClientConfig;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
-use davenda_storage::execution::ObjectStoreClientConfig;
+use url::Url;
 
 mod execution;
 mod shared_state;
 #[cfg(test)]
 mod testing;
 
+pub(crate) use shared_state::shared_state_root;
 #[cfg(test)]
 pub(crate) use testing::{shared_cache_runtime_for_test, shared_jobs_runtime_for_test};
-pub(crate) use shared_state::shared_state_root;
 
 #[derive(Clone)]
 pub(crate) struct SharedJobsRuntimeHandle {
@@ -137,9 +137,7 @@ impl RuntimePlan {
         let scheduler_node_id =
             validate_runtime_identifier("scheduler_node_id", scheduler_node_id.into())?;
         let namespace = self.shared_backend_namespace();
-        let shared_runtime = self
-            .shared_jobs_runtime
-            .get_or_init(&self.jobs);
+        let shared_runtime = self.shared_jobs_runtime.get_or_init(&self.jobs);
         Ok(JobsHost::new(
             self.config.app.name.clone(),
             scheduler_node_id,
@@ -304,6 +302,16 @@ impl RuntimePlan {
         resolver: &R,
     ) -> Result<SharedBackendClients, RuntimeServerError> {
         Ok(SharedBackendClients::from_config(&self.config, resolver)?)
+    }
+
+    pub fn object_store_client_config<R: SecretResolver>(
+        &self,
+        resolver: &R,
+    ) -> Result<Option<ObjectStoreClientConfig>, RuntimeServerError> {
+        Ok(SharedBackendClients::object_store_client_config(
+            &self.config,
+            resolver,
+        )?)
     }
 
     pub fn server_host<R: SecretResolver>(

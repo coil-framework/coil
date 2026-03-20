@@ -272,11 +272,8 @@ fn runtime_host_service_executor_uses_runtime_scoped_secret_bindings() {
     let mut secrets = BTreeMap::new();
     secrets.insert("api-token".to_string(), "super-secret".to_string());
 
-    let services = RuntimeWasmHostServices::with_runtime_secrets(
-        plan.clone(),
-        plan.storage_host(),
-        secrets,
-    );
+    let services =
+        RuntimeWasmHostServices::with_runtime_secrets(plan.clone(), plan.storage_host(), secrets);
     let executor = RuntimeHostServiceExecutor::with_services(plan.clone(), services.clone());
     let session_plan = InvocationPlan {
         extension_id: ExtensionId::new("extensions.live").unwrap(),

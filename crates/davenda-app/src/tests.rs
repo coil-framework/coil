@@ -20,6 +20,7 @@ use davenda_wasm::{
     ExtensionPoint, HandlerId, HandlerInstallation, HandlerManifest, HostCapabilityGrant,
     HostGrantSet, RenderHookExtensionPoint, ResourceLimits,
 };
+use tempfile::TempDir;
 
 fn locale(value: &str) -> LocaleTag {
     LocaleTag::new(value).expect("locale is valid")
@@ -36,6 +37,15 @@ fn theme() -> ThemeProfile {
     .unwrap()
     .with_asset_root("theme/assets")
     .unwrap()
+}
+
+fn theme_workspace() -> TempDir {
+    let workspace = tempfile::tempdir().unwrap();
+    let theme_root = workspace.path().join("theme/assets");
+    fs::create_dir_all(&theme_root).unwrap();
+    fs::write(theme_root.join("site.css"), b"body { color: #111; }").unwrap();
+    fs::write(theme_root.join("logo.svg"), b"<svg viewBox=\"0 0 1 1\" />").unwrap();
+    workspace
 }
 
 fn auth() -> AuthStrategy {
@@ -369,7 +379,7 @@ provider = "cloudflare-dns"
 [storage]
 default_class = "public_upload"
 object_store = "s3"
-local_root = "/var/lib/platform"
+local_root = "/tmp/davenda-app-tests"
 
 [cache]
 l1 = "moka"
@@ -559,8 +569,9 @@ fn composition_rejects_unknown_modules_and_missing_dependencies() {
 
 #[test]
 fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
+    let workspace = theme_workspace();
     let runtime = app()
-        .build_runtime_plan_with_extensions(
+        .build_runtime_plan_with_extensions_at(
             runtime_config("harbor-shop"),
             DefaultAuthModelPackage::default(),
             module_manifests()
@@ -569,6 +580,7 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
                 .map(|module| Box::new(module) as Box<dyn PlatformModule>)
                 .collect(),
             vec![extension_package()],
+            workspace.path(),
         )
         .unwrap();
 
@@ -599,6 +611,15 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
                 MigrationPlanOwner::CustomerApp(ref app_id) if app_id == "harbor-shop"
             ))
     );
+    let theme_publication = runtime
+        .theme_publication
+        .as_ref()
+        .expect("theme assets should be published when manifest publishing is enabled");
+    assert_eq!(
+        theme_publication.manifest().entries().count(),
+        2
+    );
+    assert_eq!(theme_publication.writes().len(), 2);
     assert!(!runtime.release_doctor.is_compatible());
     assert!(
         runtime
@@ -611,8 +632,9 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
 
 #[test]
 fn runtime_build_requires_pinned_extension_packages() {
+    let workspace = theme_workspace();
     let error = app()
-        .build_runtime_plan(
+        .build_runtime_plan_at(
             runtime_config("harbor-shop"),
             DefaultAuthModelPackage::default(),
             module_manifests()
@@ -620,6 +642,7 @@ fn runtime_build_requires_pinned_extension_packages() {
                 .map(StaticModule::new)
                 .map(|module| Box::new(module) as Box<dyn PlatformModule>)
                 .collect(),
+            workspace.path(),
         )
         .unwrap_err();
 
@@ -633,8 +656,9 @@ fn runtime_build_requires_pinned_extension_packages() {
     let mut wrong_checksum = extension_package();
     wrong_checksum.artifact_sha256 =
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
+    let workspace = theme_workspace();
     let error = app()
-        .build_runtime_plan_with_extensions(
+        .build_runtime_plan_with_extensions_at(
             runtime_config("harbor-shop"),
             DefaultAuthModelPackage::default(),
             module_manifests()
@@ -643,6 +667,7 @@ fn runtime_build_requires_pinned_extension_packages() {
                 .map(|module| Box::new(module) as Box<dyn PlatformModule>)
                 .collect(),
             vec![wrong_checksum],
+            workspace.path(),
         )
         .unwrap_err();
 
@@ -662,9 +687,10 @@ fn runtime_build_rejects_config_module_drift_and_unexpected_runtime_modules() {
     let mut drifted = runtime_config("harbor-shop");
     drifted.modules.enabled.push("events".to_string());
 
+    let workspace = theme_workspace();
     assert_eq!(
         app()
-            .build_runtime_plan(
+            .build_runtime_plan_at(
                 drifted,
                 DefaultAuthModelPackage::default(),
                 module_manifests()
@@ -672,6 +698,7 @@ fn runtime_build_rejects_config_module_drift_and_unexpected_runtime_modules() {
                     .map(StaticModule::new)
                     .map(|module| Box::new(module) as Box<dyn PlatformModule>)
                     .collect(),
+                workspace.path(),
             )
             .unwrap_err(),
         AppModelError::ConfigModulesMismatch {
@@ -687,12 +714,14 @@ fn runtime_build_rejects_config_module_drift_and_unexpected_runtime_modules() {
         .collect::<Vec<_>>();
     modules.push(Box::new(StaticModule::new(ModuleManifest::new("media"))));
 
+    let workspace = theme_workspace();
     assert_eq!(
         app()
-            .build_runtime_plan(
+            .build_runtime_plan_at(
                 runtime_config("harbor-shop"),
                 DefaultAuthModelPackage::default(),
                 modules,
+                workspace.path(),
             )
             .unwrap_err(),
         AppModelError::UnexpectedRuntimeModules {
@@ -754,8 +783,9 @@ fn release_doctor_reports_config_drift_and_unpinned_modules() {
 
 #[test]
 fn customer_app_reports_render_into_cli_surfaces() {
+    let workspace = theme_workspace();
     let runtime = app()
-        .build_runtime_plan_with_extensions(
+        .build_runtime_plan_with_extensions_at(
             runtime_config("harbor-shop"),
             DefaultAuthModelPackage::default(),
             module_manifests()
@@ -764,6 +794,7 @@ fn customer_app_reports_render_into_cli_surfaces() {
                 .map(|module| Box::new(module) as Box<dyn PlatformModule>)
                 .collect(),
             vec![extension_package()],
+            workspace.path(),
         )
         .unwrap();
 

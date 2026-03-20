@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 impl CustomerAppManifest {
     pub fn build_runtime_plan<P>(
@@ -13,6 +14,26 @@ impl CustomerAppManifest {
         self.build_runtime_plan_with_extensions(config, auth_package, modules, Vec::new())
     }
 
+    pub fn build_runtime_plan_at<P, A>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+        app_root: A,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage + 'static,
+        A: AsRef<Path>,
+    {
+        self.build_runtime_plan_with_extensions_at(
+            config,
+            auth_package,
+            modules,
+            Vec::new(),
+            app_root,
+        )
+    }
+
     pub fn build_runtime_plan_with_extensions<P>(
         &self,
         config: PlatformConfig,
@@ -22,6 +43,30 @@ impl CustomerAppManifest {
     ) -> Result<CustomerAppRuntimePlan, AppModelError>
     where
         P: AuthModelPackage + 'static,
+    {
+        let app_root = std::env::current_dir().map_err(|error| AppModelError::RuntimeBuild {
+            message: format!("failed to resolve customer app root: {error}"),
+        })?;
+        self.build_runtime_plan_with_extensions_at(
+            config,
+            auth_package,
+            modules,
+            extension_packages,
+            app_root,
+        )
+    }
+
+    pub fn build_runtime_plan_with_extensions_at<P, A>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+        extension_packages: Vec<ExtensionPackage>,
+        app_root: A,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage + 'static,
+        A: AsRef<Path>,
     {
         if config.app.name != self.id.as_str() {
             return Err(AppModelError::ConfigAppMismatch {
@@ -117,7 +162,7 @@ impl CustomerAppManifest {
         )?;
         let installed_extensions = self.resolve_extension_packages(&extension_packages)?;
 
-        let mut builder = RuntimeBuilder::new(config, auth_package);
+        let mut builder = RuntimeBuilder::new(config.clone(), auth_package);
         for module in modules {
             builder = builder.with_boxed_module(module);
         }
@@ -125,9 +170,13 @@ impl CustomerAppManifest {
             builder = builder.with_installed_extension(extension);
         }
 
+        let runtime = builder.build()?;
+        let theme_publication = self.publish_theme_assets(&config, &runtime, app_root)?;
+
         Ok(CustomerAppRuntimePlan {
             composition,
-            runtime: builder.build()?,
+            runtime,
+            theme_publication,
             migration_summary,
             release_doctor,
         })
@@ -193,6 +242,35 @@ impl CustomerAppManifest {
         }
 
         Ok(installed)
+    }
+
+    fn publish_theme_assets<A>(
+        &self,
+        config: &PlatformConfig,
+        runtime: &RuntimePlan,
+        app_root: A,
+    ) -> Result<Option<davenda_assets::ThemeAssetPublicationReceipt>, AppModelError>
+    where
+        A: AsRef<Path>,
+    {
+        if !config.assets.publish_manifest || self.theme.asset_roots().is_empty() {
+            return Ok(None);
+        }
+
+        let release_id = davenda_assets::ReleaseId::new(format!(
+            "{}-{}-theme-assets",
+            self.id,
+            self.theme.active
+        ))?;
+        let publication = self.theme.publication_plan(release_id, app_root)?;
+        let receipt = runtime
+            .storage_host()
+            .publish_theme_assets(&publication)
+            .map_err(|error| AppModelError::RuntimeBuild {
+                message: format!("failed to publish theme assets for `{}`: {error}", self.id),
+            })?;
+
+        Ok(Some(receipt))
     }
 
     fn append_extension_doctor_findings(

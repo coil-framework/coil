@@ -28,6 +28,7 @@ pub struct CustomerAppComposition {
 pub struct CustomerAppRuntimePlan {
     pub composition: CustomerAppComposition,
     pub runtime: RuntimePlan,
+    pub theme_publication: Option<davenda_assets::ThemeAssetPublicationReceipt>,
     pub migration_summary: MigrationPlanSummary,
     pub release_doctor: ReleaseDoctorReport,
 }

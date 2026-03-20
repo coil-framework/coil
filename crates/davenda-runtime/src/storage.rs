@@ -1,5 +1,5 @@
 use super::*;
-use davenda_assets::ManagedAsset;
+use davenda_assets::{ManagedAsset, ThemeAssetPublicationPlan, ThemeAssetPublicationReceipt};
 use davenda_auth::{AuthModelPackage, Capability, DavendaAuth, DefaultSubject};
 use davenda_storage::execution::{
     StorageDeliveryLocation, StorageExecutionError, StorageExecutor, StorageReadReceipt,
@@ -141,6 +141,17 @@ impl StorageHost {
             .as_deref()
             .ok_or(RuntimeStorageError::MissingCdnBaseUrl)?;
         Ok(release.publish(&self.planner, cdn_base_url)?)
+    }
+
+    pub fn publish_theme_assets(
+        &self,
+        publication: &ThemeAssetPublicationPlan,
+    ) -> Result<ThemeAssetPublicationReceipt, RuntimeStorageError> {
+        let cdn_base_url = self
+            .cdn_base_url
+            .as_deref()
+            .ok_or(RuntimeStorageError::MissingCdnBaseUrl)?;
+        Ok(publication.publish_and_sync(&self.planner, cdn_base_url, &self.executor)?)
     }
 
     pub fn plan_managed_revision(

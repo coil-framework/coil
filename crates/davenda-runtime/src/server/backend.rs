@@ -300,6 +300,7 @@ fn validate_runtime_object_store_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use davenda_storage::execution::S3CompatibleObjectStoreClient;
 
     const BACKEND_TEST_CONFIG: &str = r#"
 [app]
@@ -481,5 +482,51 @@ signed_url_ttl_secs = 900
             object_store.and_then(|config| config.endpoint_url),
             Some("http://127.0.0.1:9000".to_string())
         );
+    }
+
+    #[test]
+    fn object_store_backend_materializes_signed_requests_from_structured_config() {
+        let config = backend_test_config(Environment::Production);
+        let resolver = StaticSecretResolver::new()
+            .with_secret(
+                SecretRef::Env {
+                    var: "OBJECT_STORE_URL".to_string(),
+                },
+                r#"
+endpoint_url = "https://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#,
+            )
+            .unwrap();
+
+        let object_store_config =
+            SharedBackendClients::object_store_client_config(&config, &resolver)
+                .unwrap()
+                .unwrap();
+        let signed = S3CompatibleObjectStoreClient::new(object_store_config)
+            .signed_get_url("secure/reports/march.csv")
+            .unwrap();
+
+        assert_eq!(signed.object_key, "secure/reports/march.csv");
+        assert!(
+            signed
+                .signed_url
+                .starts_with("https://s3.internal/runtime/")
+        );
+        assert!(
+            signed
+                .signed_url
+                .contains("X-Amz-Algorithm=AWS4-HMAC-SHA256")
+        );
+        assert!(
+            signed
+                .signed_url
+                .contains("X-Amz-Credential=runtime-access")
+        );
+        assert!(signed.expires_at_unix_seconds > 0);
     }
 }

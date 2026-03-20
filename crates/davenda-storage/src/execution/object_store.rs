@@ -123,20 +123,22 @@ fn build_store(config: &ObjectStoreClientConfig) -> Result<AmazonS3, String> {
             .with_endpoint(endpoint_url.clone())
             .with_allow_http(config.allow_http);
     }
-    match &config.credentials {
-        ObjectStoreCredentials::Environment => {}
-        ObjectStoreCredentials::Static {
-            access_key_id,
-            secret_access_key,
-            session_token,
-        } => {
-            builder = builder
-                .with_access_key_id(access_key_id.clone())
-                .with_secret_access_key(secret_access_key.clone());
-            if let Some(session_token) = session_token {
-                builder = builder.with_token(session_token.clone());
-            }
-        }
+    let ObjectStoreCredentials::Static {
+        access_key_id,
+        secret_access_key,
+        session_token,
+    } = &config.credentials
+    else {
+        return Err(
+            "runtime-backed object-store clients require explicit access_key_id and secret_access_key in the structured object-store secret"
+                .to_string(),
+        );
+    };
+    builder = builder
+        .with_access_key_id(access_key_id.clone())
+        .with_secret_access_key(secret_access_key.clone());
+    if let Some(session_token) = session_token {
+        builder = builder.with_token(session_token.clone());
     }
     builder.build().map_err(|error| error.to_string())
 }

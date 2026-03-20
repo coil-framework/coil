@@ -6,7 +6,7 @@ use davenda_auth::{
     AllowedExplanation, DeniedAttempt, DeniedExplanation, DeniedReason, ExplainDecision,
     ExplainStep, ExplainTrace,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fmt::Write as _;
 
 pub(crate) fn render_auth_explain(
@@ -25,8 +25,9 @@ pub(crate) fn render_command_report(
 ) -> Result<String, CliRunError> {
     match output_mode {
         OutputMode::Human => Ok(render_report_human(report)),
-        OutputMode::Json => serde_json::to_string_pretty(report)
-            .map_err(|error| CliRunError::execution(format!("failed to encode report JSON: {error}"))),
+        OutputMode::Json => serde_json::to_string_pretty(report).map_err(|error| {
+            CliRunError::execution(format!("failed to encode report JSON: {error}"))
+        }),
     }
 }
 

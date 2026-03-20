@@ -125,10 +125,7 @@ fn exact_upload_rules_shadow_folder_defaults() {
         .expect("upload rule resolves");
 
     assert_eq!(resolved.policy, StoragePolicy::single_node_sensitive());
-    assert_eq!(
-        resolved.matched_rule_kind,
-        Some(PathPolicyKind::Upload)
-    );
+    assert_eq!(resolved.matched_rule_kind, Some(PathPolicyKind::Upload));
     assert_eq!(
         resolved.matched_rule_prefix.as_deref(),
         Some("uploads/marketing/brochure.pdf")

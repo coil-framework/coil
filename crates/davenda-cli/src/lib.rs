@@ -7,12 +7,12 @@ mod tests;
 mod validation;
 
 pub use cli::{
-    run_from_args, run_from_env, AuthExplainInvocation, AuthExplainResult, CliApplication,
-    CliRunError, ConfigValidateInvocation, ImportRunInvocation,
+    AuthExplainInvocation, AuthExplainResult, CliApplication, CliRunError,
+    ConfigValidateInvocation, ImportRunInvocation, run_from_args, run_from_env,
 };
 pub use command::{
-    baseline_commands, CommandDescriptor, CommandExecutionPlan, CommandInvocation, CommandOwner,
-    OutputMode,
+    CommandDescriptor, CommandExecutionPlan, CommandInvocation, CommandOwner, OutputMode,
+    baseline_commands,
 };
 pub use davenda_report::{
     CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportModelError, ReportRow, ReportStatus,

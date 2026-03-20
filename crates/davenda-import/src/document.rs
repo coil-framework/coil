@@ -154,7 +154,9 @@ impl From<DocumentAssetStorageDefault> for AssetStorageDefault {
         match value {
             DocumentAssetStorageDefault::PublicUpload => AssetStorageDefault::PublicUpload,
             DocumentAssetStorageDefault::PrivateShared => AssetStorageDefault::PrivateShared,
-            DocumentAssetStorageDefault::LocalOnlySensitive => AssetStorageDefault::LocalOnlySensitive,
+            DocumentAssetStorageDefault::LocalOnlySensitive => {
+                AssetStorageDefault::LocalOnlySensitive
+            }
         }
     }
 }

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use davenda_auth::{
-    configured_auth_model_package_selection, CapabilityExplanation, LiveAuthExplainHost,
-    LiveAuthExplainRequest,
+    CapabilityExplanation, LiveAuthExplainHost, LiveAuthExplainRequest,
+    configured_auth_model_package_selection,
 };
 use davenda_config::PlatformConfig;
 use std::sync::Arc;
@@ -286,9 +286,11 @@ publish_manifest = false
             .block_on(async { backend.explain(&invocation()).await })
             .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("failed to build the auth explanation"));
+        assert!(
+            error
+                .to_string()
+                .contains("failed to build the auth explanation")
+        );
         assert!(error.to_string().contains("live auth backend"));
     }
 

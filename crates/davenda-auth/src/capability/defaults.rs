@@ -121,7 +121,10 @@ mod tests {
 
         assert_eq!(package.manifest().name, "platform-extended-auth");
         assert_eq!(
-            package.package().binding_for(Capability::CmsPageRead).unwrap(),
+            package
+                .package()
+                .binding_for(Capability::CmsPageRead)
+                .unwrap(),
             DefaultAuthModelPackage::default()
                 .binding_for(Capability::CmsPageRead)
                 .unwrap()

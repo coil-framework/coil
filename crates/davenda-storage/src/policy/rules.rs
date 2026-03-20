@@ -208,7 +208,8 @@ impl StoragePolicySet {
         logical_path: &str,
         override_policy: Option<&StoragePolicyOverride>,
     ) -> Result<ResolvedStoragePolicy, StoragePolicyError> {
-        self.graph.resolve(storage_class, logical_path, override_policy)
+        self.graph
+            .resolve(storage_class, logical_path, override_policy)
     }
 }
 

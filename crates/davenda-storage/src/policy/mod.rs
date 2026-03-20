@@ -9,7 +9,6 @@ pub use model::{
 };
 pub(crate) use paths::{join_local_path, join_relative, normalize_relative_path};
 pub use rules::{
-    PathPolicyRule, ResolvedStoragePolicy, StoragePolicyError, StoragePolicyGraph,
-    StoragePolicySet,
+    PathPolicyRule, ResolvedStoragePolicy, StoragePolicyError, StoragePolicyGraph, StoragePolicySet,
 };
 pub use topology::{ObjectStoreTarget, StorageTopology};

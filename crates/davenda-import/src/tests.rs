@@ -218,8 +218,14 @@ dependencies = ["users"]
     )
     .unwrap();
 
-    assert_eq!(manifest.run_id, ImportRunId::new("wordpress-events").unwrap());
-    assert_eq!(manifest.modules, vec!["cms".to_string(), "events".to_string()]);
+    assert_eq!(
+        manifest.run_id,
+        ImportRunId::new("wordpress-events").unwrap()
+    );
+    assert_eq!(
+        manifest.modules,
+        vec!["cms".to_string(), "events".to_string()]
+    );
     assert_eq!(manifest.locale.as_deref(), Some("en"));
     assert_eq!(manifest.site.as_deref(), Some("main"));
     assert_eq!(manifest.importers.len(), 2);

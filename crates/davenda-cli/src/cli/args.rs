@@ -1,5 +1,5 @@
-use crate::cli::error::CliRunError;
 use crate::cli::config::ConfigValidateInvocation;
+use crate::cli::error::CliRunError;
 use crate::cli::import::ImportRunInvocation;
 use crate::command::OutputMode;
 use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Relation};

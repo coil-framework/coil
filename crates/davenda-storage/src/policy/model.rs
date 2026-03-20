@@ -222,11 +222,7 @@ impl StoragePolicyOverride {
 
     pub const fn is_local_only_escape_hatch(&self) -> bool {
         matches!(
-            (
-                self.delivery_mode,
-                self.sync_mode,
-                self.sensitivity,
-            ),
+            (self.delivery_mode, self.sync_mode, self.sensitivity,),
             (
                 Some(DeliveryMode::LocalOnly),
                 Some(SyncMode::LocalOnly),

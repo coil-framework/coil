@@ -5,7 +5,7 @@ use davenda_report::{
     CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus,
 };
 
-use super::validation::{require_non_empty, validate_token, ImportModelError};
+use super::validation::{ImportModelError, require_non_empty, validate_token};
 
 mod execution;
 mod ids;

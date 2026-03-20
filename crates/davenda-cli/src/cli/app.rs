@@ -1,13 +1,13 @@
-use crate::cli::args::{parse, CliInput};
+use crate::CliModelError;
+use crate::cli::args::{CliInput, parse};
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
 use crate::cli::error::CliRunError;
 use crate::cli::render::{render_auth_explain, render_command_report};
-use crate::{CommandReport, ReportRow};
 use crate::registry::CliRuntime;
-use crate::CliModelError;
-use davenda_import::ImportManifest;
+use crate::{CommandReport, ReportRow};
 use davenda_config::PlatformConfig;
+use davenda_import::ImportManifest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliApplication {
@@ -48,17 +48,33 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                     invocation.config_path.display()
                 ),
             )
-            .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
-            .with_columns(["app", "environment", "auth_package", "modules", "deployment"])
-            .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?;
+            .map_err(|error| {
+                CliRunError::execution(format!("failed to build config report: {error}"))
+            })?
+            .with_columns([
+                "app",
+                "environment",
+                "auth_package",
+                "modules",
+                "deployment",
+            ])
+            .map_err(|error| {
+                CliRunError::execution(format!("failed to build config report: {error}"))
+            })?;
             report.push_row(
                 ReportRow::new()
                     .with_cell("app", config.app.name.clone())
-                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+                    .map_err(|error| {
+                        CliRunError::execution(format!("failed to build config report: {error}"))
+                    })?
                     .with_cell("environment", environment_label(config.app.environment))
-                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+                    .map_err(|error| {
+                        CliRunError::execution(format!("failed to build config report: {error}"))
+                    })?
                     .with_cell("auth_package", config.auth.package.clone())
-                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
+                    .map_err(|error| {
+                        CliRunError::execution(format!("failed to build config report: {error}"))
+                    })?
                     .with_cell(
                         "modules",
                         if config.modules.enabled.is_empty() {
@@ -67,9 +83,16 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                             config.modules.enabled.join(",")
                         },
                     )
-                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?
-                    .with_cell("deployment", storage_deployment_label(config.storage.deployment))
-                    .map_err(|error| CliRunError::execution(format!("failed to build config report: {error}")))?,
+                    .map_err(|error| {
+                        CliRunError::execution(format!("failed to build config report: {error}"))
+                    })?
+                    .with_cell(
+                        "deployment",
+                        storage_deployment_label(config.storage.deployment),
+                    )
+                    .map_err(|error| {
+                        CliRunError::execution(format!("failed to build config report: {error}"))
+                    })?,
             );
 
             render_command_report(&report, output_mode)
@@ -113,12 +136,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 ));
             }
 
-            let manifest = ImportManifest::from_file(&invocation.manifest_path).map_err(|error| {
-                CliRunError::execution(format!(
-                    "failed to load import manifest from `{}`: {error}",
-                    invocation.manifest_path.display()
-                ))
-            })?;
+            let manifest =
+                ImportManifest::from_file(&invocation.manifest_path).map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to load import manifest from `{}`: {error}",
+                        invocation.manifest_path.display()
+                    ))
+                })?;
             let plan = manifest.plan().map_err(|error| {
                 CliRunError::execution(format!(
                     "failed to plan import manifest `{}`: {error}",

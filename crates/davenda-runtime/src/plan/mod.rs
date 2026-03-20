@@ -3,6 +3,7 @@ use url::Url;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use davenda_storage::execution::ObjectStoreClientConfig;
 
 mod execution;
 mod shared_state;
@@ -278,10 +279,18 @@ impl RuntimePlan {
     }
 
     pub fn storage_host(&self) -> StorageHost {
+        self.storage_host_with_object_store(None)
+    }
+
+    pub fn storage_host_with_object_store(
+        &self,
+        object_store: Option<ObjectStoreClientConfig>,
+    ) -> StorageHost {
         StorageHost::new(
             self.config.app.name.clone(),
             self.storage_planner.clone(),
             self.config.assets.cdn_base_url.clone(),
+            object_store,
         )
     }
 

@@ -2,12 +2,11 @@ use super::*;
 use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 use davenda_config::{ObjectStoreKind, SingleNodeStorageMode, StorageClass, StorageDeployment};
 use davenda_storage::{
-    DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind,
-    StorageExecutor, StoragePlanner, StoragePolicyOverride, StoragePolicySet, StorageTopology,
-    SyncMode,
+    execution::ObjectStoreClientConfig, DeliveryMode, DurableStore, ObjectStoreTarget,
+    Sensitivity, StorageBackendKind, StorageExecutor, StoragePlanner, StoragePolicyOverride,
+    StoragePolicySet, StorageTopology, SyncMode,
 };
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::fs;
 use std::net::TcpListener;
@@ -15,22 +14,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-
-struct EnvVarGuard {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        unsafe {
-            match self.previous.take() {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-}
 
 struct ObjectStoreTestServer {
     endpoint: String,
@@ -85,6 +68,7 @@ impl Drop for ObjectStoreTestServer {
 }
 
 fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
+    stream.set_nonblocking(false).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut request_line = String::new();
     reader.read_line(&mut request_line).unwrap();
@@ -251,14 +235,6 @@ fn deployment_release_rejects_duplicate_logical_paths() {
 #[test]
 fn theme_asset_publication_plan_publishes_and_syncs_source_roots() {
     let server = ObjectStoreTestServer::spawn();
-    let previous = std::env::var_os("OBJECT_STORE_URL");
-    unsafe {
-        std::env::set_var("OBJECT_STORE_URL", server.endpoint());
-    }
-    let _guard = EnvVarGuard {
-        key: "OBJECT_STORE_URL",
-        previous,
-    };
     let workspace = tempfile::tempdir().unwrap();
     let storage_root = tempfile::tempdir().unwrap();
     let theme_root = workspace.path().join("theme/assets");
@@ -285,7 +261,10 @@ fn theme_asset_publication_plan_publishes_and_syncs_source_roots() {
         },
         StoragePolicySet::default(),
     );
-    let executor = StorageExecutor::from_topology(planner.topology());
+    let executor = StorageExecutor::from_topology_and_object_store(
+        planner.topology(),
+        Some(ObjectStoreClientConfig::new(server.endpoint())),
+    );
     let receipt = plan
         .publish_and_sync(&planner, "https://cdn.example.com/assets", &executor)
         .unwrap();
@@ -315,14 +294,6 @@ fn theme_asset_publication_plan_publishes_and_syncs_source_roots() {
 #[test]
 fn theme_asset_publication_plan_reads_assets_from_disk_at_sync_time() {
     let server = ObjectStoreTestServer::spawn();
-    let previous = std::env::var_os("OBJECT_STORE_URL");
-    unsafe {
-        std::env::set_var("OBJECT_STORE_URL", server.endpoint());
-    }
-    let _guard = EnvVarGuard {
-        key: "OBJECT_STORE_URL",
-        previous,
-    };
     let workspace = tempfile::tempdir().unwrap();
     let storage_root = tempfile::tempdir().unwrap();
     let theme_root = workspace.path().join("theme/assets");
@@ -349,7 +320,10 @@ fn theme_asset_publication_plan_reads_assets_from_disk_at_sync_time() {
         },
         StoragePolicySet::default(),
     );
-    let executor = StorageExecutor::from_topology(planner.topology());
+    let executor = StorageExecutor::from_topology_and_object_store(
+        planner.topology(),
+        Some(ObjectStoreClientConfig::new(server.endpoint())),
+    );
     let manifest = plan
         .publish(&planner, "https://cdn.example.com/assets")
         .unwrap();

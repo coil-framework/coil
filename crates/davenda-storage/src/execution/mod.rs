@@ -7,12 +7,14 @@ use thiserror::Error;
 use crate::{StorageBackendKind, StoragePlan, StorageTopology, WriteTarget};
 
 mod local;
+mod config;
 mod object_store;
 
 #[cfg(test)]
 mod tests;
 
 use local::LocalDiskStorageClient;
+pub use config::ObjectStoreClientConfig;
 pub use object_store::HttpObjectStoreClient;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,9 +65,19 @@ pub struct StorageExecutor {
 
 impl StorageExecutor {
     pub fn from_topology(topology: &StorageTopology) -> Self {
+        Self::from_topology_and_object_store(topology, None)
+    }
+
+    pub fn from_topology_and_object_store(
+        topology: &StorageTopology,
+        object_store: Option<ObjectStoreClientConfig>,
+    ) -> Self {
         let local_root = PathBuf::from(&topology.local_root);
         let object_store = topology.object_store.as_ref().map(|_| {
-            Arc::new(HttpObjectStoreClient::from_topology(topology)) as Arc<dyn ObjectStoreClient>
+            Arc::new(HttpObjectStoreClient::from_topology_and_object_store(
+                topology,
+                object_store.clone(),
+            )) as Arc<dyn ObjectStoreClient>
         });
 
         Self {

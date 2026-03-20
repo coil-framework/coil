@@ -19,7 +19,7 @@ impl RuntimeHostServiceExecutor {
             context.customer_app.app_id, trace_id, storage_class
         );
         let plan = self
-            .plan
+            .services
             .storage_host()
             .plan_write(
                 StoragePlanRequest::new(logical_path)

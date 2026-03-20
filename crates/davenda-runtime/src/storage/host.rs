@@ -8,7 +8,8 @@ use davenda_storage::{
     SingleNodeEscapeHatchPlanner, StoragePlan, StoragePlanRequest, StoragePlanner,
     StoragePolicyOverride,
     execution::{
-        StorageDeliveryLocation, StorageExecutor, StorageReadReceipt, StorageWriteReceipt,
+        ObjectStoreClientConfig, StorageDeliveryLocation, StorageExecutor, StorageReadReceipt,
+        StorageWriteReceipt,
     },
 };
 use zanzibar::RebacEngine;
@@ -29,8 +30,12 @@ impl StorageHost {
         customer_app: String,
         planner: StoragePlanner,
         cdn_base_url: Option<String>,
+        object_store: Option<ObjectStoreClientConfig>,
     ) -> Self {
-        let executor = StorageExecutor::from_topology(planner.topology());
+        let executor = StorageExecutor::from_topology_and_object_store(
+            planner.topology(),
+            object_store,
+        );
         Self {
             customer_app,
             single_node_escape_hatch: planner.single_node_escape_hatch(),

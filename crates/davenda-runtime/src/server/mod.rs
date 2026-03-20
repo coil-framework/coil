@@ -116,6 +116,12 @@ impl HttpServerHost {
         let auth_explainer = build_auth_explainer(&plan)?;
         let browser =
             materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
+        let storage_host = plan.storage_host_with_object_store(
+            backends
+                .object_store
+                .as_ref()
+                .and_then(|backend| backend.object_store_client_config()),
+        );
         let wasm_host = WasmHost::with_host_services(
             plan.clone(),
             plan.config.app.name.clone(),
@@ -123,7 +129,11 @@ impl HttpServerHost {
             plan.extension_registry.clone(),
             plan.config.i18n.default_locale.clone(),
             plan.registered_runtime_jobs.clone(),
-            RuntimeWasmHostServices::with_runtime_secrets(plan.clone(), wasm_secrets),
+            RuntimeWasmHostServices::with_runtime_secrets(
+                plan.clone(),
+                storage_host,
+                wasm_secrets,
+            ),
         );
         Ok(Self::new_with_browser_and_authorizer(
             plan,

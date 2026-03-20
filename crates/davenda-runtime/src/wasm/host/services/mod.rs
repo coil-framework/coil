@@ -19,12 +19,14 @@ pub(crate) struct RuntimeWasmHostServices {
     secrets: secrets::RuntimeSecretBackend,
     jobs: jobs::RuntimeJobBackend,
     metadata: metadata::RuntimeMetadataBackend,
+    storage: StorageHost,
 }
 
 impl RuntimeWasmHostServices {
     pub(crate) fn new(plan: RuntimePlan) -> Self {
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
         let metadata = metadata::RuntimeMetadataBackend::open(&plan);
+        let storage = plan.storage_host();
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
                 plan.wasm.allow_network,
@@ -33,11 +35,13 @@ impl RuntimeWasmHostServices {
             secrets: secrets::RuntimeSecretBackend::deny_all(plan.config.app.name.clone()),
             jobs,
             metadata,
+            storage,
         }
     }
 
     pub(crate) fn with_runtime_secrets(
         plan: RuntimePlan,
+        storage: StorageHost,
         secrets: BTreeMap<String, String>,
     ) -> Self {
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
@@ -53,6 +57,7 @@ impl RuntimeWasmHostServices {
             ),
             jobs,
             metadata,
+            storage,
         }
     }
 
@@ -68,6 +73,7 @@ impl RuntimeWasmHostServices {
             root,
             plan.shared_backend_namespace(),
         );
+        let storage = plan.storage_host();
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
                 plan.wasm.allow_network,
@@ -76,6 +82,7 @@ impl RuntimeWasmHostServices {
             secrets: secrets::RuntimeSecretBackend::with_values(secrets),
             jobs,
             metadata,
+            storage,
         }
     }
 
@@ -126,5 +133,9 @@ impl RuntimeWasmHostServices {
 
     pub(crate) fn metadata_location(&self) -> String {
         self.metadata.location_label()
+    }
+
+    pub(crate) fn storage_host(&self) -> &StorageHost {
+        &self.storage
     }
 }

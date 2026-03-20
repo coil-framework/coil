@@ -3,6 +3,7 @@ use davenda_cache::DistributedCacheBackend;
 use davenda_config::{
     DatabaseDriver, DistributedCache, JobBackend, ObjectStoreKind, SecretRef, SessionStore,
 };
+use davenda_storage::execution::ObjectStoreClientConfig;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -76,8 +77,17 @@ pub struct SessionStoreClientTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectStoreClientTarget {
     pub kind: ObjectStoreKind,
+    pub endpoint_url: Option<String>,
     pub credential_reference: Option<String>,
     pub local_root: String,
+}
+
+impl ObjectStoreClientTarget {
+    pub fn object_store_client_config(&self) -> Option<ObjectStoreClientConfig> {
+        self.endpoint_url
+            .as_ref()
+            .map(|endpoint_url| ObjectStoreClientConfig::new(endpoint_url.clone()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +150,7 @@ impl SharedBackendClients {
             .object_store
             .map(|kind| ObjectStoreClientTarget {
                 kind,
+                endpoint_url: object_store_credentials.clone(),
                 credential_reference: object_store_credentials.clone(),
                 local_root: config.storage.local_root.clone(),
             });

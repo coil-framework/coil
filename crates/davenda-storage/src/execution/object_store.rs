@@ -4,31 +4,43 @@ use std::path::{Path, PathBuf};
 use ureq::AgentBuilder;
 use url::Url;
 
-use super::{StorageBackendKind, StorageExecutionError};
+use super::{ObjectStoreClientConfig, StorageBackendKind, StorageExecutionError};
 
 #[derive(Debug, Clone)]
 pub struct HttpObjectStoreClient {
     endpoint: Option<Url>,
     root: PathBuf,
+    credential: Option<String>,
 }
 
 impl HttpObjectStoreClient {
-    pub fn from_topology(_topology: &crate::StorageTopology) -> Self {
-        let endpoint = std::env::var("OBJECT_STORE_URL")
-            .ok()
-            .and_then(|value| Url::parse(value.trim()).ok());
-        let root = endpoint
-            .as_ref()
-            .and_then(|url| {
-                if url.scheme() == "file" {
-                    url.to_file_path().ok()
-                } else {
-                    Some(PathBuf::from(url.path().trim_start_matches('/')))
-                }
-            })
-            .unwrap_or_default();
+    pub fn from_topology_and_object_store(
+        _topology: &crate::StorageTopology,
+        object_store: Option<ObjectStoreClientConfig>,
+    ) -> Self {
+        let (endpoint, root, credential) = match object_store {
+            Some(config) => {
+                let endpoint = Url::parse(config.endpoint_url.trim()).ok();
+                let root = endpoint
+                    .as_ref()
+                    .and_then(|url| {
+                        if url.scheme() == "file" {
+                            url.to_file_path().ok()
+                        } else {
+                            Some(PathBuf::from(url.path().trim_start_matches('/')))
+                        }
+                    })
+                    .unwrap_or_default();
+                (endpoint, root, config.credential)
+            }
+            None => (None, PathBuf::default(), None),
+        };
 
-        Self { endpoint, root }
+        Self {
+            endpoint,
+            root,
+            credential,
+        }
     }
 
     fn resolve(&self, object_key: &str) -> Result<Url, StorageExecutionError> {
@@ -92,14 +104,17 @@ impl super::ObjectStoreClient for HttpObjectStoreClient {
 
         let url = self.resolve(object_key)?;
         let agent = AgentBuilder::new().build();
-        let response = agent
+        let mut request = agent
             .put(url.as_str())
-            .set("Content-Type", "application/octet-stream")
-            .send_bytes(bytes)
-            .map_err(|error| StorageExecutionError::WriteFailed {
-                path: object_key.to_string(),
-                message: error.to_string(),
-            })?;
+            .set("Content-Type", "application/octet-stream");
+        if let Some(credential) = &self.credential {
+            let authorization = format!("Bearer {credential}");
+            request = request.set("Authorization", &authorization);
+        }
+        let response = request.send_bytes(bytes).map_err(|error| StorageExecutionError::WriteFailed {
+            path: object_key.to_string(),
+            message: error.to_string(),
+        })?;
 
         if !(200..300).contains(&response.status()) {
             return Err(StorageExecutionError::WriteFailed {
@@ -127,13 +142,15 @@ impl super::ObjectStoreClient for HttpObjectStoreClient {
 
         let url = self.resolve(object_key)?;
         let agent = AgentBuilder::new().build();
-        let response = agent
-            .get(url.as_str())
-            .call()
-            .map_err(|error| StorageExecutionError::ReadFailed {
-                path: object_key.to_string(),
-                message: error.to_string(),
-            })?;
+        let mut request = agent.get(url.as_str());
+        if let Some(credential) = &self.credential {
+            let authorization = format!("Bearer {credential}");
+            request = request.set("Authorization", &authorization);
+        }
+        let response = request.call().map_err(|error| StorageExecutionError::ReadFailed {
+            path: object_key.to_string(),
+            message: error.to_string(),
+        })?;
 
         if !(200..300).contains(&response.status()) {
             return Err(StorageExecutionError::ReadFailed {

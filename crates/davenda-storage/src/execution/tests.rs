@@ -2,7 +2,6 @@ use super::*;
 use crate::{PathPolicyRule, StoragePlanRequest, StoragePlanner, StoragePolicy, StoragePolicySet};
 use davenda_config::{PlatformConfig, StorageClass};
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -10,22 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-
-struct EnvVarGuard {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        unsafe {
-            match self.previous.take() {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-}
 
 struct ObjectStoreTestServer {
     endpoint: String,
@@ -80,6 +63,7 @@ impl Drop for ObjectStoreTestServer {
 }
 
 fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
+    stream.set_nonblocking(false).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut request_line = String::new();
     reader.read_line(&mut request_line).unwrap();
@@ -234,16 +218,11 @@ fn planner() -> StoragePlanner {
 #[test]
 fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
     let server = ObjectStoreTestServer::spawn();
-    let previous = std::env::var_os("OBJECT_STORE_URL");
-    unsafe {
-        std::env::set_var("OBJECT_STORE_URL", server.endpoint());
-    }
-    let _guard = EnvVarGuard {
-        key: "OBJECT_STORE_URL",
-        previous,
-    };
     let planner = planner();
-    let executor = StorageExecutor::from_topology(planner.topology());
+    let executor = StorageExecutor::from_topology_and_object_store(
+        planner.topology(),
+        Some(ObjectStoreClientConfig::new(server.endpoint())),
+    );
     let public_plan = planner
         .plan_scalable_write(
             StoragePlanRequest::new("uploads/marketing/hero.webp")

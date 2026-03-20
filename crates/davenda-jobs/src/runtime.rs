@@ -86,8 +86,8 @@ impl JobsRuntime {
         crate::JobsPlanner::new(self.clone())
     }
 
-    pub fn coordinator(&self) -> JobsCoordinator {
-        self.coordinator_with_backend(JobsBackendAdapter::local_for_testing(self))
+    pub fn coordinator(&self) -> Result<JobsCoordinator, JobsModelError> {
+        Err(crate::backend::explicit_distributed_backend_error(self))
     }
 
     #[allow(dead_code)]
@@ -97,7 +97,9 @@ impl JobsRuntime {
 
     #[doc(hidden)]
     pub fn coordinator_for_testing(&self) -> JobsCoordinator {
-        self.coordinator_with_backend(JobsBackendAdapter::local_for_testing(self))
+        let backend = JobsBackendAdapter::local_for_testing(self)
+            .expect("test-only local jobs coordinator backend must be available");
+        self.coordinator_with_backend(backend)
     }
 
     pub fn coordinator_with_shared_runtime(

@@ -244,7 +244,7 @@ fn domain_event_envelopes_capture_correlation_and_causation() {
 #[test]
 fn scheduler_leadership_promotes_due_jobs_once() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-    let mut coordinator = runtime.coordinator();
+    let mut coordinator = runtime.coordinator_for_testing();
     coordinator
         .enqueue(
             JobSpec::new(
@@ -302,7 +302,7 @@ fn scheduler_leadership_promotes_due_jobs_once() {
 #[test]
 fn failed_jobs_retry_then_dead_letter_after_exhaustion() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Valkey)).unwrap();
-    let mut coordinator = runtime.coordinator();
+    let mut coordinator = runtime.coordinator_for_testing();
     coordinator
         .enqueue(
             JobSpec::new(
@@ -420,7 +420,7 @@ fn domain_events_dispatch_into_subscription_jobs() {
     )
     .unwrap();
 
-    let mut coordinator = runtime.coordinator();
+    let mut coordinator = runtime.coordinator_for_testing();
     let job_ids = coordinator
         .dispatch_event(&domain, &envelope, JobInstant::from_unix_seconds(200))
         .unwrap();
@@ -463,34 +463,24 @@ fn distributed_coordinators_do_not_share_backend_without_explicit_adapter_reuse(
 }
 
 #[test]
-fn default_coordinators_are_local_even_for_distributed_topologies() {
+fn default_coordinators_require_explicit_shared_runtime() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-    let mut left = runtime.coordinator();
-    let mut right = runtime.coordinator();
-
-    left.enqueue(
-        JobSpec::new(
-            JobId::new("job-shared").unwrap(),
-            JobName::new("shared-work").unwrap(),
-            runtime.describe().work_queue.clone(),
-            "shared backend work item",
-        )
-        .unwrap()
-        .with_idempotency_key(IdempotencyKey::new("shared-work:v1").unwrap()),
-        JobInstant::from_unix_seconds(10),
-    )
-    .unwrap();
-
-    right.refresh();
-    assert_eq!(right.ready_jobs().len(), 0);
+    let error = runtime.coordinator().unwrap_err();
+    assert!(matches!(
+        error,
+        JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+            backend: JobBackend::Redis,
+            ..
+        }
+    ));
 }
 
 #[test]
 #[allow(deprecated)]
 fn compatibility_shared_shims_remain_local_only() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
-    let adapter = JobsBackendAdapter::shared(&runtime);
-    let scoped = JobsBackendAdapter::shared_scoped(&runtime, "runtime-jobs-shim");
+    let adapter = JobsBackendAdapter::shared(&runtime).unwrap();
+    let scoped = JobsBackendAdapter::shared_scoped(&runtime, "runtime-jobs-shim").unwrap();
 
     assert!(!adapter.is_shared());
     assert!(!scoped.is_shared());
@@ -506,7 +496,7 @@ fn explicit_shared_runtime_constructors_report_shared_state_honestly() {
         runtime.topology.clone(),
         shared_runtime,
     );
-    let local = JobsBackendAdapter::local_for_testing(&runtime);
+    let local = JobsBackendAdapter::local_for_testing(&runtime).unwrap();
     let explicit_emulated = JobsBackendAdapter::with_shared_runtime(
         runtime.backend,
         runtime.topology.clone(),

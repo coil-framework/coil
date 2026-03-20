@@ -1,4 +1,5 @@
 use crate::model::{JobInstant, QueueKind};
+use davenda_config::JobBackend;
 use std::error::Error;
 use std::fmt;
 
@@ -58,6 +59,10 @@ pub enum JobsModelError {
     },
     MissingEventHandler {
         handler_id: String,
+    },
+    LiveSharedBackendRequiresExplicitRuntime {
+        backend: JobBackend,
+        namespace: String,
     },
 }
 
@@ -123,6 +128,13 @@ impl fmt::Display for JobsModelError {
             Self::MissingEventHandler { handler_id } => {
                 write!(f, "event handler `{handler_id}` is not registered")
             }
+            Self::LiveSharedBackendRequiresExplicitRuntime {
+                backend,
+                namespace,
+            } => write!(
+                f,
+                "live shared jobs backend `{backend:?}` for `{namespace}` requires an explicit distributed runtime"
+            ),
         }
     }
 }

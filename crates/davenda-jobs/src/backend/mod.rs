@@ -164,22 +164,26 @@ impl JobsBackendAdapter {
     }
 
     #[doc(hidden)]
-    pub fn in_memory(runtime: &JobsRuntime) -> Self {
+    pub fn in_memory(runtime: &JobsRuntime) -> Result<Self, JobsModelError> {
         Self::local_for_testing(runtime)
     }
 
     #[doc(hidden)]
-    pub fn local_for_testing(runtime: &JobsRuntime) -> Self {
+    pub fn local_for_testing(runtime: &JobsRuntime) -> Result<Self, JobsModelError> {
         #[cfg(test)]
-        let runtime_backend = Self::emulated_shared_runtime(runtime);
-        #[cfg(not(test))]
-        let runtime_backend = shared::local_runtime(runtime);
+        {
+            let runtime_backend = Self::emulated_shared_runtime(runtime);
+            return Ok(Self {
+                backend: runtime.backend,
+                queue_topology: runtime.topology.clone(),
+                shared: false,
+                runtime: runtime_backend,
+            });
+        }
 
-        Self {
-            backend: runtime.backend,
-            queue_topology: runtime.topology.clone(),
-            shared: false,
-            runtime: runtime_backend,
+        #[cfg(not(test))]
+        {
+            Err(explicit_distributed_backend_error(runtime))
         }
     }
 
@@ -188,7 +192,7 @@ impl JobsBackendAdapter {
     #[deprecated(
         note = "compatibility shim; behaves like local_for_testing(runtime). use with_shared_runtime(backend, topology, runtime) or local_for_testing(runtime)"
     )]
-    pub fn shared(runtime: &JobsRuntime) -> Self {
+    pub fn shared(runtime: &JobsRuntime) -> Result<Self, JobsModelError> {
         Self::local_for_testing(runtime)
     }
 
@@ -197,7 +201,7 @@ impl JobsBackendAdapter {
     #[deprecated(
         note = "compatibility shim; behaves like local_for_testing(runtime). use with_shared_runtime(backend, topology, runtime) or local_for_testing(runtime)"
     )]
-    pub fn shared_scoped(runtime: &JobsRuntime, _scope: impl Into<String>) -> Self {
+    pub fn shared_scoped(runtime: &JobsRuntime, _scope: impl Into<String>) -> Result<Self, JobsModelError> {
         Self::local_for_testing(runtime)
     }
 
@@ -261,6 +265,10 @@ impl JobsBackendAdapter {
         self.runtime
             .acknowledge_failed(lease, now, reason, error_message)
     }
+}
+
+pub(crate) fn explicit_distributed_backend_error(runtime: &JobsRuntime) -> JobsModelError {
+    shared::explicit_distributed_backend_error(runtime)
 }
 
 impl fmt::Debug for JobsBackendAdapter {

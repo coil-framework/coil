@@ -5,9 +5,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 #[cfg(not(test))]
-use std::env;
-
-#[cfg(not(test))]
 use redis::Commands;
 
 #[cfg(not(test))]
@@ -121,7 +118,12 @@ struct ProductionRedisSharedCacheStore {
 #[cfg(not(test))]
 impl ProductionRedisSharedCacheStore {
     fn open(kind: CacheBackendKind, namespace: String) -> Self {
-        let url = cache_backend_url(kind);
+        let url = cache_backend_url(
+            kind,
+            std::env::var("REDIS_URL").ok(),
+            std::env::var("VALKEY_URL").ok(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         let client = redis::Client::open(url.as_str())
             .unwrap_or_else(|error| panic!("failed to open redis cache backend `{url}`: {error}"));
         let connection = client.get_connection().unwrap_or_else(|error| {
@@ -193,17 +195,62 @@ impl ProductionRedisSharedCacheStore {
     }
 }
 
-#[cfg(not(test))]
-fn cache_backend_url(kind: CacheBackendKind) -> String {
+fn cache_backend_url(
+    kind: CacheBackendKind,
+    redis_url: Option<String>,
+    valkey_url: Option<String>,
+) -> Result<String, String> {
     match kind {
         CacheBackendKind::Redis => {
-            env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_string())
+            redis_url.ok_or_else(|| "redis cache backend requires REDIS_URL to be set".to_string())
         }
-        CacheBackendKind::Valkey => env::var("VALKEY_URL")
-            .or_else(|_| env::var("REDIS_URL"))
-            .unwrap_or_else(|_| "redis://127.0.0.1/".to_string()),
-        CacheBackendKind::Local => {
-            panic!("local cache backends are test-only and cannot back a live shared runtime")
-        }
+        CacheBackendKind::Valkey => valkey_url.or(redis_url).ok_or_else(|| {
+            "valkey cache backend requires VALKEY_URL or REDIS_URL to be set".to_string()
+        }),
+        CacheBackendKind::Local => Err(
+            "local cache backends are test-only and cannot back a live shared runtime".to_string(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redis_backend_requires_an_explicit_url() {
+        let error = cache_backend_url(CacheBackendKind::Redis, None, None).unwrap_err();
+        assert_eq!(error, "redis cache backend requires REDIS_URL to be set");
+    }
+
+    #[test]
+    fn valkey_backend_can_use_either_explicit_url() {
+        assert_eq!(
+            cache_backend_url(
+                CacheBackendKind::Valkey,
+                Some("redis://redis.internal/".to_string()),
+                None
+            )
+            .unwrap(),
+            "redis://redis.internal/"
+        );
+        assert_eq!(
+            cache_backend_url(
+                CacheBackendKind::Valkey,
+                None,
+                Some("redis://valkey.internal/".to_string())
+            )
+            .unwrap(),
+            "redis://valkey.internal/"
+        );
+    }
+
+    #[test]
+    fn local_backend_is_not_supported_for_live_shared_runtime() {
+        let error = cache_backend_url(CacheBackendKind::Local, None, None).unwrap_err();
+        assert_eq!(
+            error,
+            "local cache backends are test-only and cannot back a live shared runtime"
+        );
     }
 }

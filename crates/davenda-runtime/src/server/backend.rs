@@ -254,12 +254,10 @@ fn resolve_object_store_client_config<R: SecretResolver>(
         .as_ref()
         .ok_or(SecretResolutionError::MissingObjectStoreSecret { kind })?;
     let value = resolver.resolve(secret)?;
-    let object_store_config =
-        ObjectStoreClientConfig::from_secret_value(&value).map_err(|error| {
-            SecretResolutionError::InvalidObjectStoreConfig {
-                reference: secret.redacted(),
-                message: error.to_string(),
-            }
+    let object_store_config = ObjectStoreClientConfig::from_structured_secret_value(&value)
+        .map_err(|error| SecretResolutionError::InvalidObjectStoreConfig {
+            reference: secret.redacted(),
+            message: error.to_string(),
         })?;
     validate_runtime_object_store_config(config.app.environment, secret, &object_store_config)?;
     Ok(Some(object_store_config))
@@ -424,6 +422,28 @@ signed_url_ttl_secs = 900
                 message:
                     "structured object-store secrets must include explicit access_key_id and secret_access_key"
                         .to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn object_store_backend_rejects_legacy_url_secrets() {
+        let config = backend_test_config(Environment::Production);
+        let resolver = StaticSecretResolver::new()
+            .with_secret(
+                SecretRef::Env {
+                    var: "OBJECT_STORE_URL".to_string(),
+                },
+                "https://s3.internal/runtime",
+            )
+            .unwrap();
+
+        assert_eq!(
+            SharedBackendClients::object_store_client_config(&config, &resolver).unwrap_err(),
+            SecretResolutionError::InvalidObjectStoreConfig {
+                reference: "env:OBJECT_STORE_URL".to_string(),
+                message: "object-store secret must be a supported TOML or JSON document"
+                    .to_string(),
             }
         );
     }

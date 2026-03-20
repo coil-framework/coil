@@ -63,6 +63,25 @@ impl ObjectStoreClientConfig {
         Err(ObjectStoreClientConfigError::UnsupportedSecretFormat)
     }
 
+    pub fn from_structured_secret_value(
+        secret_value: &str,
+    ) -> Result<Self, ObjectStoreClientConfigError> {
+        let secret_value = secret_value.trim();
+        if secret_value.is_empty() {
+            return Err(ObjectStoreClientConfigError::EmptySecret);
+        }
+
+        if let Ok(document) = serde_json::from_str::<ObjectStoreSecretDocument>(secret_value) {
+            return Self::from_document(document);
+        }
+
+        if let Ok(document) = toml::from_str::<ObjectStoreSecretDocument>(secret_value) {
+            return Self::from_document(document);
+        }
+
+        Err(ObjectStoreClientConfigError::UnsupportedStructuredSecretFormat)
+    }
+
     pub fn with_endpoint_url(
         mut self,
         endpoint_url: impl Into<String>,
@@ -230,6 +249,8 @@ pub enum ObjectStoreClientConfigError {
     EmptySecret,
     #[error("object-store secret must be a supported URL, TOML, or JSON document")]
     UnsupportedSecretFormat,
+    #[error("object-store secret must be a supported TOML or JSON document")]
+    UnsupportedStructuredSecretFormat,
     #[error("object-store config requires a bucket name")]
     MissingBucket,
     #[error("object-store config requires a region")]
@@ -334,6 +355,18 @@ virtual_hosted_style_request = true
         assert_eq!(config.bucket, "runtime");
         assert_eq!(config.region, DEFAULT_S3_REGION);
         assert_eq!(config.credentials, ObjectStoreCredentials::Environment);
+    }
+
+    #[test]
+    fn rejects_legacy_url_secret_for_structured_only_parser() {
+        let error =
+            ObjectStoreClientConfig::from_structured_secret_value("https://s3.internal/runtime")
+                .unwrap_err();
+
+        assert_eq!(
+            error,
+            ObjectStoreClientConfigError::UnsupportedStructuredSecretFormat
+        );
     }
 
     #[test]

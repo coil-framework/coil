@@ -1,8 +1,7 @@
 use std::{collections::BTreeMap, fmt};
 
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Nonce};
-use rand::RngCore;
+use aes_gcm::Aes256Gcm;
+use aes_gcm::aead::{Aead, AeadCore, KeyInit};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -131,8 +130,7 @@ impl TlsMaterialProtector {
             }
         })?;
 
-        let mut nonce = [0_u8; 12];
-        rand::rngs::OsRng.fill_bytes(&mut nonce);
+        let nonce = Aes256Gcm::generate_nonce(&mut rand::rngs::OsRng);
 
         let payload = serde_json::to_vec(material).map_err(|error| {
             TlsModelError::CertificateMaterialEncryptionFailed {
@@ -141,14 +139,14 @@ impl TlsMaterialProtector {
         })?;
 
         let ciphertext = cipher
-            .encrypt(Nonce::from_slice(&nonce), payload.as_slice())
+            .encrypt(&nonce, payload.as_slice())
             .map_err(|error| TlsModelError::CertificateMaterialEncryptionFailed {
                 reason: error.to_string(),
             })?;
 
         Ok(EncryptedCertificateMaterial {
             key_id: self.active_key_id.clone(),
-            nonce,
+            nonce: nonce.into(),
             ciphertext,
         })
     }
@@ -168,11 +166,9 @@ impl TlsMaterialProtector {
                 reason: error.to_string(),
             }
         })?;
+        let nonce = encrypted.nonce.into();
         let plaintext = cipher
-            .decrypt(
-                Nonce::from_slice(&encrypted.nonce),
-                encrypted.ciphertext.as_ref(),
-            )
+            .decrypt(&nonce, encrypted.ciphertext.as_ref())
             .map_err(|error| TlsModelError::CertificateMaterialDecryptionFailed {
                 reason: error.to_string(),
             })?;

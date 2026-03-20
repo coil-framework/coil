@@ -56,7 +56,7 @@ fn public_delivery_invariant_is_centralized_on_storage_plans() {
 #[test]
 fn resolves_most_specific_path_policy() {
     let policies = StoragePolicySet::default()
-        .with_rule(
+        .with_folder_rule(
             PathPolicyRule::new(
                 "uploads",
                 Some(davenda_config::StorageClass::PrivateShared),
@@ -64,7 +64,7 @@ fn resolves_most_specific_path_policy() {
             )
             .expect("valid root uploads rule"),
         )
-        .with_rule(
+        .with_folder_rule(
             PathPolicyRule::new(
                 "uploads/marketing",
                 Some(davenda_config::StorageClass::PublicUpload),
@@ -92,6 +92,46 @@ fn resolves_most_specific_path_policy() {
     assert_eq!(
         resolved.matched_rule_prefix.as_deref(),
         Some("uploads/marketing")
+    );
+    assert_eq!(resolved.matched_rule_kind, Some(PathPolicyKind::Folder));
+}
+
+#[test]
+fn exact_upload_rules_shadow_folder_defaults() {
+    let policies = StoragePolicySet::default()
+        .with_folder_rule(
+            PathPolicyRule::new(
+                "uploads",
+                Some(davenda_config::StorageClass::PrivateShared),
+                StoragePolicy::private_shared(),
+            )
+            .expect("valid folder rule"),
+        )
+        .with_upload_rule(
+            PathPolicyRule::upload(
+                "uploads/marketing/brochure.pdf",
+                Some(davenda_config::StorageClass::PublicUpload),
+                StoragePolicy::single_node_sensitive(),
+            )
+            .expect("valid upload rule"),
+        );
+
+    let resolved = policies
+        .resolve(
+            davenda_config::StorageClass::PrivateShared,
+            "uploads/marketing/brochure.pdf",
+            None,
+        )
+        .expect("upload rule resolves");
+
+    assert_eq!(resolved.policy, StoragePolicy::single_node_sensitive());
+    assert_eq!(
+        resolved.matched_rule_kind,
+        Some(PathPolicyKind::Upload)
+    );
+    assert_eq!(
+        resolved.matched_rule_prefix.as_deref(),
+        Some("uploads/marketing/brochure.pdf")
     );
 }
 
@@ -179,6 +219,40 @@ fn single_node_escape_hatch_override_keeps_sensitive_files_on_server() {
         plan.local_path.as_deref(),
         Some("var/davenda/storage/secure/reports/march.csv")
     );
+    assert_eq!(plan.object_key, None);
+}
+
+#[test]
+fn per_upload_local_only_opt_out_is_centrally_enforced() {
+    let planner = StoragePlanner::from_config(&test_config());
+
+    let error = planner
+        .plan_scalable_write(
+            StoragePlanRequest::new("uploads/catalog/item.jpg")
+                .with_storage_class(davenda_config::StorageClass::PublicUpload)
+                .with_local_only(),
+        )
+        .expect_err("scalable planning should reject explicit local-only uploads");
+
+    assert_eq!(
+        error,
+        StoragePlanningError::SingleNodeEscapeHatchRequested {
+            logical_path: "uploads/catalog/item.jpg".to_string(),
+            policy: StoragePolicy::single_node_sensitive(),
+        }
+    );
+
+    let plan = planner
+        .single_node_escape_hatch()
+        .plan_write(
+            StoragePlanRequest::new("uploads/catalog/item.jpg")
+                .with_storage_class(davenda_config::StorageClass::PublicUpload)
+                .with_local_only(),
+        )
+        .expect("explicit local-only uploads should be allowed on single-node deployments");
+
+    assert_eq!(plan.policy, StoragePolicy::single_node_sensitive());
+    assert_eq!(plan.durable_store, DurableStore::LocalDisk);
     assert_eq!(plan.object_key, None);
 }
 

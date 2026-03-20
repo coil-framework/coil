@@ -7,11 +7,30 @@ use crate::{
     StoragePolicySet, StorageTopology, SyncMode,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StorageUploadDisposition {
+    FollowHierarchy,
+    KeepLocal,
+}
+
+impl StorageUploadDisposition {
+    pub const fn keep_local() -> Self {
+        Self::KeepLocal
+    }
+}
+
+impl Default for StorageUploadDisposition {
+    fn default() -> Self {
+        Self::FollowHierarchy
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoragePlanRequest {
     pub logical_path: String,
     pub storage_class: Option<StorageClass>,
     pub override_policy: Option<StoragePolicyOverride>,
+    pub upload_disposition: StorageUploadDisposition,
 }
 
 impl StoragePlanRequest {
@@ -20,6 +39,7 @@ impl StoragePlanRequest {
             logical_path: logical_path.into(),
             storage_class: None,
             override_policy: None,
+            upload_disposition: StorageUploadDisposition::default(),
         }
     }
 
@@ -30,6 +50,11 @@ impl StoragePlanRequest {
 
     pub fn with_override(mut self, override_policy: StoragePolicyOverride) -> Self {
         self.override_policy = Some(override_policy);
+        self
+    }
+
+    pub fn with_local_only(mut self) -> Self {
+        self.upload_disposition = StorageUploadDisposition::KeepLocal;
         self
     }
 }
@@ -140,7 +165,7 @@ impl StoragePlanner {
             request.override_policy.as_ref(),
         )?;
 
-        self.plan_resolved_scalable_write(logical_path, resolved)
+        self.plan_resolved_scalable_write(logical_path, resolved, request.upload_disposition)
     }
 
     pub fn plan_write(
@@ -154,8 +179,12 @@ impl StoragePlanner {
         &self,
         logical_path: String,
         resolved: crate::ResolvedStoragePolicy,
+        upload_disposition: StorageUploadDisposition,
     ) -> Result<StoragePlan, StoragePlanningError> {
-        let policy = resolved.policy;
+        let mut policy = resolved.policy;
+        if matches!(upload_disposition, StorageUploadDisposition::KeepLocal) {
+            policy = StoragePolicyOverride::force_single_node_escape_hatch().apply_to(policy);
+        }
         if policy.sync_mode == SyncMode::LocalOnly {
             return Err(StoragePlanningError::SingleNodeEscapeHatchRequested {
                 logical_path,
@@ -269,18 +298,26 @@ impl SingleNodeEscapeHatchPlanner {
             request.override_policy.as_ref(),
         )?;
 
-        self.plan_resolved_single_node_escape_hatch_write(logical_path, resolved)
+        self.plan_resolved_single_node_escape_hatch_write(
+            logical_path,
+            resolved,
+            request.upload_disposition,
+        )
     }
 
     fn plan_resolved_single_node_escape_hatch_write(
         &self,
         logical_path: String,
         resolved: crate::ResolvedStoragePolicy,
+        upload_disposition: StorageUploadDisposition,
     ) -> Result<StoragePlan, StoragePlanningError> {
-        let policy = resolved.policy;
+        let mut policy = resolved.policy;
+        if matches!(upload_disposition, StorageUploadDisposition::KeepLocal) {
+            policy = StoragePolicyOverride::force_single_node_escape_hatch().apply_to(policy);
+        }
         if policy.sync_mode != SyncMode::LocalOnly {
             return StoragePlanner::new(self.topology.clone(), self.policies.clone())
-                .plan_resolved_scalable_write(logical_path, resolved);
+                .plan_resolved_scalable_write(logical_path, resolved, upload_disposition);
         }
 
         if !self.topology.allows_explicit_local_only() {

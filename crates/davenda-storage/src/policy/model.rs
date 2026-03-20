@@ -20,6 +20,21 @@ impl fmt::Display for StorageBackendKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PathPolicyKind {
+    Folder,
+    Upload,
+}
+
+impl fmt::Display for PathPolicyKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Folder => f.write_str("folder"),
+            Self::Upload => f.write_str("upload"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DurableStore {
     LocalDisk,
     ObjectStore,
@@ -203,6 +218,21 @@ impl StoragePolicyOverride {
             sync_mode: self.sync_mode.unwrap_or(base.sync_mode),
             sensitivity: self.sensitivity.unwrap_or(base.sensitivity),
         }
+    }
+
+    pub const fn is_local_only_escape_hatch(&self) -> bool {
+        matches!(
+            (
+                self.delivery_mode,
+                self.sync_mode,
+                self.sensitivity,
+            ),
+            (
+                Some(DeliveryMode::LocalOnly),
+                Some(SyncMode::LocalOnly),
+                Some(Sensitivity::Secret),
+            )
+        )
     }
 
     pub fn force_single_node_escape_hatch() -> Self {

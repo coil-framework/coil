@@ -8,12 +8,12 @@ pub use execution::{
 };
 pub use planner::{
     SingleNodeEscapeHatchPlanner, StorageDeploymentScope, StoragePlan, StoragePlanRequest,
-    StoragePlanner, StoragePlanningError, WriteTarget, WriteTargetKind,
+    StoragePlanner, StoragePlanningError, StorageUploadDisposition, WriteTarget, WriteTargetKind,
 };
 pub use policy::{
-    DeliveryMode, DurableStore, ObjectStoreTarget, PathPolicyRule, ResolvedStoragePolicy,
-    Sensitivity, StorageBackendKind, StoragePolicy, StoragePolicyError, StoragePolicyOverride,
-    StoragePolicySet, StorageTopology, SyncMode,
+    DeliveryMode, DurableStore, ObjectStoreTarget, PathPolicyKind, PathPolicyRule,
+    ResolvedStoragePolicy, Sensitivity, StorageBackendKind, StoragePolicy, StoragePolicyError,
+    StoragePolicyGraph, StoragePolicyOverride, StoragePolicySet, StorageTopology, SyncMode,
 };
 
 #[cfg(test)]

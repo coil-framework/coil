@@ -13,6 +13,8 @@ pub enum SecretResolutionError {
     MissingSecret { reference: String },
     #[error("secret `{reference}` uses a source that is not available in this runtime context")]
     UnsupportedSecretSource { reference: String },
+    #[error("object-store backend `{kind:?}` requires an object-store secret")]
+    MissingObjectStoreSecret { kind: ObjectStoreKind },
     #[error("object-store secret `{reference}` is invalid: {message}")]
     InvalidObjectStoreConfig { reference: String, message: String },
 }
@@ -57,14 +59,16 @@ pub struct EnvironmentSecretResolver;
 impl SecretResolver for EnvironmentSecretResolver {
     fn resolve(&self, secret: &SecretRef) -> Result<String, SecretResolutionError> {
         match secret {
-            SecretRef::Env { var } => std::env::var(var).map_err(|_| {
-                SecretResolutionError::MissingSecret {
+            SecretRef::Env { var } => {
+                std::env::var(var).map_err(|_| SecretResolutionError::MissingSecret {
                     reference: secret.redacted(),
-                }
-            }),
-            SecretRef::SecretManager { .. } => Err(SecretResolutionError::UnsupportedSecretSource {
-                reference: secret.redacted(),
-            }),
+                })
+            }
+            SecretRef::SecretManager { .. } => {
+                Err(SecretResolutionError::UnsupportedSecretSource {
+                    reference: secret.redacted(),
+                })
+            }
         }
     }
 }
@@ -105,26 +109,24 @@ pub struct ObjectStoreClientTarget {
     pub credential_reference: Option<String>,
     pub signed_url_ttl_secs: Option<u64>,
     pub local_root: String,
-    config: Option<ObjectStoreClientConfig>,
+    config: ObjectStoreClientConfig,
 }
 
 impl ObjectStoreClientTarget {
     pub fn object_store_client_config(&self) -> Option<ObjectStoreClientConfig> {
-        self.config.clone()
+        Some(self.config.clone())
     }
 
     fn new(
         kind: ObjectStoreKind,
-        config: Option<ObjectStoreClientConfig>,
+        config: ObjectStoreClientConfig,
         credential_reference: Option<String>,
         local_root: String,
     ) -> Self {
-        let endpoint_url = config
-            .as_ref()
-            .and_then(|config| config.endpoint_url.clone());
-        let bucket = config.as_ref().map(|config| config.bucket.clone());
-        let region = config.as_ref().map(|config| config.region.clone());
-        let signed_url_ttl_secs = config.as_ref().map(|config| config.signed_url_ttl_secs);
+        let endpoint_url = config.endpoint_url.clone();
+        let bucket = Some(config.bucket.clone());
+        let region = Some(config.region.clone());
+        let signed_url_ttl_secs = Some(config.signed_url_ttl_secs);
         Self {
             kind,
             endpoint_url,
@@ -203,7 +205,8 @@ impl SharedBackendClients {
                     .object_store_secret
                     .as_ref()
                     .map(SecretRef::redacted);
-                let client_config = Self::object_store_client_config(config, resolver)?;
+                let client_config = Self::object_store_client_config(config, resolver)?
+                    .expect("object-store config should be present when backend is enabled");
                 Ok(ObjectStoreClientTarget::new(
                     kind,
                     client_config,
@@ -241,21 +244,22 @@ fn resolve_object_store_client_config<R: SecretResolver>(
     config: &PlatformConfig,
     resolver: &R,
 ) -> Result<Option<ObjectStoreClientConfig>, SecretResolutionError> {
-    config
+    let Some(kind) = config.storage.object_store else {
+        return Ok(None);
+    };
+    let secret = config
         .storage
         .object_store_secret
         .as_ref()
-        .map(|secret| {
-            resolver.resolve(secret).and_then(|value| {
-                ObjectStoreClientConfig::from_secret_value(&value).map_err(|error| {
-                    SecretResolutionError::InvalidObjectStoreConfig {
-                        reference: secret.redacted(),
-                        message: error.to_string(),
-                    }
-                })
-            })
-        })
-        .transpose()
+        .ok_or(SecretResolutionError::MissingObjectStoreSecret { kind })?;
+    let value = resolver.resolve(secret)?;
+    let config = ObjectStoreClientConfig::from_secret_value(&value).map_err(|error| {
+        SecretResolutionError::InvalidObjectStoreConfig {
+            reference: secret.redacted(),
+            message: error.to_string(),
+        }
+    })?;
+    Ok(Some(config))
 }
 
 fn distributed_cache_backend(cache: DistributedCache) -> DistributedCacheBackend {

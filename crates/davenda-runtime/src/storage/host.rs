@@ -1,6 +1,6 @@
 use davenda_assets::{
-    ActiveAssetManifest, AssetDeliveryPlan, ContentFingerprint, DeliveryContext,
-    DeploymentRelease, ManagedAsset, ManagedAssetRevision, RevisionId, ThemeAssetPublicationPlan,
+    ActiveAssetManifest, AssetDeliveryPlan, ContentFingerprint, DeliveryContext, DeploymentRelease,
+    ManagedAsset, ManagedAssetRevision, RevisionId, ThemeAssetPublicationPlan,
     ThemeAssetPublicationReceipt,
 };
 use davenda_auth::{AuthModelPackage, DavendaAuth, DefaultSubject};
@@ -32,10 +32,8 @@ impl StorageHost {
         cdn_base_url: Option<String>,
         object_store: Option<ObjectStoreClientConfig>,
     ) -> Self {
-        let executor = StorageExecutor::from_topology_and_object_store(
-            planner.topology(),
-            object_store,
-        );
+        let executor =
+            StorageExecutor::from_topology_and_object_store(planner.topology(), object_store);
         Self {
             customer_app,
             single_node_escape_hatch: planner.single_node_escape_hatch(),

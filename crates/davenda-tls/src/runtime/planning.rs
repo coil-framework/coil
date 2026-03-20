@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use davenda_config::{SecretRef, TlsConfig, TlsMode, TlsProvider};
+use davenda_config::{AcmeChallenge, SecretRef, TlsConfig, TlsMode, TlsProvider};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -63,11 +63,13 @@ pub struct TlsRuntime {
     pub hot_reload_supported: bool,
     pub cloudflare_mode: Option<CloudflareEncryptionMode>,
     pub account_secret_ref: Option<String>,
+    configuration_error: Option<TlsModelError>,
 }
 
 impl TlsRuntime {
     pub fn from_config(config: &TlsConfig) -> Self {
         let account_secret_ref = config.account_secret.as_ref().map(SecretRef::redacted);
+        let requested_challenge = config.challenge.map(ChallengeStrategy::from);
 
         match config.mode {
             TlsMode::External => Self {
@@ -81,24 +83,30 @@ impl TlsRuntime {
                 hot_reload_supported: false,
                 cloudflare_mode: None,
                 account_secret_ref,
+                configuration_error: external_configuration_error(config),
             },
             TlsMode::Acme => {
                 let provider = match config.provider {
                     Some(TlsProvider::CloudflareDns) => CertificateProviderKind::CloudflareDns,
                     _ => CertificateProviderKind::Acme,
                 };
+                let challenge = match (config.provider, requested_challenge) {
+                    (Some(TlsProvider::CloudflareDns), None) => Some(ChallengeStrategy::Dns01),
+                    _ => requested_challenge,
+                };
 
                 Self {
                     mode: config.mode,
                     edge_mode: EdgeMode::DirectTermination,
                     provider: Some(provider),
-                    challenge: config.challenge.map(ChallengeStrategy::from),
+                    challenge,
                     state_store: CertificateStateStore::SharedSecrets,
-                    shared_across_nodes: true,
+                    shared_across_nodes: challenge_supports_shared_issuance(challenge),
                     requires_trusted_termination_metadata: false,
                     hot_reload_supported: true,
                     cloudflare_mode: None,
                     account_secret_ref,
+                    configuration_error: acme_configuration_error(config, challenge),
                 }
             }
             TlsMode::CloudflareOrigin => Self {
@@ -112,6 +120,7 @@ impl TlsRuntime {
                 hot_reload_supported: true,
                 cloudflare_mode: Some(CloudflareEncryptionMode::FullStrict),
                 account_secret_ref,
+                configuration_error: cloudflare_origin_configuration_error(config),
             },
             TlsMode::Manual => Self {
                 mode: config.mode,
@@ -124,6 +133,7 @@ impl TlsRuntime {
                 hot_reload_supported: true,
                 cloudflare_mode: None,
                 account_secret_ref,
+                configuration_error: manual_configuration_error(config),
             },
         }
     }
@@ -136,7 +146,7 @@ impl TlsRuntime {
 
     pub fn control_plane_scope(&self) -> String {
         format!(
-            "mode={:?};edge={:?};provider={:?};challenge={:?};store={:?};shared={};hot_reload={};cloudflare={:?};trusted_termination={};account={}",
+            "mode={:?};edge={:?};provider={:?};challenge={:?};store={:?};shared={};hot_reload={};cloudflare={:?};trusted_termination={};account={};config_error={}",
             self.mode,
             self.edge_mode,
             self.provider,
@@ -147,7 +157,15 @@ impl TlsRuntime {
             self.cloudflare_mode,
             self.requires_trusted_termination_metadata,
             self.account_secret_ref.as_deref().unwrap_or("none"),
+            self.configuration_error.is_some(),
         )
+    }
+
+    fn ensure_valid_configuration(&self) -> Result<(), TlsModelError> {
+        match &self.configuration_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
     }
 
     #[cfg(test)]
@@ -166,6 +184,8 @@ impl TlsPlanner {
         &self,
         bindings: Vec<HostnameBinding>,
     ) -> Result<IssuancePlan, TlsModelError> {
+        self.runtime.ensure_valid_configuration()?;
+
         if self.runtime.mode == TlsMode::External {
             return Err(TlsModelError::ExternalTerminationDoesNotIssue);
         }
@@ -200,6 +220,8 @@ impl TlsPlanner {
         &self,
         bundle: ManualCertificateBundle,
     ) -> Result<ManualCertificateBundle, TlsModelError> {
+        self.runtime.ensure_valid_configuration()?;
+
         if self.runtime.mode != TlsMode::Manual {
             return Err(TlsModelError::ManualModeRequiresImportedCertificate);
         }
@@ -219,6 +241,8 @@ impl TlsPlanner {
         record: &CertificateRecord,
         now: TlsInstant,
     ) -> Result<RenewalPlan, TlsModelError> {
+        self.runtime.ensure_valid_configuration()?;
+
         if !matches!(
             record.status,
             CertificateStatus::Active | CertificateStatus::RenewalDue
@@ -249,5 +273,126 @@ impl TlsPlanner {
             keep_serving_current_certificate: true,
             requires_hot_reload: self.runtime.hot_reload_supported,
         })
+    }
+}
+
+fn challenge_supports_shared_issuance(challenge: Option<ChallengeStrategy>) -> bool {
+    !matches!(
+        challenge,
+        Some(ChallengeStrategy::Http01 | ChallengeStrategy::TlsAlpn01)
+    )
+}
+
+fn external_configuration_error(config: &TlsConfig) -> Option<TlsModelError> {
+    config.provider.map(|provider| {
+        invalid_configuration(
+            "tls.provider",
+            format!(
+                "`{}` requires built-in certificate automation, but tls.mode=external disables issuance",
+                tls_provider_name(provider)
+            ),
+        )
+    }).or_else(|| {
+        config.challenge.map(|challenge| {
+            invalid_configuration(
+                "tls.challenge",
+                format!(
+                    "`{}` cannot be configured when tls.mode=external",
+                    acme_challenge_name(challenge)
+                ),
+            )
+        })
+    })
+}
+
+fn acme_configuration_error(
+    config: &TlsConfig,
+    challenge: Option<ChallengeStrategy>,
+) -> Option<TlsModelError> {
+    match config.provider {
+        Some(TlsProvider::CloudflareOriginCa) => Some(invalid_configuration(
+            "tls.provider",
+            "`cloudflare-origin-ca` requires tls.mode=cloudflare_origin".to_string(),
+        )),
+        Some(TlsProvider::ManualImport) => Some(invalid_configuration(
+            "tls.provider",
+            "`manual-import` requires tls.mode=manual".to_string(),
+        )),
+        Some(TlsProvider::CloudflareDns) => match challenge {
+            Some(ChallengeStrategy::Dns01) => None,
+            Some(challenge) => Some(TlsModelError::UnsupportedProviderChallenge {
+                provider: CertificateProviderKind::CloudflareDns.to_string(),
+                challenge: challenge.to_string(),
+            }),
+            None => Some(TlsModelError::UnsupportedProviderChallenge {
+                provider: CertificateProviderKind::CloudflareDns.to_string(),
+                challenge: "none".to_string(),
+            }),
+        },
+        None => None,
+    }
+}
+
+fn cloudflare_origin_configuration_error(config: &TlsConfig) -> Option<TlsModelError> {
+    match config.provider {
+        Some(TlsProvider::CloudflareDns) => Some(invalid_configuration(
+            "tls.provider",
+            "`cloudflare-dns` requires tls.mode=acme".to_string(),
+        )),
+        Some(TlsProvider::ManualImport) => Some(invalid_configuration(
+            "tls.provider",
+            "`manual-import` requires tls.mode=manual".to_string(),
+        )),
+        _ => config.challenge.map(|challenge| {
+            invalid_configuration(
+                "tls.challenge",
+                format!(
+                    "`{}` cannot be configured when tls.mode=cloudflare_origin",
+                    acme_challenge_name(challenge)
+                ),
+            )
+        }),
+    }
+}
+
+fn manual_configuration_error(config: &TlsConfig) -> Option<TlsModelError> {
+    match config.provider {
+        Some(TlsProvider::CloudflareDns) => Some(invalid_configuration(
+            "tls.provider",
+            "`cloudflare-dns` requires tls.mode=acme".to_string(),
+        )),
+        Some(TlsProvider::CloudflareOriginCa) => Some(invalid_configuration(
+            "tls.provider",
+            "`cloudflare-origin-ca` requires tls.mode=cloudflare_origin".to_string(),
+        )),
+        _ => config.challenge.map(|challenge| {
+            invalid_configuration(
+                "tls.challenge",
+                format!(
+                    "`{}` cannot be configured when tls.mode=manual",
+                    acme_challenge_name(challenge)
+                ),
+            )
+        }),
+    }
+}
+
+fn invalid_configuration(field: &'static str, reason: String) -> TlsModelError {
+    TlsModelError::InvalidConfiguration { field, reason }
+}
+
+fn tls_provider_name(provider: TlsProvider) -> &'static str {
+    match provider {
+        TlsProvider::CloudflareDns => "cloudflare-dns",
+        TlsProvider::CloudflareOriginCa => "cloudflare-origin-ca",
+        TlsProvider::ManualImport => "manual-import",
+    }
+}
+
+fn acme_challenge_name(challenge: AcmeChallenge) -> &'static str {
+    match challenge {
+        AcmeChallenge::Http01 => "http-01",
+        AcmeChallenge::TlsAlpn01 => "tls-alpn-01",
+        AcmeChallenge::Dns01 => "dns-01",
     }
 }

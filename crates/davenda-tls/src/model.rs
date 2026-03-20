@@ -106,6 +106,16 @@ impl ChallengeStrategy {
     }
 }
 
+impl fmt::Display for ChallengeStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http01 => f.write_str("http-01"),
+            Self::TlsAlpn01 => f.write_str("tls-alpn-01"),
+            Self::Dns01 => f.write_str("dns-01"),
+        }
+    }
+}
+
 impl From<AcmeChallenge> for ChallengeStrategy {
     fn from(value: AcmeChallenge) -> Self {
         match value {

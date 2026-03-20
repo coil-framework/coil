@@ -200,9 +200,6 @@ async fn issue_cloudflare_origin_certificate(
         });
     }
 
-    let not_after = TlsInstant::from_unix_seconds(
-        issued_at.as_unix_seconds() + CLOUDFLARE_ORIGIN_VALIDITY_DAYS * 24 * 60 * 60,
-    );
     build_record(
         provider,
         certificate_id,
@@ -210,7 +207,6 @@ async fn issue_cloudflare_origin_certificate(
         state_store,
         cloudflare_mode,
         issued_at,
-        not_after,
         response.result.certificate,
         private_key_to_pem(provider, &private_key)?,
         &protector,

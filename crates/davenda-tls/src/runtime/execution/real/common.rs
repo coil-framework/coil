@@ -1,12 +1,13 @@
 use std::{env, future::Future, net::SocketAddr, path::PathBuf};
 
 use openssl::{
+    asn1::Asn1Time,
     hash::MessageDigest,
     pkey::{PKey, Private},
     rsa::Rsa,
     stack::Stack,
     x509::extension::SubjectAlternativeName,
-    x509::{X509Extension, X509NameBuilder, X509Req, X509ReqBuilder},
+    x509::{X509, X509Extension, X509NameBuilder, X509Req, X509ReqBuilder},
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
@@ -230,12 +231,12 @@ pub(crate) fn build_record(
     state_store: CertificateStateStore,
     cloudflare_mode: Option<CloudflareEncryptionMode>,
     issued_at: TlsInstant,
-    not_after: TlsInstant,
     certificate_chain: String,
     private_key: String,
     protector: &TlsMaterialProtector,
 ) -> Result<CertificateRecord, TlsModelError> {
     let material = CertificateMaterial::new(certificate_chain, private_key)?;
+    let not_after = certificate_not_after(provider, material.certificate_chain_pem().as_str())?;
     let encrypted = protector.encrypt(&material)?;
     let mut record = CertificateRecord::new(
         certificate_id.clone(),
@@ -258,6 +259,35 @@ pub(crate) fn build_record(
     }
 
     Ok(record)
+}
+
+fn certificate_not_after(
+    provider: CertificateProviderKind,
+    certificate_chain: &str,
+) -> Result<TlsInstant, TlsModelError> {
+    let certificates = X509::stack_from_pem(certificate_chain.as_bytes())
+        .map_err(|error| provider_error(provider, "parse_certificate_chain", error))?;
+    let leaf = certificates
+        .first()
+        .ok_or_else(|| TlsModelError::InvalidCertificateMaterial {
+            field: "certificate_chain_pem",
+            reason: "certificate chain did not contain a leaf certificate".to_string(),
+        })?;
+    let epoch = Asn1Time::from_unix(0)
+        .map_err(|error| provider_error(provider, "parse_not_after", error))?;
+    let diff = epoch
+        .diff(leaf.not_after())
+        .map_err(|error| provider_error(provider, "parse_not_after", error))?;
+    let days = u64::try_from(diff.days).map_err(|_| TlsModelError::InvalidCertificateMaterial {
+        field: "certificate_chain_pem",
+        reason: "certificate `notAfter` is before the unix epoch".to_string(),
+    })?;
+    let secs = u64::try_from(diff.secs).map_err(|_| TlsModelError::InvalidCertificateMaterial {
+        field: "certificate_chain_pem",
+        reason: "certificate `notAfter` is before the unix epoch".to_string(),
+    })?;
+    let total_seconds = days.saturating_mul(24 * 60 * 60).saturating_add(secs);
+    Ok(TlsInstant::from_unix_seconds(total_seconds))
 }
 
 pub(crate) fn decrypt_material(

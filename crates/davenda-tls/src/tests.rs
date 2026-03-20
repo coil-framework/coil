@@ -49,6 +49,45 @@ fn acme_dns_runtime_prefers_shared_state_and_hot_reload() {
 }
 
 #[test]
+fn acme_http_runtime_marks_edge_challenges_as_non_shared() {
+    let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Http01, None));
+    let plan = runtime
+        .planner()
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )])
+        .unwrap();
+
+    assert_eq!(plan.challenge, Some(ChallengeStrategy::Http01));
+    assert!(!plan.shared_across_nodes);
+    assert!(plan.requires_hot_reload);
+}
+
+#[test]
+fn cloudflare_dns_runtime_rejects_non_dns_challenge_configuration() {
+    let runtime = TlsRuntime::from_config(&acme_config(
+        AcmeChallenge::Http01,
+        Some(TlsProvider::CloudflareDns),
+    ));
+    let error = runtime
+        .planner()
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )])
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        TlsModelError::UnsupportedProviderChallenge {
+            provider: CertificateProviderKind::CloudflareDns.to_string(),
+            challenge: ChallengeStrategy::Http01.to_string(),
+        }
+    );
+}
+
+#[test]
 fn cloudflare_origin_runtime_forces_full_strict_origin_behavior() {
     let runtime = TlsRuntime::from_config(&TlsConfig {
         mode: TlsMode::CloudflareOrigin,
@@ -74,6 +113,31 @@ fn cloudflare_origin_runtime_forces_full_strict_origin_behavior() {
 }
 
 #[test]
+fn cloudflare_origin_runtime_rejects_acme_challenge_configuration() {
+    let runtime = TlsRuntime::from_config(&TlsConfig {
+        mode: TlsMode::CloudflareOrigin,
+        challenge: Some(AcmeChallenge::Dns01),
+        provider: Some(TlsProvider::CloudflareOriginCa),
+        account_secret: None,
+    });
+    let error = runtime
+        .planner()
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("origin.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )])
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        TlsModelError::InvalidConfiguration {
+            field: "tls.challenge",
+            reason: "`dns-01` cannot be configured when tls.mode=cloudflare_origin".to_string(),
+        }
+    );
+}
+
+#[test]
 fn external_termination_uses_trusted_metadata_and_does_not_issue_certificates() {
     let runtime = TlsRuntime::from_config(&TlsConfig {
         mode: TlsMode::External,
@@ -96,6 +160,46 @@ fn external_termination_uses_trusted_metadata_and_does_not_issue_certificates() 
             )])
             .unwrap_err(),
         TlsModelError::ExternalTerminationDoesNotIssue
+    );
+}
+
+#[test]
+fn manual_runtime_rejects_challenge_configuration() {
+    let runtime = TlsRuntime::from_config(&TlsConfig {
+        mode: TlsMode::Manual,
+        challenge: Some(AcmeChallenge::TlsAlpn01),
+        provider: Some(TlsProvider::ManualImport),
+        account_secret: None,
+    });
+    let bundle = ManualCertificateBundle::new(
+        CertificateRecord::new(
+            CertificateId::new("cert-manual-invalid").unwrap(),
+            CertificateProviderKind::ManualImport,
+            CertificateStatus::Active,
+            CertificateFingerprint::new("sha256:manual-invalid").unwrap(),
+            TlsInstant::from_unix_seconds(1_000),
+            TlsInstant::from_unix_seconds(4_000_000),
+            SecretMaterialRef::new("secrets/tls/cert-manual-invalid").unwrap(),
+            CertificateStateStore::OperatorManaged,
+        ),
+        CertificateMaterial::new(
+            "-----BEGIN CERTIFICATE-----\nmanual\n-----END CERTIFICATE-----\n",
+            "-----BEGIN PRIVATE KEY-----\nmanual\n-----END PRIVATE KEY-----\n",
+        )
+        .unwrap(),
+    );
+
+    let error = runtime
+        .planner()
+        .import_manual_certificate(bundle)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        TlsModelError::InvalidConfiguration {
+            field: "tls.challenge",
+            reason: "`tls-alpn-01` cannot be configured when tls.mode=manual".to_string(),
+        }
     );
 }
 

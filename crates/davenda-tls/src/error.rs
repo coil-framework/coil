@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::TlsInstant;
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum TlsModelError {
     #[error("`{field}` cannot be empty")]
     EmptyField { field: &'static str },
@@ -61,6 +61,8 @@ pub enum TlsModelError {
     MissingProviderCredential { provider: String },
     #[error("tls provider `{provider}` does not support challenge `{challenge}`")]
     UnsupportedProviderChallenge { provider: String, challenge: String },
+    #[error("invalid tls configuration for `{field}`: {reason}")]
+    InvalidConfiguration { field: &'static str, reason: String },
     #[error("tls provider `{provider}` failed during `{operation}`: {reason}")]
     ProviderRequestFailed {
         provider: String,

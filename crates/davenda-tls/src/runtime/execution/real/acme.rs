@@ -233,7 +233,6 @@ async fn issue_with_directory(
     )
     .map_err(|error| provider_error(provider, "encode_private_key", error))?;
 
-    let not_after = TlsInstant::from_unix_seconds(issued_at.as_unix_seconds() + 90 * 24 * 60 * 60);
     build_record(
         provider,
         certificate_id,
@@ -241,7 +240,6 @@ async fn issue_with_directory(
         state_store,
         cloudflare_mode,
         issued_at,
-        not_after,
         chain,
         private_key,
         protector,
@@ -253,6 +251,24 @@ fn resolve_challenge(
     secret: &ProviderSecret,
     requested: Option<ChallengeStrategy>,
 ) -> Result<ChallengeStrategy, TlsModelError> {
+    if provider == CertificateProviderKind::CloudflareDns {
+        return match requested {
+            Some(ChallengeStrategy::Dns01) | None => {
+                if secret.has_cloudflare_dns_credentials() {
+                    Ok(ChallengeStrategy::Dns01)
+                } else {
+                    Err(TlsModelError::MissingProviderCredential {
+                        provider: provider.to_string(),
+                    })
+                }
+            }
+            Some(challenge) => Err(TlsModelError::UnsupportedProviderChallenge {
+                provider: provider.to_string(),
+                challenge: challenge.to_string(),
+            }),
+        };
+    }
+
     if let Some(challenge) = requested {
         return match challenge {
             ChallengeStrategy::Dns01 if secret.has_cloudflare_dns_credentials() => Ok(challenge),

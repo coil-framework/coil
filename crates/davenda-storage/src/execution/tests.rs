@@ -292,6 +292,31 @@ fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
 }
 
 #[test]
+fn object_store_execution_rejects_implicit_environment_credentials() {
+    let server = ObjectStoreTestServer::spawn();
+    let planner = planner();
+    let object_store = ObjectStoreClientConfig::new("runtime", "us-east-1")
+        .unwrap()
+        .with_endpoint_url(server.endpoint())
+        .unwrap();
+    let executor =
+        StorageExecutor::from_topology_and_object_store(planner.topology(), Some(object_store));
+    let plan = planner
+        .plan_scalable_write(
+            StoragePlanRequest::new("uploads/marketing/hero.webp")
+                .with_storage_class(StorageClass::PublicUpload),
+        )
+        .unwrap();
+
+    assert_eq!(
+        executor.execute_write(&plan, b"hero-bytes").unwrap_err(),
+        StorageExecutionError::InvalidObjectStoreConfiguration {
+            detail: "runtime-backed object-store clients require explicit access_key_id and secret_access_key in the structured object-store secret".to_string(),
+        }
+    );
+}
+
+#[test]
 fn local_disk_execution_writes_reads_and_resolves_local_delivery() {
     let mut config = test_config();
     config.storage.object_store = None;

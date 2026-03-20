@@ -97,7 +97,10 @@ impl TlsCertificateExecutor for IssuedCertificateExecutor {
             plan.cloudflare_mode,
             issued_at,
             not_after,
-            format!("issue:{}:{:?}:{:?}", plan.provider, plan.challenge, plan.account_secret),
+            format!(
+                "issue:{}:{:?}:{:?}",
+                plan.provider, plan.challenge, plan.account_secret
+            ),
         )
     }
 
@@ -129,10 +132,7 @@ impl TlsCertificateExecutor for IssuedCertificateExecutor {
             not_after,
             format!(
                 "renew:{}:{}:{:?}:{:?}",
-                certificate_id,
-                replacement_certificate_id_for_log,
-                plan.provider,
-                plan.challenge
+                certificate_id, replacement_certificate_id_for_log, plan.provider, plan.challenge
             ),
         )
     }
@@ -197,7 +197,8 @@ impl TlsCertificateExecutor for AcmeTlsCertificateExecutor {
         certificate_id: CertificateId,
         issued_at: TlsInstant,
     ) -> Result<CertificateRecord, TlsModelError> {
-        self.inner.issue_certificate(plan, certificate_id, issued_at)
+        self.inner
+            .issue_certificate(plan, certificate_id, issued_at)
     }
 
     fn renew_certificate(
@@ -250,7 +251,8 @@ impl TlsCertificateExecutor for CloudflareTlsCertificateExecutor {
         certificate_id: CertificateId,
         issued_at: TlsInstant,
     ) -> Result<CertificateRecord, TlsModelError> {
-        self.inner.issue_certificate(plan, certificate_id, issued_at)
+        self.inner
+            .issue_certificate(plan, certificate_id, issued_at)
     }
 
     fn renew_certificate(

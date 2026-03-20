@@ -1,7 +1,8 @@
 use super::*;
 use davenda_cache::DistributedCacheBackend;
 use davenda_config::{
-    DatabaseDriver, DistributedCache, JobBackend, ObjectStoreKind, SecretRef, SessionStore,
+    DatabaseDriver, DistributedCache, Environment, JobBackend, ObjectStoreKind, SecretRef,
+    SessionStore,
 };
 use davenda_storage::execution::{ObjectStoreClientConfig, ObjectStoreCredentials};
 use std::collections::BTreeMap;
@@ -260,7 +261,7 @@ fn resolve_object_store_client_config<R: SecretResolver>(
                 message: error.to_string(),
             }
         })?;
-    validate_runtime_object_store_config(secret, &object_store_config)?;
+    validate_runtime_object_store_config(config.app.environment, secret, &object_store_config)?;
     Ok(Some(object_store_config))
 }
 
@@ -272,6 +273,7 @@ fn distributed_cache_backend(cache: DistributedCache) -> DistributedCacheBackend
 }
 
 fn validate_runtime_object_store_config(
+    environment: Environment,
     secret: &SecretRef,
     config: &ObjectStoreClientConfig,
 ) -> Result<(), SecretResolutionError> {
@@ -283,13 +285,201 @@ fn validate_runtime_object_store_config(
     }
 
     if let Some(endpoint_url) = config.endpoint_url.as_deref() {
-        if endpoint_url.starts_with("http://") && !config.allow_http {
+        if endpoint_url.starts_with("http://") && !matches!(environment, Environment::Development) {
             return Err(SecretResolutionError::InvalidObjectStoreConfig {
                 reference: secret.redacted(),
-                message: "runtime-backed object-store endpoints must enable allow_http explicitly when using http".to_string(),
+                message: "runtime-backed object-store endpoints must use https outside development"
+                    .to_string(),
             });
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BACKEND_TEST_CONFIG: &str = r#"
+[app]
+name = "showcase-events"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+single_node_escape_hatch = "explicit_single_node"
+object_store = "s3"
+object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
+local_root = "/tmp/davenda-runtime-tests"
+deployment = "single_node"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+localized_routes = true
+
+[seo]
+canonical_host = "www.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 101
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#;
+
+    fn backend_test_config(environment: Environment) -> PlatformConfig {
+        let environment_value = match environment {
+            Environment::Development => "development",
+            Environment::Staging => "staging",
+            Environment::Production => "production",
+        };
+        PlatformConfig::from_toml_str(&BACKEND_TEST_CONFIG.replace(
+            "environment = \"production\"",
+            &format!("environment = \"{environment_value}\""),
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn object_store_backend_requires_explicit_structured_credentials() {
+        let config = backend_test_config(Environment::Production);
+        let resolver = StaticSecretResolver::new()
+            .with_secret(
+                SecretRef::Env {
+                    var: "OBJECT_STORE_URL".to_string(),
+                },
+                r#"
+endpoint_url = "https://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+signed_url_ttl_secs = 900
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(
+            SharedBackendClients::object_store_client_config(&config, &resolver).unwrap_err(),
+            SecretResolutionError::InvalidObjectStoreConfig {
+                reference: "env:OBJECT_STORE_URL".to_string(),
+                message:
+                    "structured object-store secrets must include explicit access_key_id and secret_access_key"
+                        .to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn object_store_backend_rejects_http_endpoints_outside_development() {
+        let config = backend_test_config(Environment::Production);
+        let resolver = StaticSecretResolver::new()
+            .with_secret(
+                SecretRef::Env {
+                    var: "OBJECT_STORE_URL".to_string(),
+                },
+                r#"
+endpoint_url = "http://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(
+            SharedBackendClients::object_store_client_config(&config, &resolver).unwrap_err(),
+            SecretResolutionError::InvalidObjectStoreConfig {
+                reference: "env:OBJECT_STORE_URL".to_string(),
+                message: "runtime-backed object-store endpoints must use https outside development"
+                    .to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn object_store_backend_allows_http_endpoints_in_development() {
+        let config = backend_test_config(Environment::Development);
+        let resolver = StaticSecretResolver::new()
+            .with_secret(
+                SecretRef::Env {
+                    var: "OBJECT_STORE_URL".to_string(),
+                },
+                r#"
+endpoint_url = "http://127.0.0.1:9000"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#,
+            )
+            .unwrap();
+
+        let object_store =
+            SharedBackendClients::object_store_client_config(&config, &resolver).unwrap();
+        assert_eq!(
+            object_store.and_then(|config| config.endpoint_url),
+            Some("http://127.0.0.1:9000".to_string())
+        );
+    }
 }

@@ -112,6 +112,8 @@ enum ObjectStoreClientState {
 }
 
 fn build_store(config: &ObjectStoreClientConfig) -> Result<AmazonS3, String> {
+    validate_runtime_config(config)?;
+
     let mut builder = AmazonS3Builder::new()
         .with_bucket_name(config.bucket.clone())
         .with_region(config.region.clone())
@@ -137,6 +139,25 @@ fn build_store(config: &ObjectStoreClientConfig) -> Result<AmazonS3, String> {
         }
     }
     builder.build().map_err(|error| error.to_string())
+}
+
+fn validate_runtime_config(config: &ObjectStoreClientConfig) -> Result<(), String> {
+    if matches!(&config.credentials, ObjectStoreCredentials::Environment) {
+        return Err(
+            "runtime-backed object-store clients require explicit access_key_id and secret_access_key in the structured object-store secret"
+                .to_string(),
+        );
+    }
+
+    match config.endpoint_url.as_deref() {
+        Some(endpoint_url) if endpoint_url.starts_with("http://") && !config.allow_http => {
+            Err("object-store endpoint uses http but allow_http is not enabled".to_string())
+        }
+        None if config.allow_http => Err(
+            "allow_http requires an explicit endpoint_url in the object-store config".to_string(),
+        ),
+        _ => Ok(()),
+    }
 }
 
 fn run_object_store_future<T, F>(future: F) -> Result<T, String>

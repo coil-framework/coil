@@ -1,4 +1,5 @@
 use super::*;
+use crate::server::SecretResolutionError;
 use davenda_tls::{
     AcmeTlsCertificateExecutor, CertificateMaterial, CloudflareTlsCertificateExecutor,
     ManualCertificateBundle, ManualImportTlsCertificateExecutor, TlsCertificateExecutor,
@@ -16,6 +17,8 @@ pub enum RuntimeTlsError {
     Tls(#[from] TlsModelError),
     #[error(transparent)]
     Data(#[from] davenda_data::DataModelError),
+    #[error(transparent)]
+    Secret(#[from] SecretResolutionError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +47,7 @@ impl TlsHost {
         runtime: TlsRuntimeServices,
         _data_runtime: DataRuntimeServices,
         shared_backend_namespace: String,
+        account_secret: Option<String>,
     ) -> Result<Self, RuntimeTlsError> {
         #[cfg(test)]
         let material_protector = TlsMaterialProtector::from_seed(format!(
@@ -66,7 +70,7 @@ impl TlsHost {
                 Arc::new(AcmeTlsCertificateExecutor::new(
                     control_plane.clone(),
                     material_protector,
-                    runtime.account_secret_ref.clone(),
+                    account_secret.clone(),
                 ))
             }
             Some(davenda_tls::CertificateProviderKind::CloudflareDns)
@@ -77,7 +81,7 @@ impl TlsHost {
                         .expect("cloudflare provider is selected when creating executor"),
                     control_plane.clone(),
                     material_protector,
-                    runtime.account_secret_ref.clone(),
+                    account_secret.clone(),
                 ))
             }
             Some(davenda_tls::CertificateProviderKind::ManualImport) | None => Arc::new(

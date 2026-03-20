@@ -1,4 +1,4 @@
-use std::{env, future::Future, net::SocketAddr, path::PathBuf};
+use std::{future::Future, net::SocketAddr, path::PathBuf};
 
 use openssl::{
     asn1::Asn1Time,
@@ -46,12 +46,12 @@ pub(crate) struct ProviderSecret {
 impl ProviderSecret {
     pub(crate) fn resolve(
         provider: CertificateProviderKind,
-        reference: Option<&str>,
+        secret_value: Option<&str>,
     ) -> Result<Self, TlsModelError> {
-        let reference = reference.ok_or_else(|| TlsModelError::MissingProviderCredential {
+        let raw = secret_value.ok_or_else(|| TlsModelError::MissingProviderCredential {
             provider: provider.to_string(),
         })?;
-        let raw = resolve_secret(reference)?;
+        let raw = raw.to_string();
         let payload = serde_json::from_str::<ProviderSecretPayload>(&raw).unwrap_or_default();
         Ok(Self {
             provider,
@@ -392,20 +392,4 @@ pub(crate) fn build_certificate_request(
 
 pub(crate) fn challenge_domain(hostname: &str) -> String {
     hostname.trim_start_matches("*.").to_string()
-}
-
-pub(crate) fn resolve_secret(reference: &str) -> Result<String, TlsModelError> {
-    if let Some(var) = reference.strip_prefix("env:") {
-        return env::var(var).map_err(|_| TlsModelError::MissingProviderCredential {
-            provider: format!("env:{var}"),
-        });
-    }
-
-    if reference.starts_with("secret-manager:") {
-        return Err(TlsModelError::MissingProviderCredential {
-            provider: reference.to_string(),
-        });
-    }
-
-    Ok(reference.to_string())
 }

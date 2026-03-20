@@ -2910,3 +2910,43 @@ fn tls_host_rejects_external_termination_issuance_and_preserves_cloudflare_origi
         Some(CloudflareEncryptionMode::FullStrict)
     );
 }
+
+#[test]
+fn tls_host_uses_runtime_secret_resolvers_for_provider_credentials() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.tls.account_secret = Some(davenda_config::SecretRef::SecretManager {
+        provider: "vault".to_string(),
+        key: "tls/cloudflare".to_string(),
+    });
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::SecretManager {
+                provider: "vault".to_string(),
+                key: "tls/cloudflare".to_string(),
+            },
+            "{}",
+        )
+        .unwrap();
+    let mut host = plan.tls_host_with_secret_resolver(&resolver).unwrap();
+
+    let error = host
+        .issue_certificate(
+            vec![HostnameBinding::new(
+                Hostname::new("www.example.com").unwrap(),
+                CustomerAppId::new("showcase-events").unwrap(),
+            )],
+            CertificateId::new("cert-runtime-secret-resolution").unwrap(),
+            TlsInstant::from_unix_seconds(1_700_000_000),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        RuntimeTlsError::Tls(TlsModelError::MissingProviderCredential {
+            provider: CertificateProviderKind::CloudflareDns.to_string(),
+        })
+    );
+}

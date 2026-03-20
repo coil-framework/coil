@@ -245,11 +245,26 @@ impl RuntimePlan {
     }
 
     pub fn tls_host(&self) -> Result<TlsHost, RuntimeTlsError> {
+        self.tls_host_with_secret_resolver(&crate::server::EnvironmentSecretResolver)
+    }
+
+    pub fn tls_host_with_secret_resolver<R: crate::server::SecretResolver>(
+        &self,
+        resolver: &R,
+    ) -> Result<TlsHost, RuntimeTlsError> {
+        let account_secret = self
+            .config
+            .tls
+            .account_secret
+            .as_ref()
+            .map(|secret| resolver.resolve(secret))
+            .transpose()?;
         TlsHost::new(
             self.config.app.name.clone(),
             self.tls.clone(),
             self.data.clone(),
             self.shared_backend_scope.clone(),
+            account_secret,
         )
     }
 

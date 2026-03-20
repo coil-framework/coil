@@ -3,7 +3,7 @@ use davenda_cache::DistributedCacheBackend;
 use davenda_config::{
     DatabaseDriver, DistributedCache, JobBackend, ObjectStoreKind, SecretRef, SessionStore,
 };
-use davenda_storage::execution::ObjectStoreClientConfig;
+use davenda_storage::execution::{ObjectStoreClientConfig, ObjectStoreCredentials};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -253,13 +253,15 @@ fn resolve_object_store_client_config<R: SecretResolver>(
         .as_ref()
         .ok_or(SecretResolutionError::MissingObjectStoreSecret { kind })?;
     let value = resolver.resolve(secret)?;
-    let config = ObjectStoreClientConfig::from_secret_value(&value).map_err(|error| {
-        SecretResolutionError::InvalidObjectStoreConfig {
-            reference: secret.redacted(),
-            message: error.to_string(),
-        }
-    })?;
-    Ok(Some(config))
+    let object_store_config =
+        ObjectStoreClientConfig::from_secret_value(&value).map_err(|error| {
+            SecretResolutionError::InvalidObjectStoreConfig {
+                reference: secret.redacted(),
+                message: error.to_string(),
+            }
+        })?;
+    validate_runtime_object_store_config(secret, &object_store_config)?;
+    Ok(Some(object_store_config))
 }
 
 fn distributed_cache_backend(cache: DistributedCache) -> DistributedCacheBackend {
@@ -267,4 +269,27 @@ fn distributed_cache_backend(cache: DistributedCache) -> DistributedCacheBackend
         DistributedCache::Redis => DistributedCacheBackend::Redis,
         DistributedCache::Valkey => DistributedCacheBackend::Valkey,
     }
+}
+
+fn validate_runtime_object_store_config(
+    secret: &SecretRef,
+    config: &ObjectStoreClientConfig,
+) -> Result<(), SecretResolutionError> {
+    if matches!(&config.credentials, ObjectStoreCredentials::Environment) {
+        return Err(SecretResolutionError::InvalidObjectStoreConfig {
+            reference: secret.redacted(),
+            message: "structured object-store secrets must include explicit access_key_id and secret_access_key".to_string(),
+        });
+    }
+
+    if let Some(endpoint_url) = config.endpoint_url.as_deref() {
+        if endpoint_url.starts_with("http://") && !config.allow_http {
+            return Err(SecretResolutionError::InvalidObjectStoreConfig {
+                reference: secret.redacted(),
+                message: "runtime-backed object-store endpoints must enable allow_http explicitly when using http".to_string(),
+            });
+        }
+    }
+
+    Ok(())
 }

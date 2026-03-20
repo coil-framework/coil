@@ -18,8 +18,6 @@ use crate::runtime::JobSpec;
 #[cfg(not(test))]
 use sqlx::{Postgres, Row};
 #[cfg(not(test))]
-use std::env;
-#[cfg(not(test))]
 use std::future::Future;
 #[cfg(not(test))]
 use tokio::runtime::Runtime;
@@ -154,7 +152,8 @@ struct ProductionPostgresSharedJobsStore {
 #[cfg(not(test))]
 impl ProductionPostgresSharedJobsStore {
     fn open(runtime: &JobsRuntime, namespace: String) -> Self {
-        let url = jobs_backend_url(runtime.backend);
+        let url = jobs_backend_url(runtime.backend, std::env::var("DATABASE_URL").ok())
+            .unwrap_or_else(|error| panic!("{error}"));
         let pool = sqlx::postgres::PgPoolOptions::new()
             .min_connections(1)
             .max_connections(4)
@@ -308,14 +307,36 @@ impl ProductionPostgresSharedJobsStore {
     }
 }
 
-#[cfg(not(test))]
-fn jobs_backend_url(backend: davenda_config::JobBackend) -> String {
+fn jobs_backend_url(
+    backend: davenda_config::JobBackend,
+    database_url: Option<String>,
+) -> Result<String, crate::error::JobsModelError> {
     match backend {
-        davenda_config::JobBackend::Redis => {
-            env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/davenda".to_string())
-        }
-        davenda_config::JobBackend::Valkey => {
-            env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/davenda".to_string())
-        }
+        davenda_config::JobBackend::Redis | davenda_config::JobBackend::Valkey => database_url
+            .ok_or_else(|| {
+                crate::error::JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+                    backend,
+                    namespace: "missing environment variable DATABASE_URL".to_string(),
+                }
+            }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::JobsModelError;
+
+    #[test]
+    fn live_jobs_backend_requires_explicit_database_url() {
+        let error = jobs_backend_url(davenda_config::JobBackend::Redis, None).unwrap_err();
+
+        assert_eq!(
+            error,
+            JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+                backend: davenda_config::JobBackend::Redis,
+                namespace: "missing environment variable DATABASE_URL".to_string(),
+            }
+        );
     }
 }

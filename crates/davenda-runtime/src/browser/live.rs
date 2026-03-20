@@ -4,7 +4,6 @@ use super::session::{
     BrowserInstant, BrowserSessionRecord, DistributedSessionStoreRuntime, SessionStoreBackendKind,
 };
 use sqlx::{Postgres, Row as PgRow};
-use std::env;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -99,7 +98,7 @@ impl ProductionPostgresSharedSessionStore {
         kind: SessionStoreBackendKind,
         namespace: String,
     ) -> Result<Self, BrowserHostBuildError> {
-        let url = session_backend_url();
+        let url = session_backend_url(kind, &namespace, std::env::var("DATABASE_URL").ok())?;
         let pool = sqlx::postgres::PgPoolOptions::new()
             .min_connections(1)
             .max_connections(4)
@@ -269,8 +268,19 @@ impl ProductionPostgresSharedSessionStore {
     }
 }
 
-fn session_backend_url() -> String {
-    env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/davenda".to_string())
+fn session_backend_url(
+    kind: SessionStoreBackendKind,
+    namespace: &str,
+    database_url: Option<String>,
+) -> Result<String, BrowserHostBuildError> {
+    database_url.ok_or_else(
+        || BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
+            kind,
+            scope: namespace.to_string(),
+            path: "DATABASE_URL".to_string(),
+            reason: "missing environment variable DATABASE_URL".to_string(),
+        },
+    )
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -326,5 +336,26 @@ impl SessionStoreSnapshot {
                 session_id: session_id.to_string(),
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_session_backend_requires_explicit_database_url() {
+        let error = session_backend_url(SessionStoreBackendKind::Database, "browser-live", None)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
+                kind: SessionStoreBackendKind::Database,
+                scope: "browser-live".to_string(),
+                path: "DATABASE_URL".to_string(),
+                reason: "missing environment variable DATABASE_URL".to_string(),
+            }
+        );
     }
 }

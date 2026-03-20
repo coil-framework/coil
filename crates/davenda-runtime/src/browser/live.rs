@@ -16,6 +16,11 @@ pub(crate) fn live_shared_runtime(
     _root: impl Into<PathBuf>,
 ) -> Result<Arc<dyn DistributedSessionStoreRuntime>, BrowserHostBuildError> {
     let namespace = namespace.into();
+    if kind == SessionStoreBackendKind::Local {
+        return Err(BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime {
+            kind,
+        });
+    }
     Ok(Arc::new(ProductionPostgresSharedSessionStoreRuntime::new(
         kind,
         namespace,

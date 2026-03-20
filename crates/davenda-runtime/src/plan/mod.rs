@@ -31,29 +31,10 @@ impl SharedJobsRuntimeHandle {
     pub(crate) fn get_or_init(
         &self,
         runtime: &JobsRuntimeServices,
-        shared_state_root: impl Into<PathBuf>,
     ) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
         let namespace = self.namespace.clone();
-        #[cfg(test)]
-        let _shared_state_root = shared_state_root.into();
-        #[cfg(not(test))]
-        let shared_state_root = shared_state_root.into();
         self.runtime
-            .get_or_init(|| {
-                #[cfg(test)]
-                {
-                    crate::plan::shared_jobs_runtime_for_test(runtime, namespace.clone())
-                }
-
-                #[cfg(not(test))]
-                {
-                    davenda_jobs::JobsBackendAdapter::live_shared_runtime(
-                        runtime,
-                        namespace.clone(),
-                        shared_state_root,
-                    )
-                }
-            })
+            .get_or_init(|| shared_jobs_runtime(runtime, namespace.clone()))
             .clone()
     }
 }
@@ -158,7 +139,7 @@ impl RuntimePlan {
         let namespace = self.shared_backend_namespace();
         let shared_runtime = self
             .shared_jobs_runtime
-            .get_or_init(&self.jobs, self.shared_state_root.clone());
+            .get_or_init(&self.jobs);
         Ok(JobsHost::new(
             self.config.app.name.clone(),
             scheduler_node_id,
@@ -236,11 +217,7 @@ impl RuntimePlan {
                         davenda_cache::CacheBackendKind::Valkey
                     }
                 };
-                let runtime = davenda_cache::DistributedCacheClient::live_shared_runtime(
-                    backend,
-                    shared_namespace.clone(),
-                    self.shared_state_root.clone(),
-                );
+                let runtime = shared_cache_runtime(backend, shared_namespace.clone());
                 return Ok(CacheHost::new(
                     self.config.app.name.clone(),
                     namespace,
@@ -363,4 +340,36 @@ impl RuntimePlan {
     pub(crate) fn shared_state_root(&self) -> &PathBuf {
         &self.shared_state_root
     }
+}
+
+#[cfg(test)]
+fn shared_jobs_runtime(
+    runtime: &JobsRuntimeServices,
+    namespace: String,
+) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+    crate::plan::shared_jobs_runtime_for_test(runtime, namespace)
+}
+
+#[cfg(not(test))]
+fn shared_jobs_runtime(
+    runtime: &JobsRuntimeServices,
+    namespace: String,
+) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+    davenda_jobs::JobsBackendAdapter::live_shared_runtime(runtime, namespace, PathBuf::new())
+}
+
+#[cfg(test)]
+fn shared_cache_runtime(
+    backend: davenda_cache::CacheBackendKind,
+    namespace: String,
+) -> Arc<dyn davenda_cache::DistributedCacheRuntime> {
+    crate::plan::shared_cache_runtime_for_test(backend, namespace)
+}
+
+#[cfg(not(test))]
+fn shared_cache_runtime(
+    backend: davenda_cache::CacheBackendKind,
+    namespace: String,
+) -> Arc<dyn davenda_cache::DistributedCacheRuntime> {
+    davenda_cache::DistributedCacheClient::live_shared_runtime(backend, namespace, PathBuf::new())
 }

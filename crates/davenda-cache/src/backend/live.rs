@@ -6,6 +6,8 @@ use std::env;
 
 #[cfg(not(test))]
 use redis::Commands;
+#[cfg(test)]
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::state::CacheBackendState;
 use super::{CacheBackendKind, DistributedCacheRuntime};
@@ -13,7 +15,6 @@ use crate::{
     CacheEntry, CacheInstant, CacheKey, CacheLookup, CacheMetrics, CacheModelError, FillDecision,
     FillLease, InvalidationSet, RequestCoalescingMode,
 };
-use rusqlite::{Connection, OptionalExtension, Row, params};
 
 #[cfg(not(test))]
 pub fn live_shared_runtime(
@@ -161,15 +162,15 @@ impl ProductionRedisSharedCacheStore {
 #[cfg(not(test))]
 fn cache_backend_url(kind: CacheBackendKind) -> String {
     match kind {
-        CacheBackendKind::Redis => env::var("REDIS_URL").unwrap_or_else(|_| {
-            "redis://127.0.0.1/".to_string()
-        }),
-        CacheBackendKind::Valkey => env::var("VALKEY_URL").or_else(|_| env::var("REDIS_URL")).unwrap_or_else(|_| {
-            "redis://127.0.0.1/".to_string()
-        }),
-        CacheBackendKind::Local => env::var("REDIS_URL").unwrap_or_else(|_| {
-            "redis://127.0.0.1/".to_string()
-        }),
+        CacheBackendKind::Redis => {
+            env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_string())
+        }
+        CacheBackendKind::Valkey => env::var("VALKEY_URL")
+            .or_else(|_| env::var("REDIS_URL"))
+            .unwrap_or_else(|_| "redis://127.0.0.1/".to_string()),
+        CacheBackendKind::Local => {
+            panic!("local cache backends are test-only and cannot back a live shared runtime")
+        }
     }
 }
 
@@ -183,10 +184,12 @@ pub fn live_shared_runtime(
 }
 
 #[derive(Debug)]
+#[cfg(test)]
 struct LiveSharedCacheRuntime {
     store: LiveSharedCacheStore,
 }
 
+#[cfg(test)]
 impl LiveSharedCacheRuntime {
     fn new(kind: CacheBackendKind, namespace: String, root: PathBuf) -> Self {
         Self {
@@ -195,6 +198,7 @@ impl LiveSharedCacheRuntime {
     }
 }
 
+#[cfg(test)]
 impl DistributedCacheRuntime for LiveSharedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
         self.store
@@ -248,11 +252,13 @@ impl DistributedCacheRuntime for LiveSharedCacheRuntime {
 }
 
 #[derive(Debug)]
+#[cfg(test)]
 struct LiveSharedCacheStore {
     connection: Mutex<Connection>,
     namespace: String,
 }
 
+#[cfg(test)]
 impl LiveSharedCacheStore {
     fn open(kind: CacheBackendKind, namespace: String, root: PathBuf) -> Self {
         let path = live_database_path(kind, &namespace, root);
@@ -396,12 +402,14 @@ impl LiveSharedCacheStore {
     }
 }
 
+#[cfg(test)]
 fn live_database_path(kind: CacheBackendKind, namespace: &str, root: PathBuf) -> PathBuf {
     root.join("cache")
         .join(cache_kind_slug(kind))
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
+#[cfg(test)]
 fn cache_kind_slug(kind: CacheBackendKind) -> &'static str {
     match kind {
         CacheBackendKind::Local => "local",
@@ -410,6 +418,7 @@ fn cache_kind_slug(kind: CacheBackendKind) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn sanitize_namespace(namespace: &str) -> String {
     namespace
         .chars()

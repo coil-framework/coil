@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use super::state::JobsBackendState;
@@ -17,7 +16,10 @@ use std::future::Future;
 use sqlx::{Postgres, Row};
 #[cfg(not(test))]
 use tokio::runtime::Runtime;
+#[cfg(test)]
 use rusqlite::{Connection, OptionalExtension, params};
+#[cfg(test)]
+use std::sync::Mutex;
 
 #[cfg(not(test))]
 pub fn live_shared_runtime(
@@ -286,119 +288,6 @@ impl ProductionPostgresSharedJobsStore {
             Ok(outcome)
         })
     }
-
-    async fn read_snapshot_raw(
-        pool: sqlx::Pool<Postgres>,
-        namespace: String,
-    ) -> Result<crate::JobsCoordinatorSnapshot, JobsModelError> {
-        Self::ensure_table_static(&pool).await?;
-        let payload = sqlx::query("SELECT payload FROM jobs_state WHERE namespace = $1")
-            .bind(&namespace)
-            .fetch_optional(&pool)
-            .await
-            .map_err(|error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: davenda_config::JobBackend::Redis,
-                namespace: error.to_string(),
-            })?
-            .map(|row| row.get::<String, _>("payload"));
-        match payload {
-            Some(payload) => serde_json::from_str(&payload).map_err(|error| {
-                JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                    backend: davenda_config::JobBackend::Redis,
-                    namespace: error.to_string(),
-                }
-            }),
-            None => Ok(crate::JobsCoordinatorSnapshot::default()),
-        }
-    }
-
-    async fn ensure_table_static(pool: &sqlx::Pool<Postgres>) -> Result<(), JobsModelError> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS jobs_state (
-                namespace TEXT PRIMARY KEY,
-                payload TEXT NOT NULL
-            )
-            "#,
-        )
-        .execute(pool)
-        .await
-        .map_err(|error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-            backend: davenda_config::JobBackend::Redis,
-            namespace: error.to_string(),
-        })?;
-        Ok(())
-    }
-
-    async fn mutate_state<T>(
-        pool: sqlx::Pool<Postgres>,
-        namespace: String,
-        runtime: JobsRuntime,
-        op: impl FnOnce(&mut JobsBackendState) -> Result<T, JobsModelError>,
-    ) -> Result<T, JobsModelError> {
-        Self::ensure_table_static(&pool).await?;
-        let mut tx = pool.begin().await.map_err(|error| {
-            JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: runtime.backend,
-                namespace: error.to_string(),
-            }
-        })?;
-
-        sqlx::query("INSERT INTO jobs_state (namespace, payload) VALUES ($1, $2) ON CONFLICT(namespace) DO NOTHING")
-            .bind(&namespace)
-            .bind(serde_json::to_string(&crate::JobsCoordinatorSnapshot::default()).unwrap())
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: runtime.backend,
-                namespace: error.to_string(),
-            })?;
-
-        let payload = sqlx::query("SELECT payload FROM jobs_state WHERE namespace = $1 FOR UPDATE")
-            .bind(&namespace)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: runtime.backend,
-                namespace: error.to_string(),
-            })?
-            .get::<String, _>("payload");
-
-        let snapshot = serde_json::from_str(&payload).map_err(|error| {
-            JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: runtime.backend,
-                namespace: error.to_string(),
-            }
-        })?;
-
-        let mut state = JobsBackendState { runtime, snapshot };
-        let outcome = op(&mut state)?;
-        let serialized = serde_json::to_string(&state.snapshot).map_err(|error| {
-            JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: state.runtime.backend,
-                namespace: error.to_string(),
-            }
-        })?;
-
-        sqlx::query("UPDATE jobs_state SET payload = $2 WHERE namespace = $1")
-            .bind(&namespace)
-            .bind(serialized)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: state.runtime.backend,
-                namespace: error.to_string(),
-            })?;
-
-        tx.commit().await.map_err(|error| {
-            JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
-                backend: state.runtime.backend,
-                namespace: error.to_string(),
-            }
-        })?;
-
-        Ok(outcome)
-    }
 }
 
 #[cfg(not(test))]
@@ -425,11 +314,13 @@ pub fn live_shared_runtime(
 }
 
 #[derive(Debug)]
+#[cfg(test)]
 pub(super) struct LiveSharedJobsCoordinationRuntime {
     runtime: JobsRuntime,
     store: LiveSharedJobsStore,
 }
 
+#[cfg(test)]
 impl LiveSharedJobsCoordinationRuntime {
     fn new(runtime: JobsRuntime, namespace: String, root: PathBuf) -> Self {
         Self {
@@ -439,6 +330,7 @@ impl LiveSharedJobsCoordinationRuntime {
     }
 }
 
+#[cfg(test)]
 impl JobsCoordinationRuntime for LiveSharedJobsCoordinationRuntime {
     fn snapshot(&self) -> crate::JobsCoordinatorSnapshot {
         self.store
@@ -519,11 +411,13 @@ impl JobsCoordinationRuntime for LiveSharedJobsCoordinationRuntime {
 }
 
 #[derive(Debug)]
+#[cfg(test)]
 struct LiveSharedJobsStore {
     connection: Mutex<Connection>,
     namespace: String,
 }
 
+#[cfg(test)]
 impl LiveSharedJobsStore {
     fn open(runtime: &JobsRuntime, namespace: String, root: PathBuf) -> Self {
         let path = live_database_path(runtime, &namespace, root);
@@ -670,12 +564,14 @@ impl LiveSharedJobsStore {
     }
 }
 
+#[cfg(test)]
 fn live_database_path(runtime: &JobsRuntime, namespace: &str, root: PathBuf) -> PathBuf {
     root.join("jobs")
         .join(job_backend_slug(runtime.backend))
         .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
 }
 
+#[cfg(test)]
 fn job_backend_slug(backend: davenda_config::JobBackend) -> &'static str {
     match backend {
         davenda_config::JobBackend::Redis => "redis",
@@ -683,6 +579,7 @@ fn job_backend_slug(backend: davenda_config::JobBackend) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn sanitize_namespace(namespace: &str) -> String {
     namespace
         .chars()

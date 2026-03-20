@@ -275,6 +275,108 @@ fn parse_previous_material_keys(value: Option<String>) -> Result<Vec<String>, Ru
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RuntimeBuilder;
+    use davenda_auth::DefaultAuthModelPackage;
+    use davenda_config::{AcmeChallenge, PlatformConfig, SecretRef, TlsMode};
+    use davenda_tls::{
+        CertificateId, CertificateProviderKind, CustomerAppId, Hostname, HostnameBinding,
+    };
+
+    const TLS_RUNTIME_TEST_CONFIG: &str = r#"
+[app]
+name = "showcase-events"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+single_node_escape_hatch = "explicit_single_node"
+object_store = "s3"
+object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
+local_root = "/tmp/davenda-runtime-tests"
+deployment = "single_node"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+localized_routes = true
+
+[seo]
+canonical_host = "www.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 101
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#;
+
+    fn tls_runtime_test_config() -> PlatformConfig {
+        PlatformConfig::from_toml_str(TLS_RUNTIME_TEST_CONFIG).unwrap()
+    }
+
+    fn binding(hostname: &str) -> HostnameBinding {
+        HostnameBinding::new(
+            Hostname::new(hostname).unwrap(),
+            CustomerAppId::new("showcase-events").unwrap(),
+        )
+    }
 
     #[test]
     fn previous_tls_material_key_list_accepts_comma_and_newline_delimiters() {
@@ -296,5 +398,48 @@ mod tests {
                 ),
             })
         );
+    }
+
+    #[test]
+    fn tls_host_uses_real_acme_executor_in_tests() {
+        let mut config = tls_runtime_test_config();
+        config.tls.mode = TlsMode::Acme;
+        config.tls.challenge = Some(AcmeChallenge::TlsAlpn01);
+        config.tls.provider = None;
+        config.tls.account_secret = Some(SecretRef::SecretManager {
+            provider: "vault".to_string(),
+            key: "tls/acme".to_string(),
+        });
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        let resolver = crate::server::StaticSecretResolver::new()
+            .with_secret(
+                SecretRef::SecretManager {
+                    provider: "vault".to_string(),
+                    key: "tls/acme".to_string(),
+                },
+                r#"{"tls_alpn_bind_address":"not-a-socket-address"}"#,
+            )
+            .unwrap();
+        let mut host = plan.tls_host_with_secret_resolver(&resolver).unwrap();
+
+        let error = host
+            .issue_certificate(
+                vec![binding("www.example.com")],
+                CertificateId::new("cert-real-acme-runtime").unwrap(),
+                TlsInstant::from_unix_seconds(1_700_000_000),
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            RuntimeTlsError::Tls(TlsModelError::ProviderRequestFailed {
+                provider,
+                operation,
+                ..
+            }) if provider == CertificateProviderKind::Acme.to_string()
+                && operation == "parse_tls_alpn_bind_address"
+        ));
     }
 }

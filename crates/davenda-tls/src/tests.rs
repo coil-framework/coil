@@ -204,6 +204,92 @@ fn manual_runtime_rejects_challenge_configuration() {
 }
 
 #[test]
+fn exported_acme_executor_uses_real_provider_path_in_test_builds() {
+    let runtime = TlsRuntime::from_config(&TlsConfig {
+        mode: TlsMode::Acme,
+        challenge: Some(AcmeChallenge::TlsAlpn01),
+        provider: None,
+        account_secret: None,
+    });
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
+    let executor = AcmeTlsCertificateExecutor::new(
+        control_plane,
+        TlsMaterialProtector::from_seed("real-acme-export-test").unwrap(),
+        Some(r#"{"tls_alpn_bind_address":"not-a-socket-address"}"#.to_string()),
+    );
+    let plan = runtime
+        .planner()
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )])
+        .unwrap();
+
+    let error = executor
+        .issue_certificate(
+            &plan,
+            CertificateId::new("cert-real-acme-export").unwrap(),
+            TlsInstant::from_unix_seconds(1_700_000_000),
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        TlsModelError::ProviderRequestFailed {
+            provider,
+            operation,
+            ..
+        } if provider == CertificateProviderKind::Acme.to_string()
+            && operation == "parse_tls_alpn_bind_address"
+    ));
+}
+
+#[test]
+fn exported_cloudflare_executor_uses_real_provider_path_in_test_builds() {
+    let runtime = TlsRuntime::from_config(&acme_config(
+        AcmeChallenge::Dns01,
+        Some(TlsProvider::CloudflareDns),
+    ));
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime);
+    let executor = CloudflareTlsCertificateExecutor::new(
+        CertificateProviderKind::CloudflareDns,
+        control_plane,
+        TlsMaterialProtector::from_seed("real-cloudflare-export-test").unwrap(),
+        Some("{}".to_string()),
+    );
+    let plan = IssuancePlan {
+        edge_mode: EdgeMode::DirectTermination,
+        provider: CertificateProviderKind::CloudflareDns,
+        challenge: Some(ChallengeStrategy::Http01),
+        state_store: CertificateStateStore::SharedSecrets,
+        bindings: vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )],
+        shared_across_nodes: false,
+        requires_hot_reload: true,
+        account_secret: Some("{}".to_string()),
+        cloudflare_mode: None,
+    };
+
+    let error = executor
+        .issue_certificate(
+            &plan,
+            CertificateId::new("cert-real-cloudflare-export").unwrap(),
+            TlsInstant::from_unix_seconds(1_700_000_000),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        TlsModelError::UnsupportedProviderChallenge {
+            provider: CertificateProviderKind::CloudflareDns.to_string(),
+            challenge: ChallengeStrategy::Http01.to_string(),
+        }
+    );
+}
+
+#[test]
 fn tls_material_protector_supports_key_rotation_without_losing_existing_material() {
     let original = TlsMaterialProtector::from_seed("tls-material-original").unwrap();
     let rotated =

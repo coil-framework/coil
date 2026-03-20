@@ -1,13 +1,10 @@
+#[cfg_attr(test, allow(dead_code))]
 #[cfg(test)]
 mod issued;
 mod manual;
-#[cfg(not(test))]
 mod real;
 
-#[cfg(test)]
-pub use issued::{AcmeTlsCertificateExecutor, CloudflareTlsCertificateExecutor};
 pub use manual::ManualImportTlsCertificateExecutor;
-#[cfg(not(test))]
 pub use real::{AcmeTlsCertificateExecutor, CloudflareTlsCertificateExecutor};
 
 use std::fmt;

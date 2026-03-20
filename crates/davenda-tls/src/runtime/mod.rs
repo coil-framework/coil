@@ -6,7 +6,10 @@ mod state;
 
 pub use backend::{PostgresTlsControlPlaneStore, TlsControlPlaneStore};
 pub use control_plane::TlsControlPlaneRuntime;
-pub use execution::{ManualImportTlsCertificateExecutor, TlsCertificateExecutor};
+pub use execution::{
+    AcmeTlsCertificateExecutor, CloudflareTlsCertificateExecutor,
+    ManualImportTlsCertificateExecutor, TlsCertificateExecutor,
+};
 pub use planning::{
     ChallengeTicket, HotReloadEvent, IssuancePlan, RenewalPlan, TlsPlanner, TlsRuntime,
 };

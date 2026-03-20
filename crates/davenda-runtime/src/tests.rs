@@ -2740,6 +2740,55 @@ fn tls_host_status_tracks_control_plane_inventory_renewals_and_pending_challenge
 }
 
 #[test]
+fn tls_host_issues_and_renews_certificates_through_provider_executors() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let mut host = plan.tls_host().unwrap();
+    let binding = HostnameBinding::new(
+        Hostname::new("issue.example.com").unwrap(),
+        CustomerAppId::new("showcase-events").unwrap(),
+    );
+
+    let issued = host
+        .issue_certificate(
+            vec![binding.clone()],
+            CertificateId::new("cert-issued").unwrap(),
+            TlsInstant::from_unix_seconds(1_000),
+        )
+        .unwrap();
+    assert_eq!(issued.status, CertificateStatus::Active);
+    assert_eq!(issued.provider, CertificateProviderKind::CloudflareDns);
+    assert!(issued.material.is_some());
+    assert!(
+        host.certificate_material(&issued.id)
+            .unwrap()
+            .certificate_chain_pem()
+            .as_str()
+            .contains("provider=cloudflare_dns")
+    );
+
+    let replacement = host
+        .renew_certificate(
+            &issued.id,
+            CertificateId::new("cert-issued-next").unwrap(),
+            TlsInstant::from_unix_seconds(6_000_000),
+        )
+        .unwrap();
+    assert_eq!(replacement.id.as_str(), "cert-issued-next");
+    assert_eq!(
+        host.status()
+            .inventory
+            .active_for_hostname(&binding.hostname)
+            .unwrap()
+            .id
+            .as_str(),
+        "cert-issued-next"
+    );
+}
+
+#[test]
 fn cloned_tls_control_plane_handles_share_state_within_the_runtime_facade() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())

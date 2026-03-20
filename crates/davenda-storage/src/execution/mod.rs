@@ -13,7 +13,7 @@ mod object_store;
 mod tests;
 
 use local::LocalDiskStorageClient;
-pub use object_store::LocalFilesystemObjectStoreClient;
+pub use object_store::HttpObjectStoreClient;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageDeliveryLocation {
@@ -50,6 +50,7 @@ pub struct StorageReadReceipt {
 pub trait ObjectStoreClient: fmt::Debug + Send + Sync {
     fn backend_kind(&self) -> StorageBackendKind;
     fn root(&self) -> &Path;
+    fn is_configured(&self) -> bool;
     fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError>;
     fn get(&self, object_key: &str) -> Result<(PathBuf, Vec<u8>), StorageExecutionError>;
 }
@@ -64,9 +65,7 @@ impl StorageExecutor {
     pub fn from_topology(topology: &StorageTopology) -> Self {
         let local_root = PathBuf::from(&topology.local_root);
         let object_store = topology.object_store.as_ref().map(|_| {
-            Arc::new(LocalFilesystemObjectStoreClient::new(
-                local_root.join("object-store"),
-            )) as Arc<dyn ObjectStoreClient>
+            Arc::new(HttpObjectStoreClient::from_topology(topology)) as Arc<dyn ObjectStoreClient>
         });
 
         Self {
@@ -102,12 +101,17 @@ impl StorageExecutor {
                         logical_path: plan.logical_path.clone(),
                     }
                 })?;
-                self.object_store
-                    .as_ref()
-                    .ok_or_else(|| StorageExecutionError::MissingObjectStoreBackend {
+                let client = self.object_store.as_ref().ok_or_else(|| {
+                    StorageExecutionError::MissingObjectStoreBackend {
                         logical_path: plan.logical_path.clone(),
-                    })?
-                    .put(object_key, bytes)?
+                    }
+                })?;
+                if !client.is_configured() {
+                    return Err(StorageExecutionError::MissingObjectStoreEndpoint {
+                        logical_path: plan.logical_path.clone(),
+                    });
+                }
+                client.put(object_key, bytes)?
             }
         };
 
@@ -143,12 +147,17 @@ impl StorageExecutor {
                         logical_path: plan.logical_path.clone(),
                     }
                 })?;
-                self.object_store
-                    .as_ref()
-                    .ok_or_else(|| StorageExecutionError::MissingObjectStoreBackend {
+                let client = self.object_store.as_ref().ok_or_else(|| {
+                    StorageExecutionError::MissingObjectStoreBackend {
                         logical_path: plan.logical_path.clone(),
-                    })?
-                    .get(object_key)?
+                    }
+                })?;
+                if !client.is_configured() {
+                    return Err(StorageExecutionError::MissingObjectStoreEndpoint {
+                        logical_path: plan.logical_path.clone(),
+                    });
+                }
+                client.get(object_key)?
             }
         };
 
@@ -228,6 +237,8 @@ pub enum StorageExecutionError {
     MissingObjectKey { logical_path: String },
     #[error("storage plan for `{logical_path}` requires an object-store backend")]
     MissingObjectStoreBackend { logical_path: String },
+    #[error("storage plan for `{logical_path}` requires a configured object-store endpoint")]
+    MissingObjectStoreEndpoint { logical_path: String },
     #[error("storage plan for `{logical_path}` requires `cdn_base_url` to resolve public delivery")]
     MissingCdnBaseUrl { logical_path: String },
     #[error("storage path `{path}` is outside the configured storage root")]

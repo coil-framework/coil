@@ -823,6 +823,8 @@ version = "0.1.0"
 dependencies = [
  "davenda-config",
  "thiserror 1.0.69",
+ "ureq",
+ "url",
 ]
 
 [[package]]

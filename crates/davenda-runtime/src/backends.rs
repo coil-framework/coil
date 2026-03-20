@@ -10,7 +10,7 @@ use davenda_cache::CacheBackendKind;
 pub(crate) struct RuntimeBackendMaterializer {
     namespace: String,
     plans: SharedBackendClients,
-    browser_shared_state_root: PathBuf,
+    shared_state_root: PathBuf,
     #[cfg(test)]
     cache_runtime: Option<Arc<dyn davenda_cache::DistributedCacheRuntime>>,
     jobs_runtime: Arc<Mutex<Option<Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>>,
@@ -20,7 +20,7 @@ impl RuntimeBackendMaterializer {
     pub(crate) fn new(
         namespace: String,
         plans: SharedBackendClients,
-        browser_shared_state_root: PathBuf,
+        shared_state_root: PathBuf,
     ) -> Self {
         #[cfg(test)]
         let cache_runtime = plans.distributed_cache.as_ref().map(|target| {
@@ -33,7 +33,7 @@ impl RuntimeBackendMaterializer {
         Self {
             namespace,
             plans,
-            browser_shared_state_root,
+            shared_state_root,
             #[cfg(test)]
             cache_runtime,
             jobs_runtime: Arc::new(Mutex::new(None)),
@@ -57,7 +57,7 @@ impl RuntimeBackendMaterializer {
                 let session_runtime = crate::browser::live_shared_runtime(
                     target.kind,
                     format!("{}:{customer_app}", self.namespace),
-                    self.browser_shared_state_root.clone(),
+                    self.shared_state_root.clone(),
                 )?;
 
                 BrowserHost::with_session_store_client(
@@ -112,7 +112,7 @@ impl fmt::Debug for RuntimeBackendMaterializer {
         let mut debug = f.debug_struct("RuntimeBackendMaterializer");
         debug.field("namespace", &self.namespace);
         debug.field("plans", &self.plans);
-        debug.field("browser_shared_state_root", &self.browser_shared_state_root);
+        debug.field("shared_state_root", &self.shared_state_root);
         #[cfg(test)]
         debug.field(
             "cache_runtime",

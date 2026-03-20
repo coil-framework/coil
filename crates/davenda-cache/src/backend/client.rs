@@ -57,6 +57,14 @@ impl DistributedCacheClient {
         }
     }
 
+    pub fn live_shared_runtime(
+        kind: CacheBackendKind,
+        namespace: impl Into<String>,
+        root: impl Into<std::path::PathBuf>,
+    ) -> Arc<dyn DistributedCacheRuntime> {
+        super::live::live_shared_runtime(kind, namespace, root)
+    }
+
     #[doc(hidden)]
     pub fn emulated_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
         let _ = kind;

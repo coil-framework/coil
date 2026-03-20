@@ -1,32 +1,58 @@
 use super::*;
 use url::Url;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 mod execution;
-mod live;
+mod shared_state;
 #[cfg(test)]
 mod testing;
 
 #[cfg(test)]
 pub(crate) use testing::{shared_cache_runtime_for_test, shared_jobs_runtime_for_test};
+pub(crate) use shared_state::shared_state_root;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct SharedJobsRuntimeHandle {
+    namespace: String,
     runtime: Arc<OnceLock<Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>,
 }
 
 impl SharedJobsRuntimeHandle {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(namespace: impl Into<String>) -> Self {
+        Self {
+            namespace: namespace.into(),
+            runtime: Arc::new(OnceLock::new()),
+        }
     }
 
     pub(crate) fn get_or_init(
         &self,
         runtime: &JobsRuntimeServices,
+        shared_state_root: impl Into<PathBuf>,
     ) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+        let namespace = self.namespace.clone();
+        #[cfg(test)]
+        let _shared_state_root = shared_state_root.into();
+        #[cfg(not(test))]
+        let shared_state_root = shared_state_root.into();
         self.runtime
-            .get_or_init(|| davenda_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
+            .get_or_init(|| {
+                #[cfg(test)]
+                {
+                    crate::plan::shared_jobs_runtime_for_test(runtime, namespace.clone())
+                }
+
+                #[cfg(not(test))]
+                {
+                    davenda_jobs::JobsBackendAdapter::live_shared_runtime(
+                        runtime,
+                        namespace.clone(),
+                        shared_state_root,
+                    )
+                }
+            })
             .clone()
     }
 }
@@ -34,6 +60,7 @@ impl SharedJobsRuntimeHandle {
 impl fmt::Debug for SharedJobsRuntimeHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SharedJobsRuntimeHandle")
+            .field("namespace", &self.namespace)
             .field("initialized", &self.runtime.get().is_some())
             .finish()
     }
@@ -46,6 +73,7 @@ pub struct RuntimePlan {
     pub auth_package: AuthModelPackageSelection,
     pub approved_outbound_http_endpoints: BTreeMap<String, Url>,
     pub shared_backend_scope: String,
+    pub shared_state_root: PathBuf,
     pub cache_topology: CacheTopology,
     pub cache_planner: CachePlanner,
     pub i18n: I18nRuntimeServices,
@@ -127,7 +155,9 @@ impl RuntimePlan {
         let scheduler_node_id =
             validate_runtime_identifier("scheduler_node_id", scheduler_node_id.into())?;
         let namespace = self.shared_backend_namespace();
-        let shared_runtime = self.shared_jobs_runtime.get_or_init(&self.jobs);
+        let shared_runtime = self
+            .shared_jobs_runtime
+            .get_or_init(&self.jobs, self.shared_state_root.clone());
         Ok(JobsHost::new(
             self.config.app.name.clone(),
             scheduler_node_id,
@@ -205,9 +235,18 @@ impl RuntimePlan {
                         davenda_cache::CacheBackendKind::Valkey
                     }
                 };
-                // Live builds require an explicit distributed cache runtime;
-                // no file-backed shared invalidation runtime is constructed here.
-                return Err(live::unconfigured_live_cache_error(backend));
+                let runtime = davenda_cache::DistributedCacheClient::live_shared_runtime(
+                    backend,
+                    shared_namespace.clone(),
+                    self.shared_state_root.clone(),
+                );
+                return Ok(CacheHost::new(
+                    self.config.app.name.clone(),
+                    namespace,
+                    self.cache_planner,
+                    Some(runtime),
+                    shared_namespace,
+                ));
             }
         }
 
@@ -310,5 +349,9 @@ impl RuntimePlan {
             "customer-app:{}:{}",
             self.config.app.name, self.shared_backend_scope
         )
+    }
+
+    pub(crate) fn shared_state_root(&self) -> &PathBuf {
+        &self.shared_state_root
     }
 }

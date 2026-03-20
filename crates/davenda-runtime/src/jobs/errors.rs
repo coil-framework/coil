@@ -4,10 +4,6 @@ use super::super::*;
 pub enum RuntimeJobsError {
     #[error(transparent)]
     Jobs(#[from] JobsModelError),
-    #[error(
-        "live shared jobs backend `{backend:?}` requires an explicit distributed runtime; file-backed shared state is test-only"
-    )]
-    LiveSharedRuntimeRequiresExplicitBackend { backend: davenda_config::JobBackend },
     #[error("runtime value `{field}` cannot be empty")]
     EmptyValue { field: &'static str },
     #[error("job `{job}` is not declared by the runtime")]

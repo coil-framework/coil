@@ -1,8 +1,10 @@
 use super::*;
 use davenda_tls::{
-    CertificateMaterial, ManualCertificateBundle, ManualImportTlsCertificateExecutor,
-    TlsCertificateExecutor, TlsMaterialProtector,
+    AcmeTlsCertificateExecutor, CertificateMaterial, CloudflareTlsCertificateExecutor,
+    ManualCertificateBundle, ManualImportTlsCertificateExecutor, TlsCertificateExecutor,
+    TlsMaterialProtector,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeTlsError {
@@ -29,7 +31,7 @@ pub struct TlsHost {
     pub customer_app: String,
     pub runtime: TlsRuntimeServices,
     control_plane: TlsControlPlaneRuntime,
-    material_executor: ManualImportTlsCertificateExecutor,
+    certificate_executor: Arc<dyn TlsCertificateExecutor>,
 }
 
 impl TlsHost {
@@ -63,13 +65,29 @@ impl TlsHost {
             &_data_runtime,
             format!("customer-app:{}:{}", customer_app, shared_backend_namespace),
         )?;
-        let material_executor =
-            ManualImportTlsCertificateExecutor::new(control_plane.clone(), material_protector);
+        let certificate_executor: Arc<dyn TlsCertificateExecutor> = match runtime.provider {
+            Some(davenda_tls::CertificateProviderKind::Acme) => Arc::new(
+                AcmeTlsCertificateExecutor::new(control_plane.clone(), material_protector),
+            ),
+            Some(davenda_tls::CertificateProviderKind::CloudflareDns)
+            | Some(davenda_tls::CertificateProviderKind::CloudflareOriginCa) => Arc::new(
+                CloudflareTlsCertificateExecutor::new(
+                    runtime
+                        .provider
+                        .expect("cloudflare provider is selected when creating executor"),
+                    control_plane.clone(),
+                    material_protector,
+                ),
+            ),
+            Some(davenda_tls::CertificateProviderKind::ManualImport) | None => Arc::new(
+                ManualImportTlsCertificateExecutor::new(control_plane.clone(), material_protector),
+            ),
+        };
         Ok(Self {
             customer_app,
             runtime,
             control_plane,
-            material_executor,
+            certificate_executor,
         })
     }
 
@@ -103,7 +121,7 @@ impl TlsHost {
         bundle: ManualCertificateBundle,
     ) -> Result<(), RuntimeTlsError> {
         let bundle = self.runtime.planner().import_manual_certificate(bundle)?;
-        Ok(self.material_executor.import_manual_certificate(bundle)?)
+        Ok(self.certificate_executor.import_manual_certificate(bundle)?)
     }
 
     pub fn certificate_material(
@@ -111,8 +129,45 @@ impl TlsHost {
         certificate_id: &CertificateId,
     ) -> Result<CertificateMaterial, RuntimeTlsError> {
         Ok(self
-            .material_executor
+            .certificate_executor
             .certificate_material(certificate_id)?)
+    }
+
+    pub fn issue_certificate(
+        &mut self,
+        bindings: Vec<HostnameBinding>,
+        certificate_id: CertificateId,
+        now: TlsInstant,
+    ) -> Result<CertificateRecord, RuntimeTlsError> {
+        let issuance = self.issue_for_bindings(bindings)?;
+        let record = self.certificate_executor.issue_certificate(&issuance, certificate_id, now)?;
+        self.control_plane.import_certificate(record.clone())?;
+        Ok(record)
+    }
+
+    pub fn renew_certificate(
+        &mut self,
+        certificate_id: &CertificateId,
+        replacement_certificate_id: CertificateId,
+        now: TlsInstant,
+    ) -> Result<CertificateRecord, RuntimeTlsError> {
+        let renewal_plan = self.queue_renewal(certificate_id, now)?;
+        let _ticket = self.begin_renewal(certificate_id, replacement_certificate_id.clone())?;
+        let record = match self.certificate_executor.renew_certificate(
+            &renewal_plan,
+            certificate_id.clone(),
+            replacement_certificate_id,
+            now,
+        ) {
+            Ok(record) => record,
+            Err(error) => {
+                let _ = self.fail_renewal(certificate_id);
+                return Err(error.into());
+            }
+        };
+        self.control_plane
+            .activate_replacement(certificate_id, record.clone())?;
+        Ok(record)
     }
 
     pub fn queue_renewal(

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use super::*;
@@ -105,7 +104,7 @@ impl HttpServerHost {
             RuntimeBackendMaterializer::new(
                 plan.shared_backend_namespace(),
                 backends.clone(),
-                PathBuf::from(&plan.config.storage.local_root),
+                plan.shared_state_root().clone(),
             );
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(

@@ -1,7 +1,133 @@
 use super::*;
 use crate::{PathPolicyRule, StoragePlanRequest, StoragePlanner, StoragePolicy, StoragePolicySet};
 use davenda_config::{PlatformConfig, StorageClass};
+use std::collections::BTreeMap;
+use std::ffi::OsString;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+}
+
+struct ObjectStoreTestServer {
+    endpoint: String,
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl ObjectStoreTestServer {
+    fn spawn() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
+        let stop_thread = Arc::clone(&stop);
+        let store_thread = Arc::clone(&store);
+        let handle = thread::spawn(move || loop {
+            if stop_thread.load(Ordering::SeqCst) {
+                break;
+            }
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let store = Arc::clone(&store_thread);
+                    handle_request(stream, &store);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("object-store test server failed: {error}"),
+            }
+        });
+
+        Self {
+            endpoint,
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+}
+
+impl Drop for ObjectStoreTestServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).unwrap();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("");
+    let path = parts.next().unwrap_or("/").trim_start_matches('/').to_string();
+
+    let mut content_length = 0usize;
+    loop {
+        let mut header = String::new();
+        reader.read_line(&mut header).unwrap();
+        let trimmed = header.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse().unwrap_or(0);
+            }
+        }
+    }
+
+    let mut body = vec![0_u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body).unwrap();
+    }
+
+    let (status, response_body) = match method {
+        "PUT" => {
+            store.lock().unwrap().insert(path, body);
+            ("200 OK", Vec::new())
+        }
+        "GET" => match store.lock().unwrap().get(&path).cloned() {
+            Some(bytes) => ("200 OK", bytes),
+            None => ("404 Not Found", b"not found".to_vec()),
+        },
+        _ => ("405 Method Not Allowed", b"method not allowed".to_vec()),
+    };
+
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response_body.len()
+    );
+    stream.write_all(response.as_bytes()).unwrap();
+    if !response_body.is_empty() {
+        stream.write_all(&response_body).unwrap();
+    }
+}
 
 fn test_config() -> PlatformConfig {
     PlatformConfig::from_toml_str(
@@ -107,6 +233,15 @@ fn planner() -> StoragePlanner {
 
 #[test]
 fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
+    let server = ObjectStoreTestServer::spawn();
+    let previous = std::env::var_os("OBJECT_STORE_URL");
+    unsafe {
+        std::env::set_var("OBJECT_STORE_URL", server.endpoint());
+    }
+    let _guard = EnvVarGuard {
+        key: "OBJECT_STORE_URL",
+        previous,
+    };
     let planner = planner();
     let executor = StorageExecutor::from_topology(planner.topology());
     let public_plan = planner
@@ -119,11 +254,7 @@ fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
     let receipt = executor.execute_write(&public_plan, b"hero-bytes").unwrap();
     let object_key = public_plan.object_key.as_deref().unwrap();
     assert_eq!(receipt.target.backend, StorageBackendKind::S3Compatible);
-    assert!(
-        receipt
-            .path
-            .ends_with(format!("object-store/{}", object_key))
-    );
+    assert!(receipt.path.ends_with(object_key));
     assert_eq!(
         executor.execute_read(&public_plan).unwrap().bytes,
         b"hero-bytes"

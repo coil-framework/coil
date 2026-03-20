@@ -3,7 +3,7 @@ mod planner;
 mod policy;
 
 pub use execution::{
-    LocalFilesystemObjectStoreClient, ObjectStoreClient, StorageDeliveryLocation,
+    HttpObjectStoreClient, ObjectStoreClient, StorageDeliveryLocation,
     StorageExecutionError, StorageExecutor, StorageReadReceipt, StorageWriteReceipt,
 };
 pub use planner::{

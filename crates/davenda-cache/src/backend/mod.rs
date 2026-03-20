@@ -8,6 +8,7 @@ use crate::{
 
 mod client;
 mod local;
+mod live;
 mod shared;
 mod state;
 mod testing;

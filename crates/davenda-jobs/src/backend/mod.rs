@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod shared;
+mod live;
 mod state;
 mod testing;
 
@@ -147,6 +148,14 @@ impl JobsBackendAdapter {
         runtime: Arc<dyn JobsCoordinationRuntime>,
     ) -> Self {
         Self::new(backend, queue_topology, runtime)
+    }
+
+    pub fn live_shared_runtime(
+        runtime: &JobsRuntime,
+        namespace: impl Into<String>,
+        root: impl Into<std::path::PathBuf>,
+    ) -> Arc<dyn JobsCoordinationRuntime> {
+        live::live_shared_runtime(runtime, namespace, root)
     }
 
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {

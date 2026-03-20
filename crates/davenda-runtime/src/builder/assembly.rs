@@ -2,6 +2,7 @@ use super::*;
 use crate::builder::helpers::*;
 use crate::builder::http::*;
 use crate::builder::state::RuntimeBuilderParts;
+use crate::plan::shared_state_root;
 use davenda_template::TemplateRuntime;
 
 pub(crate) fn build_runtime_plan<P>(
@@ -202,12 +203,18 @@ where
         );
     }
 
+    let shared_backend_scope = next_runtime_plan_scope();
+    let shared_state_root = shared_state_root(&config);
+
+    let app_name = config.app.name.clone();
+
     Ok(RuntimePlan {
         config,
         auth_package_name: auth_package.manifest().name.clone(),
         auth_package,
         approved_outbound_http_endpoints,
-        shared_backend_scope: next_runtime_plan_scope(),
+        shared_backend_scope: shared_backend_scope.clone(),
+        shared_state_root,
         cache_topology: bootstrap.cache.topology,
         cache_planner: bootstrap.cache.planner,
         i18n: bootstrap.i18n,
@@ -229,7 +236,10 @@ where
         extension_registry,
         registered_extension_slots,
         installed_extensions,
-        shared_jobs_runtime: SharedJobsRuntimeHandle::new(),
+        shared_jobs_runtime: SharedJobsRuntimeHandle::new(format!(
+            "customer-app:{}:{}",
+            app_name, shared_backend_scope
+        )),
         module_jobs,
         module_event_subscriptions,
         module_data_repositories,

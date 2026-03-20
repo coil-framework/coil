@@ -24,7 +24,7 @@ pub(crate) struct LiveAuthExplainBackend {
 
 impl LiveAuthExplainBackend {
     pub(crate) fn from_config(config: &PlatformConfig) -> Result<Self, CliRunError> {
-        let package = resolve_configured_auth_package_selection(config);
+        let package = resolve_deployment_configured_auth_package_selection(config);
         let explainer = LiveAuthExplainHost::from_config(config, package).map_err(|error| {
             CliRunError::execution(format!(
                 "failed to initialize the live auth explain backend: {error}"
@@ -59,7 +59,7 @@ impl AuthExplainBackend for LiveAuthExplainBackend {
     }
 }
 
-fn resolve_configured_auth_package_selection(
+fn resolve_deployment_configured_auth_package_selection(
     config: &PlatformConfig,
 ) -> davenda_auth::AuthModelPackageSelection {
     // The CLI explain path is keyed by the deployment-configured auth package identity.
@@ -253,7 +253,7 @@ publish_manifest = false
         let mut config = config(true);
         config.auth.package = "platform-extended-auth".to_string();
 
-        let package = resolve_configured_auth_package_selection(&config);
+        let package = resolve_deployment_configured_auth_package_selection(&config);
 
         assert_eq!(package.manifest().name, "platform-extended-auth");
         assert_ne!(

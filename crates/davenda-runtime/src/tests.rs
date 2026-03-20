@@ -117,6 +117,7 @@ provider = "cloudflare-dns"
 default_class = "public_upload"
 single_node_escape_hatch = "explicit_single_node"
 object_store = "s3"
+object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
 local_root = "/tmp/davenda-runtime-tests"
 deployment = "single_node"
 
@@ -794,13 +795,7 @@ fn content_fingerprint(fill: char) -> ContentFingerprint {
 }
 
 fn config_with_backend_secrets() -> String {
-    let with_storage_secret = VALID_CONFIG.replace(
-        "local_root = \"/tmp/davenda-runtime-tests\"",
-        "local_root = \"/tmp/davenda-runtime-tests\"\nobject_store_secret = { kind = \"env\", var = \"OBJECT_STORE_URL\" }",
-    );
-    format!(
-        "{with_storage_secret}\n[database]\nurl = {{ kind = \"env\", var = \"DATABASE_URL\" }}\n"
-    )
+    format!("{VALID_CONFIG}\n[database]\nurl = {{ kind = \"env\", var = \"DATABASE_URL\" }}\n")
 }
 
 fn config_with_wasm_secret_bindings() -> String {

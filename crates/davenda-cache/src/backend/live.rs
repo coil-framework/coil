@@ -57,9 +57,10 @@ impl ProductionRedisSharedCacheRuntime {
 #[cfg(not(test))]
 impl DistributedCacheRuntime for ProductionRedisSharedCacheRuntime {
     fn insert(&self, entry: CacheEntry) {
+        let entry = entry.clone();
         self.store
-            .with_state_mut(|state| {
-                state.insert(entry);
+            .with_state_mut(move |state| {
+                state.insert(entry.clone());
                 Ok(())
             })
             .expect("redis cache backend insert failed");
@@ -83,14 +84,17 @@ impl DistributedCacheRuntime for ProductionRedisSharedCacheRuntime {
         mode: RequestCoalescingMode,
         holder: String,
     ) -> FillDecision {
+        let key = key.clone();
+        let holder = holder.clone();
         self.store
-            .with_state_mut(|state| Ok(state.begin_fill(key, mode, holder)))
+            .with_state_mut(move |state| Ok(state.begin_fill(&key, mode, holder.clone())))
             .expect("redis cache backend fill coordination failed")
     }
 
     fn complete_fill(&self, lease: &FillLease) -> Result<(), CacheModelError> {
+        let lease = lease.clone();
         self.store
-            .with_state_mut(|state| state.complete_fill(lease))
+            .with_state_mut(move |state| state.complete_fill(&lease))
     }
 
     fn metrics(&self) -> CacheMetrics {
@@ -137,47 +141,55 @@ impl ProductionRedisSharedCacheStore {
             .connection
             .lock()
             .expect("redis cache backend mutex poisoned");
-        let payload: Option<Vec<u8>> = connection
-            .get(&self.key)
-            .unwrap_or_else(|error| panic!("failed to read redis cache backend state: {error}"));
-        let state = match payload {
-            Some(payload) => bincode::deserialize(&payload).unwrap_or_else(|error| {
-                panic!("failed to deserialize redis cache backend state: {error}")
-            }),
-            None => CacheBackendState::new(),
-        };
+        let state = Self::load_state(&mut connection, &self.key);
         Ok(op(&state))
     }
 
     fn with_state_mut<T>(
         &self,
-        op: impl FnOnce(&mut CacheBackendState) -> Result<T, CacheModelError>,
+        mut op: impl FnMut(&mut CacheBackendState) -> Result<T, CacheModelError>,
     ) -> Result<T, CacheModelError> {
         let mut connection = self
             .connection
             .lock()
             .expect("redis cache backend mutex poisoned");
+        redis::transaction(
+            &mut *connection,
+            &[self.key.as_str()],
+            |connection, pipeline| {
+                let mut state = Self::load_state(connection, &self.key);
+                let outcome = op(&mut state);
+                if outcome.is_ok() {
+                    pipeline
+                        .set(&self.key, Self::serialize_state(&state))
+                        .ignore()
+                        .query::<()>(connection)
+                        .unwrap_or_else(|error| {
+                            panic!("failed to persist redis cache backend state: {error}")
+                        });
+                }
+                Ok(Some(outcome))
+            },
+        )
+        .unwrap_or_else(|error| panic!("failed to coordinate redis cache backend state: {error}"))
+    }
+
+    fn load_state(connection: &mut redis::Connection, key: &str) -> CacheBackendState {
         let payload: Option<Vec<u8>> = connection
-            .get(&self.key)
+            .get(key)
             .unwrap_or_else(|error| panic!("failed to read redis cache backend state: {error}"));
-        let mut state = match payload {
+        match payload {
             Some(payload) => bincode::deserialize(&payload).unwrap_or_else(|error| {
                 panic!("failed to deserialize redis cache backend state: {error}")
             }),
             None => CacheBackendState::new(),
-        };
-        let outcome = op(&mut state);
-        if outcome.is_ok() {
-            let serialized = bincode::serialize(&state).unwrap_or_else(|error| {
-                panic!("failed to serialize redis cache backend state: {error}")
-            });
-            connection
-                .set::<_, _, ()>(&self.key, serialized)
-                .unwrap_or_else(|error| {
-                    panic!("failed to persist redis cache backend state: {error}")
-                });
         }
-        outcome
+    }
+
+    fn serialize_state(state: &CacheBackendState) -> Vec<u8> {
+        bincode::serialize(state).unwrap_or_else(|error| {
+            panic!("failed to serialize redis cache backend state: {error}")
+        })
     }
 }
 

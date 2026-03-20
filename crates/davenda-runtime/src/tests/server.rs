@@ -1,19 +1,40 @@
 use super::*;
 
+const LIVE_DATABASE_URL: &str = "postgres://platform:secret@db.internal/platform";
+const LIVE_OBJECT_STORE_SECRET: &str = r#"
+endpoint_url = "https://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#;
+
+fn live_backend_secret_resolver() -> StaticSecretResolver {
+    StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DATABASE_URL".to_string(),
+            },
+            LIVE_DATABASE_URL,
+        )
+        .unwrap()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "OBJECT_STORE_URL".to_string(),
+            },
+            LIVE_OBJECT_STORE_SECRET,
+        )
+        .unwrap()
+}
+
 #[tokio::test]
 async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(
             &resolver,
@@ -127,14 +148,7 @@ async fn server_router_denies_diagnostics_probe_for_authenticated_sessions_witho
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let server = HttpServerHost::new_with_authorizer(
         plan,
@@ -181,14 +195,7 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
         davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1")),
@@ -254,14 +261,7 @@ async fn server_router_hides_auth_explain_when_deployment_disables_it() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let server = HttpServerHost::new_with_authorizer(
         plan,
@@ -296,14 +296,7 @@ async fn server_router_serves_live_auth_explain_when_enabled_and_authorized() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let package = DefaultAuthModelPackage::default();
     let capability = Capability::CmsPageRead;
@@ -404,7 +397,7 @@ async fn server_router_uses_live_auth_explainer_when_enabled() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let subject =
         davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1"));
@@ -529,14 +522,7 @@ async fn server_host_rejects_request_bodies_over_the_configured_limit_before_han
         )
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(
             &resolver,
@@ -576,14 +562,7 @@ async fn server_host_adapts_live_requests_into_runtime_execution() {
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(&resolver, cookie_secret, csrf_secret)
         .unwrap();
@@ -640,14 +619,7 @@ async fn server_host_uses_live_browser_host_wiring_for_shared_sessions() {
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(&resolver, cookie_secret, csrf_secret)
         .unwrap();
@@ -696,14 +668,7 @@ async fn server_host_authorizes_capability_routes_through_live_authorizer() {
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
         davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("editor-live-1")),
@@ -774,14 +739,7 @@ async fn server_host_authorizes_capability_routes_with_a_replacement_auth_packag
     assert_eq!(plan.auth_package.manifest().mode, PackageMode::Extend);
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
         davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("editor-live-extend")),
@@ -852,14 +810,7 @@ async fn server_host_renders_page_templates_as_html() {
 
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(&resolver, cookie_secret, csrf_secret)
         .unwrap();
@@ -926,14 +877,7 @@ async fn server_host_emits_hreflang_links_for_localized_page_routes() {
         .build()
         .unwrap();
 
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(
             &resolver,
@@ -1000,14 +944,7 @@ async fn server_host_renders_fragment_templates_as_html() {
         .build()
         .unwrap();
 
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(
             &resolver,
@@ -1079,14 +1016,7 @@ async fn server_host_executes_page_extensions_during_live_requests() {
 
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(&resolver, cookie_secret, csrf_secret)
         .unwrap();
@@ -1195,14 +1125,7 @@ async fn server_host_applies_typed_cache_policy_to_public_page_responses() {
 
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(&resolver, cookie_secret, csrf_secret)
         .unwrap();
@@ -1257,14 +1180,7 @@ async fn server_host_executes_render_hooks_during_html_render() {
         ))
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(
             &resolver,
@@ -1324,14 +1240,7 @@ async fn server_host_executes_admin_widget_extensions_during_live_requests() {
         ))
         .build()
         .unwrap();
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let authorizer = Arc::new(PermissiveLiveRouteCapabilityAuthorizer);
     let server = HttpServerHost::new_with_authorizer(
@@ -1426,14 +1335,7 @@ async fn server_host_executes_api_extensions_during_live_requests() {
         .build()
         .unwrap();
 
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let server = plan
         .server_host(
             &resolver,
@@ -1498,14 +1400,7 @@ async fn server_host_rejects_capability_routes_when_live_authorizer_denies() {
         .unwrap();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let resolver = StaticSecretResolver::new()
-        .with_secret(
-            davenda_config::SecretRef::Env {
-                var: "DATABASE_URL".to_string(),
-            },
-            "postgres://platform:secret@db.internal/platform",
-        )
-        .unwrap();
+    let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new());
     let server = HttpServerHost::new_with_authorizer(

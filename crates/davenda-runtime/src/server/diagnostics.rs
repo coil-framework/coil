@@ -183,6 +183,10 @@ pub(crate) async fn serve_diagnostics_probe(
                     .as_ref()
                     .map(|backend| json!({
                         "kind": format!("{:?}", backend.kind),
+                        "endpoint_url": backend.endpoint_url,
+                        "bucket": backend.bucket,
+                        "region": backend.region,
+                        "signed_url_ttl_secs": backend.signed_url_ttl_secs,
                         "credential_reference": backend.credential_reference,
                         "local_root": backend.local_root,
                     })),

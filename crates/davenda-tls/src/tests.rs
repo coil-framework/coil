@@ -204,6 +204,31 @@ fn manual_runtime_rejects_challenge_configuration() {
 }
 
 #[test]
+fn tls_material_protector_supports_key_rotation_without_losing_existing_material() {
+    let original = TlsMaterialProtector::from_seed("tls-material-original").unwrap();
+    let rotated =
+        TlsMaterialProtector::from_seed_ring("tls-material-rotated", ["tls-material-original"])
+            .unwrap();
+    let material = CertificateMaterial::new(
+        "-----BEGIN CERTIFICATE-----\nrotated\n-----END CERTIFICATE-----\n",
+        "-----BEGIN PRIVATE KEY-----\nrotated\n-----END PRIVATE KEY-----\n",
+    )
+    .unwrap();
+
+    let encrypted_with_original = original.encrypt(&material).unwrap();
+    let encrypted_with_rotated = rotated.encrypt(&material).unwrap();
+
+    assert_eq!(rotated.decrypt(&encrypted_with_original).unwrap(), material);
+    assert_eq!(rotated.decrypt(&encrypted_with_rotated).unwrap(), material);
+    assert_eq!(
+        original.decrypt(&encrypted_with_rotated).unwrap_err(),
+        TlsModelError::UnsupportedEncryptedMaterialKey {
+            key_id: rotated.key_id().to_string(),
+        }
+    );
+}
+
+#[test]
 fn renewal_keeps_current_certificate_live_until_replacement_succeeds() {
     let runtime = TlsRuntime::from_config(&acme_config(AcmeChallenge::Dns01, None));
     let record = CertificateRecord::new(

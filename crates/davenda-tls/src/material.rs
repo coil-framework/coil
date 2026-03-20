@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -85,37 +85,47 @@ pub struct EncryptedCertificateMaterial {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TlsMaterialProtector {
-    key_id: String,
-    key: [u8; 32],
+    active_key_id: String,
+    active_key: [u8; 32],
+    decryption_keys: BTreeMap<String, [u8; 32]>,
 }
 
 impl TlsMaterialProtector {
     pub fn from_seed(seed: impl AsRef<[u8]>) -> Result<Self, TlsModelError> {
-        let seed = seed.as_ref();
-        if seed.is_empty() {
-            return Err(TlsModelError::EmptyField {
-                field: "tls_material_seed",
-            });
+        Self::from_seed_ring(seed, std::iter::empty::<&[u8]>())
+    }
+
+    pub fn from_seed_ring<I, S>(active_seed: S, previous_seeds: I) -> Result<Self, TlsModelError>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let (active_key_id, active_key) = derive_key("tls_material_seed", active_seed.as_ref())?;
+        let mut decryption_keys = BTreeMap::new();
+        decryption_keys.insert(active_key_id.clone(), active_key);
+
+        for seed in previous_seeds {
+            let (key_id, key) = derive_key("tls_material_previous_seed", seed.as_ref())?;
+            decryption_keys.entry(key_id).or_insert(key);
         }
 
-        let digest = Sha256::digest(seed);
-        let mut key = [0_u8; 32];
-        key.copy_from_slice(&digest);
         Ok(Self {
-            key_id: format!("{:x}", digest),
-            key,
+            active_key_id,
+            active_key,
+            decryption_keys,
         })
     }
 
     pub fn key_id(&self) -> &str {
-        &self.key_id
+        &self.active_key_id
     }
 
     pub fn encrypt(
         &self,
         material: &CertificateMaterial,
     ) -> Result<EncryptedCertificateMaterial, TlsModelError> {
-        let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|error| {
+        let cipher = Aes256Gcm::new_from_slice(&self.active_key).map_err(|error| {
             TlsModelError::CertificateMaterialEncryptionFailed {
                 reason: error.to_string(),
             }
@@ -137,7 +147,7 @@ impl TlsMaterialProtector {
             })?;
 
         Ok(EncryptedCertificateMaterial {
-            key_id: self.key_id.clone(),
+            key_id: self.active_key_id.clone(),
             nonce,
             ciphertext,
         })
@@ -147,13 +157,13 @@ impl TlsMaterialProtector {
         &self,
         encrypted: &EncryptedCertificateMaterial,
     ) -> Result<CertificateMaterial, TlsModelError> {
-        if encrypted.key_id != self.key_id {
-            return Err(TlsModelError::UnsupportedEncryptedMaterialKey {
+        let key = self.decryption_keys.get(&encrypted.key_id).ok_or_else(|| {
+            TlsModelError::UnsupportedEncryptedMaterialKey {
                 key_id: encrypted.key_id.clone(),
-            });
-        }
+            }
+        })?;
 
-        let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|error| {
+        let cipher = Aes256Gcm::new_from_slice(key).map_err(|error| {
             TlsModelError::CertificateMaterialDecryptionFailed {
                 reason: error.to_string(),
             }
@@ -234,4 +244,15 @@ fn validate_pem_block(
     }
 
     Ok(())
+}
+
+fn derive_key(field: &'static str, seed: &[u8]) -> Result<(String, [u8; 32]), TlsModelError> {
+    if seed.is_empty() {
+        return Err(TlsModelError::EmptyField { field });
+    }
+
+    let digest = Sha256::digest(seed);
+    let mut key = [0_u8; 32];
+    key.copy_from_slice(&digest);
+    Ok((format!("{:x}", digest), key))
 }

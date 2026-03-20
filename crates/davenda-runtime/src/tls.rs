@@ -1,10 +1,14 @@
 use super::*;
 use davenda_tls::{
-    CertificateMaterial, ManualCertificateBundle, ManualImportTlsCertificateExecutor,
-    TlsCertificateExecutor, TlsMaterialProtector, AcmeTlsCertificateExecutor,
-    CloudflareTlsCertificateExecutor,
+    AcmeTlsCertificateExecutor, CertificateMaterial, CloudflareTlsCertificateExecutor,
+    ManualCertificateBundle, ManualImportTlsCertificateExecutor, TlsCertificateExecutor,
+    TlsMaterialProtector,
 };
 use std::sync::Arc;
+
+#[cfg(not(test))]
+const TLS_MATERIAL_KEY_ENV: &str = "DAVENDA_TLS_MATERIAL_KEY";
+const TLS_PREVIOUS_MATERIAL_KEYS_ENV: &str = "DAVENDA_TLS_PREVIOUS_MATERIAL_KEYS";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeTlsError {
@@ -41,21 +45,13 @@ impl TlsHost {
         _data_runtime: DataRuntimeServices,
         shared_backend_namespace: String,
     ) -> Result<Self, RuntimeTlsError> {
-        let material_seed = {
-            #[cfg(test)]
-            {
-                format!(
-                    "test-tls-material:{}:{}",
-                    customer_app, shared_backend_namespace
-                )
-            }
-
-            #[cfg(not(test))]
-            {
-                _data_runtime.resolve_connection_url()?
-            }
-        };
-        let material_protector = TlsMaterialProtector::from_seed(material_seed)?;
+        #[cfg(test)]
+        let material_protector = TlsMaterialProtector::from_seed(format!(
+            "test-tls-material:{}:{}",
+            customer_app, shared_backend_namespace
+        ))?;
+        #[cfg(not(test))]
+        let material_protector = runtime_material_protector()?;
         #[cfg(test)]
         let control_plane =
             TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
@@ -66,24 +62,24 @@ impl TlsHost {
             format!("customer-app:{}:{}", customer_app, shared_backend_namespace),
         )?;
         let certificate_executor: Arc<dyn TlsCertificateExecutor> = match runtime.provider {
-            Some(davenda_tls::CertificateProviderKind::Acme) => Arc::new(
-                AcmeTlsCertificateExecutor::new(
+            Some(davenda_tls::CertificateProviderKind::Acme) => {
+                Arc::new(AcmeTlsCertificateExecutor::new(
                     control_plane.clone(),
                     material_protector,
                     runtime.account_secret_ref.clone(),
-                ),
-            ),
+                ))
+            }
             Some(davenda_tls::CertificateProviderKind::CloudflareDns)
-            | Some(davenda_tls::CertificateProviderKind::CloudflareOriginCa) => Arc::new(
-                CloudflareTlsCertificateExecutor::new(
+            | Some(davenda_tls::CertificateProviderKind::CloudflareOriginCa) => {
+                Arc::new(CloudflareTlsCertificateExecutor::new(
                     runtime
                         .provider
                         .expect("cloudflare provider is selected when creating executor"),
                     control_plane.clone(),
                     material_protector,
                     runtime.account_secret_ref.clone(),
-                ),
-            ),
+                ))
+            }
             Some(davenda_tls::CertificateProviderKind::ManualImport) | None => Arc::new(
                 ManualImportTlsCertificateExecutor::new(control_plane.clone(), material_protector),
             ),
@@ -126,7 +122,9 @@ impl TlsHost {
         bundle: ManualCertificateBundle,
     ) -> Result<(), RuntimeTlsError> {
         let bundle = self.runtime.planner().import_manual_certificate(bundle)?;
-        Ok(self.certificate_executor.import_manual_certificate(bundle)?)
+        Ok(self
+            .certificate_executor
+            .import_manual_certificate(bundle)?)
     }
 
     pub fn certificate_material(
@@ -145,7 +143,9 @@ impl TlsHost {
         now: TlsInstant,
     ) -> Result<CertificateRecord, RuntimeTlsError> {
         let issuance = self.issue_for_bindings(bindings)?;
-        let record = self.certificate_executor.issue_certificate(&issuance, certificate_id, now)?;
+        let record = self
+            .certificate_executor
+            .issue_certificate(&issuance, certificate_id, now)?;
         self.control_plane.import_certificate(record.clone())?;
         Ok(record)
     }
@@ -212,5 +212,85 @@ impl TlsHost {
 
     pub fn control_plane(&self) -> &TlsControlPlaneRuntime {
         &self.control_plane
+    }
+}
+
+#[cfg(not(test))]
+fn runtime_material_protector() -> Result<TlsMaterialProtector, RuntimeTlsError> {
+    let active_key = std::env::var(TLS_MATERIAL_KEY_ENV).map_err(|_| {
+        TlsModelError::InvalidConfiguration {
+            field: "tls.material_encryption_key",
+            reason: format!(
+                "set `{TLS_MATERIAL_KEY_ENV}` so certificate material is encrypted with a dedicated TLS secret"
+            ),
+        }
+    })?;
+    let active_key = active_key.trim().to_string();
+    if active_key.is_empty() {
+        return Err(TlsModelError::InvalidConfiguration {
+            field: "tls.material_encryption_key",
+            reason: format!(
+                "`{TLS_MATERIAL_KEY_ENV}` must not be empty when TLS certificate material is stored by the platform"
+            ),
+        }
+        .into());
+    }
+    let previous_keys =
+        parse_previous_material_keys(std::env::var(TLS_PREVIOUS_MATERIAL_KEYS_ENV).ok())?;
+    Ok(TlsMaterialProtector::from_seed_ring(
+        active_key,
+        previous_keys,
+    )?)
+}
+
+fn parse_previous_material_keys(value: Option<String>) -> Result<Vec<String>, RuntimeTlsError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+
+    let keys = value
+        .split([',', '\n'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    if keys.is_empty() {
+        return Err(TlsModelError::InvalidConfiguration {
+            field: "tls.previous_material_encryption_keys",
+            reason: format!(
+                "`{TLS_PREVIOUS_MATERIAL_KEYS_ENV}` was set but did not contain any usable key material"
+            ),
+        }
+        .into());
+    }
+
+    Ok(keys)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn previous_tls_material_key_list_accepts_comma_and_newline_delimiters() {
+        let keys = parse_previous_material_keys(Some("old-a,\nold-b\nold-c".to_string())).unwrap();
+
+        assert_eq!(keys, vec!["old-a", "old-b", "old-c"]);
+    }
+
+    #[test]
+    fn previous_tls_material_key_list_rejects_empty_configured_values() {
+        let error = parse_previous_material_keys(Some(" , \n ".to_string())).unwrap_err();
+
+        assert_eq!(
+            error,
+            RuntimeTlsError::Tls(TlsModelError::InvalidConfiguration {
+                field: "tls.previous_material_encryption_keys",
+                reason: format!(
+                    "`{TLS_PREVIOUS_MATERIAL_KEYS_ENV}` was set but did not contain any usable key material"
+                ),
+            })
+        );
     }
 }

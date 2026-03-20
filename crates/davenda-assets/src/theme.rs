@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::fs::File;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -13,17 +15,12 @@ use davenda_storage::{StorageExecutor, StoragePlanner, StorageWriteReceipt};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeAssetSource {
     source_path: PathBuf,
-    bytes: Vec<u8>,
     artifact: DeploymentArtifact,
 }
 
 impl ThemeAssetSource {
     pub fn source_path(&self) -> &Path {
         &self.source_path
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
     }
 
     pub fn artifact(&self) -> &DeploymentArtifact {
@@ -117,8 +114,13 @@ impl ThemeAssetPublicationPlan {
                     logical_path: logical_path.to_string(),
                 }
             })?;
-            let write =
-                executor.execute_write(published.delivery().storage_plan(), source.bytes())?;
+            let bytes = fs::read(source.source_path()).map_err(|error| {
+                AssetModelError::ThemeAssetReadFailed {
+                    path: source.source_path().display().to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            let write = executor.execute_write(published.delivery().storage_plan(), &bytes)?;
             writes.push(write);
         }
 
@@ -195,42 +197,73 @@ fn collect_directory_assets(
             continue;
         }
 
-        let bytes = fs::read(&path).map_err(|error| AssetModelError::ThemeAssetReadFailed {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        })?;
         let relative_path = path
             .strip_prefix(app_root.join(source_root))
             .expect("scanned asset path should always share the same source root");
         let relative_path = relative_manifest_path(relative_path);
-        let logical_path = crate::normalize_manifest_path(
-            "logical_path",
-            format!("{source_root}/{relative_path}"),
-        )?;
-        let fingerprint = ContentFingerprint::new(
-            FingerprintAlgorithm::Sha256,
-            format!("{:x}", Sha256::digest(&bytes)),
-        )?;
-        let hashed_path = crate::normalize_manifest_path(
-            "hashed_path",
-            hashed_deployment_path(&logical_path, fingerprint.digest()),
-        )?;
-        let content_type = content_type_for_path(&path);
-        let artifact = DeploymentArtifact::new(
-            logical_path,
-            hashed_path,
-            fingerprint,
-            content_type,
-            bytes.len() as u64,
-        )?;
+        let artifact = load_theme_asset_artifact(source_root, &relative_path, &path)?;
         sources.push(ThemeAssetSource {
             source_path: path,
-            bytes,
             artifact,
         });
     }
 
     Ok(())
+}
+
+fn load_theme_asset_artifact(
+    source_root: &str,
+    relative_path: &str,
+    path: &Path,
+) -> Result<DeploymentArtifact, AssetModelError> {
+    let file = File::open(path).map_err(|error| AssetModelError::ThemeAssetReadFailed {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| AssetModelError::ThemeAssetReadFailed {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| AssetModelError::ThemeAssetReadFailed {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    let logical_path = crate::normalize_manifest_path(
+        "logical_path",
+        format!("{source_root}/{relative_path}"),
+    )?;
+    let fingerprint = ContentFingerprint::new(
+        FingerprintAlgorithm::Sha256,
+        format!("{:x}", hasher.finalize()),
+    )?;
+    let hashed_path = crate::normalize_manifest_path(
+        "hashed_path",
+        hashed_deployment_path(&logical_path, fingerprint.digest()),
+    )?;
+    let content_type = content_type_for_path(path);
+
+    DeploymentArtifact::new(
+        logical_path,
+        hashed_path,
+        fingerprint,
+        content_type,
+        metadata.len(),
+    )
 }
 
 fn relative_manifest_path(path: &Path) -> String {

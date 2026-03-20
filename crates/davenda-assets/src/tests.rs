@@ -178,6 +178,50 @@ fn theme_asset_publication_plan_publishes_and_syncs_source_roots() {
 }
 
 #[test]
+fn theme_asset_publication_plan_reads_assets_from_disk_at_sync_time() {
+    let workspace = tempfile::tempdir().unwrap();
+    let storage_root = tempfile::tempdir().unwrap();
+    let theme_root = workspace.path().join("theme/assets");
+    fs::create_dir_all(&theme_root).unwrap();
+    let source_file = theme_root.join("site.css");
+    fs::write(&source_file, b"body { color: #222; }").unwrap();
+
+    let plan = ThemeAssetPublicationPlan::from_roots(
+        ReleaseId::new("release-theme-assets-disk").unwrap(),
+        workspace.path(),
+        ["theme/assets"],
+    )
+    .unwrap();
+
+    let planner = StoragePlanner::new(
+        StorageTopology {
+            local_root: storage_root.path().display().to_string(),
+            default_class: StorageClass::PublicUpload,
+            deployment: StorageDeployment::Distributed,
+            single_node_escape_hatch: SingleNodeStorageMode::Disabled,
+            object_store: Some(ObjectStoreTarget {
+                kind: ObjectStoreKind::S3,
+            }),
+        },
+        StoragePolicySet::default(),
+    );
+    let executor = StorageExecutor::from_topology(planner.topology());
+    let manifest = plan
+        .publish(&planner, "https://cdn.example.com/assets")
+        .unwrap();
+
+    fs::remove_file(&source_file).unwrap();
+
+    assert_eq!(
+        plan.sync(&manifest, &executor).unwrap_err(),
+        AssetModelError::ThemeAssetReadFailed {
+            path: source_file.display().to_string(),
+            message: "No such file or directory (os error 2)".to_string(),
+        }
+    );
+}
+
+#[test]
 fn managed_assets_require_publication_before_public_delivery() {
     let planner = object_store_planner();
     let revision = ManagedAssetRevision::plan(

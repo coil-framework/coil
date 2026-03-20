@@ -140,8 +140,9 @@ impl CookieSealer {
         let cipher = cipher_for_secret(secret);
         let mut nonce = [0u8; 12];
         OsRng.fill_bytes(&mut nonce);
+        let nonce = Nonce::from(nonce);
         let ciphertext = cipher
-            .encrypt(Nonce::from_slice(&nonce), value.as_bytes())
+            .encrypt(&nonce, value.as_bytes())
             .map_err(|_| BrowserSecurityError::InvalidEncryptedCookiePayload)?;
 
         Ok(format!(
@@ -174,10 +175,14 @@ impl CookieSealer {
         let ciphertext = URL_SAFE_NO_PAD
             .decode(ciphertext)
             .map_err(|_| BrowserSecurityError::InvalidEncryptedCookieFormat)?;
+        let nonce: [u8; 12] = nonce
+            .try_into()
+            .map_err(|_| BrowserSecurityError::InvalidEncryptedCookieFormat)?;
 
         let cipher = cipher_for_secret(secret);
+        let nonce = Nonce::from(nonce);
         let plaintext = cipher
-            .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+            .decrypt(&nonce, ciphertext.as_ref())
             .map_err(|_| BrowserSecurityError::InvalidEncryptedCookiePayload)?;
 
         String::from_utf8(plaintext)

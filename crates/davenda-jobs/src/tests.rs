@@ -509,7 +509,7 @@ fn explicit_shared_runtime_constructors_report_shared_state_honestly() {
 }
 
 #[test]
-fn test_only_sqlite_shared_runtime_shares_state_across_independent_coordinators() {
+fn test_only_shared_runtime_shares_state_across_independent_coordinators() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
     let namespace = persistent_namespace("jobs");
     let left_runtime =
@@ -549,7 +549,7 @@ fn test_only_sqlite_shared_runtime_shares_state_across_independent_coordinators(
 }
 
 #[test]
-fn test_only_sqlite_shared_runtime_isolated_across_namespaces() {
+fn test_only_shared_runtime_isolated_across_namespaces() {
     let runtime = JobsRuntime::from_config(&config(JobBackend::Redis)).unwrap();
     let left_runtime = JobsBackendAdapter::test_only_sqlite_shared_runtime(
         &runtime,

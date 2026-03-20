@@ -9,7 +9,6 @@ use crate::{
 mod client;
 mod live;
 mod local;
-mod shared;
 mod state;
 mod testing;
 
@@ -37,10 +36,31 @@ pub struct CacheBackendAdapter {
 
 impl CacheBackendAdapter {
     pub fn new(topology: CacheTopology) -> Self {
-        Self::local_for_testing(topology)
+        match topology.l2() {
+            Some(crate::DistributedCacheBackend::Redis) => Self::distributed(
+                topology,
+                DistributedCacheClient::with_shared_runtime(
+                    CacheBackendKind::Redis,
+                    DistributedCacheClient::unavailable_shared_runtime(CacheBackendKind::Redis),
+                ),
+            ),
+            Some(crate::DistributedCacheBackend::Valkey) => Self::distributed(
+                topology,
+                DistributedCacheClient::with_shared_runtime(
+                    CacheBackendKind::Valkey,
+                    DistributedCacheClient::unavailable_shared_runtime(CacheBackendKind::Valkey),
+                ),
+            ),
+            None => Self::local_backend(topology),
+        }
     }
 
+    #[cfg(test)]
     pub fn local_for_testing(topology: CacheTopology) -> Self {
+        Self::local_backend(topology)
+    }
+
+    fn local_backend(topology: CacheTopology) -> Self {
         let kind = match topology.l2() {
             Some(crate::DistributedCacheBackend::Redis) => CacheBackendKind::Redis,
             Some(crate::DistributedCacheBackend::Valkey) => CacheBackendKind::Valkey,
@@ -91,6 +111,7 @@ impl CacheBackendAdapter {
 
     #[allow(dead_code)]
     #[doc(hidden)]
+    #[cfg(test)]
     #[deprecated(
         note = "compatibility shim; behaves like local_for_testing(topology). use with_shared_runtime(topology, runtime) or local_for_testing(topology)"
     )]
@@ -100,6 +121,7 @@ impl CacheBackendAdapter {
 
     #[allow(dead_code)]
     #[doc(hidden)]
+    #[cfg(test)]
     #[deprecated(
         note = "compatibility shim; behaves like local_for_testing(topology). use with_shared_runtime(topology, runtime) or local_for_testing(topology)"
     )]

@@ -132,7 +132,7 @@ impl DistributedSessionStoreClient {
         kind: SessionStoreBackendKind,
         scope: impl Into<String>,
     ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        super::shared::test_only_sqlite_shared_runtime(kind, scope.into())
+        super::testing::test_only_sqlite_shared_runtime(kind, scope.into())
     }
 
     pub fn kind(&self) -> SessionStoreBackendKind {

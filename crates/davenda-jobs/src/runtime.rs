@@ -91,11 +91,13 @@ impl JobsRuntime {
     }
 
     #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn coordinator_in_memory(&self) -> JobsCoordinator {
         self.coordinator_for_testing()
     }
 
     #[doc(hidden)]
+    #[cfg(test)]
     pub fn coordinator_for_testing(&self) -> JobsCoordinator {
         let backend = JobsBackendAdapter::local_for_testing(self)
             .expect("test-only local jobs coordinator backend must be available");

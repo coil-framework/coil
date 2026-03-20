@@ -16,15 +16,16 @@ pub struct JobsCoordinator {
 
 impl JobsCoordinator {
     pub fn new(runtime: JobsRuntime) -> Result<Self, JobsModelError> {
-        let backend = JobsBackendAdapter::local_for_testing(&runtime)?;
-        Ok(Self::with_backend(runtime, backend))
+        Err(crate::backend::explicit_distributed_backend_error(&runtime))
     }
 
     #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn new_in_memory(runtime: JobsRuntime) -> Self {
         Self::new_for_testing(runtime)
     }
 
+    #[cfg(test)]
     pub fn new_for_testing(runtime: JobsRuntime) -> Self {
         let backend = JobsBackendAdapter::local_for_testing(&runtime)
             .expect("test-only local jobs coordinator backend must be available");

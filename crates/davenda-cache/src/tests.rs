@@ -68,6 +68,21 @@ impl DistributedCacheRuntime for SharedCacheRuntimeHarness {
     }
 }
 
+fn explicit_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
+    Arc::new(SharedCacheRuntimeHarness::new(
+        DistributedCacheClient::emulated_shared_runtime(kind),
+    ))
+}
+
+fn named_shared_runtime(
+    kind: CacheBackendKind,
+    namespace: impl Into<String>,
+) -> Arc<dyn DistributedCacheRuntime> {
+    Arc::new(SharedCacheRuntimeHarness::new(
+        DistributedCacheClient::test_only_sqlite_shared_runtime(kind, namespace.into()),
+    ))
+}
+
 #[test]
 fn variation_keys_are_stable_for_equivalent_scopes() {
     let left = CacheScope::public()
@@ -217,11 +232,47 @@ fn distributed_topology_enables_cluster_coalescing_and_l2_cache() {
 }
 
 #[test]
-fn cache_runtime_new_keeps_distributed_topologies_local_until_explicitly_shared() {
-    let runtime = CacheRuntime::new(CacheTopology::with_redis());
+fn cache_runtime_new_requires_explicit_shared_runtime_for_distributed_topologies() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let topology = CacheTopology::with_redis();
+    let planner = CachePlanner::new(topology);
+    let plan = planner
+        .plan(
+            CachePlanRequest::new(
+                CacheNamespace::new("catalog.page").unwrap(),
+                "page:requires-runtime",
+                HttpCachePolicy::new(
+                    CacheScope::public(),
+                    Some(FreshnessPolicy::new(Duration::from_secs(60), None).unwrap()),
+                    ResponseValidators::default(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_application_policy(
+                ApplicationCachePolicy::new(
+                    CacheScope::public(),
+                    FreshnessPolicy::new(Duration::from_secs(60), None).unwrap(),
+                    InvalidationSet::new(),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let mut runtime = CacheRuntime::new(topology);
 
     assert_eq!(runtime.backend_kind(), CacheBackendKind::Redis);
     assert!(!runtime.backend_is_shared());
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        runtime.insert(
+            plan.application().unwrap(),
+            "<html>requires-runtime</html>",
+            CacheInstant::from_unix_seconds(100),
+        );
+    }))
+    .is_err());
 }
 
 #[test]
@@ -420,7 +471,9 @@ fn local_cache_runtime_clones_do_not_share_state() {
 }
 
 #[test]
-fn planner_runtime_defaults_are_local_even_for_distributed_topologies() {
+fn planner_runtime_requires_explicit_shared_runtime_for_distributed_topologies() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     let planner = CachePlanner::new(CacheTopology::with_valkey());
     let plan = planner
         .plan(
@@ -448,22 +501,17 @@ fn planner_runtime_defaults_are_local_even_for_distributed_topologies() {
         .unwrap();
 
     let mut left = planner.runtime();
-    let mut right = planner.runtime();
 
     assert!(!left.backend_is_shared());
     assert_eq!(left.backend_kind(), CacheBackendKind::Valkey);
-
-    left.insert(
-        plan.application().unwrap(),
-        "<html>shared</html>",
-        CacheInstant::from_unix_seconds(100),
-    );
-
-    let lookup = right.lookup(
-        plan.application().unwrap().key(),
-        CacheInstant::from_unix_seconds(110),
-    );
-    assert_eq!(lookup.state, CacheLookupState::Miss);
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        left.insert(
+            plan.application().unwrap(),
+            "<html>shared</html>",
+            CacheInstant::from_unix_seconds(100),
+        );
+    }))
+    .is_err());
 }
 
 #[test]
@@ -556,12 +604,8 @@ fn persistent_shared_cache_runtime_shares_state_across_independent_clients() {
         .unwrap();
 
     let namespace = persistent_namespace("cache");
-    let left_runtime = DistributedCacheClient::test_only_sqlite_shared_runtime(
-        CacheBackendKind::Redis,
-        namespace.clone(),
-    );
-    let right_runtime =
-        DistributedCacheClient::test_only_sqlite_shared_runtime(CacheBackendKind::Redis, namespace);
+    let left_runtime = named_shared_runtime(CacheBackendKind::Redis, namespace.clone());
+    let right_runtime = named_shared_runtime(CacheBackendKind::Redis, namespace);
     let left_adapter = CacheBackendAdapter::with_shared_runtime(topology, left_runtime);
     let right_adapter = CacheBackendAdapter::with_shared_runtime(topology, right_runtime);
     let mut left = CacheRuntime::with_backend(topology, left_adapter);
@@ -582,7 +626,7 @@ fn persistent_shared_cache_runtime_shares_state_across_independent_clients() {
 }
 
 #[test]
-fn persistent_shared_cache_runtime_isolated_across_namespaces() {
+fn test_only_shared_cache_runtime_isolated_across_namespaces() {
     let topology = CacheTopology::with_redis();
     let planner = CachePlanner::new(topology);
     let plan = planner
@@ -618,14 +662,8 @@ fn persistent_shared_cache_runtime_isolated_across_namespaces() {
         )
         .unwrap();
 
-    let left_runtime = DistributedCacheClient::test_only_sqlite_shared_runtime(
-        CacheBackendKind::Redis,
-        persistent_namespace("cache-left"),
-    );
-    let right_runtime = DistributedCacheClient::test_only_sqlite_shared_runtime(
-        CacheBackendKind::Redis,
-        persistent_namespace("cache-right"),
-    );
+    let left_runtime = named_shared_runtime(CacheBackendKind::Redis, persistent_namespace("cache-left"));
+    let right_runtime = named_shared_runtime(CacheBackendKind::Redis, persistent_namespace("cache-right"));
     let left_adapter = CacheBackendAdapter::with_shared_runtime(topology, left_runtime);
     let right_adapter = CacheBackendAdapter::with_shared_runtime(topology, right_runtime);
     let mut left = CacheRuntime::with_backend(topology, left_adapter);
@@ -804,7 +842,7 @@ fn runtime_serves_fresh_then_stale_then_miss() {
         )
         .unwrap();
     let application = plan.application().unwrap();
-    let mut runtime = planner.runtime();
+    let mut runtime = planner.runtime_with_shared_runtime(explicit_shared_runtime(CacheBackendKind::Valkey));
     runtime.insert(
         application,
         "<html>cached</html>",
@@ -883,7 +921,7 @@ fn runtime_keeps_public_and_private_entries_isolated() {
         private_plan.application().unwrap().key()
     );
 
-    let mut runtime = planner.runtime();
+    let mut runtime = planner.runtime_with_shared_runtime(explicit_shared_runtime(CacheBackendKind::Redis));
     runtime.insert(
         public_plan.application().unwrap(),
         "public",
@@ -970,7 +1008,7 @@ fn runtime_invalidates_entries_by_surrogate_tag() {
             ),
         )
         .unwrap();
-    let mut runtime = planner.runtime();
+    let mut runtime = planner.runtime_with_shared_runtime(explicit_shared_runtime(CacheBackendKind::Redis));
     runtime.insert(
         page_plan.application().unwrap(),
         "page",
@@ -1024,7 +1062,7 @@ fn runtime_coalesces_duplicate_fill_requests() {
         )
         .unwrap();
     let key = plan.application().unwrap().key().clone();
-    let mut runtime = planner.runtime();
+    let mut runtime = planner.runtime_with_shared_runtime(explicit_shared_runtime(CacheBackendKind::Redis));
 
     let first = runtime.begin_fill(&key, RequestCoalescingMode::Cluster, "request-a");
     let lease = match first {

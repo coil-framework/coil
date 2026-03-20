@@ -173,31 +173,26 @@ impl JobsBackendAdapter {
     }
 
     #[doc(hidden)]
+    #[cfg(test)]
     pub fn in_memory(runtime: &JobsRuntime) -> Result<Self, JobsModelError> {
         Self::local_for_testing(runtime)
     }
 
     #[doc(hidden)]
+    #[cfg(test)]
     pub fn local_for_testing(runtime: &JobsRuntime) -> Result<Self, JobsModelError> {
-        #[cfg(test)]
-        {
-            let runtime_backend = Self::emulated_shared_runtime(runtime);
-            return Ok(Self {
-                backend: runtime.backend,
-                queue_topology: runtime.topology.clone(),
-                shared: false,
-                runtime: runtime_backend,
-            });
-        }
-
-        #[cfg(not(test))]
-        {
-            Err(explicit_distributed_backend_error(runtime))
-        }
+        let runtime_backend = Self::emulated_shared_runtime(runtime);
+        Ok(Self {
+            backend: runtime.backend,
+            queue_topology: runtime.topology.clone(),
+            shared: false,
+            runtime: runtime_backend,
+        })
     }
 
     #[allow(dead_code)]
     #[doc(hidden)]
+    #[cfg(test)]
     #[deprecated(
         note = "compatibility shim; behaves like local_for_testing(runtime). use with_shared_runtime(backend, topology, runtime) or local_for_testing(runtime)"
     )]
@@ -207,6 +202,7 @@ impl JobsBackendAdapter {
 
     #[allow(dead_code)]
     #[doc(hidden)]
+    #[cfg(test)]
     #[deprecated(
         note = "compatibility shim; behaves like local_for_testing(runtime). use with_shared_runtime(backend, topology, runtime) or local_for_testing(runtime)"
     )]

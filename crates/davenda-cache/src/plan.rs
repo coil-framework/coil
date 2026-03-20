@@ -156,17 +156,16 @@ impl CachePlanner {
     }
 
     pub fn runtime(&self) -> crate::CacheRuntime {
-        crate::CacheRuntime::with_backend(
-            self.topology,
-            crate::CacheBackendAdapter::local_for_testing(self.topology),
-        )
+        crate::CacheRuntime::new(self.topology)
     }
 
+    #[cfg(test)]
     #[doc(hidden)]
     pub fn local_for_testing(&self) -> crate::CacheRuntime {
         crate::CacheRuntime::local_for_testing(self.topology)
     }
 
+    #[cfg(test)]
     #[doc(hidden)]
     pub fn local_runtime(&self) -> crate::CacheRuntime {
         self.local_for_testing()
@@ -181,6 +180,7 @@ impl CachePlanner {
 
     #[allow(dead_code)]
     #[doc(hidden)]
+    #[cfg(test)]
     #[deprecated(note = "use runtime_with_shared_runtime(shared_runtime)")]
     pub fn shared_runtime(&self) -> crate::CacheRuntime {
         self.runtime()

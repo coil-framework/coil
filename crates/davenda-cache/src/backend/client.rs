@@ -7,8 +7,6 @@ use crate::{
 };
 
 use super::CacheBackendKind;
-#[cfg(test)]
-use super::shared;
 
 pub trait DistributedCacheRuntime: Send + Sync + 'static {
     fn insert(&self, entry: CacheEntry);
@@ -65,9 +63,14 @@ impl DistributedCacheClient {
         super::live::live_shared_runtime(kind, namespace, root)
     }
 
+    pub(crate) fn unavailable_shared_runtime(
+        kind: CacheBackendKind,
+    ) -> Arc<dyn DistributedCacheRuntime> {
+        Arc::new(ExplicitDistributedCacheRuntimeRequired { kind })
+    }
+
     #[doc(hidden)]
     pub fn emulated_shared_runtime(kind: CacheBackendKind) -> Arc<dyn DistributedCacheRuntime> {
-        let _ = kind;
         super::testing::test_only_sqlite_shared_runtime(
             kind,
             super::testing::test_scope_namespace(),
@@ -79,7 +82,7 @@ impl DistributedCacheClient {
         kind: CacheBackendKind,
         namespace: impl Into<String>,
     ) -> Arc<dyn DistributedCacheRuntime> {
-        shared::test_only_sqlite_shared_runtime(kind, namespace.into())
+        super::testing::test_only_sqlite_shared_runtime(kind, namespace.into())
     }
 
     #[cfg(test)]
@@ -149,5 +152,54 @@ impl fmt::Debug for DistributedCacheClient {
         f.debug_struct("DistributedCacheClient")
             .field("kind", &self.kind)
             .finish()
+    }
+}
+
+#[derive(Debug)]
+struct ExplicitDistributedCacheRuntimeRequired {
+    kind: CacheBackendKind,
+}
+
+impl ExplicitDistributedCacheRuntimeRequired {
+    fn panic(&self) -> ! {
+        panic!(
+            "distributed cache backend `{kind:?}` requires an explicit shared runtime",
+            kind = self.kind
+        )
+    }
+}
+
+impl DistributedCacheRuntime for ExplicitDistributedCacheRuntimeRequired {
+    fn insert(&self, _entry: CacheEntry) {
+        self.panic();
+    }
+
+    fn lookup(&self, _key: &CacheKey, _now: CacheInstant) -> CacheLookup {
+        self.panic();
+    }
+
+    fn invalidate(&self, _tags: &InvalidationSet) -> Vec<CacheKey> {
+        self.panic();
+    }
+
+    fn begin_fill(
+        &self,
+        _key: &CacheKey,
+        _mode: RequestCoalescingMode,
+        _holder: String,
+    ) -> FillDecision {
+        self.panic();
+    }
+
+    fn complete_fill(&self, _lease: &FillLease) -> Result<(), CacheModelError> {
+        self.panic();
+    }
+
+    fn metrics(&self) -> CacheMetrics {
+        CacheMetrics::default()
+    }
+
+    fn is_shared_backend(&self) -> bool {
+        false
     }
 }

@@ -5,7 +5,6 @@ mod flash;
 mod host;
 mod live;
 mod session;
-mod shared;
 mod support;
 #[cfg(test)]
 mod testing;

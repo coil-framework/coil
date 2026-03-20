@@ -673,7 +673,6 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "redis",
- "rusqlite",
  "serde",
  "serde_json",
 ]
@@ -789,9 +788,7 @@ dependencies = [
 name = "davenda-jobs"
 version = "0.1.0"
 dependencies = [
- "bincode",
  "davenda-config",
- "rusqlite",
  "serde",
  "serde_json",
  "sqlx",

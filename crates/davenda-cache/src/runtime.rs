@@ -89,12 +89,10 @@ pub struct CacheRuntime {
 
 impl CacheRuntime {
     pub fn new(topology: CacheTopology) -> Self {
-        Self::with_backend(
-            topology,
-            crate::CacheBackendAdapter::local_for_testing(topology),
-        )
+        Self::with_backend(topology, crate::CacheBackendAdapter::new(topology))
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     #[doc(hidden)]
     pub fn local_for_testing(topology: CacheTopology) -> Self {

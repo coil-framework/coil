@@ -1,4 +1,5 @@
 use crate::cli::error::CliRunError;
+use crate::cli::config::ConfigValidateInvocation;
 use crate::cli::import::ImportRunInvocation;
 use crate::command::OutputMode;
 use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Relation};
@@ -16,6 +17,10 @@ pub struct AuthExplainInvocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliInput {
     Help,
+    ConfigValidate {
+        output_mode: OutputMode,
+        invocation: ConfigValidateInvocation,
+    },
     AuthExplain {
         output_mode: OutputMode,
         invocation: AuthExplainInvocation,
@@ -87,6 +92,20 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     }
 
     match positionals.as_slice() {
+        [command, subcommand] if command == "config" && subcommand == "validate" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`config validate` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ConfigValidate {
+                output_mode,
+                invocation: ConfigValidateInvocation { config_path },
+            })
+        }
         [command, subcommand] if command == "auth" && subcommand == "explain" => {
             let config_path = config_path
                 .or_else(discover_default_config_path)
@@ -324,5 +343,28 @@ mod tests {
             invocation.manifest_path,
             PathBuf::from("imports/wordpress-events.toml")
         );
+    }
+
+    #[test]
+    fn parse_config_validate_uses_explicit_config_path() {
+        let input = parse([
+            "config".to_string(),
+            "validate".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ConfigValidate {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected config validate input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
     }
 }

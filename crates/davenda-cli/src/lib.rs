@@ -8,7 +8,7 @@ mod validation;
 
 pub use cli::{
     run_from_args, run_from_env, AuthExplainInvocation, AuthExplainResult, CliApplication,
-    CliRunError, ImportRunInvocation,
+    CliRunError, ConfigValidateInvocation, ImportRunInvocation,
 };
 pub use command::{
     baseline_commands, CommandDescriptor, CommandExecutionPlan, CommandInvocation, CommandOwner,

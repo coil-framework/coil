@@ -1,49 +1,46 @@
-#![cfg_attr(test, allow(dead_code))]
-
 use super::host::BrowserHostBuildError;
 use super::session::{
     BrowserInstant, BrowserSessionRecord, DistributedSessionStoreRuntime, SessionStoreBackendKind,
 };
 use super::RuntimeBrowserError;
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use std::env;
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::runtime::Runtime;
+use sqlx::{Postgres, Row as PgRow};
 
 pub(crate) fn live_shared_runtime(
     kind: SessionStoreBackendKind,
     namespace: impl Into<String>,
-    root: impl Into<PathBuf>,
+    _root: impl Into<PathBuf>,
 ) -> Result<Arc<dyn DistributedSessionStoreRuntime>, BrowserHostBuildError> {
     let namespace = namespace.into();
-    let path = live_database_path(kind, &namespace, root.into());
-    let runtime = LiveSharedSessionStoreRuntime::new(kind, namespace, path)?;
-    Ok(Arc::new(runtime))
+    Ok(Arc::new(ProductionPostgresSharedSessionStoreRuntime::new(
+        kind,
+        namespace,
+    )?))
 }
 
 #[derive(Debug)]
-struct LiveSharedSessionStoreRuntime {
-    store: LiveSharedSessionStore,
+struct ProductionPostgresSharedSessionStoreRuntime {
+    store: ProductionPostgresSharedSessionStore,
 }
 
-impl LiveSharedSessionStoreRuntime {
-    fn new(
-        kind: SessionStoreBackendKind,
-        namespace: String,
-        path: PathBuf,
-    ) -> Result<Self, BrowserHostBuildError> {
+impl ProductionPostgresSharedSessionStoreRuntime {
+    fn new(kind: SessionStoreBackendKind, namespace: String) -> Result<Self, BrowserHostBuildError> {
         Ok(Self {
-            store: LiveSharedSessionStore::open(kind, namespace, path)?,
+            store: ProductionPostgresSharedSessionStore::open(kind, namespace)?,
         })
     }
 }
 
-impl DistributedSessionStoreRuntime for LiveSharedSessionStoreRuntime {
+impl DistributedSessionStoreRuntime for ProductionPostgresSharedSessionStoreRuntime {
     fn issue(&self, record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
-        self.store
-            .with_state_mut(|state| {
-                state.issue(record);
-                Ok(())
-            })
+        self.store.with_state_mut(|state| {
+            state.issue(record);
+            Ok(())
+        })
     }
 
     fn session(
@@ -54,11 +51,10 @@ impl DistributedSessionStoreRuntime for LiveSharedSessionStoreRuntime {
     }
 
     fn delete(&self, session_id: &str) -> Result<(), RuntimeBrowserError> {
-        self.store
-            .with_state_mut(|state| {
-                state.sessions.remove(session_id);
-                Ok(())
-            })
+        self.store.with_state_mut(|state| {
+            state.sessions.remove(session_id);
+            Ok(())
+        })
     }
 
     fn revoke(&self, session_id: &str, now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
@@ -82,6 +78,191 @@ impl DistributedSessionStoreRuntime for LiveSharedSessionStoreRuntime {
     fn supports_live_shared_state(&self) -> bool {
         true
     }
+}
+
+#[derive(Debug)]
+struct ProductionPostgresSharedSessionStore {
+    pool: sqlx::Pool<Postgres>,
+    runtime: Runtime,
+    kind: SessionStoreBackendKind,
+    namespace: String,
+}
+
+impl ProductionPostgresSharedSessionStore {
+    fn open(
+        kind: SessionStoreBackendKind,
+        namespace: String,
+    ) -> Result<Self, BrowserHostBuildError> {
+        let url = session_backend_url();
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .min_connections(1)
+            .max_connections(4)
+            .connect_lazy(&url)
+            .map_err(|reason| BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
+                kind,
+                scope: namespace.clone(),
+                path: url.clone(),
+                reason: reason.to_string(),
+            })?;
+        let runtime = Runtime::new().map_err(|reason| {
+            BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
+                kind,
+                scope: namespace.clone(),
+                path: url.clone(),
+                reason: reason.to_string(),
+            }
+        })?;
+
+        Ok(Self {
+            pool,
+            runtime,
+            kind,
+            namespace,
+        })
+    }
+
+    fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
+        self.runtime.block_on(future)
+    }
+
+    async fn ensure_table(pool: &sqlx::Pool<Postgres>) -> Result<(), RuntimeBrowserError> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS session_state (
+                namespace TEXT PRIMARY KEY,
+                payload TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|error| RuntimeBrowserError::LiveSharedSessionStoreFailure {
+            kind: SessionStoreBackendKind::Database,
+            scope: "session-state".to_string(),
+            reason: error.to_string(),
+        })?;
+        Ok(())
+    }
+
+    fn read_state<T>(
+        &self,
+        op: impl FnOnce(&SessionStoreSnapshot) -> T,
+    ) -> Result<T, RuntimeBrowserError> {
+        self.block_on(async {
+            Self::ensure_table(&self.pool).await?;
+            let payload = sqlx::query("SELECT payload FROM session_state WHERE namespace = $1")
+                .bind(&self.namespace)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|error| RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                    kind: self.kind,
+                    scope: self.namespace.clone(),
+                    reason: error.to_string(),
+                })?
+                .map(|row| row.get::<String, _>("payload"));
+
+            let state = match payload {
+                Some(payload) => serde_json::from_str(&payload).map_err(|error| {
+                    RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                        kind: self.kind,
+                        scope: self.namespace.clone(),
+                        reason: error.to_string(),
+                    }
+                })?,
+                None => SessionStoreSnapshot::default(),
+            };
+
+            Ok(op(&state))
+        })
+    }
+
+    fn with_state_mut<T>(
+        &self,
+        op: impl FnOnce(&mut SessionStoreSnapshot) -> Result<T, RuntimeBrowserError>,
+    ) -> Result<T, RuntimeBrowserError> {
+        self.block_on(async {
+            Self::ensure_table(&self.pool).await?;
+            let mut tx = self.pool.begin().await.map_err(|error| {
+                RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                    kind: self.kind,
+                    scope: self.namespace.clone(),
+                    reason: error.to_string(),
+                }
+            })?;
+
+            sqlx::query(
+                "INSERT INTO session_state (namespace, payload) VALUES ($1, $2) ON CONFLICT(namespace) DO NOTHING",
+            )
+            .bind(&self.namespace)
+            .bind(serde_json::to_string(&SessionStoreSnapshot::default()).unwrap())
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                kind: self.kind,
+                scope: self.namespace.clone(),
+                reason: error.to_string(),
+            })?;
+
+            let payload = sqlx::query(
+                "SELECT payload FROM session_state WHERE namespace = $1 FOR UPDATE",
+            )
+            .bind(&self.namespace)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|error| RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                kind: self.kind,
+                scope: self.namespace.clone(),
+                reason: error.to_string(),
+            })?
+            .get::<String, _>("payload");
+
+            let mut state = serde_json::from_str(&payload).map_err(|error| {
+                RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                    kind: self.kind,
+                    scope: self.namespace.clone(),
+                    reason: error.to_string(),
+                }
+            })?;
+
+            let outcome = op(&mut state);
+            let should_persist = matches!(
+                outcome.as_ref(),
+                Ok(_) | Err(RuntimeBrowserError::ExpiredSession { .. })
+            );
+            if should_persist {
+                let payload = serde_json::to_string(&state).map_err(|error| {
+                    RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                        kind: self.kind,
+                        scope: self.namespace.clone(),
+                        reason: error.to_string(),
+                    }
+                })?;
+                sqlx::query("UPDATE session_state SET payload = $2 WHERE namespace = $1")
+                    .bind(&self.namespace)
+                    .bind(payload)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|error| RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                        kind: self.kind,
+                        scope: self.namespace.clone(),
+                        reason: error.to_string(),
+                    })?;
+                tx.commit().await.map_err(|error| {
+                    RuntimeBrowserError::LiveSharedSessionStoreFailure {
+                        kind: self.kind,
+                        scope: self.namespace.clone(),
+                        reason: error.to_string(),
+                    }
+                })?;
+            }
+
+            outcome
+        })
+    }
+}
+
+fn session_backend_url() -> String {
+    env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/davenda".to_string())
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -138,176 +319,4 @@ impl SessionStoreSnapshot {
             }),
         }
     }
-}
-
-#[derive(Debug)]
-struct LiveSharedSessionStore {
-    connection: Mutex<Connection>,
-    kind: SessionStoreBackendKind,
-    namespace: String,
-}
-
-impl LiveSharedSessionStore {
-    fn open(
-        kind: SessionStoreBackendKind,
-        namespace: String,
-        path: PathBuf,
-    ) -> Result<Self, BrowserHostBuildError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|reason| {
-                BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
-                    kind,
-                    scope: namespace.clone(),
-                    path: path.display().to_string(),
-                    reason: reason.to_string(),
-                }
-            })?;
-        }
-
-        let connection = Connection::open(&path).map_err(|reason| {
-            BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
-                kind,
-                scope: namespace.clone(),
-                path: path.display().to_string(),
-                reason: reason.to_string(),
-            }
-        })?;
-        connection.execute_batch(
-            r#"
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            CREATE TABLE IF NOT EXISTS session_state (
-                namespace TEXT PRIMARY KEY,
-                payload TEXT NOT NULL
-            );
-            "#,
-        )
-        .map_err(|reason| BrowserHostBuildError::LiveSharedSessionStoreInitializationFailed {
-            kind,
-            scope: namespace.clone(),
-            path: path.display().to_string(),
-            reason: reason.to_string(),
-        })?;
-
-        Ok(Self {
-            connection: Mutex::new(connection),
-            kind,
-            namespace,
-        })
-    }
-
-    fn error(&self, reason: impl Into<String>) -> RuntimeBrowserError {
-        RuntimeBrowserError::LiveSharedSessionStoreFailure {
-            kind: self.kind,
-            scope: self.namespace.clone(),
-            reason: reason.into(),
-        }
-    }
-
-    fn read_state<T>(
-        &self,
-        op: impl FnOnce(&SessionStoreSnapshot) -> T,
-    ) -> Result<T, RuntimeBrowserError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| self.error("session backend mutex poisoned"))?;
-        let payload: Option<String> = connection
-            .query_row(
-                "SELECT payload FROM session_state WHERE namespace = ?1",
-                params![self.namespace.as_str()],
-                |row: &Row<'_>| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|reason: rusqlite::Error| self.error(reason.to_string()))?;
-
-        let state = match payload {
-            Some(payload) => serde_json::from_str(&payload).map_err(|reason: serde_json::Error| {
-                self.error(reason.to_string())
-            })?,
-            None => SessionStoreSnapshot::default(),
-        };
-
-        Ok(op(&state))
-    }
-
-    fn with_state_mut<T>(
-        &self,
-        op: impl FnOnce(&mut SessionStoreSnapshot) -> Result<T, RuntimeBrowserError>,
-    ) -> Result<T, RuntimeBrowserError> {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| self.error("session backend mutex poisoned"))?;
-        let tx = connection
-            .transaction()
-            .map_err(|reason: rusqlite::Error| self.error(reason.to_string()))?;
-        let payload: Option<String> = tx
-            .query_row(
-                "SELECT payload FROM session_state WHERE namespace = ?1",
-                params![self.namespace.as_str()],
-                |row: &Row<'_>| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|reason: rusqlite::Error| self.error(reason.to_string()))?;
-
-        let mut state = match payload {
-            Some(payload) => serde_json::from_str(&payload).map_err(|reason: serde_json::Error| {
-                self.error(reason.to_string())
-            })?,
-            None => SessionStoreSnapshot::default(),
-        };
-
-        let outcome = op(&mut state);
-        let should_persist = matches!(
-            outcome.as_ref(),
-            Ok(_) | Err(RuntimeBrowserError::ExpiredSession { .. })
-        );
-        if should_persist {
-            let payload = serde_json::to_string(&state)
-                .map_err(|reason: serde_json::Error| self.error(reason.to_string()))?;
-            tx.execute(
-                "INSERT INTO session_state (namespace, payload) VALUES (?1, ?2)
-                 ON CONFLICT(namespace) DO UPDATE SET payload = excluded.payload",
-                params![self.namespace.as_str(), payload],
-            )
-            .map_err(|reason: rusqlite::Error| self.error(reason.to_string()))?;
-            tx.commit()
-                .map_err(|reason: rusqlite::Error| self.error(reason.to_string()))?;
-        }
-
-        outcome
-    }
-}
-
-fn live_database_path(
-    kind: SessionStoreBackendKind,
-    namespace: &str,
-    root: PathBuf,
-) -> PathBuf {
-    root.join("browser")
-        .join(session_backend_slug(kind))
-        .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
-}
-
-fn session_backend_slug(kind: SessionStoreBackendKind) -> &'static str {
-    match kind {
-        SessionStoreBackendKind::Local => "local",
-        SessionStoreBackendKind::Database => "database",
-        SessionStoreBackendKind::Redis => "redis",
-        SessionStoreBackendKind::Valkey => "valkey",
-    }
-}
-
-fn sanitize_namespace(namespace: &str) -> String {
-    namespace
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }

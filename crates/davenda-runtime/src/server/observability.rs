@@ -92,7 +92,10 @@ pub(crate) async fn serve_metrics_probe(
     )
 }
 
-pub(super) fn observability_response(status: StatusCode, value: serde_json::Value) -> Response<Body> {
+pub(super) fn observability_response(
+    status: StatusCode,
+    value: serde_json::Value,
+) -> Response<Body> {
     let mut response = Response::new(Body::from(value.to_string()));
     *response.status_mut() = status;
     response
@@ -101,7 +104,9 @@ pub(super) fn observability_response(status: StatusCode, value: serde_json::Valu
     response
 }
 
-pub(super) fn health_report_json(report: &davenda_observability::HealthReport) -> serde_json::Value {
+pub(super) fn health_report_json(
+    report: &davenda_observability::HealthReport,
+) -> serde_json::Value {
     json!({
         "kind": report.kind.to_string(),
         "status": health_status_string(report.overall_status()),
@@ -113,7 +118,9 @@ pub(super) fn health_report_json(report: &davenda_observability::HealthReport) -
     })
 }
 
-pub(super) fn maintenance_mode_json(mode: &davenda_observability::MaintenanceMode) -> serde_json::Value {
+pub(super) fn maintenance_mode_json(
+    mode: &davenda_observability::MaintenanceMode,
+) -> serde_json::Value {
     json!({
         "enabled": mode.enabled,
         "audience": match &mode.audience {

@@ -22,11 +22,7 @@ impl<K, V> CompiledModuleCache<K, V>
 where
     K: Eq + Hash + Clone,
 {
-    pub(super) fn get_or_insert_with<E, F>(
-        &self,
-        key: K,
-        compile: F,
-    ) -> Result<Arc<V>, E>
+    pub(super) fn get_or_insert_with<E, F>(&self, key: K, compile: F) -> Result<Arc<V>, E>
     where
         F: FnOnce() -> Result<V, E>,
     {
@@ -41,11 +37,11 @@ where
         }
 
         let compiled = Arc::new(compile()?);
-        let mut entries = self
-            .entries
-            .lock()
-            .expect("compiled module cache poisoned");
-        Ok(entries.entry(key).or_insert_with(|| compiled.clone()).clone())
+        let mut entries = self.entries.lock().expect("compiled module cache poisoned");
+        Ok(entries
+            .entry(key)
+            .or_insert_with(|| compiled.clone())
+            .clone())
     }
 
     #[cfg(test)]

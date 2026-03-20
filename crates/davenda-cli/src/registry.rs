@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::CliModelError;
 use crate::command::{
-    CommandDescriptor, CommandExecutionPlan, CommandInvocation, CommandOwner, baseline_commands,
+    baseline_commands, CommandDescriptor, CommandExecutionPlan, CommandInvocation, CommandOwner,
 };
 use crate::validation::{require_non_empty, validate_token};
+use crate::CliModelError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CommandRegistry {

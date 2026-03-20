@@ -1,5 +1,5 @@
-use super::support::{sign_payload, verify_payload};
 use super::BrowserSecurityError;
+use super::support::{sign_payload, verify_payload};
 use crate::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

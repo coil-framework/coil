@@ -19,8 +19,8 @@ mod observability;
 mod request;
 
 use auth::DeferredPostgresRouteCapabilityAuthorizer;
-use auth::auth_explain_router;
 pub(crate) use auth::LiveRouteCapabilityAuthorizer;
+use auth::auth_explain_router;
 pub use backend::{
     DatabaseClientTarget, DistributedCacheClientTarget, JobsClientTarget, ObjectStoreClientTarget,
     SecretResolutionError, SecretResolver, SessionStoreClientTarget, SharedBackendClients,

@@ -1184,6 +1184,7 @@ fn browser_host_issues_rotates_and_revokes_server_side_sessions() {
     assert!(issued.set_cookie_header.starts_with("davenda_session="));
     assert_eq!(
         host.session(&issued.record.session_id)
+            .unwrap()
             .and_then(|record| record.principal_id),
         Some("member-1".to_string())
     );
@@ -1198,6 +1199,7 @@ fn browser_host_issues_rotates_and_revokes_server_side_sessions() {
     assert_ne!(rotated.issued.record.session_id, issued.record.session_id);
     assert_eq!(
         host.session(&issued.record.session_id)
+            .unwrap()
             .map(|record| record.status_at(BrowserInstant::from_unix_seconds(121))),
         Some(BrowserSessionStatus::Revoked)
     );
@@ -1209,6 +1211,7 @@ fn browser_host_issues_rotates_and_revokes_server_side_sessions() {
     .unwrap();
     assert_eq!(
         host.session(&rotated.issued.record.session_id)
+            .unwrap()
             .map(|record| record.status_at(BrowserInstant::from_unix_seconds(131))),
         Some(BrowserSessionStatus::Revoked)
     );
@@ -1240,7 +1243,7 @@ fn browser_host_keeps_memory_sessions_local_to_each_clone() {
         )
         .unwrap();
 
-    assert!(right.session(&issued.record.session_id).is_none());
+    assert!(right.session(&issued.record.session_id).unwrap().is_none());
     assert!(
         right
             .resolve_request(
@@ -1306,6 +1309,7 @@ fn browser_host_shares_distributed_sessions_by_default_within_a_plan() {
     assert_eq!(
         right
             .session(&issued.record.session_id)
+            .unwrap()
             .and_then(|record| record.principal_id),
         Some("member-3".to_string())
     );
@@ -1379,6 +1383,7 @@ fn browser_host_shares_distributed_sessions_when_reusing_an_explicit_client() {
     assert_eq!(
         right
             .session(&issued.record.session_id)
+            .unwrap()
             .and_then(|record| record.principal_id),
         Some("member-3".to_string())
     );
@@ -1568,7 +1573,7 @@ fn execute_browser_request_rejects_expired_server_side_sessions() {
             session_id: issued.record.session_id.clone(),
         }
     );
-    assert!(host.session(&issued.record.session_id).is_none());
+    assert!(host.session(&issued.record.session_id).unwrap().is_none());
 }
 
 #[test]
@@ -2268,6 +2273,7 @@ fn runtime_backend_materializer_reuses_explicit_session_runtime_for_browser_host
     assert_eq!(
         right
             .session(&issued.record.session_id)
+            .unwrap()
             .and_then(|record| record.principal_id),
         Some("member-runtime".to_string())
     );
@@ -2326,6 +2332,7 @@ fn runtime_backend_materializer_shares_session_state_across_instances() {
     assert_eq!(
         right
             .session(&issued.record.session_id)
+            .unwrap()
             .and_then(|record| record.principal_id),
         Some("member-isolated".to_string())
     );

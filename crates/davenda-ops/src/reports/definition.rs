@@ -3,9 +3,8 @@ use crate::identifiers::ReportId;
 use crate::validation::require_non_empty;
 use davenda_auth::Capability;
 use davenda_core::{
-    ReportDefinition as ManifestReportDefinition,
-    ReportDeliveryMode as ManifestReportDeliveryMode, ReportFormat as ManifestReportFormat,
-    ReportSensitivity as ManifestReportSensitivity,
+    ReportDefinition as ManifestReportDefinition, ReportDeliveryMode as ManifestReportDeliveryMode,
+    ReportFormat as ManifestReportFormat, ReportSensitivity as ManifestReportSensitivity,
 };
 use davenda_jobs::RetryPolicy;
 use std::fmt;

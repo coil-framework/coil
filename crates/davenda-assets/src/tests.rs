@@ -1,8 +1,6 @@
 use super::*;
 use davenda_auth::{DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
-use davenda_config::{
-    ObjectStoreKind, SingleNodeStorageMode, StorageClass, StorageDeployment,
-};
+use davenda_config::{ObjectStoreKind, SingleNodeStorageMode, StorageClass, StorageDeployment};
 use davenda_storage::{
     DeliveryMode, DurableStore, ObjectStoreTarget, Sensitivity, StorageBackendKind, StoragePlanner,
     StoragePolicyOverride, StoragePolicySet, StorageTopology, SyncMode,

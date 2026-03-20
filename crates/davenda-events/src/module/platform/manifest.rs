@@ -12,12 +12,10 @@ mod surfaces;
 
 use backoffice::{bulk_operations, report_definitions, search_contributions};
 use capabilities::{
-    capability_contracts, core_service_dependencies, module_dependencies,
-    optional_capabilities, required_capabilities,
+    capability_contracts, core_service_dependencies, module_dependencies, optional_capabilities,
+    required_capabilities,
 };
-use operations::{
-    event_subscriptions, extension_slots, jobs, module_behaviors, module_migrations,
-};
+use operations::{event_subscriptions, extension_slots, jobs, module_behaviors, module_migrations};
 use surfaces::{http_surfaces, integration_points, route_surfaces};
 
 pub(super) fn build_manifest(module: &EventsModule) -> ModuleManifest {

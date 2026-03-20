@@ -1,18 +1,18 @@
+use super::super::observability::observability_response;
 use super::render::render_explanation_json;
 use super::*;
+use axum::Json;
 use axum::body::Body;
 use axum::extract::Request;
 use axum::extract::State;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::post;
-use axum::Json;
 use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Relation};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use super::super::observability::observability_response;
 
 use davenda_auth::LiveAuthExplainRequest;
 
@@ -167,14 +167,20 @@ async fn build_auth_explain_response(
     let explanation = state
         .auth_explainer
         .as_ref()
-        .ok_or_else(|| AuthExplainRequestError::Internal(RuntimeServerError::Explain {
-            reason: "auth explain API is disabled by deployment config".to_string(),
-        }))?
+        .ok_or_else(|| {
+            AuthExplainRequestError::Internal(RuntimeServerError::Explain {
+                reason: "auth explain API is disabled by deployment config".to_string(),
+            })
+        })?
         .explain_capability(&request)
         .await
         .map_err(AuthExplainRequestError::Internal)?;
 
-    Ok(render_explanation_json(state.plan.tenant_id(), &request, &explanation))
+    Ok(render_explanation_json(
+        state.plan.tenant_id(),
+        &request,
+        &explanation,
+    ))
 }
 
 fn parse_subject(input: &str) -> Result<DefaultSubject, AuthExplainRequestError> {
@@ -194,9 +200,9 @@ fn parse_subject(input: &str) -> Result<DefaultSubject, AuthExplainRequestError>
 }
 
 fn parse_entity(input: &str) -> Result<Entity, AuthExplainRequestError> {
-    let (namespace, id) = input.split_once(':').ok_or_else(|| {
-        AuthExplainRequestError::BadRequest(format!("invalid entity `{input}`"))
-    })?;
+    let (namespace, id) = input
+        .split_once(':')
+        .ok_or_else(|| AuthExplainRequestError::BadRequest(format!("invalid entity `{input}`")))?;
     if id.trim().is_empty() {
         return Err(AuthExplainRequestError::BadRequest(format!(
             "invalid entity `{input}`"
@@ -239,9 +245,8 @@ fn parse_entity(input: &str) -> Result<Entity, AuthExplainRequestError> {
 }
 
 fn parse_relation(input: &str) -> Result<Relation, AuthExplainRequestError> {
-    Relation::from_str(input).ok_or_else(|| {
-        AuthExplainRequestError::BadRequest(format!("unknown relation `{input}`"))
-    })
+    Relation::from_str(input)
+        .ok_or_else(|| AuthExplainRequestError::BadRequest(format!("unknown relation `{input}`")))
 }
 
 fn parse_capability(input: &str) -> Result<Capability, AuthExplainRequestError> {

@@ -1,9 +1,9 @@
 use davenda_auth::Capability;
 
 use crate::{
-    AccessibilityContract, AdminResourceDescriptor, AdminResourceId, AdminResourceKind,
-    AdminShell, AdminWidgetDescriptor, AdminWidgetId, BulkActionKind, NavigationSection,
-    WidgetSlot, WorkflowAction, WorkflowId,
+    AccessibilityContract, AdminResourceDescriptor, AdminResourceId, AdminResourceKind, AdminShell,
+    AdminWidgetDescriptor, AdminWidgetId, BulkActionKind, NavigationSection, WidgetSlot,
+    WorkflowAction, WorkflowId,
 };
 
 pub(super) fn default_shell() -> AdminShell {

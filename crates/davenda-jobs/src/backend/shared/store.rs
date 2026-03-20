@@ -5,7 +5,7 @@ use super::*;
 use crate::backend::JobsBackendState;
 use crate::error::JobsModelError;
 use bincode::{deserialize, serialize};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
 use std::sync::Mutex;
 

@@ -5,8 +5,8 @@ use davenda_config::PlatformConfig;
 use davenda_wasm::{
     CustomerAppContext, ExtensionId, HandlerId, HostCapabilityGrant, HostGrantSet, HttpMethod,
     InvocationContext, InvocationInput, InvocationPlan, JobExecution, MetadataExecution,
-    MetadataGrant, NetworkExecution, PageInvocation, PrincipalRef, ResourceLimits,
-    SecretExecution, TraceContext,
+    MetadataGrant, NetworkExecution, PageInvocation, PrincipalRef, ResourceLimits, SecretExecution,
+    TraceContext,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -208,7 +208,10 @@ fn runtime_host_service_executor_uses_live_backends() {
 
     let jobs = plan.jobs_host("scheduler-a").unwrap();
     assert_eq!(jobs.coordinator().ready_jobs().len(), 1);
-    assert_eq!(jobs.coordinator().ready_jobs()[0].spec.queue.as_str(), "jobs.work");
+    assert_eq!(
+        jobs.coordinator().ready_jobs()[0].spec.queue.as_str(),
+        "jobs.work"
+    );
 
     let metadata = session
         .execute_host_call(davenda_wasm::HostCall::MetadataWrite {

@@ -79,13 +79,21 @@ fn step_to_json(step: &ExplainStep) -> Value {
             "tuple": render_tuple(tuple),
             "to": render_node(to),
         }),
-        ExplainStep::Computed { from, via_tuple, to } => json!({
+        ExplainStep::Computed {
+            from,
+            via_tuple,
+            to,
+        } => json!({
             "kind": "computed",
             "from": render_node(from),
             "via_tuple": render_tuple(via_tuple),
             "to": render_node(to),
         }),
-        ExplainStep::TupleToUserset { from, via_tuple, to } => json!({
+        ExplainStep::TupleToUserset {
+            from,
+            via_tuple,
+            to,
+        } => json!({
             "kind": "tuple_to_userset",
             "from": render_node(from),
             "via_tuple": render_tuple(via_tuple),

@@ -1,21 +1,17 @@
+use super::observability::{health_report_json, maintenance_mode_json, observability_response};
 use super::*;
 use axum::Router;
 use axum::body::Body;
-use axum::extract::State;
 use axum::extract::Request;
+use axum::extract::State;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::get;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use super::observability::{
-    health_report_json, maintenance_mode_json, observability_response,
-};
 
-pub(crate) fn privileged_router(
-    state: Arc<RuntimeServerState>,
-) -> Router<Arc<RuntimeServerState>> {
+pub(crate) fn privileged_router(state: Arc<RuntimeServerState>) -> Router<Arc<RuntimeServerState>> {
     let auth_state = state.clone();
     Router::new()
         .route("/diagnostics", get(serve_diagnostics_probe))

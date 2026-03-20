@@ -1,5 +1,5 @@
-use super::*;
 use super::super::super::support::default_retry_policy;
+use super::*;
 
 pub(super) fn search_contributions() -> Vec<SearchIndexContribution> {
     vec![

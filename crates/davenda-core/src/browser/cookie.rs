@@ -1,5 +1,5 @@
-use super::support::{cipher_for_secret, ensure_cookie_protection, sign_payload, verify_payload};
 use super::BrowserSecurityError;
+use super::support::{cipher_for_secret, ensure_cookie_protection, sign_payload, verify_payload};
 use crate::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

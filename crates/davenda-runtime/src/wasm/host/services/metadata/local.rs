@@ -259,7 +259,10 @@ mod tests {
         let root = shared_state_root("pragmas");
         let backend = LocalMetadataAuditStore::open(root, "audit-suite".to_string());
 
-        let connection = backend.connection.lock().expect("connection mutex should not be poisoned");
+        let connection = backend
+            .connection
+            .lock()
+            .expect("connection mutex should not be poisoned");
         let synchronous: i64 = connection
             .query_row("PRAGMA synchronous", [], |row| row.get(0))
             .expect("synchronous pragma should be queryable");
@@ -267,7 +270,10 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode pragma should be queryable");
 
-        assert_eq!(synchronous, 2, "FULL synchronous mode should be enabled for local audit durability");
+        assert_eq!(
+            synchronous, 2,
+            "FULL synchronous mode should be enabled for local audit durability"
+        );
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
     }
 }

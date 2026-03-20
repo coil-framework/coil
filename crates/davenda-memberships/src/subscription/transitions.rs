@@ -1,6 +1,6 @@
 use crate::{
-    EntitlementStatus, MembershipInstant, MembershipModelError, MembershipTier,
-    SubscriptionEvent, SubscriptionEventKind, SubscriptionStatus, TierChangeKind,
+    EntitlementStatus, MembershipInstant, MembershipModelError, MembershipTier, SubscriptionEvent,
+    SubscriptionEventKind, SubscriptionStatus, TierChangeKind,
 };
 
 use super::Subscription;

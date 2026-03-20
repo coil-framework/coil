@@ -3,8 +3,8 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-mod explain;
 mod authorizer;
+mod explain;
 mod request;
 #[cfg(test)]
 mod testing;

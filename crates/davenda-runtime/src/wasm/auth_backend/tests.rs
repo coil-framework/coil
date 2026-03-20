@@ -220,13 +220,21 @@ impl RebacEngine for MemoryRebacEngine {
             .expect("memory auth engine mutex poisoned");
         Ok(tuples
             .iter()
-            .filter(|tuple| object.as_ref().is_none_or(|expected| &tuple.object == expected))
+            .filter(|tuple| {
+                object
+                    .as_ref()
+                    .is_none_or(|expected| &tuple.object == expected)
+            })
             .filter(|tuple| {
                 relation
                     .as_ref()
                     .is_none_or(|expected| &tuple.relation == expected)
             })
-            .filter(|tuple| subject.as_ref().is_none_or(|expected| &tuple.subject == expected))
+            .filter(|tuple| {
+                subject
+                    .as_ref()
+                    .is_none_or(|expected| &tuple.subject == expected)
+            })
             .cloned()
             .collect())
     }
@@ -242,9 +250,9 @@ impl RebacEngine for MemoryRebacEngine {
             .tuples
             .lock()
             .expect("memory auth engine mutex poisoned");
-        Ok(tuples
-            .iter()
-            .any(|tuple| &tuple.object == object && tuple.relation == relation && &tuple.subject == subject))
+        Ok(tuples.iter().any(|tuple| {
+            &tuple.object == object && tuple.relation == relation && &tuple.subject == subject
+        }))
     }
 
     async fn check_many(

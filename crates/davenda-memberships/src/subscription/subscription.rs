@@ -2,8 +2,7 @@ use davenda_commerce::{EntitlementKey, OrderId};
 
 use crate::{
     BillingInterval, MemberAccountId, MembershipInstant, MembershipModelError, MembershipTier,
-    MembershipTierId, SubscriptionEvent, SubscriptionEventKind, SubscriptionId,
-    SubscriptionStatus,
+    MembershipTierId, SubscriptionEvent, SubscriptionEventKind, SubscriptionId, SubscriptionStatus,
 };
 
 use super::EntitlementGrant;

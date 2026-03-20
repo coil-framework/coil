@@ -20,6 +20,7 @@ pub struct JobsHost {
 }
 
 impl JobsHost {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn new(
         customer_app: String,
         scheduler_node_id: String,

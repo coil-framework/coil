@@ -33,6 +33,7 @@ impl RuntimeBackendMaterializer {
         }
     }
 
+    #[cfg_attr(not(test), allow(unused_variables))]
     pub(crate) fn browser_host(
         &self,
         customer_app: String,

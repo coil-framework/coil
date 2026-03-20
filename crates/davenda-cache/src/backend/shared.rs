@@ -1,4 +1,5 @@
 #![cfg_attr(test, allow(dead_code))]
+#![cfg(test)]
 //! Test-only SQLite persistence used for shared backend tests.
 
 #[cfg(test)]
@@ -11,7 +12,7 @@ use crate::{
 #[cfg(test)]
 use bincode::{deserialize, serialize};
 #[cfg(test)]
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,19 +28,6 @@ pub(crate) fn test_only_sqlite_shared_runtime(
     namespace: impl Into<String>,
 ) -> Arc<dyn DistributedCacheRuntime> {
     Arc::new(TestOnlySqliteSharedCacheRuntime::new(
-        kind,
-        namespace.into(),
-    ))
-}
-
-#[cfg(not(test))]
-pub(crate) fn live_rejection_shared_runtime(
-    kind: CacheBackendKind,
-    namespace: impl Into<String>,
-) -> Arc<dyn DistributedCacheRuntime> {
-    // Live cache coordination must be configured explicitly; this is the
-    // rejection backend for non-test builds.
-    Arc::new(LiveRejectionDistributedCacheRuntime::new(
         kind,
         namespace.into(),
     ))
@@ -131,68 +119,6 @@ impl DistributedCacheRuntime for TestOnlySqliteSharedCacheRuntime {
 
     fn is_shared_backend(&self) -> bool {
         true
-    }
-
-    fn supports_live_shared_state(&self) -> bool {
-        false
-    }
-}
-
-#[cfg(not(test))]
-#[derive(Debug)]
-struct LiveRejectionDistributedCacheRuntime {
-    kind: CacheBackendKind,
-    namespace: String,
-}
-
-#[cfg(not(test))]
-impl LiveRejectionDistributedCacheRuntime {
-    fn new(kind: CacheBackendKind, namespace: String) -> Self {
-        Self { kind, namespace }
-    }
-
-    fn unsupported_message(&self) -> String {
-        format!(
-            "live shared cache backend `{kind:?}` for `{namespace}` requires an explicit distributed runtime; file-backed shared state is test-only",
-            kind = self.kind,
-            namespace = self.namespace
-        )
-    }
-}
-
-#[cfg(not(test))]
-impl DistributedCacheRuntime for LiveRejectionDistributedCacheRuntime {
-    fn insert(&self, _entry: CacheEntry) {
-        panic!("{}", self.unsupported_message());
-    }
-
-    fn lookup(&self, _key: &CacheKey, _now: CacheInstant) -> CacheLookup {
-        panic!("{}", self.unsupported_message());
-    }
-
-    fn invalidate(&self, _tags: &InvalidationSet) -> Vec<CacheKey> {
-        panic!("{}", self.unsupported_message());
-    }
-
-    fn begin_fill(
-        &self,
-        _key: &CacheKey,
-        _mode: RequestCoalescingMode,
-        _holder: String,
-    ) -> FillDecision {
-        panic!("{}", self.unsupported_message());
-    }
-
-    fn complete_fill(&self, _lease: &FillLease) -> Result<(), CacheModelError> {
-        panic!("{}", self.unsupported_message());
-    }
-
-    fn metrics(&self) -> CacheMetrics {
-        panic!("{}", self.unsupported_message());
-    }
-
-    fn is_shared_backend(&self) -> bool {
-        false
     }
 
     fn supports_live_shared_state(&self) -> bool {

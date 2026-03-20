@@ -46,11 +46,17 @@ impl RuntimeBackendMaterializer {
                     format!("{}:{customer_app}", self.namespace),
                 );
                 #[cfg(not(test))]
-                let session_runtime = DistributedSessionStoreClient::live_rejection_shared_runtime(
-                    target.kind,
-                    format!("{}:{customer_app}", self.namespace),
-                );
+                {
+                    // Live browser sessions require an explicit shared-store
+                    // runtime; the materializer does not build a fallback.
+                    return Err(
+                        BrowserHostBuildError::LiveSharedSessionStoreRequiresExplicitRuntime {
+                            kind: target.kind,
+                        },
+                    );
+                }
 
+                #[cfg(test)]
                 BrowserHost::with_session_store_client(
                     customer_app.clone(),
                     services.clone(),

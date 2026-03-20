@@ -127,33 +127,12 @@ impl DistributedSessionStoreClient {
         Self { kind, runtime }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn test_only_sqlite_shared_runtime(
         kind: SessionStoreBackendKind,
         scope: impl Into<String>,
     ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        #[cfg(test)]
-        {
-            return super::shared::test_only_sqlite_shared_runtime(kind, scope.into());
-        }
-
-        #[cfg(not(test))]
-        {
-            super::shared::live_rejection_shared_runtime(kind, scope.into())
-        }
-    }
-
-    #[cfg(not(test))]
-    pub(crate) fn live_rejection_shared_runtime(
-        kind: SessionStoreBackendKind,
-        scope: impl Into<String>,
-    ) -> Arc<dyn DistributedSessionStoreRuntime> {
-        // Live browser sessions must be configured explicitly; this is the
-        // rejection backend for non-test builds.
-        Arc::new(LiveRejectionDistributedSessionStoreRuntime::new(
-            kind,
-            scope.into(),
-        ))
+        super::shared::test_only_sqlite_shared_runtime(kind, scope.into())
     }
 
     pub fn kind(&self) -> SessionStoreBackendKind {
@@ -207,66 +186,6 @@ impl std::fmt::Debug for DistributedSessionStoreClient {
         f.debug_struct("DistributedSessionStoreClient")
             .field("kind", &self.kind)
             .finish()
-    }
-}
-
-#[cfg(not(test))]
-#[derive(Debug)]
-pub(super) struct LiveRejectionDistributedSessionStoreRuntime {
-    kind: SessionStoreBackendKind,
-    scope: String,
-}
-
-#[cfg(not(test))]
-impl LiveRejectionDistributedSessionStoreRuntime {
-    pub(super) fn new(kind: SessionStoreBackendKind, scope: String) -> Self {
-        Self { kind, scope }
-    }
-
-    fn unavailable_error(&self) -> RuntimeBrowserError {
-        RuntimeBrowserError::LiveSharedSessionStoreUnavailable {
-            kind: self.kind,
-            scope: self.scope.clone(),
-        }
-    }
-}
-
-#[cfg(not(test))]
-impl DistributedSessionStoreRuntime for LiveRejectionDistributedSessionStoreRuntime {
-    fn issue(&self, _record: BrowserSessionRecord) -> Result<(), RuntimeBrowserError> {
-        Err(self.unavailable_error())
-    }
-
-    fn session(
-        &self,
-        _session_id: &str,
-    ) -> Result<Option<BrowserSessionRecord>, RuntimeBrowserError> {
-        Err(self.unavailable_error())
-    }
-
-    fn delete(&self, _session_id: &str) -> Result<(), RuntimeBrowserError> {
-        Err(self.unavailable_error())
-    }
-
-    fn revoke(&self, _session_id: &str, _now: BrowserInstant) -> Result<(), RuntimeBrowserError> {
-        Err(self.unavailable_error())
-    }
-
-    fn touch_active_session(
-        &self,
-        _session_id: &str,
-        _idle_timeout: Duration,
-        _now: BrowserInstant,
-    ) -> Result<Option<String>, RuntimeBrowserError> {
-        Err(self.unavailable_error())
-    }
-
-    fn is_shared_backend(&self) -> bool {
-        false
-    }
-
-    fn supports_live_shared_state(&self) -> bool {
-        false
     }
 }
 

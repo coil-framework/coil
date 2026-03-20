@@ -6,7 +6,9 @@ use crate::{
     FillLease, InvalidationSet, RequestCoalescingMode,
 };
 
-use super::{shared, CacheBackendKind};
+use super::CacheBackendKind;
+#[cfg(test)]
+use super::shared;
 
 pub trait DistributedCacheRuntime: Send + Sync + 'static {
     fn insert(&self, entry: CacheEntry);
@@ -70,14 +72,6 @@ impl DistributedCacheClient {
         namespace: impl Into<String>,
     ) -> Arc<dyn DistributedCacheRuntime> {
         shared::test_only_sqlite_shared_runtime(kind, namespace.into())
-    }
-
-    #[cfg(not(test))]
-    pub fn live_rejection_shared_runtime(
-        kind: CacheBackendKind,
-        namespace: impl Into<String>,
-    ) -> Arc<dyn DistributedCacheRuntime> {
-        shared::live_rejection_shared_runtime(kind, namespace.into())
     }
 
     #[cfg(test)]

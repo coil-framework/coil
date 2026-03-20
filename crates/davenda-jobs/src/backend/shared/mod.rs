@@ -8,9 +8,9 @@ use crate::{
     DeadLetterReason, JobFailureDisposition, JobId, JobInstant, JobLease, JobQueueName, JobSpec,
     JobsCoordinatorSnapshot, JobsModelError, SchedulerLeadership,
 };
+use std::sync::Arc;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 #[cfg(not(test))]
@@ -39,7 +39,7 @@ pub(crate) fn test_only_sqlite_shared_runtime(
 }
 
 #[cfg(not(test))]
-pub(crate) fn live_rejection_shared_runtime(
+pub(crate) fn unconfigured_live_shared_runtime(
     runtime: &JobsRuntime,
     namespace: impl Into<String>,
 ) -> Arc<dyn JobsCoordinationRuntime> {
@@ -51,9 +51,9 @@ pub(crate) fn live_rejection_shared_runtime(
 
 #[cfg(not(test))]
 pub(crate) fn local_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {
-    // Live jobs coordination must be configured explicitly; this path only
-    // constructs the rejection backend for non-test builds.
-    live_rejection_shared_runtime(runtime, default_namespace(runtime))
+    // Single-node local coordination remains available for local-mode runtime
+    // helpers, but live distributed builds must wire an explicit backend.
+    unconfigured_live_shared_runtime(runtime, default_namespace(runtime))
 }
 
 #[cfg(test)]

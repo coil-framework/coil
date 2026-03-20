@@ -163,14 +163,6 @@ impl JobsBackendAdapter {
         shared::test_only_sqlite_shared_runtime(runtime, namespace.into())
     }
 
-    #[cfg(not(test))]
-    pub fn live_rejection_shared_runtime(
-        runtime: &JobsRuntime,
-        namespace: impl Into<String>,
-    ) -> Arc<dyn JobsCoordinationRuntime> {
-        shared::live_rejection_shared_runtime(runtime, namespace.into())
-    }
-
     #[doc(hidden)]
     pub fn in_memory(runtime: &JobsRuntime) -> Self {
         Self::local_for_testing(runtime)

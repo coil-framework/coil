@@ -97,28 +97,29 @@ impl RuntimePlan {
             validate_runtime_identifier("scheduler_node_id", scheduler_node_id.into())?;
         let namespace = self.shared_backend_namespace();
         #[cfg(test)]
-        let shared_runtime = shared_jobs_runtime_for_test(&self.jobs, namespace.clone());
-        #[cfg(not(test))]
-        // Live builds never fall back to local/shared-volume jobs state.
-        let shared_runtime = live::live_rejection_jobs_runtime(&self.jobs, namespace.clone());
-        #[cfg(not(test))]
-        if !shared_runtime.is_shared_backend() {
-            return Err(RuntimeJobsError::LiveSharedRuntimeRequiresExplicitBackend {
-                backend: self.jobs.backend,
-            });
+        {
+            let shared_runtime = shared_jobs_runtime_for_test(&self.jobs, namespace.clone());
+            return Ok(JobsHost::new(
+                self.config.app.name.clone(),
+                scheduler_node_id,
+                self.jobs.clone(),
+                self.jobs.describe().clone(),
+                self.registered_runtime_jobs.clone(),
+                self.registered_runtime_event_subscriptions.clone(),
+                self.jobs_domain.clone(),
+                shared_runtime,
+                namespace,
+            ));
         }
 
-        Ok(JobsHost::new(
-            self.config.app.name.clone(),
-            scheduler_node_id,
-            self.jobs.clone(),
-            self.jobs.describe().clone(),
-            self.registered_runtime_jobs.clone(),
-            self.registered_runtime_event_subscriptions.clone(),
-            self.jobs_domain.clone(),
-            shared_runtime,
-            namespace,
-        ))
+        #[cfg(not(test))]
+        {
+            let _ = scheduler_node_id;
+            let _ = namespace;
+            // Live builds require an explicit distributed jobs runtime; no
+            // local SQLite or shared-volume coordinator is constructed here.
+            return Err(live::unconfigured_live_jobs_error(self.jobs.backend));
+        }
     }
 
     pub fn ops_host(
@@ -144,40 +145,58 @@ impl RuntimePlan {
     pub fn cache_host(&self) -> Result<CacheHost, RuntimeCacheError> {
         let namespace = self.cache_namespace()?;
         let shared_namespace = self.shared_backend_namespace();
-        let shared_runtime = if self.cache_planner.topology().supports_shared_invalidation() {
-            let backend = match self
-                .cache_planner
-                .topology()
-                .l2()
-                .expect("shared cache runtime requires distributed l2")
-            {
-                davenda_cache::DistributedCacheBackend::Redis => {
-                    davenda_cache::CacheBackendKind::Redis
-                }
-                davenda_cache::DistributedCacheBackend::Valkey => {
-                    davenda_cache::CacheBackendKind::Valkey
-                }
-            };
+        if self.cache_planner.topology().supports_shared_invalidation() {
             #[cfg(test)]
-            let runtime = shared_cache_runtime_for_test(backend, shared_namespace.clone());
-            #[cfg(not(test))]
-            // Live builds never fall back to local/shared-volume cache state.
-            let runtime = live::live_rejection_cache_runtime(backend, shared_namespace.clone());
-            #[cfg(not(test))]
-            if !runtime.is_shared_backend() {
-                return Err(
-                    RuntimeCacheError::LiveSharedRuntimeRequiresExplicitBackend { kind: backend },
-                );
+            {
+                let backend = match self
+                    .cache_planner
+                    .topology()
+                    .l2()
+                    .expect("shared cache runtime requires distributed l2")
+                {
+                    davenda_cache::DistributedCacheBackend::Redis => {
+                        davenda_cache::CacheBackendKind::Redis
+                    }
+                    davenda_cache::DistributedCacheBackend::Valkey => {
+                        davenda_cache::CacheBackendKind::Valkey
+                    }
+                };
+                let runtime = shared_cache_runtime_for_test(backend, shared_namespace.clone());
+                return Ok(CacheHost::new(
+                    self.config.app.name.clone(),
+                    namespace,
+                    self.cache_planner,
+                    Some(runtime),
+                    shared_namespace,
+                ));
             }
-            Some(runtime)
-        } else {
-            None
-        };
+
+            #[cfg(not(test))]
+            {
+                let backend = match self
+                    .cache_planner
+                    .topology()
+                    .l2()
+                    .expect("shared cache runtime requires distributed l2")
+                {
+                    davenda_cache::DistributedCacheBackend::Redis => {
+                        davenda_cache::CacheBackendKind::Redis
+                    }
+                    davenda_cache::DistributedCacheBackend::Valkey => {
+                        davenda_cache::CacheBackendKind::Valkey
+                    }
+                };
+                // Live builds require an explicit distributed cache runtime;
+                // no file-backed shared invalidation runtime is constructed here.
+                return Err(live::unconfigured_live_cache_error(backend));
+            }
+        }
+
         Ok(CacheHost::new(
             self.config.app.name.clone(),
             namespace,
             self.cache_planner,
-            shared_runtime,
+            None,
             shared_namespace,
         ))
     }

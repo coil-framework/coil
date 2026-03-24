@@ -114,6 +114,10 @@ pub enum AppModelError {
         configured: String,
         actual: String,
     },
+    #[error("failed to read customer app manifest `{path}`: {message}")]
+    ManifestRead { path: String, message: String },
+    #[error("failed to parse customer app manifest: {message}")]
+    ManifestParse { message: String },
     #[error("{0}")]
     ModuleCapabilityValidation(#[from] CapabilityValidationError),
     #[error("{0}")]

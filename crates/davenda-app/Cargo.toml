@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 davenda-auth = { path = "../davenda-auth" }
 davenda-assets = { path = "../davenda-assets" }
-davenda-cli = { path = "../davenda-cli" }
 davenda-config = { path = "../davenda-config" }
 davenda-core = { path = "../davenda-core" }
 davenda-data = { path = "../davenda-data" }
@@ -16,6 +15,8 @@ davenda-report = { path = "../davenda-report" }
 davenda-runtime = { path = "../davenda-runtime" }
 davenda-template = { path = "../davenda-template" }
 davenda-wasm = { path = "../davenda-wasm" }
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.8.23"
 thiserror = "2.0.17"
 
 [dev-dependencies]

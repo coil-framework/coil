@@ -25,7 +25,7 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -33,6 +33,14 @@ use tempfile::TempDir;
 struct EnvVarGuard {
     key: &'static str,
     previous: Option<OsString>,
+}
+
+static OBJECT_STORE_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+fn object_store_env_lock() -> MutexGuard<'static, ()> {
+    OBJECT_STORE_ENV_LOCK
+        .lock()
+        .expect("object-store env lock poisoned")
 }
 
 impl Drop for EnvVarGuard {
@@ -132,7 +140,11 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
     let path = parts
         .next()
         .unwrap_or("/")
+        .split('?')
+        .next()
+        .unwrap_or("/")
         .trim_start_matches('/')
+        .trim_start_matches("runtime/")
         .to_string();
 
     let mut content_length = 0usize;
@@ -497,11 +509,15 @@ fn static_migration_plan(module: &str, step_id: &str) -> MigrationPlan {
 }
 
 fn runtime_config(app_id: &str) -> PlatformConfig {
+    runtime_config_with_environment(app_id, "production")
+}
+
+fn runtime_config_with_environment(app_id: &str, environment: &str) -> PlatformConfig {
     PlatformConfig::from_toml_str(&format!(
         r#"
 [app]
 name = "{app_id}"
-environment = "production"
+environment = "{environment}"
 
 [server]
 bind = "0.0.0.0:8080"
@@ -730,12 +746,13 @@ fn composition_rejects_unknown_modules_and_missing_dependencies() {
 
 #[test]
 fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
+    let _lock = object_store_env_lock();
     let server = ObjectStoreTestServer::spawn();
     let _guard = set_object_store_secret(server.endpoint());
     let workspace = theme_workspace();
     let runtime = app()
         .build_runtime_plan_with_extensions_at(
-            runtime_config("harbor-shop"),
+            runtime_config_with_environment("harbor-shop", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()
@@ -795,7 +812,7 @@ fn runtime_build_requires_pinned_extension_packages() {
     let workspace = theme_workspace();
     let error = app()
         .build_runtime_plan_at(
-            runtime_config("harbor-shop"),
+            runtime_config_with_environment("harbor-shop", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()
@@ -819,7 +836,7 @@ fn runtime_build_requires_pinned_extension_packages() {
     let workspace = theme_workspace();
     let error = app()
         .build_runtime_plan_with_extensions_at(
-            runtime_config("harbor-shop"),
+            runtime_config_with_environment("harbor-shop", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()
@@ -943,12 +960,13 @@ fn release_doctor_reports_config_drift_and_unpinned_modules() {
 
 #[test]
 fn customer_app_reports_render_into_cli_surfaces() {
+    let _lock = object_store_env_lock();
     let server = ObjectStoreTestServer::spawn();
     let _guard = set_object_store_secret(server.endpoint());
     let workspace = theme_workspace();
     let runtime = app()
         .build_runtime_plan_with_extensions_at(
-            runtime_config("harbor-shop"),
+            runtime_config_with_environment("harbor-shop", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()

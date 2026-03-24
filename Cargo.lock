@@ -631,7 +631,6 @@ version = "0.1.0"
 dependencies = [
  "davenda-assets",
  "davenda-auth",
- "davenda-cli",
  "davenda-config",
  "davenda-core",
  "davenda-data",
@@ -642,8 +641,10 @@ dependencies = [
  "davenda-storage",
  "davenda-template",
  "davenda-wasm",
+ "serde",
  "tempfile",
  "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]
@@ -682,10 +683,17 @@ name = "davenda-cli"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "davenda-admin",
  "davenda-auth",
+ "davenda-cms",
+ "davenda-commerce",
  "davenda-config",
+ "davenda-events",
  "davenda-import",
+ "davenda-media",
+ "davenda-memberships",
  "davenda-report",
+ "davenda-runtime",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
@@ -731,7 +739,6 @@ dependencies = [
  "davenda-a11y",
  "davenda-auth",
  "davenda-cache",
- "davenda-cli",
  "davenda-config",
  "davenda-data",
  "davenda-i18n",

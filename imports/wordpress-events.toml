@@ -1,0 +1,36 @@
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "harbor-shop"
+modules = ["cms", "events", "media"]
+locale = "en-GB"
+site = "main"
+validation_mode = "strict"
+publication_mode = "stage_validated"
+asset_storage_default = "public_upload"
+
+[[importers]]
+id = "users"
+phase = 10
+resource_kind = "user"
+description = "Import users and groups"
+
+[[importers]]
+id = "media"
+phase = 20
+resource_kind = "asset"
+description = "Import media and attachments"
+
+[[importers]]
+id = "pages"
+phase = 30
+resource_kind = "page"
+description = "Import pages and navigation"
+dependencies = ["media"]
+
+[[importers]]
+id = "events"
+phase = 40
+resource_kind = "event"
+description = "Import events and timeslots"
+dependencies = ["users", "media"]

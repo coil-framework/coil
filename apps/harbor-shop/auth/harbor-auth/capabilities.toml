@@ -1,0 +1,3 @@
+[bindings."catalog.featured.edit"]
+resource_type = "product"
+permission = "featured_edit"

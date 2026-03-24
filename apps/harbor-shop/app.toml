@@ -1,0 +1,23 @@
+[app]
+name = "harbor-shop"
+display_name = "Harbor Shop"
+
+[domains]
+canonical = "shop.example.com"
+additional = ["www.example.com"]
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[theme]
+active = "harbor"
+template_namespaces = ["customer-app", "harbor"]
+asset_roots = ["theme/assets"]
+
+[auth]
+mode = "extend"
+package = "harbor-auth"
+
+[modules]
+enabled = ["cms", "media", "commerce", "events", "admin"]

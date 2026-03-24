@@ -1,0 +1,10 @@
+{{ layout "layouts/base" }}
+{{ set "page.title" "Harbor Shop" }}
+
+{{#content}}
+  {{ include "components/hero" }}
+  <section class="section">
+    <h2>Featured collections</h2>
+    {{ fragment "commerce.collection.grid" }}
+  </section>
+{{/content}}

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ page.title }}</title>
+    <link rel="stylesheet" href="{{ asset \"theme/assets/site.css\" }}" />
+  </head>
+  <body>
+    <header>
+      <img src="{{ asset \"theme/assets/logo.svg\" }}" alt="Harbor Shop" width="48" height="48" />
+      <nav>
+        {{ fragment "navigation.primary" }}
+      </nav>
+    </header>
+    <main>
+      {{ slot "content" }}
+    </main>
+    <footer>
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

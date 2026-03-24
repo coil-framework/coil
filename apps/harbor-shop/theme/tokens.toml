@@ -1,0 +1,16 @@
+[color]
+brand = "#0f2a35"
+accent = "#f5a623"
+text = "#1b1f24"
+background = "#f7f4ef"
+
+[font]
+base = "system-ui"
+headline = "system-ui"
+
+[spacing]
+xs = "4px"
+sm = "8px"
+md = "16px"
+lg = "24px"
+xl = "40px"

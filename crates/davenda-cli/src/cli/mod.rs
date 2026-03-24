@@ -2,6 +2,7 @@ mod app;
 mod args;
 mod auth;
 mod backend;
+mod customer_app;
 mod config;
 mod error;
 mod import;

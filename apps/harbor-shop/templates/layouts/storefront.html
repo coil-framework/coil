@@ -1,20 +1,33 @@
 <!doctype html>
-<html lang="{{ locale }}">
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:fragment="shell"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ page.title }}</title>
-    <link rel="stylesheet" href="{{ asset \"theme/assets/site.css\" }}" />
+    <title dv:text="${pageTitle}">Harbor Shop</title>
+    <link
+      rel="stylesheet"
+      href="/theme/assets/site.css"
+      dv:href="@{theme/assets/site.css}"
+    />
   </head>
   <body>
     <header>
-      <img src="{{ asset \"theme/assets/logo.svg\" }}" alt="Harbor Shop" width="48" height="48" />
-      <nav>
-        {{ fragment "navigation.primary" }}
-      </nav>
+      <img
+        src="/theme/assets/logo.svg"
+        dv:src="@{theme/assets/logo.svg}"
+        alt="Harbor Shop"
+        width="48"
+        height="48"
+      />
+      <nav dv:replace="~{navigation/primary}"></nav>
     </header>
-    <main>
-      {{ slot "content" }}
+    <main dv:slot="content">
+      <section>Content goes here.</section>
     </main>
     <footer>
       <small>Harbor Shop</small>

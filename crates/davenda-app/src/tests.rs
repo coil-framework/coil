@@ -214,9 +214,32 @@ fn theme() -> ThemeProfile {
 fn theme_workspace() -> TempDir {
     let workspace = tempfile::tempdir().unwrap();
     let theme_root = workspace.path().join("theme/assets");
+    let templates_root = workspace.path().join("templates");
     fs::create_dir_all(&theme_root).unwrap();
+    fs::create_dir_all(templates_root.join("layouts")).unwrap();
+    fs::create_dir_all(templates_root.join("components")).unwrap();
     fs::write(theme_root.join("site.css"), b"body { color: #111; }").unwrap();
     fs::write(theme_root.join("logo.svg"), b"<svg viewBox=\"0 0 1 1\" />").unwrap();
+    fs::write(
+        templates_root.join("layouts/base.html"),
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev" dv:fragment="shell" dv:attr="lang=${locale}">
+  <head>
+    <title dv:text="${pageTitle}">Harbor Shop</title>
+  </head>
+  <body>
+    <main dv:slot="content">
+      <section>Fallback content</section>
+    </main>
+  </body>
+</html>"#,
+    )
+    .unwrap();
+    fs::write(
+        templates_root.join("components/hero.html"),
+        r#"<section xmlns:dv="https://davenda.dev" dv:fragment="hero">Hero</section>"#,
+    )
+    .unwrap();
     workspace
 }
 
@@ -904,6 +927,38 @@ fn runtime_build_rejects_config_module_drift_and_unexpected_runtime_modules() {
         AppModelError::UnexpectedRuntimeModules {
             app_id: "harbor-shop".to_string(),
             modules: vec!["media".to_string()],
+        }
+    );
+}
+
+#[test]
+fn runtime_build_requires_customer_template_tree() {
+    let workspace = tempfile::tempdir().unwrap();
+    let theme_root = workspace.path().join("theme/assets");
+    fs::create_dir_all(&theme_root).unwrap();
+    fs::write(theme_root.join("site.css"), b"body { color: #111; }").unwrap();
+    fs::write(theme_root.join("logo.svg"), b"<svg viewBox=\"0 0 1 1\" />").unwrap();
+
+    let error = app()
+        .build_runtime_plan_at(
+            runtime_config("harbor-shop"),
+            DefaultAuthModelPackage::default(),
+            module_manifests()
+                .into_iter()
+                .map(StaticModule::new)
+                .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+                .collect(),
+            workspace.path(),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        AppModelError::RuntimeBuild {
+            message: format!(
+                "customer app templates directory `{}` does not exist",
+                workspace.path().join("templates").display()
+            ),
         }
     );
 }

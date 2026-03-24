@@ -1,0 +1,18 @@
+<section class="collection-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
+  <h2>Featured collections</h2>
+  <ul class="collection-grid__list" dv:if="${featuredCollections}">
+    <li class="collection-grid__item" dv:each="collection : ${featuredCollections}">
+      <a
+        class="collection-grid__link"
+        href="/collections/featured"
+        dv:href="${collection.url}"
+        dv:text="${collection.name}"
+      >
+        Featured collection
+      </a>
+    </li>
+  </ul>
+  <p class="collection-grid__empty" dv:unless="${featuredCollections}">
+    Featured collections will appear here once content is published.
+  </p>
+</section>

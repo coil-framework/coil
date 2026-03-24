@@ -2,6 +2,15 @@ use super::*;
 use davenda_report::ReportStatus;
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn unique_path(label: &str, extension: &str) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!("davenda-import-{label}-{unique}.{extension}"))
+}
 
 #[test]
 fn manifest_plans_importers_in_dependency_order() {
@@ -159,6 +168,96 @@ fn import_run_summary_tracks_idempotent_receipts() {
     let counts = summary.status_counts();
     assert_eq!(counts[&ImportRecordStatus::Imported], 1);
     assert_eq!(counts[&ImportRecordStatus::SkippedUnchanged], 1);
+}
+
+#[test]
+fn import_plan_execution_persists_a_journal_and_resumes_completed_importers() {
+    let manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-cutover").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap()
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("users").unwrap(),
+            10,
+            "user",
+            "Import users",
+        )
+        .unwrap(),
+    )
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("events").unwrap(),
+            20,
+            "event",
+            "Import events",
+        )
+        .unwrap()
+        .depending_on(ImporterId::new("users").unwrap()),
+    );
+
+    let plan = manifest.plan().unwrap();
+    let journal_path = unique_path("journal", "json");
+
+    let first = plan.execute(&journal_path).unwrap();
+    assert_eq!(first.importer_records.len(), 2);
+    assert_eq!(first.importer_records[0].status, ImporterExecutionStatus::Executed);
+    assert_eq!(first.importer_records[1].status, ImporterExecutionStatus::Executed);
+    assert!(journal_path.is_file());
+
+    let second = plan.execute(&journal_path).unwrap();
+    assert_eq!(
+        second.importer_records[0].status,
+        ImporterExecutionStatus::SkippedCompleted
+    );
+    assert_eq!(
+        second.importer_records[1].status,
+        ImporterExecutionStatus::SkippedCompleted
+    );
+
+    let rendered = second.command_report().unwrap();
+    assert!(rendered.summary.contains("Resumed import run `wordpress-cutover`"));
+    assert_eq!(rendered.rows.len(), 2);
+    assert_eq!(rendered.diagnostics.len(), 1);
+}
+
+#[test]
+fn import_plan_execution_rejects_mismatched_existing_journal() {
+    let manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-cutover").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap()
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("users").unwrap(),
+            10,
+            "user",
+            "Import users",
+        )
+        .unwrap(),
+    );
+    let plan = manifest.plan().unwrap();
+    let journal_path = unique_path("mismatch", "json");
+    fs::write(
+        &journal_path,
+        r#"{
+  "run_id": "other-run",
+  "customer_app_id": "other-app",
+  "completed_importers": ["users"]
+}"#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        plan.execute(&journal_path).unwrap_err(),
+        ImportModelError::JournalRunMismatch { .. }
+    ));
 }
 
 #[test]

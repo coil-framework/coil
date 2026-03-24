@@ -1,10 +1,29 @@
-{{ layout "layouts/base" }}
-{{ set "page.title" "Harbor Shop" }}
-
-{{#content}}
-  {{ include "components/hero" }}
-  <section class="section">
-    <h2>Featured collections</h2>
-    {{ fragment "commerce.collection.grid" }}
-  </section>
-{{/content}}
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Harbor Shop'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Harbor Shop</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main">
+      <section class="home-page">
+        <div dv:replace="~{components/hero}"></div>
+        <div dv:replace="~{commerce/collection-grid}"></div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

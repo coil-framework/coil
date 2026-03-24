@@ -1,4 +1,7 @@
 use super::*;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImportRecordStatus {
@@ -75,6 +78,170 @@ impl ImportRunSummary {
             *counts.entry(receipt.status).or_insert(0) += 1;
         }
         counts
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImporterExecutionStatus {
+    Executed,
+    SkippedCompleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImporterExecutionRecord {
+    pub importer_id: String,
+    pub phase: u16,
+    pub resource_kind: String,
+    pub description: String,
+    pub batch_id: String,
+    pub status: ImporterExecutionStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct ImportJournal {
+    run_id: String,
+    customer_app_id: String,
+    completed_importers: Vec<String>,
+}
+
+impl ImportJournal {
+    pub(super) fn new(run_id: &ImportRunId, customer_app_id: &str) -> Self {
+        Self {
+            run_id: run_id.to_string(),
+            customer_app_id: customer_app_id.to_string(),
+            completed_importers: Vec::new(),
+        }
+    }
+
+    pub(super) fn load(
+        path: impl AsRef<Path>,
+        run_id: &ImportRunId,
+        customer_app_id: &str,
+    ) -> Result<Self, ImportModelError> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(Self::new(run_id, customer_app_id));
+        }
+
+        let input = fs::read_to_string(path).map_err(|error| ImportModelError::JournalRead {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+        let journal: Self =
+            serde_json::from_str(&input).map_err(|error| ImportModelError::JournalParse {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            })?;
+        if journal.run_id != run_id.as_str() || journal.customer_app_id != customer_app_id {
+            return Err(ImportModelError::JournalRunMismatch {
+                path: path.display().to_string(),
+                expected_run_id: run_id.to_string(),
+                actual_run_id: journal.run_id,
+                expected_customer_app_id: customer_app_id.to_string(),
+                actual_customer_app_id: journal.customer_app_id,
+            });
+        }
+        Ok(journal)
+    }
+
+    pub(super) fn contains(&self, importer_id: &ImporterId) -> bool {
+        self.completed_importers
+            .iter()
+            .any(|existing| existing == importer_id.as_str())
+    }
+
+    pub(super) fn mark_completed(&mut self, importer_id: &ImporterId) {
+        if !self.contains(importer_id) {
+            self.completed_importers.push(importer_id.to_string());
+            self.completed_importers.sort();
+        }
+    }
+
+    pub(super) fn save(&self, path: impl AsRef<Path>) -> Result<(), ImportModelError> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| ImportModelError::JournalWrite {
+                path: parent.display().to_string(),
+                message: error.to_string(),
+            })?;
+        }
+        let output =
+            serde_json::to_string_pretty(self).map_err(|error| ImportModelError::JournalWrite {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            })?;
+        fs::write(path, output).map_err(|error| ImportModelError::JournalWrite {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportExecution {
+    pub run_id: ImportRunId,
+    pub customer_app_id: String,
+    pub journal_path: String,
+    pub importer_records: Vec<ImporterExecutionRecord>,
+}
+
+impl ImportExecution {
+    pub fn command_report(&self) -> Result<CommandReport, ImportModelError> {
+        let resumed = self
+            .importer_records
+            .iter()
+            .any(|record| record.status == ImporterExecutionStatus::SkippedCompleted);
+        let mut report = CommandReport::new(
+            ["import", "run"],
+            if resumed {
+                format!(
+                    "Resumed import run `{}` for `{}`",
+                    self.run_id, self.customer_app_id
+                )
+            } else {
+                format!(
+                    "Executed import run `{}` for `{}`",
+                    self.run_id, self.customer_app_id
+                )
+            },
+        )?
+        .with_columns([
+            "phase",
+            "importer",
+            "resource_kind",
+            "status",
+            "batch_id",
+            "description",
+        ])?;
+
+        for record in &self.importer_records {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("phase", record.phase.to_string())?
+                    .with_cell("importer", record.importer_id.clone())?
+                    .with_cell("resource_kind", record.resource_kind.clone())?
+                    .with_cell(
+                        "status",
+                        match record.status {
+                            ImporterExecutionStatus::Executed => "executed".to_string(),
+                            ImporterExecutionStatus::SkippedCompleted => {
+                                "skipped_completed".to_string()
+                            }
+                        },
+                    )?
+                    .with_cell("batch_id", record.batch_id.clone())?
+                    .with_cell("description", record.description.clone())?,
+            );
+        }
+
+        report.push_diagnostic(DiagnosticRecord::new(
+            DiagnosticSeverity::Info,
+            "import.journal",
+            format!("import journal persisted at `{}`", self.journal_path),
+        )?);
+
+        Ok(report)
     }
 }
 

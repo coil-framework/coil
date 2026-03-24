@@ -1,4 +1,5 @@
 use crate::CliModelError;
+use crate::cli::customer_app::{load_customer_app_context, load_official_modules};
 use crate::cli::args::{CliInput, DevServerInvocation, parse};
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -6,15 +7,10 @@ use crate::cli::error::CliRunError;
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
 use crate::{CommandReport, ReportRow};
-use davenda_admin::AdminModule;
-use davenda_auth::{AuthModelPackage, configured_auth_model_package};
-use davenda_cms::CmsModule;
-use davenda_commerce::CommerceModule;
+use davenda_auth::configured_auth_model_package;
 use davenda_config::PlatformConfig;
-use davenda_events::EventsModule;
 use davenda_import::ImportManifest;
-use davenda_media::MediaModule;
-use davenda_memberships::MembershipsModule;
+use std::path::{Path, PathBuf};
 use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,17 +132,84 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             };
             render_auth_explain(&result, output_mode)
         }
+        CliInput::ModuleList {
+            output_mode,
+            config_path,
+        } => {
+            let context = load_customer_app_context(&config_path)?;
+            let auth_package =
+                configured_auth_model_package(context.config.auth.package.clone());
+            let composition = context
+                .manifest
+                .compose(&auth_package, &context.module_manifests)
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to compose customer app `{}` for module listing: {error}",
+                        context.manifest.id
+                    ))
+                })?;
+            let report = composition.module_list_report().map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to render module list for `{}`: {error}",
+                    config_path.display()
+                ))
+            })?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::MigratePlan {
+            output_mode,
+            config_path,
+        } => {
+            let context = load_customer_app_context(&config_path)?;
+            let auth_package =
+                configured_auth_model_package(context.config.auth.package.clone());
+            let migration_summary =
+                context
+                    .manifest
+                    .migration_summary(auth_package, &context.modules);
+            let report = migration_summary.command_report().map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to render migration plan for `{}`: {error}",
+                    config_path.display()
+                ))
+            })?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::ReleaseDoctor {
+            output_mode,
+            config_path,
+        } => {
+            let context = load_customer_app_context(&config_path)?;
+            let auth_package =
+                configured_auth_model_package(context.config.auth.package.clone());
+            let report = context
+                .manifest
+                .release_doctor_with_extensions(
+                    &auth_package,
+                    &context.module_manifests,
+                    &[],
+                    Some(&context.config),
+                )
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to build release doctor report for `{}`: {error}",
+                        config_path.display()
+                    ))
+                })?
+                .command_report()
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to render release doctor report for `{}`: {error}",
+                        config_path.display()
+                    ))
+                })?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::ImportRun {
             output_mode,
             dry_run,
             invocation,
         } => {
-            if !dry_run {
-                return Err(CliRunError::usage(
-                    "`import run` only supports `--dry-run` in this build",
-                ));
-            }
-
             let manifest =
                 ImportManifest::from_file(&invocation.manifest_path).map_err(|error| {
                     CliRunError::execution(format!(
@@ -161,12 +224,28 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 ))
             })?;
 
-            let report = plan.command_report().map_err(|error| {
-                CliRunError::execution(format!(
-                    "failed to render import plan `{}`: {error}",
-                    invocation.manifest_path.display()
-                ))
-            })?;
+            let report = if dry_run {
+                plan.command_report().map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to render import plan `{}`: {error}",
+                        invocation.manifest_path.display()
+                    ))
+                })?
+            } else {
+                let journal_path = import_journal_path(&invocation.manifest_path, &manifest.run_id);
+                let execution = plan.execute(&journal_path).map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to execute import manifest `{}`: {error}",
+                        invocation.manifest_path.display()
+                    ))
+                })?;
+                execution.command_report().map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to render import execution `{}`: {error}",
+                        invocation.manifest_path.display()
+                    ))
+                })?
+            };
             render_command_report(&report, output_mode)
         }
     }
@@ -193,12 +272,19 @@ fn usage() -> String {
         "  platform dev server [--config <path>]",
         "  platform config validate [--config <path>] [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
-        "  platform import run <manifest-path> --dry-run [--json]",
+        "  platform module list [--config <path>] [--json]",
+        "  platform migrate plan [--config <path>] [--json]",
+        "  platform release doctor [--config <path>] [--json]",
+        "  platform import run <manifest-path> [--dry-run] [--json]",
         "",
         "Examples:",
         "  platform dev server --config config/platform.toml",
         "  platform config validate --config config/platform.toml",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
+        "  platform module list --config config/platform.toml",
+        "  platform migrate plan --config config/platform.toml",
+        "  platform release doctor --config config/platform.toml",
+        "  platform import run imports/wordpress-events.toml",
         "  platform import run imports/wordpress-events.toml --dry-run",
         "",
         "Environment:",
@@ -226,11 +312,15 @@ fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
         .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
 
     tokio_runtime.block_on(async move {
+        let modules = load_official_modules(&config)?;
         let builder = RuntimeBuilder::new(
             config.clone(),
             configured_auth_model_package(auth_package_name),
         );
-        let builder = install_official_modules(builder, &config)?;
+        let mut builder = builder;
+        for module in modules {
+            builder = builder.with_boxed_module(module);
+        }
         let plan = builder.build().map_err(|error| {
             CliRunError::execution(format!("failed to build runtime plan: {error}"))
         })?;
@@ -264,30 +354,15 @@ fn read_runtime_secret(var: &str) -> Result<String, CliRunError> {
     })
 }
 
-fn install_official_modules<P>(
-    mut builder: davenda_runtime::RuntimeBuilder<P>,
-    config: &PlatformConfig,
-) -> Result<davenda_runtime::RuntimeBuilder<P>, CliRunError>
-where
-    P: AuthModelPackage + 'static,
-{
-    for module_name in &config.modules.enabled {
-        builder = match module_name.as_str() {
-            "admin" => builder.with_module(AdminModule::new()),
-            "commerce" => builder.with_module(CommerceModule::new()),
-            "cms" => builder.with_module(CmsModule::new()),
-            "events" => builder.with_module(EventsModule::new()),
-            "media" => builder.with_module(MediaModule::new()),
-            "memberships" => builder.with_module(MembershipsModule::new()),
-            other => {
-                return Err(CliRunError::execution(format!(
-                    "unsupported module `{other}` in `dev server` config"
-                )));
-            }
-        };
-    }
-
-    Ok(builder)
+fn import_journal_path(manifest_path: &Path, run_id: &impl std::fmt::Display) -> PathBuf {
+    let parent = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    parent
+        .join(".davenda")
+        .join("import-runs")
+        .join(format!("{run_id}.json"))
 }
 
 fn environment_label(environment: davenda_config::Environment) -> &'static str {
@@ -310,6 +385,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const DISABLED_EXPLAIN_CONFIG: &str = r#"
 [app]
@@ -392,12 +468,66 @@ tracing = false
 publish_manifest = false
 "#;
 
+    const CUSTOMER_APP_MANIFEST: &str = r#"
+[app]
+name = "showcase-events"
+display_name = "Showcase Events"
+
+[domains]
+canonical = "example.com"
+
+[i18n]
+default_locale = "en"
+supported_locales = ["en"]
+
+[theme]
+active = "storefront"
+template_namespaces = ["pages", "layouts"]
+
+[auth]
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms"]
+
+[[customer_migrations]]
+id = "site-navigation"
+order = 10
+description = "Migrate the customer navigation structure"
+"#;
+
+    fn customer_app_fixture() -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("davenda-cli-workflow-{suffix}"));
+        let config_dir = root.join("config");
+        let app_root = root.join("apps").join("showcase-events");
+        let templates_root = app_root.join("templates").join("pages");
+
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&templates_root).unwrap();
+        fs::write(config_dir.join("platform.toml"), DISABLED_EXPLAIN_CONFIG).unwrap();
+        fs::write(app_root.join("app.toml"), CUSTOMER_APP_MANIFEST).unwrap();
+        fs::write(
+            templates_root.join("home.html"),
+            "<html><body><main>Showcase Events</main></body></html>",
+        )
+        .unwrap();
+
+        config_dir.join("platform.toml")
+    }
+
     #[test]
     fn run_from_args_returns_usage_for_help() {
         let rendered = run_from_args(["--help".to_string()]).unwrap();
         assert!(rendered.contains("platform config validate [--config <path>]"));
         assert!(rendered.contains("platform auth explain [--config <path>]"));
-        assert!(rendered.contains("platform import run <manifest-path> --dry-run"));
+        assert!(rendered.contains("platform module list [--config <path>]"));
+        assert!(rendered.contains("platform migrate plan [--config <path>]"));
+        assert!(rendered.contains("platform release doctor [--config <path>]"));
+        assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
     }
 
     #[test]
@@ -499,6 +629,57 @@ dependencies = ["users"]
     }
 
     #[test]
+    fn run_from_args_executes_and_resumes_import_runs_from_a_manifest() {
+        let manifest_path = PathBuf::from("/tmp/davenda-cli-import-execute.toml");
+        let journal_path = import_journal_path(
+            &manifest_path,
+            &davenda_import::ImportRunId::new("wordpress-execute").unwrap(),
+        );
+        if journal_path.exists() {
+            fs::remove_file(&journal_path).unwrap();
+        }
+        if let Some(parent) = journal_path.parent() {
+            let _ = fs::remove_dir_all(parent);
+        }
+
+        fs::write(
+            &manifest_path,
+            r#"
+run_id = "wordpress-execute"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "harbor-shop"
+
+[[importers]]
+id = "pages"
+phase = 10
+resource_kind = "page"
+description = "Import pages"
+"#,
+        )
+        .unwrap();
+
+        let first = run_from_args([
+            "import".to_string(),
+            "run".to_string(),
+            manifest_path.display().to_string(),
+        ])
+        .unwrap();
+        assert!(first.contains("Executed import run `wordpress-execute`"));
+        assert!(first.contains("executed"));
+        assert!(journal_path.is_file());
+
+        let second = run_from_args([
+            "import".to_string(),
+            "run".to_string(),
+            manifest_path.display().to_string(),
+        ])
+        .unwrap();
+        assert!(second.contains("Resumed import run `wordpress-execute`"));
+        assert!(second.contains("skipped_completed"));
+    }
+
+    #[test]
     fn run_from_args_validates_config_and_renders_a_report() {
         let config_path = PathBuf::from("/tmp/davenda-cli-config-validate.toml");
         fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
@@ -513,6 +694,54 @@ dependencies = ["users"]
 
         assert!(rendered.contains("config validate"));
         assert!(rendered.contains("Validated effective platform configuration"));
+        assert!(rendered.contains("showcase-events"));
+    }
+
+    #[test]
+    fn run_from_args_renders_module_list_from_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "module".to_string(),
+            "list".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("module list"));
+        assert!(rendered.contains("cms"));
+    }
+
+    #[test]
+    fn run_from_args_renders_migration_plan_from_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "migrate".to_string(),
+            "plan".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("migrate plan"));
+        assert!(rendered.contains("customer_app:showcase-events"));
+    }
+
+    #[test]
+    fn run_from_args_renders_release_doctor_from_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "release".to_string(),
+            "doctor".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("release doctor"));
         assert!(rendered.contains("showcase-events"));
     }
 }

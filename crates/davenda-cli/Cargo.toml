@@ -8,6 +8,8 @@ default-run = "platform"
 async-trait = "0.1"
 davenda-admin = { path = "../davenda-admin" }
 davenda-auth = { path = "../davenda-auth" }
+davenda-app = { path = "../davenda-app" }
+davenda-core = { path = "../davenda-core" }
 davenda-cms = { path = "../davenda-cms" }
 davenda-commerce = { path = "../davenda-commerce" }
 davenda-config = { path = "../davenda-config" }
@@ -15,6 +17,7 @@ davenda-events = { path = "../davenda-events" }
 davenda-import = { path = "../davenda-import" }
 davenda-media = { path = "../davenda-media" }
 davenda-memberships = { path = "../davenda-memberships" }
+davenda-ops = { path = "../davenda-ops" }
 davenda-report = { path = "../davenda-report" }
 davenda-runtime = { path = "../davenda-runtime" }
 serde_json = "1.0"

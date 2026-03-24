@@ -68,6 +68,8 @@ impl CustomerAppManifest {
         P: AuthModelPackage + 'static,
         A: AsRef<Path>,
     {
+        let app_root = app_root.as_ref();
+        validate_customer_app_root(app_root)?;
         self.validate_runtime_config_alignment(&config)?;
 
         let manifests = modules
@@ -105,6 +107,7 @@ impl CustomerAppManifest {
         let installed_extensions = self.resolve_extension_packages(&extension_packages)?;
 
         let mut builder = RuntimeBuilder::new(config.clone(), auth_package);
+        builder = builder.with_template_root(app_root);
         for module in modules {
             builder = builder.with_boxed_module(module);
         }
@@ -227,4 +230,43 @@ impl CustomerAppManifest {
 
         Ok(Some(receipt))
     }
+}
+
+fn validate_customer_app_root(app_root: &Path) -> Result<(), AppModelError> {
+    if !app_root.exists() {
+        return Err(AppModelError::RuntimeBuild {
+            message: format!(
+                "customer app root `{}` does not exist",
+                app_root.display()
+            ),
+        });
+    }
+    if !app_root.is_dir() {
+        return Err(AppModelError::RuntimeBuild {
+            message: format!(
+                "customer app root `{}` is not a directory",
+                app_root.display()
+            ),
+        });
+    }
+
+    let templates_root = app_root.join("templates");
+    if !templates_root.exists() {
+        return Err(AppModelError::RuntimeBuild {
+            message: format!(
+                "customer app templates directory `{}` does not exist",
+                templates_root.display()
+            ),
+        });
+    }
+    if !templates_root.is_dir() {
+        return Err(AppModelError::RuntimeBuild {
+            message: format!(
+                "customer app templates directory `{}` is not a directory",
+                templates_root.display()
+            ),
+        });
+    }
+
+    Ok(())
 }

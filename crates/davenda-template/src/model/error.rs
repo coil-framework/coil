@@ -26,6 +26,15 @@ pub enum TemplateModelError {
     MissingSlotFill {
         slot: SlotName,
     },
+    TemplateRead {
+        path: String,
+        message: String,
+    },
+    ParseError {
+        line: usize,
+        column: usize,
+        message: String,
+    },
     FragmentCannotRenderLayout {
         name: TemplateName,
     },
@@ -63,6 +72,14 @@ impl fmt::Display for TemplateModelError {
             ),
             Self::MissingValue { key } => write!(f, "render value `{key}` was not provided"),
             Self::MissingSlotFill { slot } => write!(f, "slot `{slot}` has no fill or fallback"),
+            Self::TemplateRead { path, message } => {
+                write!(f, "failed to read template `{path}`: {message}")
+            }
+            Self::ParseError {
+                line,
+                column,
+                message,
+            } => write!(f, "template parse error at {line}:{column}: {message}"),
             Self::FragmentCannotRenderLayout { name } => {
                 write!(
                     f,

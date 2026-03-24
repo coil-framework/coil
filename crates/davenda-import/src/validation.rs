@@ -25,6 +25,22 @@ pub enum ImportModelError {
     ManifestRead { path: String, message: String },
     #[error("failed to parse import manifest: {message}")]
     ManifestParse { message: String },
+    #[error("failed to read import journal `{path}`: {message}")]
+    JournalRead { path: String, message: String },
+    #[error("failed to write import journal `{path}`: {message}")]
+    JournalWrite { path: String, message: String },
+    #[error("failed to parse import journal `{path}`: {message}")]
+    JournalParse { path: String, message: String },
+    #[error(
+        "import journal `{path}` belongs to run `{actual_run_id}` for customer app `{actual_customer_app_id}`, not `{expected_run_id}` / `{expected_customer_app_id}`"
+    )]
+    JournalRunMismatch {
+        path: String,
+        expected_run_id: String,
+        actual_run_id: String,
+        expected_customer_app_id: String,
+        actual_customer_app_id: String,
+    },
     #[error("{0}")]
     Report(#[from] ReportModelError),
 }

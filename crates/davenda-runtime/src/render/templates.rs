@@ -2,8 +2,9 @@ use super::*;
 use davenda_template::{
     AttributeNode, DocumentRenderRequest, ElementNode, FragmentRenderRequest, Node, RenderModel,
     RenderValue, TemplateDefinition, TemplateKind, TemplateModelError, TemplateName,
-    TemplateNamespace, TemplateRuntime, TemplateSelector, TrustedHtml,
+    TemplateNamespace, TemplateRuntime, TemplateSelector, TemplateSourceParser, TrustedHtml,
 };
+use std::path::PathBuf;
 
 pub(super) fn template_selector(template: &str) -> Result<TemplateSelector, TemplateModelError> {
     Ok(TemplateSelector::new(TemplateName::new(
@@ -114,4 +115,19 @@ fn runtime_page_shell_template(
         TemplateName::new("runtime.page.shell")?,
         vec![Node::static_text("<!DOCTYPE html>"), Node::Element(html)],
     ))
+}
+
+pub(super) fn load_customer_templates_from_roots(
+    template_roots: &[PathBuf],
+    namespace: TemplateNamespace,
+) -> Result<Vec<TemplateDefinition>, TemplateModelError> {
+    let parser = TemplateSourceParser::new();
+    let mut templates = Vec::new();
+    for root in template_roots {
+        let template_dir = root.join("templates");
+        if template_dir.exists() {
+            templates.extend(parser.load_directory(&template_dir, namespace.clone())?);
+        }
+    }
+    Ok(templates)
 }

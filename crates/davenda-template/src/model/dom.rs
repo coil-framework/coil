@@ -4,6 +4,7 @@ use super::*;
 pub enum AttributeValue {
     Static(String),
     DynamicText(String),
+    DynamicExpression(TemplateExpression),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +30,19 @@ impl AttributeNode {
     ) -> Result<Self, TemplateModelError> {
         Ok(Self {
             name: validate_attribute_name(name.into())?,
-            value: AttributeValue::DynamicText(validate_token("render_key", key.into())?),
+            value: AttributeValue::DynamicExpression(TemplateExpression::ModelKey(
+                validate_token("render_key", key.into())?,
+            )),
+        })
+    }
+
+    pub fn dynamic_expression(
+        name: impl Into<String>,
+        expression: TemplateExpression,
+    ) -> Result<Self, TemplateModelError> {
+        Ok(Self {
+            name: validate_attribute_name(name.into())?,
+            value: AttributeValue::DynamicExpression(expression),
         })
     }
 }
@@ -77,6 +90,38 @@ impl SlotNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemplateExpression {
+    ModelKey(String),
+    LiteralText(String),
+    LiteralBool(bool),
+    AssetPath(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateBinding {
+    pub(crate) key: String,
+    pub(crate) expression: TemplateExpression,
+}
+
+impl TemplateBinding {
+    pub fn new(
+        key: impl Into<String>,
+        expression: TemplateExpression,
+    ) -> Result<Self, TemplateModelError> {
+        Ok(Self {
+            key: validate_token("render_key", key.into())?,
+            expression,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionExpression {
+    Key(String),
+    Literal(bool),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
     StaticText(String),
     Value(String),
@@ -84,6 +129,20 @@ pub enum Node {
     Element(ElementNode),
     Slot(SlotNode),
     Include(TemplateSelector),
+    With {
+        bindings: Vec<TemplateBinding>,
+        children: Vec<Node>,
+    },
+    Conditional {
+        condition: ConditionExpression,
+        negated: bool,
+        children: Vec<Node>,
+    },
+    Each {
+        item: String,
+        collection: String,
+        children: Vec<Node>,
+    },
 }
 
 impl Node {
@@ -101,5 +160,57 @@ impl Node {
 
     pub fn include(selector: TemplateSelector) -> Self {
         Self::Include(selector)
+    }
+
+    pub fn with(bindings: Vec<TemplateBinding>, children: Vec<Node>) -> Self {
+        Self::With { bindings, children }
+    }
+
+    pub fn conditional(
+        condition: impl Into<String>,
+        children: Vec<Node>,
+    ) -> Result<Self, TemplateModelError> {
+        Ok(Self::Conditional {
+            condition: ConditionExpression::Key(validate_token(
+                "render_key",
+                condition.into(),
+            )?),
+            negated: false,
+            children,
+        })
+    }
+
+    pub fn conditional_literal(value: bool, children: Vec<Node>) -> Self {
+        Self::Conditional {
+            condition: ConditionExpression::Literal(value),
+            negated: false,
+            children,
+        }
+    }
+
+    pub fn conditional_not(
+        condition: impl Into<String>,
+        children: Vec<Node>,
+    ) -> Result<Self, TemplateModelError> {
+        Ok(Self::Conditional {
+            condition: ConditionExpression::Key(validate_token(
+                "render_key",
+                condition.into(),
+            )?),
+            negated: true,
+            children,
+        })
+    }
+
+    pub fn each(
+        item: impl Into<String>,
+        collection: impl Into<String>,
+        children: Vec<Node>,
+    ) -> Result<Self, TemplateModelError> {
+        Ok(Self::Each {
+            item: validate_token("render_key", item.into())?,
+            collection: validate_token("render_key", collection.into())?,
+            children,
+        })
     }
 }

@@ -72,17 +72,20 @@ impl TemplateRuntime {
                 Node::StaticText(value) => rendered.push_str(value),
                 Node::Value(key) => {
                     let value = model
-                        .get(key)
+                        .get_path(key)
                         .ok_or_else(|| TemplateModelError::MissingValue { key: key.clone() })?;
-                    rendered.push_str(&value.render_html());
+                    rendered.push_str(&escape_html_text(value.as_text(key)?));
                 }
                 Node::RawValue(key) => {
                     let value = model
-                        .get(key)
+                        .get_path(key)
                         .ok_or_else(|| TemplateModelError::MissingValue { key: key.clone() })?;
                     match value {
                         RenderValue::TrustedHtml(value) => rendered.push_str(value.as_str()),
-                        RenderValue::Text(_) => {
+                        RenderValue::Text(_)
+                        | RenderValue::Bool(_)
+                        | RenderValue::List(_)
+                        | RenderValue::Object(_) => {
                             return Err(TemplateModelError::ValueTypeMismatch {
                                 key: key.clone(),
                                 expected: "trusted_html",
@@ -91,6 +94,16 @@ impl TemplateRuntime {
                     }
                 }
                 Node::Element(element) => {
+                    if element.tag == "dv:block" {
+                        rendered.push_str(&self.render_nodes(
+                            namespaces,
+                            model,
+                            slots,
+                            &element.children,
+                            surface,
+                        )?);
+                        continue;
+                    }
                     rendered.push('<');
                     rendered.push_str(&element.tag);
                     for attribute in &element.attributes {
@@ -102,10 +115,30 @@ impl TemplateRuntime {
                                 rendered.push_str(&escape_html_attribute(value))
                             }
                             AttributeValue::DynamicText(key) => {
-                                let value = model.get(key).ok_or_else(|| {
+                                let value = model.get_path(key).ok_or_else(|| {
                                     TemplateModelError::MissingValue { key: key.clone() }
                                 })?;
                                 rendered.push_str(&escape_html_attribute(value.as_text(key)?));
+                            }
+                            AttributeValue::DynamicExpression(expression) => {
+                                let value = self.evaluate_expression(model, expression)?;
+                                match value {
+                                    RenderValue::Text(value) => {
+                                        rendered.push_str(&escape_html_attribute(&value));
+                                    }
+                                    RenderValue::TrustedHtml(value) => {
+                                        rendered.push_str(&escape_html_attribute(value.as_str()));
+                                    }
+                                    RenderValue::Bool(value) => {
+                                        rendered.push_str(&escape_html_attribute(&value.to_string()));
+                                    }
+                                    RenderValue::List(_) | RenderValue::Object(_) => {
+                                        return Err(TemplateModelError::ValueTypeMismatch {
+                                            key: attribute.name.clone(),
+                                            expected: "text",
+                                        });
+                                    }
+                                }
                             }
                         }
                         rendered.push('"');
@@ -118,9 +151,9 @@ impl TemplateRuntime {
                         &element.children,
                         surface,
                     )?);
-                    rendered.push_str("</");
-                    rendered.push_str(&element.tag);
-                    rendered.push('>');
+                        rendered.push_str("</");
+                        rendered.push_str(&element.tag);
+                        rendered.push('>');
                 }
                 Node::Slot(slot) => {
                     if let Some(fill) = slots.get(&slot.name) {
@@ -134,6 +167,61 @@ impl TemplateRuntime {
                         return Err(TemplateModelError::MissingSlotFill {
                             slot: slot.name.clone(),
                         });
+                    }
+                }
+                Node::With { bindings, children } => {
+                    let mut extended = model.clone();
+                    for binding in bindings {
+                        let value = self.evaluate_expression(model, &binding.expression)?;
+                        extended = extended.with_value(binding.key.clone(), value)?;
+                    }
+                    rendered.push_str(&self.render_nodes(
+                        namespaces,
+                        &extended,
+                        slots,
+                        children,
+                        surface,
+                    )?);
+                }
+                Node::Conditional {
+                    condition,
+                    negated,
+                    children,
+                } => {
+                    let enabled = self.evaluate_condition(model, condition)?;
+                    let enabled = if *negated { !enabled } else { enabled };
+
+                    if enabled {
+                        rendered.push_str(&self.render_nodes(
+                            namespaces,
+                            model,
+                            slots,
+                            children,
+                            surface,
+                        )?);
+                    }
+                }
+                Node::Each {
+                    item,
+                    collection,
+                    children,
+                } => {
+                    let value = model
+                        .get_path(collection)
+                        .ok_or_else(|| TemplateModelError::MissingValue {
+                            key: collection.clone(),
+                        })?;
+                    for entry in value.as_list(collection)? {
+                        let loop_model = model
+                            .merged_with(entry)
+                            .with_object(item.clone(), entry.clone())?;
+                        rendered.push_str(&self.render_nodes(
+                            namespaces,
+                            &loop_model,
+                            slots,
+                            children,
+                            surface,
+                        )?);
                     }
                 }
                 Node::Include(selector) => {
@@ -188,6 +276,38 @@ impl TemplateRuntime {
             }
             SlotFill::Nodes(nodes) => {
                 self.render_nodes(namespaces, model, &BTreeMap::new(), nodes, surface)
+            }
+        }
+    }
+
+    fn evaluate_expression(
+        &self,
+        model: &RenderModel,
+        expression: &TemplateExpression,
+    ) -> Result<RenderValue, TemplateModelError> {
+        match expression {
+            TemplateExpression::ModelKey(key) => model
+                .get_path(key)
+                .cloned()
+                .ok_or_else(|| TemplateModelError::MissingValue { key: key.clone() }),
+            TemplateExpression::LiteralText(value) => Ok(RenderValue::text(value.clone())),
+            TemplateExpression::LiteralBool(value) => Ok(RenderValue::bool(*value)),
+            TemplateExpression::AssetPath(value) => Ok(RenderValue::text(value.clone())),
+        }
+    }
+
+    fn evaluate_condition(
+        &self,
+        model: &RenderModel,
+        condition: &ConditionExpression,
+    ) -> Result<bool, TemplateModelError> {
+        match condition {
+            ConditionExpression::Literal(value) => Ok(*value),
+            ConditionExpression::Key(key) => {
+                let value = model
+                    .get_path(key)
+                    .ok_or_else(|| TemplateModelError::MissingValue { key: key.clone() })?;
+                value.as_bool(key)
             }
         }
     }

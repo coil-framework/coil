@@ -1,6 +1,7 @@
 use super::*;
 use crate::builder::helpers::*;
 use crate::builder::http::*;
+use crate::builder::templates;
 use crate::builder::state::RuntimeBuilderParts;
 use crate::plan::shared_state_root;
 use davenda_template::TemplateRuntime;
@@ -17,6 +18,7 @@ where
         modules,
         extensions,
         templates,
+        template_roots,
         storage_policies,
         routes,
         handlers,
@@ -93,6 +95,12 @@ where
     }
 
     for definition in templates {
+        template.registry.register(definition)?;
+    }
+    for definition in templates::load_customer_templates_from_roots(
+        &template_roots,
+        template.customer_app_namespace.clone(),
+    )? {
         template.registry.register(definition)?;
     }
     template.runtime = TemplateRuntime::new(template.registry.clone());

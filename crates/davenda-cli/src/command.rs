@@ -132,6 +132,21 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Explain why a subject can or cannot exercise a capability",
         )?,
         CommandDescriptor::new(
+            ["module", "list"],
+            CommandOwner::Core,
+            "List installed modules for the active customer app",
+        )?,
+        CommandDescriptor::new(
+            ["migrate", "plan"],
+            CommandOwner::Core,
+            "Plan core, module, auth, and customer-app migrations",
+        )?,
+        CommandDescriptor::new(
+            ["release", "doctor"],
+            CommandOwner::Core,
+            "Check release compatibility for the active customer app",
+        )?,
+        CommandDescriptor::new(
             ["import", "run"],
             CommandOwner::Core,
             "Run a staged content or data import into the current customer app",

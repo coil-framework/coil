@@ -33,6 +33,18 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         invocation: AuthExplainInvocation,
     },
+    ModuleList {
+        output_mode: OutputMode,
+        config_path: PathBuf,
+    },
+    MigratePlan {
+        output_mode: OutputMode,
+        config_path: PathBuf,
+    },
+    ReleaseDoctor {
+        output_mode: OutputMode,
+        config_path: PathBuf,
+    },
     ImportRun {
         output_mode: OutputMode,
         dry_run: bool,
@@ -158,6 +170,48 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     resource,
                     options,
                 },
+            })
+        }
+        [command, subcommand] if command == "module" && subcommand == "list" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`module list` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ModuleList {
+                output_mode,
+                config_path,
+            })
+        }
+        [command, subcommand] if command == "migrate" && subcommand == "plan" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`migrate plan` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::MigratePlan {
+                output_mode,
+                config_path,
+            })
+        }
+        [command, subcommand] if command == "release" && subcommand == "doctor" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`release doctor` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ReleaseDoctor {
+                output_mode,
+                config_path,
             })
         }
         [command, subcommand, manifest_path] if command == "import" && subcommand == "run" => {

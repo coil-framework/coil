@@ -7,7 +7,10 @@ mod requests;
 mod template;
 mod tokens;
 
-pub use dom::{AttributeNode, AttributeValue, ElementNode, Node, SlotNode};
+pub use dom::{
+    AttributeNode, AttributeValue, ConditionExpression, ElementNode, Node, SlotNode,
+    TemplateBinding, TemplateExpression,
+};
 pub use error::TemplateModelError;
 pub use render::{RenderModel, RenderOutput, RenderValue, TrustedHtml};
 pub use requests::{DocumentRenderRequest, FragmentRenderRequest, SlotFill};

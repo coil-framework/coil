@@ -25,6 +25,20 @@ pub enum RuntimeBuildError {
     Ops(#[from] OpsModelError),
     #[error(transparent)]
     Template(#[from] TemplateModelError),
+    #[error("failed to read template source `{path}`: {message}")]
+    TemplateSourceRead { path: String, message: String },
+    #[error("failed to parse template source `{path}`: {message}")]
+    TemplateSourceParse { path: String, message: String },
+    #[error("template source `{path}` uses unsupported directive `{directive}`")]
+    TemplateSourceUnsupportedDirective { path: String, directive: String },
+    #[error("customer app root `{path}` does not exist")]
+    MissingCustomerAppRoot { path: String },
+    #[error("customer app root `{path}` is not a directory")]
+    CustomerAppRootNotDirectory { path: String },
+    #[error("customer app templates directory `{path}` does not exist")]
+    MissingTemplateTree { path: String },
+    #[error("customer app templates directory `{path}` does not contain any `.html` templates")]
+    EmptyTemplateTree { path: String },
     #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
     AuthPackageMismatch { configured: String, actual: String },
     #[error(

@@ -235,6 +235,38 @@ pub struct ImportPlan {
 }
 
 impl ImportPlan {
+    pub fn execute(&self, journal_path: impl AsRef<Path>) -> Result<ImportExecution, ImportModelError> {
+        let journal_path = journal_path.as_ref();
+        let mut journal = ImportJournal::load(journal_path, &self.run_id, &self.customer_app_id)?;
+        let mut importer_records = Vec::with_capacity(self.ordered_importers.len());
+
+        for importer in &self.ordered_importers {
+            let status = if journal.contains(&importer.id) {
+                ImporterExecutionStatus::SkippedCompleted
+            } else {
+                journal.mark_completed(&importer.id);
+                journal.save(journal_path)?;
+                ImporterExecutionStatus::Executed
+            };
+
+            importer_records.push(ImporterExecutionRecord {
+                importer_id: importer.id.to_string(),
+                phase: importer.phase,
+                resource_kind: importer.resource_kind.clone(),
+                description: importer.description.clone(),
+                batch_id: format!("{}:{}", self.run_id, importer.id),
+                status,
+            });
+        }
+
+        Ok(ImportExecution {
+            run_id: self.run_id.clone(),
+            customer_app_id: self.customer_app_id.clone(),
+            journal_path: journal_path.display().to_string(),
+            importer_records,
+        })
+    }
+
     pub fn command_report(&self) -> Result<CommandReport, ImportModelError> {
         let mut report = CommandReport::new(
             ["import", "run"],

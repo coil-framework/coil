@@ -1,6 +1,7 @@
 use super::*;
 use crate::builder::assembly;
 use davenda_template::TemplateDefinition;
+use std::path::PathBuf;
 
 pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
@@ -8,6 +9,7 @@ pub struct RuntimeBuilder<P> {
     modules: Vec<Box<dyn PlatformModule>>,
     extensions: Vec<InstalledExtension>,
     templates: Vec<TemplateDefinition>,
+    template_roots: Vec<PathBuf>,
     storage_policies: StoragePolicySet,
     routes: Vec<RouteDefinition>,
     handlers: Vec<HandlerDefinition>,
@@ -21,6 +23,7 @@ pub(crate) struct RuntimeBuilderParts<P> {
     pub(crate) modules: Vec<Box<dyn PlatformModule>>,
     pub(crate) extensions: Vec<InstalledExtension>,
     pub(crate) templates: Vec<TemplateDefinition>,
+    pub(crate) template_roots: Vec<PathBuf>,
     pub(crate) storage_policies: StoragePolicySet,
     pub(crate) routes: Vec<RouteDefinition>,
     pub(crate) handlers: Vec<HandlerDefinition>,
@@ -39,6 +42,7 @@ where
             modules: Vec::new(),
             extensions: Vec::new(),
             templates: Vec::new(),
+            template_roots: Vec::new(),
             storage_policies: StoragePolicySet::default(),
             routes: Vec::new(),
             handlers: Vec::new(),
@@ -75,6 +79,14 @@ where
         I: IntoIterator<Item = TemplateDefinition>,
     {
         self.templates.extend(templates);
+        self
+    }
+
+    pub fn with_template_root<A>(mut self, root: A) -> Self
+    where
+        A: Into<PathBuf>,
+    {
+        self.template_roots.push(root.into());
         self
     }
 
@@ -119,6 +131,7 @@ where
             modules: self.modules,
             extensions: self.extensions,
             templates: self.templates,
+            template_roots: self.template_roots,
             storage_policies: self.storage_policies,
             routes: self.routes,
             handlers: self.handlers,

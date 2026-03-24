@@ -519,6 +519,13 @@ description = "Migrate the customer navigation structure"
         config_dir.join("platform.toml")
     }
 
+    fn harbor_shop_platform_config() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/harbor-shop/platform.toml")
+            .canonicalize()
+            .expect("sample customer app config exists")
+    }
+
     #[test]
     fn run_from_args_returns_usage_for_help() {
         let rendered = run_from_args(["--help".to_string()]).unwrap();
@@ -743,5 +750,33 @@ description = "Import pages"
 
         assert!(rendered.contains("release doctor"));
         assert!(rendered.contains("showcase-events"));
+    }
+
+    #[test]
+    fn run_from_args_renders_sample_customer_app_release_doctor_without_ops_blocker() {
+        let rendered = run_from_args([
+            "release".to_string(),
+            "doctor".to_string(),
+            "--config".to_string(),
+            harbor_shop_platform_config().display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("release doctor"));
+        assert!(!rendered.contains("module.ops.missing"));
+    }
+
+    #[test]
+    fn run_from_args_renders_sample_customer_app_module_list_with_ops_installed() {
+        let rendered = run_from_args([
+            "module".to_string(),
+            "list".to_string(),
+            "--config".to_string(),
+            harbor_shop_platform_config().display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("module list"));
+        assert!(rendered.contains("ops"));
     }
 }

@@ -92,6 +92,7 @@ fn resolve_customer_app_root(
 ) -> Result<PathBuf, CliRunError> {
     let mut candidates = Vec::new();
     if let Some(parent) = config_path.parent() {
+        candidates.push(parent.to_path_buf());
         if let Some(repo_root) = parent.parent() {
             candidates.push(repo_root.join("apps").join(app_name));
             candidates.push(repo_root.to_path_buf());

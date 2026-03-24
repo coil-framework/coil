@@ -1,0 +1,13 @@
+# Target Workloads: Commerce, Memberships, Events, CMS
+
+The platform is being designed for sites that are operational applications, not for static brochure publishing. The common shape is a customer-facing HTML-first website with a meaningful account area, admin surface, media concerns, and domain workflows that cannot be modeled as simple content publishing.
+
+Commerce is one major workload family. That includes catalog pages, collections, promotions, pricing, carts, checkout, orders, refunds, taxes, currencies, and payment integration. Even when product pages are mostly content-rich and design-led, the runtime still has to support reliable state changes, SEO-friendly rendering, background processing, and careful cache invalidation. Commerce therefore pulls on almost every core service: auth, sessions, forms, jobs, storage, metrics, and cache policy.
+
+Membership and subscription workloads sit close to commerce but add their own complexity. Plans, entitlements, recurring billing, account gating, and visibility rules cut across page rendering, admin controls, and operational messaging. Membership state affects who may see or do what, which is one reason the authorization model is a foundational concern rather than an optional module concern.
+
+Events and bookings are another first-class target. The existing customer system has events, timeslots, capacity limits, reservations, bookings, waitlists, check-in, cancellations, and region-aware visibility. Those flows are concurrency-sensitive and operationally significant. They require transaction discipline, background jobs, notifications, and accurate authorization checks, not just pretty pages.
+
+CMS and admin functionality remain central as well. The rewrite is replacing WordPress as an editorial and operational tool, not just as a frontend runtime. The platform therefore needs page composition, navigation, redirects, drafts, previews, revisions, media handling, localized metadata, admin CRUD surfaces, dashboards, reporting, and auditability. However, these concerns should be installable and composable as official modules, not hard-coded into every deployment by default.
+
+The first reference customer app combines all of these workload families at once: commerce, memberships, subscriptions, events, bookings, branded CMS behavior, and customer-specific admin requirements. That combination is exactly why the architecture cannot optimize for only one concern. The system must be strong at rendering, forms, authorization, storage, caching, and operations at the same time. A platform that handles only content or only commerce would not actually solve the problem presented by the current product.

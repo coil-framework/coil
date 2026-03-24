@@ -60,7 +60,7 @@ explain_api = false
 tenant_id = 101
 
 [modules]
-enabled = ["cms", "commerce", "media", "events", "admin"]
+enabled = ["cms", "commerce", "media", "events", "admin", "ops"]
 
 [wasm]
 directory = "extensions"

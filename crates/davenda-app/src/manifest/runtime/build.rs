@@ -127,7 +127,18 @@ impl CustomerAppManifest {
         })
     }
 
-    fn validate_runtime_config_alignment(
+    pub fn migration_summary<P>(
+        &self,
+        auth_package: P,
+        modules: &[Box<dyn PlatformModule>],
+    ) -> MigrationPlanSummary
+    where
+        P: AuthModelPackage + 'static,
+    {
+        build_migration_summary(self, auth_package.manifest().name.clone(), modules)
+    }
+
+    pub fn validate_runtime_config_alignment(
         &self,
         config: &PlatformConfig,
     ) -> Result<(), AppModelError> {

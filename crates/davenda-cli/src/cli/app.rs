@@ -1,13 +1,21 @@
 use crate::CliModelError;
-use crate::cli::args::{CliInput, parse};
+use crate::cli::args::{CliInput, DevServerInvocation, parse};
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
 use crate::cli::error::CliRunError;
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
 use crate::{CommandReport, ReportRow};
+use davenda_admin::AdminModule;
+use davenda_auth::{AuthModelPackage, configured_auth_model_package};
+use davenda_cms::CmsModule;
+use davenda_commerce::CommerceModule;
 use davenda_config::PlatformConfig;
+use davenda_events::EventsModule;
 use davenda_import::ImportManifest;
+use davenda_media::MediaModule;
+use davenda_memberships::MembershipsModule;
+use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliApplication {
@@ -30,6 +38,10 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
     let input = parse(args)?;
     match input {
         CliInput::Help => Ok(usage()),
+        CliInput::DevServer { invocation } => {
+            run_dev_server(&invocation)?;
+            Ok(String::new())
+        }
         CliInput::ConfigValidate {
             output_mode,
             invocation,
@@ -127,12 +139,11 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
         CliInput::ImportRun {
             output_mode,
             dry_run,
-            confirmed,
             invocation,
         } => {
-            if !dry_run && !confirmed {
+            if !dry_run {
                 return Err(CliRunError::usage(
-                    "`import run` requires `--dry-run` while planning or `--yes` before execution",
+                    "`import run` only supports `--dry-run` in this build",
                 ));
             }
 
@@ -149,12 +160,6 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                     invocation.manifest_path.display()
                 ))
             })?;
-
-            if !dry_run {
-                return Err(CliRunError::execution(
-                    "live import execution requires customer-app importer bindings; `davenda-cli` currently supports planned validation via `import run --dry-run`",
-                ));
-            }
 
             let report = plan.command_report().map_err(|error| {
                 CliRunError::execution(format!(
@@ -185,16 +190,104 @@ pub fn run_from_env() -> i32 {
 fn usage() -> String {
     [
         "Usage:",
+        "  platform dev server [--config <path>]",
         "  platform config validate [--config <path>] [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform import run <manifest-path> --dry-run [--json]",
         "",
         "Examples:",
+        "  platform dev server --config config/platform.toml",
         "  platform config validate --config config/platform.toml",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform import run imports/wordpress-events.toml --dry-run",
+        "",
+        "Environment:",
+        "  DAVENDA_COOKIE_SECRET and DAVENDA_CSRF_SECRET are required for `dev server`",
+        "  DATABASE_URL and OBJECT_STORE_URL are required by `config/platform.toml`",
     ]
     .join("\n")
+}
+
+fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
+    let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load platform config from `{}`: {error}",
+            invocation.config_path.display()
+        ))
+    })?;
+
+    let cookie_secret = read_runtime_secret("DAVENDA_COOKIE_SECRET")?;
+    let csrf_secret = read_runtime_secret("DAVENDA_CSRF_SECRET")?;
+    let bind = config.server.bind.clone();
+    let auth_package_name = config.auth.package.clone();
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+
+    tokio_runtime.block_on(async move {
+        let builder = RuntimeBuilder::new(
+            config.clone(),
+            configured_auth_model_package(auth_package_name),
+        );
+        let builder = install_official_modules(builder, &config)?;
+        let plan = builder.build().map_err(|error| {
+            CliRunError::execution(format!("failed to build runtime plan: {error}"))
+        })?;
+        let server = plan
+            .server_host(
+                &EnvironmentSecretResolver,
+                cookie_secret.as_bytes(),
+                csrf_secret.as_bytes(),
+            )
+            .map_err(|error| {
+                CliRunError::execution(format!("failed to build dev server host: {error}"))
+            })?;
+        let listener = tokio::net::TcpListener::bind(&bind)
+            .await
+            .map_err(|error| {
+                CliRunError::execution(format!("failed to bind dev server on `{bind}`: {error}"))
+            })?;
+
+        println!("Serving `{}` on http://{bind}", plan.config.app.name);
+        server.serve(listener).await.map_err(|error| {
+            CliRunError::execution(format!("dev server stopped unexpectedly: {error}"))
+        })
+    })
+}
+
+fn read_runtime_secret(var: &str) -> Result<String, CliRunError> {
+    std::env::var(var).map_err(|_| {
+        CliRunError::execution(format!(
+            "missing `{var}`; set it before starting `dev server`"
+        ))
+    })
+}
+
+fn install_official_modules<P>(
+    mut builder: davenda_runtime::RuntimeBuilder<P>,
+    config: &PlatformConfig,
+) -> Result<davenda_runtime::RuntimeBuilder<P>, CliRunError>
+where
+    P: AuthModelPackage + 'static,
+{
+    for module_name in &config.modules.enabled {
+        builder = match module_name.as_str() {
+            "admin" => builder.with_module(AdminModule::new()),
+            "commerce" => builder.with_module(CommerceModule::new()),
+            "cms" => builder.with_module(CmsModule::new()),
+            "events" => builder.with_module(EventsModule::new()),
+            "media" => builder.with_module(MediaModule::new()),
+            "memberships" => builder.with_module(MembershipsModule::new()),
+            other => {
+                return Err(CliRunError::execution(format!(
+                    "unsupported module `{other}` in `dev server` config"
+                )));
+            }
+        };
+    }
+
+    Ok(builder)
 }
 
 fn environment_label(environment: davenda_config::Environment) -> &'static str {

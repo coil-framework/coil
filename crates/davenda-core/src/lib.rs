@@ -8,7 +8,6 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use davenda_a11y::{NavigationContract, ThemeAccessibilityContract};
 use davenda_auth::{AuthModelPackage, Capability};
 use davenda_cache::{CachePlanner, CacheTopology, DistributedCacheBackend};
-use davenda_cli::CliRuntime;
 use davenda_config::{
     CookieConfig as HttpCookieConfig, CookieProtection as ConfigCookieProtection,
     CsrfConfig as HttpCsrfConfig, DistributedCache, PlatformConfig, SameSitePolicy,

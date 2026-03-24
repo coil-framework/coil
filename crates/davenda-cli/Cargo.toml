@@ -6,13 +6,20 @@ default-run = "platform"
 
 [dependencies]
 async-trait = "0.1"
+davenda-admin = { path = "../davenda-admin" }
 davenda-auth = { path = "../davenda-auth" }
+davenda-cms = { path = "../davenda-cms" }
+davenda-commerce = { path = "../davenda-commerce" }
 davenda-config = { path = "../davenda-config" }
+davenda-events = { path = "../davenda-events" }
 davenda-import = { path = "../davenda-import" }
+davenda-media = { path = "../davenda-media" }
+davenda-memberships = { path = "../davenda-memberships" }
 davenda-report = { path = "../davenda-report" }
+davenda-runtime = { path = "../davenda-runtime" }
 serde_json = "1.0"
 thiserror = "1.0"
-tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1", features = ["net", "rt", "rt-multi-thread"] }
 
 [[bin]]
 name = "platform"

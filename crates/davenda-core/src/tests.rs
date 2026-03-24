@@ -141,13 +141,8 @@ fn bootstrap_registers_core_services() {
         "davenda_session"
     );
     assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
-    assert!(
-        bootstrap
-            .cli
-            .registry
-            .commands()
-            .any(|command| command.path == vec!["config".to_string(), "validate".to_string()])
-    );
+    assert!(bootstrap.cli.customer_app == "showcase-events");
+    assert_eq!(bootstrap.cli.baseline_command_count, 4);
     assert_eq!(
         bootstrap.data.driver,
         davenda_config::DatabaseDriver::Postgres

@@ -25,8 +25,8 @@ pub fn bootstrap_core_services(
     registry.register_core_service(
         "core.cli",
         format!(
-            "Platform CLI contract with {} baseline commands",
-            cli.registry.commands().count()
+            "Platform CLI contract for `{}` with {} baseline commands",
+            cli.customer_app, cli.baseline_command_count
         ),
     )?;
     registry.register_core_service("core.logging", "Structured logging service")?;

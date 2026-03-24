@@ -15,8 +15,16 @@ pub struct AuthExplainInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DevServerInvocation {
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliInput {
     Help,
+    DevServer {
+        invocation: DevServerInvocation,
+    },
     ConfigValidate {
         output_mode: OutputMode,
         invocation: ConfigValidateInvocation,
@@ -28,7 +36,6 @@ pub(crate) enum CliInput {
     ImportRun {
         output_mode: OutputMode,
         dry_run: bool,
-        confirmed: bool,
         invocation: ImportRunInvocation,
     },
 }
@@ -40,7 +47,6 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
         .map(PathBuf::from);
     let mut output_mode = OutputMode::Human;
     let mut dry_run = false;
-    let mut confirmed = false;
     let mut subject: Option<DefaultSubject> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
@@ -54,7 +60,6 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--help" | "-h" => return Ok(CliInput::Help),
             "--json" => output_mode = OutputMode::Json,
             "--dry-run" => dry_run = true,
-            "--yes" => confirmed = true,
             "--config" => {
                 config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
             }
@@ -92,6 +97,19 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     }
 
     match positionals.as_slice() {
+        [command, subcommand] if command == "dev" && subcommand == "server" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`dev server` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::DevServer {
+                invocation: DevServerInvocation { config_path },
+            })
+        }
         [command, subcommand] if command == "config" && subcommand == "validate" => {
             let config_path = config_path
                 .or_else(discover_default_config_path)
@@ -146,7 +164,6 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             Ok(CliInput::ImportRun {
                 output_mode,
                 dry_run,
-                confirmed,
                 invocation: ImportRunInvocation {
                     manifest_path: PathBuf::from(manifest_path),
                 },
@@ -178,6 +195,7 @@ fn discover_default_config_path() -> Option<PathBuf> {
         PathBuf::from("config/davenda.toml"),
         PathBuf::from("platform.toml"),
         PathBuf::from("config/platform.toml"),
+        PathBuf::from("apps/harbor-shop/platform.toml"),
     ]
     .into_iter()
     .find(|path| path.is_file())
@@ -329,7 +347,6 @@ mod tests {
         let CliInput::ImportRun {
             output_mode,
             dry_run,
-            confirmed,
             invocation,
         } = input
         else {
@@ -338,11 +355,27 @@ mod tests {
 
         assert_eq!(output_mode, OutputMode::Json);
         assert!(dry_run);
-        assert!(!confirmed);
         assert_eq!(
             invocation.manifest_path,
             PathBuf::from("imports/wordpress-events.toml")
         );
+    }
+
+    #[test]
+    fn parse_dev_server_uses_explicit_config_path() {
+        let input = parse([
+            "dev".to_string(),
+            "server".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::DevServer { invocation } = input else {
+            panic!("expected dev server input");
+        };
+
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
     }
 
     #[test]

@@ -128,7 +128,21 @@ pub struct A11yRuntimeServices {
     pub theme_baseline: ThemeAccessibilityContract,
 }
 
-pub type CliRuntimeServices = CliRuntime;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliRuntimeServices {
+    pub customer_app: String,
+    pub baseline_command_count: usize,
+}
+
+impl CliRuntimeServices {
+    pub fn new(customer_app: impl Into<String>, baseline_command_count: usize) -> Self {
+        Self {
+            customer_app: customer_app.into(),
+            baseline_command_count,
+        }
+    }
+}
+
 pub type DataRuntimeServices = DataRuntime;
 pub type JobsRuntimeServices = JobsRuntime;
 pub type ObservabilityRuntimeServices = ObservabilityRuntime;

@@ -858,12 +858,8 @@ fn runtime_builder_creates_a_runtime_plan() {
     );
     assert_eq!(plan.browser.sessions.session_cookie.name, "davenda_session");
     assert_eq!(plan.browser.csrf.field_name, "_csrf");
-    assert!(
-        plan.cli
-            .registry
-            .commands()
-            .any(|command| command.path == vec!["tls".to_string(), "renew".to_string()])
-    );
+    assert_eq!(plan.cli.customer_app, "showcase-events");
+    assert_eq!(plan.cli.baseline_command_count, 4);
     assert_eq!(plan.data.driver, davenda_config::DatabaseDriver::Postgres);
     assert_eq!(plan.data.schema, "public");
     assert_eq!(plan.jobs.backend, davenda_config::JobBackend::Redis);

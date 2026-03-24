@@ -96,7 +96,7 @@ pub(crate) fn data_runtime_from_config(config: &PlatformConfig) -> DataRuntimeSe
 }
 
 pub(crate) fn cli_runtime_from_config(config: &PlatformConfig) -> CliRuntimeServices {
-    CliRuntime::baseline(&config.app.name).expect("cli runtime config must be valid")
+    CliRuntimeServices::new(config.app.name.clone(), 4)
 }
 
 pub(crate) fn tls_runtime_from_config(config: &PlatformConfig) -> TlsRuntimeServices {

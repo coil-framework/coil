@@ -12,12 +12,10 @@ fn baseline_runtime_registers_core_command_families() {
         .map(|command| command.path.join(" "))
         .collect::<Vec<_>>();
 
+    assert!(paths.contains(&"dev server".to_string()));
     assert!(paths.contains(&"config validate".to_string()));
-    assert!(paths.contains(&"migrate plan".to_string()));
-    assert!(paths.contains(&"assets publish".to_string()));
+    assert!(paths.contains(&"auth explain".to_string()));
     assert!(paths.contains(&"import run".to_string()));
-    assert!(paths.contains(&"release plan".to_string()));
-    assert!(paths.contains(&"tls renew".to_string()));
 }
 
 #[test]
@@ -59,7 +57,7 @@ fn invocation_plans_enforce_dry_run_and_confirmation_rules() {
     let runtime = CliRuntime::baseline("showcase-events").unwrap();
     let dry_run = runtime
         .plan(
-            CommandInvocation::new(["migrate", "plan"])
+            CommandInvocation::new(["import", "run"])
                 .unwrap()
                 .dry_run()
                 .with_output_mode(OutputMode::Json),
@@ -68,18 +66,25 @@ fn invocation_plans_enforce_dry_run_and_confirmation_rules() {
     assert!(dry_run.dry_run);
     assert_eq!(dry_run.output_mode, OutputMode::Json);
 
-    let blocked = runtime.plan(CommandInvocation::new(["tls", "renew"]).unwrap());
+    let blocked = runtime.plan(
+        CommandInvocation::new(["config", "validate"])
+            .unwrap()
+            .dry_run(),
+    );
     assert_eq!(
         blocked.unwrap_err(),
-        CliModelError::ConfirmationRequired {
-            path: "tls renew".to_string(),
+        CliModelError::DryRunUnsupported {
+            path: "config validate".to_string(),
         }
     );
 
-    let confirmed = runtime
-        .plan(CommandInvocation::new(["tls", "renew"]).unwrap().confirm())
-        .unwrap();
-    assert_eq!(confirmed.descriptor.path.join(" "), "tls renew");
+    let descriptor = runtime
+        .registry
+        .find(&["import".to_string(), "run".to_string()]);
+    assert_eq!(
+        descriptor.unwrap().description,
+        "Run a staged content or data import into the current customer app"
+    );
 }
 
 #[test]

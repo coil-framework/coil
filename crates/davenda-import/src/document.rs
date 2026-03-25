@@ -1,14 +1,14 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
 use crate::{
     AssetStorageDefault, ImportCutover, ImportCutoverTrigger, ImportManifest,
     ImportMigrationArtifacts, ImportModelError, ImportRunId, ImportSource, ImportSourceFormat,
-    ImportSourceInput, ImportTarget, ImportVerification, ImporterId, ImporterSpec,
-    PublicationMode, RollbackTriggerId, SourceSystemId, ValidationMode,
+    ImportSourceInput, ImportTarget, ImportVerification, ImportWebhookVerification, ImporterId,
+    ImporterSpec, PublicationMode, RollbackTriggerId, SourceSystemId, ValidationMode,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -219,6 +219,18 @@ pub struct ImportVerificationDocument {
     pub sample_routes: Vec<String>,
     #[serde(default)]
     pub sample_users: Vec<String>,
+    #[serde(default)]
+    pub webhooks: Vec<ImportWebhookVerificationDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ImportWebhookVerificationDocument {
+    pub source: String,
+    pub event: String,
+    #[serde(default)]
+    pub max_verification_failures: u32,
+    #[serde(default)]
+    pub max_replay_rejections: u32,
 }
 
 impl ImportVerificationDocument {
@@ -233,7 +245,18 @@ impl ImportVerificationDocument {
         for user in self.sample_users {
             verification = verification.with_sample_user(user)?;
         }
+        for webhook in self.webhooks {
+            verification = verification.with_webhook(webhook.into_model()?);
+        }
         Ok(verification)
+    }
+}
+
+impl ImportWebhookVerificationDocument {
+    fn into_model(self) -> Result<ImportWebhookVerification, ImportModelError> {
+        Ok(ImportWebhookVerification::new(self.source, self.event)?
+            .with_max_verification_failures(self.max_verification_failures)
+            .with_max_replay_rejections(self.max_replay_rejections))
     }
 }
 

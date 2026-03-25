@@ -162,6 +162,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Validate the configured auth package against the installed module capability contracts",
         )?,
         CommandDescriptor::new(
+            ["auth", "package", "inspect"],
+            CommandOwner::Core,
+            "Inspect the active auth package manifest, versioning, and runtime binding shape",
+        )?,
+        CommandDescriptor::new(
             ["module", "list"],
             CommandOwner::Core,
             "List installed modules for the active customer app",
@@ -238,9 +243,19 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Inspect registered runtime jobs, queue topology, and current queue health",
         )?,
         CommandDescriptor::new(
+            ["jobs", "ready"],
+            CommandOwner::Core,
+            "Inspect ready jobs waiting for worker pickup, including backlog shape and idempotency context",
+        )?,
+        CommandDescriptor::new(
             ["jobs", "dead-letters"],
             CommandOwner::Core,
             "Inspect dead-lettered jobs, failure reasons, and retry exhaustion outcomes",
+        )?,
+        CommandDescriptor::new(
+            ["jobs", "in-flight"],
+            CommandOwner::Core,
+            "Inspect currently leased jobs, worker ownership, and lease expiry risk",
         )?,
         CommandDescriptor::new(
             ["jobs", "retry"],
@@ -312,6 +327,14 @@ mod tests {
     }
 
     #[test]
+    fn baseline_commands_include_jobs_ready() {
+        let commands = baseline_commands("harbor-shop").unwrap();
+        assert!(commands.iter().any(|descriptor| {
+            descriptor.path == vec!["jobs".to_string(), "ready".to_string()]
+        }));
+    }
+
+    #[test]
     fn baseline_commands_include_module_enable_and_disable() {
         let commands = baseline_commands("harbor-shop").unwrap();
         let install = commands
@@ -345,6 +368,14 @@ mod tests {
             .expect("jobs retry descriptor should exist");
         assert!(retry.supports_dry_run);
         assert!(retry.requires_confirmation);
+    }
+
+    #[test]
+    fn baseline_commands_include_jobs_in_flight() {
+        let commands = baseline_commands("harbor-shop").unwrap();
+        assert!(commands.iter().any(|descriptor| {
+            descriptor.path == vec!["jobs".to_string(), "in-flight".to_string()]
+        }));
     }
 
     #[test]

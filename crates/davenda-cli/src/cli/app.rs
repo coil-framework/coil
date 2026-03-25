@@ -4,14 +4,16 @@ use crate::cli::args::{
     AuthListInvocation, AuthLookupInvocation, AuthPackageInspectInvocation,
     AuthPackageValidateInvocation, AuthTestModelInvocation, CacheInspectInvocation,
     CacheInvalidateInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
-    JobsDeadLettersInvocation, JobsPromoteInvocation, JobsRetryInvocation, JobsStatusInvocation,
-    MigrateApplyInvocation, ModuleDisableInvocation, ModuleEnableInvocation,
-    ModuleInspectInvocation, ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation,
-    parse,
+    JobsDeadLettersInvocation, JobsInFlightInvocation, JobsPromoteInvocation, JobsReadyInvocation,
+    JobsRetryInvocation, JobsStatusInvocation, MigrateApplyInvocation, ModuleDisableInvocation,
+    ModuleEnableInvocation, ModuleInspectInvocation, ModuleInstallInvocation,
+    StorageInspectInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
-use crate::cli::customer_app::{load_customer_app_context, load_official_modules};
+use crate::cli::customer_app::{
+    load_customer_app_context, load_official_modules, resolve_customer_app_root,
+};
 use crate::cli::error::CliRunError;
 use crate::cli::import::{ImportCutoverInvocation, ImportRunInvocation};
 use crate::cli::render::{render_auth_explain, render_command_report};
@@ -22,21 +24,23 @@ use davenda_app::{
 };
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::{
-    AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity,
-    Namespace, Relation, configured_auth_model_package, default_auth_model_package,
+    AuthModelPackage, AuthModelPackageSelection, Capability, DavendaAuth, DefaultSubject,
+    DefaultTuple, DefaultTupleUpdate, Entity, Namespace, Relation, configured_auth_model_package,
+    default_auth_model_package, load_auth_model_package_at,
 };
 use davenda_cache::{CacheInstant, InvalidationSet, InvalidationTag};
 use davenda_commerce::EntitlementKey;
-use davenda_config::{PlatformConfig, StorageClass};
+use davenda_config::{DatabaseConfig, PlatformConfig, StorageClass};
 use davenda_core::validate_module_capabilities;
 use davenda_data::{
-    CompiledStatement, DataRuntime, DataValue, MigrationPlan, MigrationRegistry, MutationAction,
-    MutationSpec, PostgresDataClient,
+    CompiledStatement, CompiledTransaction, DataRuntime, DataValue, DomainWrite, MigrationPlan,
+    MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient, TransactionIsolation,
+    TransactionPlan,
 };
 use davenda_import::{
     CutoverCheck, CutoverDnsRecordChange, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord,
-    CutoverSwitchExecution, CutoverTrafficTargetChange, ImportManifest, ImportModelError,
-    PublicationMode, RollbackTrigger,
+    CutoverSwitchExecution, CutoverTrafficTargetChange, ImportAuthMapping, ImportManifest,
+    ImportModelError, PublicationMode, RollbackTrigger,
 };
 use davenda_jobs::JobInstant;
 use davenda_memberships::{
@@ -45,9 +49,9 @@ use davenda_memberships::{
 };
 use davenda_runtime::{
     BrowserInstant, CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod,
-    RequestExecutionError, RequestInput, RouteArea, RouteAuthGate, RuntimeBuilder, SecretResolver,
-    SessionIssueRequest, StorageHost, WebhookObservationEvent, WebhookObservationSnapshot,
-    WebhookObservationStatus,
+    JobsHost, RequestExecutionError, RequestInput, RouteArea, RouteAuthGate, RuntimeBuilder,
+    SecretResolver, SessionIssueRequest, StorageHost, WebhookObservationEvent,
+    WebhookObservationSnapshot, WebhookObservationStatus,
 };
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
@@ -161,13 +165,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             invocation,
         } => {
             // Auth explain is deployment-configured and always goes through the live backend.
-            let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
-                CliRunError::execution(format!(
-                    "failed to load platform config from `{}`: {error}",
-                    invocation.config_path.display()
-                ))
-            })?;
-            let backend = LiveAuthExplainBackend::from_config(&config)?;
+            let backend = LiveAuthExplainBackend::from_config_path(&invocation.config_path)?;
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -237,7 +235,8 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             config_path,
         } => {
             let context = load_customer_app_context(&config_path)?;
-            let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+            let auth_package =
+                load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
             let composition = context
                 .manifest
                 .compose(&auth_package, &context.module_manifests)
@@ -291,7 +290,8 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             config_path,
         } => {
             let context = load_customer_app_context(&config_path)?;
-            let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+            let auth_package =
+                load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
             let migration_summary = context
                 .manifest
                 .migration_summary(auth_package, &context.modules);
@@ -355,11 +355,25 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_jobs_status(&invocation)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::JobsReady {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_jobs_ready(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::JobsDeadLetters {
             output_mode,
             invocation,
         } => {
             let report = run_jobs_dead_letters(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::JobsInFlight {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_jobs_in_flight(&invocation)?;
             render_command_report(&report, output_mode)
         }
         CliInput::JobsRetry {
@@ -477,7 +491,9 @@ fn usage() -> String {
         "  platform cache inspect [--config <path>] --route <path> [--json]",
         "  platform cache invalidate [--config <path>] --tag <tag> [--tag <tag> ...] [--dry-run] --yes [--json]",
         "  platform jobs status [--config <path>] [--queue <name>] [--json]",
+        "  platform jobs ready [--config <path>] [--queue <name>] [--limit <n>] [--json]",
         "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
+        "  platform jobs in-flight [--config <path>] [--queue <name>] [--worker-id <id>] [--limit <n>] [--json]",
         "  platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform jobs promote [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform tls status [--config <path>] [--json]",
@@ -515,7 +531,9 @@ fn usage() -> String {
         "  platform cache inspect --config config/platform.toml --route /en-GB/home",
         "  platform cache invalidate --config config/platform.toml --tag route:events.list --tag locale:en-GB --yes",
         "  platform jobs status --config config/platform.toml",
+        "  platform jobs ready --config config/platform.toml --queue jobs.work --limit 25",
         "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
+        "  platform jobs in-flight --config config/platform.toml --queue jobs.work --worker-id worker-a --limit 25",
         "  platform jobs retry dead-letter:job-retry --config config/platform.toml --dry-run",
         "  platform jobs promote --config config/platform.toml --dry-run",
         "  platform tls status --config config/platform.toml",
@@ -558,6 +576,30 @@ struct LiveImportAuthContext {
     auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
     site_id: Option<String>,
     storefront_id: String,
+    auth_package: AuthModelPackageSelection,
+    auth_mapping: Option<ImportAuthMapping>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum ImportAuthGrantScope {
+    Site,
+    Storefront,
+}
+
+impl ImportAuthGrantScope {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Site => "site",
+            Self::Storefront => "storefront",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedImportAuthGrant {
+    scope: ImportAuthGrantScope,
+    relation: Relation,
+    capabilities: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -586,6 +628,8 @@ fn build_live_auth_backend(
     ),
     CliRunError,
 > {
+    let runtime = build_cli_async_runtime()?;
+    let _runtime_guard = runtime.enter();
     let config = PlatformConfig::from_file(config_path).map_err(|error| {
         CliRunError::execution(format!(
             "failed to load platform config from `{}`: {error}",
@@ -604,19 +648,71 @@ fn build_live_auth_backend(
     })?;
     let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
     let auth = DavendaAuth::new(engine, config.auth.tenant_id);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| {
-            CliRunError::execution(format!("failed to start the CLI async runtime: {error}"))
-        })?;
 
     Ok((config, auth, runtime))
 }
 
+fn build_cli_async_runtime() -> Result<tokio::runtime::Runtime, CliRunError> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| {
+            CliRunError::execution(format!("failed to start the CLI async runtime: {error}"))
+        })
+}
+
+fn build_cli_jobs_host(
+    built: &BuiltCustomerAppContext,
+    node_id: &str,
+    operation: &str,
+) -> Result<(tokio::runtime::Runtime, JobsHost), CliRunError> {
+    let runtime = build_cli_async_runtime()?;
+    let _runtime_guard = runtime.enter();
+    let host = built
+        .runtime_plan
+        .runtime
+        .jobs_host(node_id)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build jobs {operation} host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    Ok((runtime, host))
+}
+
+fn load_auth_package_from_app_root(
+    app_root: &Path,
+    package_name: &str,
+) -> Result<davenda_auth::LoadedAuthModelPackage, CliRunError> {
+    load_auth_model_package_at(package_name, app_root).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load auth package `{package_name}` from customer app `{}`: {error}",
+            app_root.display()
+        ))
+    })
+}
+
+fn load_configured_auth_package(
+    config_path: &Path,
+) -> Result<davenda_auth::LoadedAuthModelPackage, CliRunError> {
+    let config = PlatformConfig::from_file(config_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load platform config from `{}`: {error}",
+            config_path.display()
+        ))
+    })?;
+    if config.auth.package == default_auth_model_package().manifest().name {
+        return load_auth_package_from_app_root(Path::new("."), &config.auth.package);
+    }
+
+    let app_root = resolve_customer_app_root(config_path, &config.app.name)?;
+    load_auth_package_from_app_root(&app_root, &config.auth.package)
+}
+
 fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, CliRunError> {
-    let (config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth check")?;
-    let package = configured_auth_model_package(config.auth.package.clone());
+    let (_config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth check")?;
+    let package = load_configured_auth_package(&invocation.config_path)?;
     let binding = package
         .resolve_binding(invocation.capability, &invocation.resource)
         .map_err(|error| {
@@ -699,13 +795,7 @@ fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, Cli
 fn run_auth_bindings_inspect(
     invocation: &AuthBindingsInspectInvocation,
 ) -> Result<CommandReport, CliRunError> {
-    let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
-        CliRunError::execution(format!(
-            "failed to load platform config from `{}`: {error}",
-            invocation.config_path.display()
-        ))
-    })?;
-    let package = configured_auth_model_package(config.auth.package.clone());
+    let package = load_configured_auth_package(&invocation.config_path)?;
     let mut bindings = package
         .capability_bindings()
         .values()
@@ -768,9 +858,9 @@ fn run_auth_bindings_inspect(
 
 fn run_auth_test_model(invocation: &AuthTestModelInvocation) -> Result<CommandReport, CliRunError> {
     let document = load_auth_model_test_document(&invocation.spec_path)?;
-    let (config, auth, runtime) =
+    let (_config, auth, runtime) =
         build_live_auth_backend(&invocation.config_path, "auth test-model")?;
-    let package = configured_auth_model_package(config.auth.package.clone());
+    let package = load_configured_auth_package(&invocation.config_path)?;
     let mut report = CommandReport::new(
         ["auth", "test-model"],
         format!(
@@ -856,8 +946,8 @@ fn run_auth_test_model(invocation: &AuthTestModelInvocation) -> Result<CommandRe
 }
 
 fn run_auth_list(invocation: &AuthListInvocation) -> Result<CommandReport, CliRunError> {
-    let (config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth list")?;
-    let package = configured_auth_model_package(config.auth.package.clone());
+    let (_config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth list")?;
+    let package = load_configured_auth_package(&invocation.config_path)?;
     let mut object_ids = runtime
         .block_on(async {
             auth.list_objects(
@@ -919,8 +1009,8 @@ fn run_auth_list(invocation: &AuthListInvocation) -> Result<CommandReport, CliRu
 }
 
 fn run_auth_lookup(invocation: &AuthLookupInvocation) -> Result<CommandReport, CliRunError> {
-    let (config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth lookup")?;
-    let package = configured_auth_model_package(config.auth.package.clone());
+    let (_config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth lookup")?;
+    let package = load_configured_auth_package(&invocation.config_path)?;
     let mut subject_ids = runtime
         .block_on(async {
             auth.list_subject_ids(
@@ -993,7 +1083,8 @@ fn run_auth_package_validate(
     invocation: &AuthPackageValidateInvocation,
 ) -> Result<CommandReport, CliRunError> {
     let context = load_customer_app_context(&invocation.config_path)?;
-    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let auth_package =
+        load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
     let package_manifest = auth_package.manifest().clone();
     let mut report = CommandReport::new(
         ["auth", "package", "validate"],
@@ -1092,10 +1183,9 @@ fn run_auth_package_inspect(
     invocation: &AuthPackageInspectInvocation,
 ) -> Result<CommandReport, CliRunError> {
     let context = load_customer_app_context(&invocation.config_path)?;
-    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let auth_package =
+        load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
     let package_manifest = auth_package.manifest().clone();
-    let shipped_default = default_auth_model_package();
-    let shipped_manifest = shipped_default.manifest();
     let imports = if package_manifest.imports.is_empty() {
         "none".to_string()
     } else {
@@ -1163,15 +1253,13 @@ fn run_auth_package_inspect(
     )?;
     push_report_diagnostic(
         &mut report,
-        if package_manifest.name == shipped_manifest.name {
-            DiagnosticSeverity::Info
-        } else {
-            DiagnosticSeverity::Warning
-        },
-        "auth.package.runtime_shape",
+        DiagnosticSeverity::Info,
+        "auth.package.runtime_source",
         format!(
-            "configured package identity `{}` currently reuses the shipped default schema and capability bindings from `{}` at runtime",
-            package_manifest.name, shipped_manifest.name
+            "loaded auth package implementation `{}` for customer app `{}` with {} effective capability bindings",
+            package_manifest.name,
+            context.manifest.id,
+            auth_package.capability_bindings().len()
         ),
     )?;
     Ok(report)
@@ -1179,7 +1267,8 @@ fn run_auth_package_inspect(
 
 fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandReport, CliRunError> {
     let context = load_customer_app_context(&invocation.config_path)?;
-    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let auth_package =
+        load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
     validate_supported_official_module(&invocation.module)?;
     let installed_spec = context
         .manifest
@@ -1809,7 +1898,8 @@ fn run_module_state_change(
         .iter()
         .map(|installed| installed.manifest().clone())
         .collect::<Vec<_>>();
-    let auth_package = configured_auth_model_package(updated_config.auth.package.clone());
+    let auth_package =
+        load_auth_package_from_app_root(&context.app_root, &updated_config.auth.package)?;
     updated_manifest
         .compose(&auth_package, &updated_module_manifests)
         .map_err(|error| {
@@ -2035,7 +2125,8 @@ fn update_enabled_modules_document(
 
 fn run_release_doctor(config_path: &Path) -> Result<CommandReport, CliRunError> {
     let context = load_customer_app_context(config_path)?;
-    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let auth_package =
+        load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
     context
         .manifest
         .release_doctor_with_extensions(
@@ -2061,14 +2152,17 @@ fn run_release_doctor(config_path: &Path) -> Result<CommandReport, CliRunError> 
 
 fn run_release_plan(config_path: &Path) -> Result<CommandReport, CliRunError> {
     let context = load_customer_app_context(config_path)?;
-    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let auth_package =
+        load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
     let migration_summary = context
         .manifest
         .migration_summary(auth_package, &context.modules);
+    let doctor_auth_package =
+        load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?;
     let doctor = context
         .manifest
         .release_doctor_with_extensions(
-            &configured_auth_model_package(context.config.auth.package.clone()),
+            &doctor_auth_package,
             &context.module_manifests,
             &[],
             Some(&context.config),
@@ -2423,22 +2517,16 @@ fn run_jobs_status(invocation: &JobsStatusInvocation) -> Result<CommandReport, C
 
     let database_url = std::env::var("DATABASE_URL").ok();
     let jobs_host = if database_url.is_some() {
-        Some(
-            built
-                .runtime_plan
-                .runtime
-                .jobs_host("platform-jobs-status")
-                .map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to build jobs status host for `{}`: {error}",
-                        built.manifest.id
-                    ))
-                })?,
-        )
+        Some(build_cli_jobs_host(
+            &built,
+            "platform-jobs-status",
+            "status",
+        )?)
     } else {
         None
     };
-    let coordinator_state = jobs_host.as_ref().map(|host| {
+    let coordinator_state = jobs_host.as_ref().map(|(runtime, host)| {
+        let _runtime_guard = runtime.enter();
         let coordinator = host.coordinator();
         (
             coordinator.ready_jobs().to_vec(),
@@ -2538,7 +2626,8 @@ fn run_jobs_status(invocation: &JobsStatusInvocation) -> Result<CommandReport, C
             built.runtime_plan.runtime.jobs.default_retry_limit
         ),
     )?;
-    if let Some(host) = jobs_host {
+    if let Some((runtime, host)) = jobs_host {
+        let _runtime_guard = runtime.enter();
         let leadership = host.coordinator().leadership().cloned();
         push_report_diagnostic(
             &mut report,
@@ -2569,6 +2658,149 @@ fn run_jobs_status(invocation: &JobsStatusInvocation) -> Result<CommandReport, C
     Ok(report)
 }
 
+fn run_jobs_ready(invocation: &JobsReadyInvocation) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    let topology = built.runtime_plan.runtime.jobs.describe().clone();
+    let queue_filter = invocation.queue.as_deref();
+    if let Some(filter) = queue_filter {
+        let known_queues = topology
+            .queues
+            .iter()
+            .map(|queue| queue.name.to_string())
+            .collect::<Vec<_>>();
+        if !known_queues.iter().any(|queue| queue == filter) {
+            return Err(CliRunError::execution(format!(
+                "queue filter `{filter}` is not defined for customer app `{}`; expected one of: {}",
+                built.manifest.id,
+                known_queues.join(", ")
+            )));
+        }
+    }
+
+    let database_url = std::env::var("DATABASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            CliRunError::execution(format!(
+                "live jobs coordinator state is required to inspect ready jobs for `{}`: set DATABASE_URL before running `jobs ready`",
+                built.manifest.id
+            ))
+        })?;
+    let _database_url = database_url;
+
+    let (runtime, host) = build_cli_jobs_host(&built, "platform-jobs-ready", "ready")?;
+    let _runtime_guard = runtime.enter();
+
+    build_jobs_ready_report(
+        &built.manifest.id.to_string(),
+        &topology,
+        built.runtime_plan.runtime.jobs.backend,
+        built.runtime_plan.runtime.jobs.default_retry_limit,
+        host.coordinator().ready_jobs(),
+        queue_filter,
+        invocation.limit,
+    )
+}
+
+fn build_jobs_ready_report(
+    app_id: &str,
+    topology: &davenda_jobs::QueueTopology,
+    backend: davenda_config::JobBackend,
+    default_retry_limit: u32,
+    ready_jobs: &[davenda_jobs::QueuedJobRecord],
+    queue_filter: Option<&str>,
+    limit: usize,
+) -> Result<CommandReport, CliRunError> {
+    let mut report = CommandReport::new(
+        ["jobs", "ready"],
+        format!("Ready jobs for customer app `{app_id}`"),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "job_id",
+        "job_name",
+        "queue",
+        "attempts",
+        "enqueued_at",
+        "idempotency_key",
+        "payload",
+    ])
+    .map_err(report_build_error)?;
+
+    let mut ready_jobs = ready_jobs
+        .iter()
+        .filter(|record| queue_filter.map_or(true, |filter| record.spec.queue.as_str() == filter))
+        .collect::<Vec<_>>();
+    ready_jobs.sort_by(|left, right| {
+        left.enqueued_at
+            .cmp(&right.enqueued_at)
+            .then_with(|| left.spec.job_id.as_str().cmp(right.spec.job_id.as_str()))
+    });
+
+    let total_count = ready_jobs.len();
+    let limited = ready_jobs.into_iter().take(limit).collect::<Vec<_>>();
+
+    for record in &limited {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("job_id", record.spec.job_id.to_string())
+                .map_err(report_build_error)?
+                .with_cell("job_name", record.spec.job_name.to_string())
+                .map_err(report_build_error)?
+                .with_cell("queue", record.spec.queue.to_string())
+                .map_err(report_build_error)?
+                .with_cell("attempts", record.attempts.to_string())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "enqueued_at",
+                    record.enqueued_at.as_unix_seconds().to_string(),
+                )
+                .map_err(report_build_error)?
+                .with_cell(
+                    "idempotency_key",
+                    record
+                        .spec
+                        .idempotency_key
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| "none".to_string()),
+                )
+                .map_err(report_build_error)?
+                .with_cell("payload", record.spec.payload_description.clone())
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "jobs.ready",
+        format!(
+            "queue_filter={} limit={} returned {} of {} ready job(s)",
+            queue_filter.unwrap_or("all"),
+            limit,
+            limited.len(),
+            total_count
+        ),
+    )?;
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "jobs.topology",
+        format!(
+            "backend={:?} work_queue={} scheduled_queue={} domain_events_queue={} dead_letter_queue={} default_retry_limit={}",
+            backend,
+            topology.work_queue,
+            topology.scheduled_queue,
+            topology.domain_events_queue,
+            topology.dead_letter_queue,
+            default_retry_limit
+        ),
+    )?;
+
+    Ok(report)
+}
+
 fn run_jobs_dead_letters(
     invocation: &JobsDeadLettersInvocation,
 ) -> Result<CommandReport, CliRunError> {
@@ -2592,23 +2824,17 @@ fn run_jobs_dead_letters(
 
     let database_url = std::env::var("DATABASE_URL").ok();
     let jobs_host = if database_url.is_some() {
-        Some(
-            built
-                .runtime_plan
-                .runtime
-                .jobs_host("platform-jobs-dead-letters")
-                .map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to build jobs dead-letter host for `{}`: {error}",
-                        built.manifest.id
-                    ))
-                })?,
-        )
+        Some(build_cli_jobs_host(
+            &built,
+            "platform-jobs-dead-letters",
+            "dead-letter",
+        )?)
     } else {
         None
     };
 
-    if let Some(host) = jobs_host {
+    if let Some((runtime, host)) = jobs_host {
+        let _runtime_guard = runtime.enter();
         let mut dead_letters = host
             .coordinator()
             .dead_letters()
@@ -2705,6 +2931,153 @@ fn run_jobs_dead_letters(
     Ok(report)
 }
 
+fn run_jobs_in_flight(invocation: &JobsInFlightInvocation) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    let queue_filter = invocation.queue.as_deref();
+    let worker_filter = invocation.worker_id.as_deref();
+    let mut report = CommandReport::new(
+        ["jobs", "in-flight"],
+        format!("In-flight jobs for customer app `{}`", built.manifest.id),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "job_id",
+        "queue",
+        "worker_id",
+        "attempts",
+        "leased_at",
+        "lease_until",
+        "status",
+    ])
+    .map_err(report_build_error)?;
+
+    let database_url = std::env::var("DATABASE_URL").ok();
+    let jobs_host = if database_url.is_some() {
+        Some(build_cli_jobs_host(
+            &built,
+            "platform-jobs-in-flight",
+            "in-flight",
+        )?)
+    } else {
+        None
+    };
+
+    if let Some((runtime, host)) = jobs_host {
+        let _runtime_guard = runtime.enter();
+        let now_unix_seconds = unix_timestamp_now()?;
+        let mut leases = host
+            .coordinator()
+            .in_flight_jobs()
+            .iter()
+            .filter(|lease| {
+                queue_filter.map_or(true, |filter| lease.record.spec.queue.as_str() == filter)
+                    && worker_filter.map_or(true, |filter| lease.worker_id == filter)
+            })
+            .collect::<Vec<_>>();
+        leases.sort_by(|left, right| {
+            left.lease_until.cmp(&right.lease_until).then_with(|| {
+                left.record
+                    .spec
+                    .job_id
+                    .as_str()
+                    .cmp(right.record.spec.job_id.as_str())
+            })
+        });
+
+        let total_count = leases.len();
+        let limited = leases
+            .into_iter()
+            .take(invocation.limit)
+            .collect::<Vec<_>>();
+        let expired_count = limited
+            .iter()
+            .filter(|lease| lease.lease_until.as_unix_seconds() <= now_unix_seconds)
+            .count();
+        if expired_count > 0 {
+            report = report.with_status(ReportStatus::Unsafe);
+        }
+
+        for lease in &limited {
+            let expired = lease.lease_until.as_unix_seconds() <= now_unix_seconds;
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("job_id", lease.record.spec.job_id.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("queue", lease.record.spec.queue.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("worker_id", lease.worker_id.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("attempts", lease.record.attempts.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("leased_at", lease.leased_at.as_unix_seconds().to_string())
+                    .map_err(report_build_error)?
+                    .with_cell(
+                        "lease_until",
+                        lease.lease_until.as_unix_seconds().to_string(),
+                    )
+                    .map_err(report_build_error)?
+                    .with_cell("status", if expired { "expired" } else { "leased" })
+                    .map_err(report_build_error)?,
+            );
+        }
+
+        push_report_diagnostic(
+            &mut report,
+            if expired_count > 0 {
+                DiagnosticSeverity::Warning
+            } else {
+                DiagnosticSeverity::Info
+            },
+            "jobs.in_flight",
+            format!(
+                "queue_filter={} worker_filter={} limit={} returned {} of {} in-flight job(s)",
+                queue_filter.unwrap_or("all"),
+                worker_filter.unwrap_or("all"),
+                invocation.limit,
+                limited.len(),
+                total_count
+            ),
+        )?;
+        if expired_count > 0 {
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Warning,
+                "jobs.in_flight.expired",
+                format!("{expired_count} leased job(s) have expired worker leases"),
+            )?;
+        }
+    } else {
+        report = report.with_status(ReportStatus::Warning);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "jobs.runtime.unavailable",
+            format!(
+                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to inspect in-flight job state",
+                built.manifest.id
+            ),
+        )?;
+    }
+
+    let topology = built.runtime_plan.runtime.jobs.describe().clone();
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "jobs.topology",
+        format!(
+            "backend={:?} work_queue={} scheduled_queue={} domain_events_queue={} dead_letter_queue={} default_retry_limit={}",
+            built.runtime_plan.runtime.jobs.backend,
+            topology.work_queue,
+            topology.scheduled_queue,
+            topology.domain_events_queue,
+            topology.dead_letter_queue,
+            built.runtime_plan.runtime.jobs.default_retry_limit
+        ),
+    )?;
+
+    Ok(report)
+}
+
 fn run_jobs_retry(
     invocation: &JobsRetryInvocation,
     dry_run: bool,
@@ -2749,16 +3122,8 @@ fn run_jobs_retry(
         return Ok(report);
     };
 
-    let mut host = built
-        .runtime_plan
-        .runtime
-        .jobs_host("platform-jobs-retry")
-        .map_err(|error| {
-            CliRunError::execution(format!(
-                "failed to build jobs retry host for `{}`: {error}",
-                built.manifest.id
-            ))
-        })?;
+    let (runtime, mut host) = build_cli_jobs_host(&built, "platform-jobs-retry", "retry")?;
+    let _runtime_guard = runtime.enter();
     let dead_letter = host
         .coordinator()
         .dead_letters()
@@ -2886,16 +3251,8 @@ fn run_jobs_promote(
         return Ok(report);
     };
 
-    let mut host = built
-        .runtime_plan
-        .runtime
-        .jobs_host("platform-jobs-promote")
-        .map_err(|error| {
-            CliRunError::execution(format!(
-                "failed to build jobs promote host for `{}`: {error}",
-                built.manifest.id
-            ))
-        })?;
+    let (runtime, mut host) = build_cli_jobs_host(&built, "platform-jobs-promote", "promote")?;
+    let _runtime_guard = runtime.enter();
     let due_jobs = host
         .coordinator()
         .scheduled_jobs()
@@ -3731,6 +4088,14 @@ fn resolve_cache_route_execution(
     built: &BuiltCustomerAppContext,
     route: &str,
 ) -> Result<(davenda_runtime::RequestExecution, String), CliRunError> {
+    resolve_cache_route_execution_for_principal(built, route, None)
+}
+
+fn resolve_cache_route_execution_for_principal(
+    built: &BuiltCustomerAppContext,
+    route: &str,
+    principal_id: Option<&str>,
+) -> Result<(davenda_runtime::RequestExecution, String), CliRunError> {
     let host = built.runtime_plan.runtime.config.seo.canonical_host.clone();
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
@@ -3746,12 +4111,15 @@ fn resolve_cache_route_execution(
 
     let mut last_error = None;
     for candidate in &candidate_routes {
-        let request =
+        let mut request =
             RequestInput::new(HttpMethod::Get, host.as_str(), candidate).map_err(|error| {
                 CliRunError::execution(format!(
                     "failed to prepare cache route request `{candidate}`: {error}"
                 ))
             })?;
+        if let Some(principal_id) = principal_id {
+            request = request.with_principal(principal_id.to_string());
+        }
         match built
             .runtime_plan
             .runtime
@@ -3777,6 +4145,53 @@ fn resolve_cache_route_execution(
         "failed to resolve cache route `{route}` for `{}` after trying [{attempted}] (last attempt `{failed_route}`): {error}",
         built.manifest.id
     )))
+}
+
+fn normalize_expected_cache_headers(
+    headers: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+        .collect()
+}
+
+fn compare_expected_cache_headers(
+    expected: &BTreeMap<String, String>,
+    observed: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut mismatches = Vec::new();
+    for (name, expected_value) in expected {
+        match observed.get(name) {
+            Some(actual) if actual == expected_value => {}
+            Some(actual) => mismatches.push(format!(
+                "{name} expected `{expected_value}` but observed `{actual}`"
+            )),
+            None => mismatches.push(format!(
+                "{name} expected `{expected_value}` but was missing"
+            )),
+        }
+    }
+    mismatches
+}
+
+fn observed_public_cache_policy(
+    headers: &BTreeMap<String, String>,
+) -> Option<BTreeMap<String, String>> {
+    let cache_control = headers.get("cache-control")?;
+    let lower = cache_control.to_ascii_lowercase();
+    if !lower.contains("public") || lower.contains("private") || lower.contains("no-store") {
+        return None;
+    }
+
+    let mut policy = BTreeMap::from([("cache-control".to_string(), cache_control.clone())]);
+    if let Some(value) = headers.get("surrogate-key") {
+        policy.insert("surrogate-key".to_string(), value.clone());
+    }
+    if let Some(value) = headers.get("vary") {
+        policy.insert("vary".to_string(), value.clone());
+    }
+    Some(policy)
 }
 
 fn localized_cache_route_candidate(built: &BuiltCustomerAppContext, route: &str) -> Option<String> {
@@ -4216,31 +4631,22 @@ fn run_import_manifest(
         let default_locale = runtime.built.manifest.default_locale.to_string();
         let publish_validated = plan.publication_mode == PublicationMode::PublishValidated;
         let requires_live_data = publish_validated
-            && plan
-                .ordered_importers
-                .iter()
-                .any(|importer| {
-                    matches!(
-                        importer.resource_kind.as_str(),
-                        "page" | "event" | "user" | "membership_tier" | "subscription"
-                    )
-                });
+            && plan.ordered_importers.iter().any(|importer| {
+                matches!(
+                    importer.resource_kind.as_str(),
+                    "page" | "event" | "user" | "membership_tier" | "subscription"
+                )
+            });
         let requires_live_auth = publish_validated
             && plan
                 .ordered_importers
                 .iter()
                 .any(|importer| matches!(importer.resource_kind.as_str(), "user" | "subscription"));
-        let requires_live_site_auth = publish_validated
+        let requires_live_user_auth_mapping = publish_validated
             && plan
                 .ordered_importers
                 .iter()
                 .any(|importer| importer.resource_kind == "user");
-        if requires_live_site_auth && manifest.site.is_none() {
-            return Err(CliRunError::execution(format!(
-                "publish-validated import manifest `{}` requires `site` to materialize live auth state",
-                invocation.manifest_path.display()
-            )));
-        }
         let data_runtime = runtime.built.runtime_plan.runtime.data.clone();
         let mut data_client = None;
         let tokio_runtime = if requires_live_data || requires_live_auth {
@@ -4258,9 +4664,13 @@ fn run_import_manifest(
             None
         };
         let mut auth_context = match (requires_live_auth, tokio_runtime.as_ref()) {
-            (true, Some(tokio_runtime)) => {
-                Some(build_import_auth_context(runtime, &manifest, tokio_runtime)?)
-            }
+            (true, Some(tokio_runtime)) => Some(build_import_auth_context(
+                runtime,
+                manifest_root,
+                &manifest,
+                requires_live_user_auth_mapping,
+                tokio_runtime,
+            )?),
             _ => None,
         };
         plan.execute_with_handler(
@@ -4277,8 +4687,7 @@ fn run_import_manifest(
                         )?;
                     }
                     "page" if publish_validated => {
-                        let client =
-                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        let client = ensure_import_data_client(&data_runtime, &mut data_client)?;
                         materialize_page_record(
                             tokio_runtime
                                 .as_ref()
@@ -4289,8 +4698,7 @@ fn run_import_manifest(
                         )?;
                     }
                     "event" if publish_validated => {
-                        let client =
-                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        let client = ensure_import_data_client(&data_runtime, &mut data_client)?;
                         materialize_event_record(
                             tokio_runtime
                                 .as_ref()
@@ -4300,8 +4708,7 @@ fn run_import_manifest(
                         )?;
                     }
                     "membership_tier" if publish_validated => {
-                        let client =
-                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        let client = ensure_import_data_client(&data_runtime, &mut data_client)?;
                         materialize_membership_tier_record(
                             tokio_runtime
                                 .as_ref()
@@ -4311,8 +4718,7 @@ fn run_import_manifest(
                         )?;
                     }
                     "subscription" if publish_validated => {
-                        let client =
-                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        let client = ensure_import_data_client(&data_runtime, &mut data_client)?;
                         let auth_context = auth_context.as_mut().expect(
                             "publish-validated subscription imports build a live auth context",
                         );
@@ -4320,14 +4726,14 @@ fn run_import_manifest(
                             tokio_runtime
                                 .as_ref()
                                 .expect("publish-validated imports build a runtime"),
+                            &data_runtime,
                             &client,
                             auth_context,
                             staged_record,
                         )?;
                     }
                     "user" if publish_validated => {
-                        let client =
-                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        let client = ensure_import_data_client(&data_runtime, &mut data_client)?;
                         let auth_context = auth_context
                             .as_mut()
                             .expect("publish-validated imports build a live auth context");
@@ -4335,6 +4741,7 @@ fn run_import_manifest(
                             tokio_runtime
                                 .as_ref()
                                 .expect("publish-validated imports build a runtime"),
+                            &data_runtime,
                             &client,
                             auth_context,
                             staged_record,
@@ -4406,6 +4813,7 @@ struct CutoverVerificationSupport {
 
 const CLOUDFLARE_API_BASE_URL_ENV: &str = "DAVENDA_CLOUDFLARE_API_BASE_URL";
 const CUTOVER_CLOUDFLARE_SECRET_ENV: &str = "DAVENDA_CUTOVER_CLOUDFLARE_SECRET";
+const CUTOVER_SYNTHETIC_SESSION_ENV: &str = "DAVENDA_CUTOVER_ALLOW_SYNTHETIC_SESSION";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CloudflareDnsSwitchRequest {
@@ -5696,6 +6104,13 @@ struct ObservationVerificationChecks {
     webhook_failures: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObservedLiveRoutePayload {
+    status_code: u16,
+    headers: BTreeMap<String, String>,
+    body: String,
+}
+
 fn observe_import_cutover(
     invocation: &ImportCutoverInvocation,
     evaluated: &EvaluatedImportCutover,
@@ -6566,6 +6981,16 @@ fn build_cutover_verification_checks(
                 .to_string(),
         ));
     }
+    if checks.cache_leaks && verification.sample_routes.is_empty() {
+        return Err(CliRunError::execution(
+            "verification check `cache_leaks` requires `[verification].sample_routes`".to_string(),
+        ));
+    }
+    if checks.cache_leaks && verification.sample_users.is_empty() {
+        return Err(CliRunError::execution(
+            "verification check `cache_leaks` requires `[verification].sample_users`".to_string(),
+        ));
+    }
     if checks.fragment_rendering && support.fragment_probe.is_none() {
         return Err(CliRunError::execution(
             "verification check `fragment_rendering` requires at least one fragment route in the target runtime"
@@ -6631,7 +7056,7 @@ fn render_supported_verification_checks(
         rendered.push("record_counts(import-run)");
     }
     if checks.cache_leaks {
-        rendered.push("cache_leaks(observe)");
+        rendered.push("cache_leaks(local+observe)");
     }
     if checks.fragment_rendering {
         rendered.push("fragment_rendering(local)");
@@ -6713,6 +7138,18 @@ fn execute_local_cutover_verification_checks(
                 route.path
             ));
         }
+    }
+    if checks.cache_leaks {
+        let sample_user = verification.sample_users.first().ok_or_else(|| {
+            CliRunError::execution(
+                "verification check `cache_leaks` requires `[verification].sample_users`"
+                    .to_string(),
+            )
+        })?;
+        completed.push(format!(
+            "cache_leaks(routes:{} user:{sample_user})",
+            verification.sample_routes.len()
+        ));
     }
     if checks.webhook_failures {
         for probe in verify_local_webhook_failure_probes(verification, support)? {
@@ -7143,6 +7580,7 @@ fn execute_cutover_observation_probe(
 
     let mut routes = Vec::new();
     let mut media_probe_count = 0usize;
+    let mut observed_route_payloads = BTreeMap::new();
     for route in sample_routes {
         let url = base.join(route).map_err(|error| {
             CliRunError::execution(format!(
@@ -7219,23 +7657,12 @@ fn execute_cutover_observation_probe(
             }
             match resolve_cache_route_execution(built, route) {
                 Ok((execution, cache_key)) => {
-                    let expected_cache_headers = execution
-                        .cache_plan
-                        .headers
-                        .iter()
-                        .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
-                        .collect::<BTreeMap<_, _>>();
-                    let mut cache_mismatches = Vec::new();
-                    for (name, expected) in expected_cache_headers {
-                        match actual_cache_headers.get(&name) {
-                            Some(actual) if actual == &expected => {}
-                            Some(actual) => cache_mismatches.push(format!(
-                                "{name} expected `{expected}` but observed `{actual}`"
-                            )),
-                            None => cache_mismatches
-                                .push(format!("{name} expected `{expected}` but was missing")),
-                        }
-                    }
+                    let expected_cache_headers =
+                        normalize_expected_cache_headers(&execution.cache_plan.headers);
+                    let cache_mismatches = compare_expected_cache_headers(
+                        &expected_cache_headers,
+                        &actual_cache_headers,
+                    );
                     if cache_mismatches.is_empty() {
                         outcome.push(format!("cache_ok({cache_key})"));
                     } else {
@@ -7256,6 +7683,16 @@ fn execute_cutover_observation_probe(
                 status_code
             ));
             outcome.push("unexpected_status".to_string());
+        }
+        if verification_checks.cache_leaks {
+            observed_route_payloads.insert(
+                route.clone(),
+                ObservedLiveRoutePayload {
+                    status_code,
+                    headers: actual_cache_headers.clone(),
+                    body: body.clone(),
+                },
+            );
         }
         routes.push(ObservedCutoverRoute {
             route: route.clone(),
@@ -7351,6 +7788,23 @@ fn execute_cutover_observation_probe(
             });
         }
     }
+    if verification_checks.cache_leaks {
+        let verification = verification.ok_or_else(|| {
+            CliRunError::execution(
+                "verification requires cache_leaks but the import manifest does not declare a `[verification]` section"
+                    .to_string(),
+            )
+        })?;
+        observe_cache_leaks(
+            built,
+            client,
+            &base,
+            verification,
+            &observed_route_payloads,
+            &mut routes,
+            &mut failures,
+        )?;
+    }
     if verification_checks.webhook_failures {
         let verification = verification.ok_or_else(|| {
             CliRunError::execution(
@@ -7380,6 +7834,197 @@ fn execute_cutover_observation_probe(
         maintenance_enabled,
         routes,
         failures,
+    })
+}
+
+fn observe_cache_leaks(
+    built: &BuiltCustomerAppContext,
+    client: &BlockingHttpClient,
+    base: &Url,
+    verification: &davenda_import::ImportVerification,
+    observed_routes: &BTreeMap<String, ObservedLiveRoutePayload>,
+    routes: &mut Vec<ObservedCutoverRoute>,
+    failures: &mut Vec<String>,
+) -> Result<(), CliRunError> {
+    let sample_user = verification.sample_users.first().ok_or_else(|| {
+        CliRunError::execution(
+            "verification check `cache_leaks` requires `[verification].sample_users`".to_string(),
+        )
+    })?;
+    let session_cookie = issue_cutover_observation_session_cookie(built, sample_user)?;
+
+    for route in &verification.sample_routes {
+        let anonymous_before = observed_routes.get(route).ok_or_else(|| {
+            CliRunError::execution(format!(
+                "cache leak observation expected an anonymous probe result for route `{}`",
+                route
+            ))
+        })?;
+        let Some(anonymous_policy) = observed_public_cache_policy(&anonymous_before.headers) else {
+            routes.push(ObservedCutoverRoute {
+                route: format!("cache_leak {route}"),
+                status_code: anonymous_before.status_code,
+                outcome: "not_public_cacheable".to_string(),
+            });
+            continue;
+        };
+        let authenticated =
+            execute_live_route_probe(client, base, route, Some(session_cookie.as_str()))?;
+        let anonymous_after = execute_live_route_probe(client, base, route, None)?;
+        let authenticated_policy = observed_public_cache_policy(&authenticated.headers);
+        let mut outcome = Vec::new();
+        if let Some(authenticated_policy) = authenticated_policy.as_ref() {
+            let cache_mismatches =
+                compare_expected_cache_headers(&anonymous_policy, authenticated_policy);
+            if cache_mismatches.is_empty() {
+                outcome.push("auth_public_policy_matches_anon".to_string());
+            } else {
+                outcome.push("auth_public_policy_changed".to_string());
+            }
+        } else {
+            outcome.push("auth_not_public_cacheable".to_string());
+        }
+        if authenticated.status_code >= 500 || authenticated.status_code == 404 {
+            outcome.push("auth_route_unhealthy".to_string());
+            failures.push(format!(
+                "cache leak observation route `{}` returned {} for authenticated traffic",
+                route, authenticated.status_code
+            ));
+        }
+        let anonymous_policy_matches_authenticated =
+            authenticated_policy
+                .as_ref()
+                .is_some_and(|authenticated_policy| {
+                    compare_expected_cache_headers(&anonymous_policy, authenticated_policy)
+                        .is_empty()
+                });
+        if anonymous_before.body != authenticated.body && anonymous_policy_matches_authenticated {
+            outcome.push("auth_body_differs_under_public_policy".to_string());
+            failures.push(format!(
+                "route `{}` returned different authenticated content while retaining the anonymous cache policy",
+                route
+            ));
+        } else {
+            outcome.push("auth_body_isolated".to_string());
+        }
+        if anonymous_after.body != anonymous_before.body {
+            outcome.push("anonymous_changed_after_auth".to_string());
+            if anonymous_after.body == authenticated.body {
+                failures.push(format!(
+                    "route `{}` served authenticated content back to anonymous traffic after the authenticated probe",
+                    route
+                ));
+            } else {
+                failures.push(format!(
+                    "route `{}` changed its anonymous response after the authenticated probe, indicating unstable cache isolation",
+                    route
+                ));
+            }
+        } else {
+            outcome.push("anonymous_stable".to_string());
+        }
+        routes.push(ObservedCutoverRoute {
+            route: format!("cache_leak {route}"),
+            status_code: authenticated.status_code,
+            outcome: outcome.join(" "),
+        });
+    }
+
+    Ok(())
+}
+
+fn issue_cutover_observation_session_cookie(
+    built: &BuiltCustomerAppContext,
+    principal_id: &str,
+) -> Result<String, CliRunError> {
+    let cookie_secret = read_runtime_secret("DAVENDA_COOKIE_SECRET")?;
+    let csrf_secret = read_runtime_secret("DAVENDA_CSRF_SECRET")?;
+    let allow_synthetic_session = std::env::var_os(CUTOVER_SYNTHETIC_SESSION_ENV).is_some();
+    let cookie_name = built
+        .runtime_plan
+        .runtime
+        .config
+        .http
+        .session_cookie
+        .name
+        .clone();
+    let synthetic_cookie = format!("{cookie_name}=test-session-{principal_id}");
+    let server = match built.runtime_plan.runtime.server_host(
+        &EnvironmentSecretResolver,
+        cookie_secret.as_bytes(),
+        csrf_secret.as_bytes(),
+    ) {
+        Ok(server) => server,
+        Err(error) if allow_synthetic_session => return Ok(synthetic_cookie),
+        Err(error) => {
+            return Err(CliRunError::execution(format!(
+                "failed to build server host for cache-leak observation in `{}`: {error}",
+                built.manifest.id
+            )));
+        }
+    };
+    let now = BrowserInstant::from_unix_seconds(unix_timestamp_now()?);
+    let issued = match server.issue_session(
+        SessionIssueRequest::new()
+            .for_principal(principal_id)
+            .map_err(|error| CliRunError::execution(error.to_string()))?,
+        now,
+    ) {
+        Ok(issued) => issued,
+        Err(_) if allow_synthetic_session => return Ok(synthetic_cookie),
+        Err(error) => {
+            return Err(CliRunError::execution(format!(
+                "failed to issue a session for cache-leak observation user `{principal_id}`: {error}"
+            )));
+        }
+    };
+
+    Ok(format!("{}={}", cookie_name, issued.cookie_value))
+}
+
+fn execute_live_route_probe(
+    client: &BlockingHttpClient,
+    base: &Url,
+    route: &str,
+    session_cookie: Option<&str>,
+) -> Result<ObservedLiveRoutePayload, CliRunError> {
+    let url = base.join(route).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to resolve cutover observation route `{route}` against `{base}`: {error}"
+        ))
+    })?;
+    let mut request = client.get(url.clone());
+    if let Some(session_cookie) = session_cookie {
+        request = request.header(reqwest::header::COOKIE, session_cookie);
+    }
+    let response = request.send().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to probe cutover route `{}` at `{}`: {error}",
+            route, url
+        ))
+    })?;
+    let status_code = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let body = response.text().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to read cutover route `{}` at `{}`: {error}",
+            route, url
+        ))
+    })?;
+
+    Ok(ObservedLiveRoutePayload {
+        status_code,
+        headers,
+        body,
     })
 }
 
@@ -7672,7 +8317,7 @@ fn build_customer_app_runtime_context(
         .manifest
         .build_runtime_plan_at(
             config,
-            configured_auth_model_package(context.config.auth.package.clone()),
+            load_auth_package_from_app_root(&context.app_root, &context.config.auth.package)?,
             context.modules,
             &context.app_root,
         )
@@ -8039,7 +8684,8 @@ fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
     let cookie_secret = read_runtime_secret("DAVENDA_COOKIE_SECRET")?;
     let csrf_secret = read_runtime_secret("DAVENDA_CSRF_SECRET")?;
     let bind = config.server.bind.clone();
-    let auth_package_name = config.auth.package.clone();
+    let app_root = resolve_customer_app_root(&invocation.config_path, &config.app.name)?;
+    let auth_package = load_auth_package_from_app_root(&app_root, &config.auth.package)?;
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -8047,10 +8693,7 @@ fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
 
     tokio_runtime.block_on(async move {
         let modules = load_official_modules(&config)?;
-        let builder = RuntimeBuilder::new(
-            config.clone(),
-            configured_auth_model_package(auth_package_name),
-        );
+        let builder = RuntimeBuilder::new(config.clone(), auth_package);
         let mut builder = builder;
         for module in modules {
             builder = builder.with_boxed_module(module);
@@ -8220,7 +8863,9 @@ fn build_import_runtime_context(
 
 fn build_import_auth_context(
     runtime: &BuiltImportRuntimeContext,
+    manifest_root: &Path,
     manifest: &ImportManifest,
+    require_auth_mapping: bool,
     tokio_runtime: &tokio::runtime::Runtime,
 ) -> Result<LiveImportAuthContext, CliRunError> {
     let client = runtime
@@ -8245,7 +8890,8 @@ fn build_import_auth_context(
         .auth
         .package
         .clone();
-    let auth_package = configured_auth_model_package(auth_package_name.clone());
+    let auth_package =
+        load_auth_package_from_app_root(&runtime.built.app_root, &auth_package_name)?;
     tokio_runtime
         .block_on(async { auth.apply_model_package(&auth_package).await })
         .map_err(|error| {
@@ -8254,12 +8900,61 @@ fn build_import_auth_context(
                 auth_package_name
             ))
         })?;
+    let auth_mapping = if require_auth_mapping {
+        let mapping = manifest.load_auth_mapping(manifest_root).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to load import auth mapping document for `{}`: {error}",
+                manifest_root.display()
+            ))
+        })?;
+        validate_import_auth_mapping(&mapping, &auth_package).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to validate import auth mapping for `{}`: {error}",
+                manifest_root.display()
+            ))
+        })?;
+        Some(mapping)
+    } else {
+        None
+    };
 
     Ok(LiveImportAuthContext {
         auth,
         site_id: manifest.site.clone(),
         storefront_id: runtime.built.manifest.id.to_string(),
+        auth_package: AuthModelPackageSelection::new(auth_package),
+        auth_mapping,
     })
+}
+
+fn validate_import_auth_mapping(
+    auth_mapping: &ImportAuthMapping,
+    auth_package: &dyn AuthModelPackage,
+) -> Result<(), ImportModelError> {
+    for role_mapping in auth_mapping.role_mappings() {
+        for capability_name in &role_mapping.capabilities {
+            let capability = Capability::from_str(capability_name).ok_or_else(|| {
+                ImportModelError::ManifestParse {
+                    message: format!(
+                        "auth mapping role `{}` references unsupported capability `{}`",
+                        role_mapping.legacy_role, capability_name
+                    ),
+                }
+            })?;
+            if auth_package.binding_for(capability).is_none() {
+                return Err(ImportModelError::ManifestParse {
+                    message: format!(
+                        "auth mapping role `{}` references capability `{}` which is not bound by auth package `{}`",
+                        role_mapping.legacy_role,
+                        capability.as_str(),
+                        auth_package.manifest().name
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn materialize_import_assets(
@@ -8732,20 +9427,36 @@ fn materialize_event_record(
 
 fn materialize_user_record(
     tokio_runtime: &tokio::runtime::Runtime,
+    data_runtime: &DataRuntime,
     data_client: &PostgresDataClient,
     auth_context: &LiveImportAuthContext,
     staged_record: &mut Value,
 ) -> Result<(), ImportModelError> {
     let (mutation, account_persisted) = user_account_import_mutation(staged_record)?;
-    let statement = mutation.compile(1).map_err(import_data_model_error)?;
-    tokio_runtime
-        .block_on(async { data_client.execute_statement(&statement).await })
-        .map_err(|error| ImportModelError::ManifestParse {
-            message: format!("failed to persist imported user account state: {error}"),
-        })?;
+    execute_membership_import_transaction(
+        tokio_runtime,
+        data_runtime,
+        data_client,
+        "import.membership.user",
+        &[("membership_member_accounts", "upsert")],
+        vec![mutation],
+        "failed to persist imported user account state",
+    )?;
 
-    let (updates, auth_persisted) =
-        user_import_updates(staged_record, auth_context.site_id.as_deref())?;
+    let auth_mapping =
+        auth_context
+            .auth_mapping
+            .as_ref()
+            .ok_or_else(|| ImportModelError::ManifestParse {
+                message: "live user import requires a loaded auth mapping document".to_string(),
+            })?;
+    let (updates, auth_persisted) = user_import_updates(
+        staged_record,
+        auth_context.site_id.as_deref(),
+        &auth_context.storefront_id,
+        auth_context.auth_package.package(),
+        auth_mapping,
+    )?;
     tokio_runtime
         .block_on(async { auth_context.auth.write(updates).await })
         .map_err(|error| ImportModelError::ManifestParse {
@@ -8791,25 +9502,41 @@ fn materialize_membership_tier_record(
 
 fn materialize_subscription_record(
     tokio_runtime: &tokio::runtime::Runtime,
+    data_runtime: &DataRuntime,
     data_client: &PostgresDataClient,
     auth_context: &LiveImportAuthContext,
     staged_record: &mut Value,
 ) -> Result<(), ImportModelError> {
+    let (account_mutation, mut account_persisted) =
+        subscription_member_account_bootstrap_mutation(staged_record)?;
+
     let (mutations, auth_updates, persisted) =
         subscription_import_persistence(staged_record, &auth_context.storefront_id)?;
-    for mutation in mutations {
-        let statement = mutation.compile(1).map_err(import_data_model_error)?;
-        tokio_runtime
-            .block_on(async { data_client.execute_statement(&statement).await })
-            .map_err(|error| ImportModelError::ManifestParse {
-                message: format!("failed to persist imported subscription state: {error}"),
-            })?;
-    }
+    execute_membership_import_transaction(
+        tokio_runtime,
+        data_runtime,
+        data_client,
+        "import.membership.subscription",
+        &[
+            ("membership_member_accounts", "upsert"),
+            ("membership_subscriptions", "upsert"),
+            ("membership_entitlements", "upsert"),
+        ],
+        std::iter::once(account_mutation).chain(mutations).collect(),
+        "failed to persist imported subscription state",
+    )?;
     tokio_runtime
         .block_on(async { auth_context.auth.write(auth_updates).await })
         .map_err(|error| ImportModelError::ManifestParse {
             message: format!("failed to persist imported subscription auth state: {error}"),
         })?;
+
+    if let Some(account_persisted) = account_persisted.as_object_mut() {
+        account_persisted.insert(
+            "disposition".to_string(),
+            serde_json::json!("transactional"),
+        );
+    }
 
     let normalized = staged_record
         .get_mut("normalized")
@@ -8817,13 +9544,175 @@ fn materialize_subscription_record(
         .ok_or_else(|| ImportModelError::ManifestParse {
             message: "staged subscription record is missing `normalized` object data".to_string(),
         })?;
+    let persisted = match persisted {
+        Value::Array(mut entries) => {
+            entries.insert(0, account_persisted);
+            Value::Array(entries)
+        }
+        other => Value::Array(vec![account_persisted, other]),
+    };
     normalized.insert("persisted".to_string(), persisted);
     Ok(())
+}
+
+fn execute_membership_import_transaction(
+    tokio_runtime: &tokio::runtime::Runtime,
+    data_runtime: &DataRuntime,
+    data_client: &PostgresDataClient,
+    transaction_name: &str,
+    writes: &[(&str, &str)],
+    mutations: Vec<MutationSpec>,
+    error_context: &str,
+) -> Result<(), ImportModelError> {
+    let compiled =
+        compile_membership_import_transaction(data_runtime, transaction_name, writes, mutations)?;
+    tokio_runtime
+        .block_on(async { data_client.execute_transaction(&compiled).await })
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("{error_context}: {error}"),
+        })?;
+    Ok(())
+}
+
+fn compile_membership_import_transaction(
+    data_runtime: &DataRuntime,
+    transaction_name: &str,
+    writes: &[(&str, &str)],
+    mutations: Vec<MutationSpec>,
+) -> Result<CompiledTransaction, ImportModelError> {
+    let mut plan = TransactionPlan::new(transaction_name, TransactionIsolation::Serializable)
+        .map_err(import_data_model_error)?;
+    for (resource, action) in writes {
+        plan =
+            plan.with_write(DomainWrite::new(*resource, *action).map_err(import_data_model_error)?);
+    }
+    data_runtime
+        .compile_transaction(&plan, &mutations)
+        .map_err(import_data_model_error)
+}
+
+fn subscription_member_account_bootstrap_mutation(
+    staged_record: &Value,
+) -> Result<(MutationSpec, Value), ImportModelError> {
+    let source_system = required_staged_string(staged_record, "source_system")?;
+    let source_key = required_staged_string(staged_record, "source_key")?;
+    let batch_id = required_staged_string(staged_record, "checksum")?;
+    let fingerprint = required_staged_string(staged_record, "checksum")?;
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged subscription record is missing `normalized` object data".to_string(),
+        })?;
+    let principal_id = required_normalized_string(normalized, "principal_id")?;
+    MemberAccountId::new(principal_id.clone()).map_err(import_membership_model_error)?;
+    let email = optional_normalized_string(normalized, "email")?.unwrap_or_default();
+    let username =
+        optional_normalized_string(normalized, "username")?.unwrap_or_else(|| principal_id.clone());
+    let display_name =
+        optional_normalized_string(normalized, "display_name")?.unwrap_or_else(|| username.clone());
+    let synthetic_source_key = format!("{source_key}#member-account:{principal_id}");
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to calculate member account bootstrap timestamp: {error}"),
+        })?
+        .as_secs();
+
+    let mutation = MutationSpec::new("membership_member_accounts", MutationAction::Upsert)
+        .and_then(|mutation| mutation.with_assignment("id", principal_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("email", email.clone()))
+        .and_then(|mutation| mutation.with_assignment("username", username.clone()))
+        .and_then(|mutation| mutation.with_assignment("display_name", display_name.clone()))
+        .and_then(|mutation| mutation.with_assignment("source_system", source_system))
+        .and_then(|mutation| mutation.with_assignment("source_key", synthetic_source_key.clone()))
+        .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id))
+        .and_then(|mutation| mutation.with_assignment("fingerprint", fingerprint))
+        .and_then(|mutation| mutation.with_assignment("updated_at", DataValue::UInt(updated_at)))
+        .and_then(|mutation| mutation.on_conflict_field("id"))
+        .map_err(import_data_model_error)?;
+
+    Ok((
+        mutation,
+        serde_json::json!({
+            "table": "membership_member_accounts",
+            "member_account_id": principal_id,
+            "email": email,
+            "username": username,
+            "display_name": display_name,
+            "source_key": synthetic_source_key,
+            "bootstrap": "subscription",
+            "updated_at": updated_at,
+        }),
+    ))
+}
+
+fn subscription_member_account_bootstrap_statement(
+    staged_record: &Value,
+) -> Result<(CompiledStatement, Value), ImportModelError> {
+    let source_system = required_staged_string(staged_record, "source_system")?;
+    let source_key = required_staged_string(staged_record, "source_key")?;
+    let batch_id = required_staged_string(staged_record, "checksum")?;
+    let fingerprint = required_staged_string(staged_record, "checksum")?;
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged subscription record is missing `normalized` object data".to_string(),
+        })?;
+    let principal_id = required_normalized_string(normalized, "principal_id")?;
+    MemberAccountId::new(principal_id.clone()).map_err(import_membership_model_error)?;
+    let email = optional_normalized_string(normalized, "email")?.unwrap_or_default();
+    let username =
+        optional_normalized_string(normalized, "username")?.unwrap_or_else(|| principal_id.clone());
+    let display_name =
+        optional_normalized_string(normalized, "display_name")?.unwrap_or_else(|| username.clone());
+    let synthetic_source_key = format!("{source_key}#member-account:{principal_id}");
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to calculate member account bootstrap timestamp: {error}"),
+        })?
+        .as_secs();
+
+    let insert = MutationSpec::new("membership_member_accounts", MutationAction::Insert)
+        .and_then(|mutation| mutation.with_assignment("id", principal_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("email", email.clone()))
+        .and_then(|mutation| mutation.with_assignment("username", username.clone()))
+        .and_then(|mutation| mutation.with_assignment("display_name", display_name.clone()))
+        .and_then(|mutation| mutation.with_assignment("source_system", source_system))
+        .and_then(|mutation| mutation.with_assignment("source_key", synthetic_source_key.clone()))
+        .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id))
+        .and_then(|mutation| mutation.with_assignment("fingerprint", fingerprint))
+        .and_then(|mutation| mutation.with_assignment("updated_at", DataValue::UInt(updated_at)))
+        .map_err(import_data_model_error)?
+        .compile(1)
+        .map_err(import_data_model_error)?;
+
+    Ok((
+        CompiledStatement {
+            sql: format!("{} ON CONFLICT (\"id\") DO NOTHING", insert.sql),
+            bind_values: insert.bind_values,
+        },
+        serde_json::json!({
+            "table": "membership_member_accounts",
+            "member_account_id": principal_id,
+            "email": email,
+            "username": username,
+            "display_name": display_name,
+            "source_key": synthetic_source_key,
+            "bootstrap": "subscription",
+            "updated_at": updated_at,
+        }),
+    ))
 }
 
 fn user_import_updates(
     staged_record: &Value,
     site_id: Option<&str>,
+    storefront_id: &str,
+    auth_package: &dyn AuthModelPackage,
+    auth_mapping: &ImportAuthMapping,
 ) -> Result<(Vec<DefaultTupleUpdate>, Value), ImportModelError> {
     let normalized = staged_record
         .get("normalized")
@@ -8832,14 +9721,6 @@ fn user_import_updates(
             message: "staged user record is missing `normalized` object data".to_string(),
         })?;
     let principal_id = required_normalized_string(normalized, "principal_id")?;
-    let site_id = site_id.ok_or_else(|| ImportModelError::ManifestParse {
-        message: "live user import requires a non-empty `site`".to_string(),
-    })?;
-    if site_id.is_empty() {
-        return Err(ImportModelError::ManifestParse {
-            message: "live user import requires a non-empty `site`".to_string(),
-        });
-    }
     let legacy_roles = normalized
         .get("legacy_roles")
         .and_then(Value::as_array)
@@ -8848,11 +9729,11 @@ fn user_import_updates(
         })?;
 
     let user = DefaultSubject::entity(Entity::user(principal_id.clone()));
-    let site = Entity::site(site_id.to_string());
     let mut updates = Vec::new();
     let mut imported_roles = Vec::new();
     let mut effective_roles = Vec::new();
-    let mut preserved_only_roles = Vec::new();
+    let mut mapped_capabilities = BTreeMap::<String, Vec<String>>::new();
+    let mut granted_scopes = Vec::<Value>::new();
     let mut seen_roles = BTreeSet::new();
 
     for role in legacy_roles {
@@ -8873,16 +9754,35 @@ fn user_import_updates(
             Relation::Member,
             user.clone(),
         )));
-        match supported_legacy_wordpress_role(role)? {
-            Some(site_relation) => {
-                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
-                    site.clone(),
-                    site_relation,
-                    DefaultSubject::userset(group, Relation::Member),
-                )));
-                effective_roles.push(role.to_string());
+        let capability_names = auth_mapping
+            .capabilities_for_role(role)
+            .ok_or_else(|| ImportModelError::ManifestParse {
+                message: format!(
+                    "legacy role `{role}` is not declared in the configured import auth mapping document"
+                ),
+            })?;
+        mapped_capabilities.insert(role.to_string(), capability_names.to_vec());
+        for grant in derive_import_role_grants(capability_names, auth_package)? {
+            let scope_entity = import_auth_scope_entity(grant.scope, site_id, storefront_id)?;
+            updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
+                scope_entity.clone(),
+                grant.relation,
+                DefaultSubject::userset(group.clone(), Relation::Member),
+            )));
+            let relation_name = grant.relation.as_str().to_string();
+            if !effective_roles
+                .iter()
+                .any(|candidate| candidate == &relation_name)
+            {
+                effective_roles.push(relation_name.clone());
             }
-            None => preserved_only_roles.push(role.to_string()),
+            granted_scopes.push(serde_json::json!({
+                "legacy_role": role,
+                "scope": grant.scope.as_str(),
+                "resource_id": scope_entity.id(),
+                "relation": relation_name,
+                "capabilities": grant.capabilities,
+            }));
         }
     }
 
@@ -8892,26 +9792,214 @@ fn user_import_updates(
             "table": "auth_tuples",
             "principal_id": principal_id,
             "site_id": site_id,
+            "storefront_id": storefront_id,
             "legacy_roles": imported_roles,
             "roles": effective_roles,
-            "preserved_only_roles": preserved_only_roles,
+            "mapped_capabilities": mapped_capabilities,
+            "granted_scopes": granted_scopes,
             "writes": updates.len(),
         }),
     ))
 }
 
-fn supported_legacy_wordpress_role(role: &str) -> Result<Option<Relation>, ImportModelError> {
-    match role {
-        "administrator" => Ok(Some(Relation::Admin)),
-        "editor" => Ok(Some(Relation::Editor)),
-        // These roles are common in WordPress and WooCommerce, but the shipped auth model
-        // has no narrow equivalent that would avoid over-granting admin-shell or domain access.
-        "author" | "contributor" | "subscriber" | "customer" | "shop_manager" => Ok(None),
-        other => Err(ImportModelError::ManifestParse {
+fn derive_import_role_grants(
+    capabilities: &[String],
+    auth_package: &dyn AuthModelPackage,
+) -> Result<Vec<ResolvedImportAuthGrant>, ImportModelError> {
+    let mut grants = Vec::<ResolvedImportAuthGrant>::new();
+
+    for capability_name in capabilities {
+        let capability = Capability::from_str(capability_name).ok_or_else(|| {
+            ImportModelError::ManifestParse {
+                message: format!(
+                    "import auth mapping references unsupported capability `{capability_name}`"
+                ),
+            }
+        })?;
+        let binding = auth_package
+            .binding_for(capability)
+            .ok_or_else(|| ImportModelError::ManifestParse {
+                message: format!(
+                    "auth package `{}` does not bind capability `{}` required by the import auth mapping document",
+                    auth_package.manifest().name,
+                    capability.as_str()
+                ),
+            })?;
+        let relation = root_role_for_capability_binding(capability, binding.relation)?;
+        for namespace in &binding.resource_namespaces {
+            if let Some(scope) = import_auth_scope_for_namespace(capability, *namespace)? {
+                push_import_role_grant(&mut grants, scope, relation, capability.as_str());
+            }
+        }
+    }
+
+    Ok(grants)
+}
+
+fn import_auth_scope_for_namespace(
+    capability: Capability,
+    namespace: Namespace,
+) -> Result<Option<ImportAuthGrantScope>, ImportModelError> {
+    match namespace {
+        Namespace::Site
+        | Namespace::Brand
+        | Namespace::Page
+        | Namespace::Navigation
+        | Namespace::Event
+        | Namespace::EventSlot
+        | Namespace::Booking
+        | Namespace::MediaLibrary
+        | Namespace::Media
+        | Namespace::AssetFolder
+        | Namespace::Asset
+        | Namespace::ThemeAssetBundle
+        | Namespace::AdminModule => Ok(Some(ImportAuthGrantScope::Site)),
+        Namespace::Storefront
+        | Namespace::Product
+        | Namespace::Collection
+        | Namespace::Order
+        | Namespace::Subscription
+        | Namespace::MembershipTier => Ok(Some(ImportAuthGrantScope::Storefront)),
+        Namespace::Tenant => Err(ImportModelError::ManifestParse {
             message: format!(
-                "legacy role `{other}` cannot be imported safely into the current auth model; add an explicit supported mapping before publishing live user auth state"
+                "capability `{}` cannot be imported from legacy roles because it targets tenant-scoped auth",
+                capability.as_str()
             ),
         }),
+        Namespace::Group | Namespace::Team | Namespace::User | Namespace::ServiceAccount => {
+            Err(ImportModelError::ManifestParse {
+                message: format!(
+                    "capability `{}` cannot be imported from legacy roles because it targets unsupported principal namespaces",
+                    capability.as_str()
+                ),
+            })
+        }
+    }
+}
+
+fn root_role_for_capability_binding(
+    capability: Capability,
+    relation: Relation,
+) -> Result<Relation, ImportModelError> {
+    match relation {
+        Relation::Owner => Ok(Relation::Owner),
+        Relation::Admin
+        | Relation::Manage
+        | Relation::Delete
+        | Relation::Unpublish
+        | Relation::ManageStorage
+        | Relation::Refund
+        | Relation::CheckIn => Ok(Relation::Admin),
+        Relation::Editor | Relation::Edit | Relation::Publish | Relation::Replace => {
+            Ok(Relation::Editor)
+        }
+        Relation::Support => Ok(Relation::Support),
+        Relation::Viewer | Relation::View | Relation::Read => Ok(Relation::Viewer),
+        Relation::Member | Relation::Book | Relation::Checkout => Ok(Relation::Member),
+        Relation::ReadPublic => Err(ImportModelError::ManifestParse {
+            message: format!(
+                "capability `{}` resolves to `read_public`, which cannot be granted safely for live legacy auth import without resource-specific tuples",
+                capability.as_str()
+            ),
+        }),
+        other => Err(ImportModelError::ManifestParse {
+            message: format!(
+                "capability `{}` resolves to unsupported relation `{}` for live legacy auth import",
+                capability.as_str(),
+                other.as_str()
+            ),
+        }),
+    }
+}
+
+fn push_import_role_grant(
+    grants: &mut Vec<ResolvedImportAuthGrant>,
+    scope: ImportAuthGrantScope,
+    relation: Relation,
+    capability: &str,
+) {
+    if let Some(existing) = grants
+        .iter_mut()
+        .find(|grant| grant.scope == scope && import_role_covers(grant.relation, relation))
+    {
+        if !existing
+            .capabilities
+            .iter()
+            .any(|candidate| candidate == capability)
+        {
+            existing.capabilities.push(capability.to_string());
+        }
+        return;
+    }
+
+    let mut carried_capabilities = vec![capability.to_string()];
+    grants.retain_mut(|grant| {
+        if grant.scope == scope && import_role_covers(relation, grant.relation) {
+            for existing in &grant.capabilities {
+                if !carried_capabilities
+                    .iter()
+                    .any(|candidate| candidate == existing)
+                {
+                    carried_capabilities.push(existing.clone());
+                }
+            }
+            false
+        } else {
+            true
+        }
+    });
+
+    grants.push(ResolvedImportAuthGrant {
+        scope,
+        relation,
+        capabilities: carried_capabilities,
+    });
+}
+
+fn import_role_covers(existing: Relation, required: Relation) -> bool {
+    matches!(
+        (existing, required),
+        (Relation::Owner, Relation::Owner)
+            | (Relation::Owner, Relation::Admin)
+            | (Relation::Owner, Relation::Editor)
+            | (Relation::Owner, Relation::Support)
+            | (Relation::Owner, Relation::Viewer)
+            | (Relation::Owner, Relation::Member)
+            | (Relation::Admin, Relation::Admin)
+            | (Relation::Admin, Relation::Editor)
+            | (Relation::Admin, Relation::Support)
+            | (Relation::Admin, Relation::Viewer)
+            | (Relation::Admin, Relation::Member)
+            | (Relation::Editor, Relation::Editor)
+            | (Relation::Editor, Relation::Viewer)
+            | (Relation::Editor, Relation::Member)
+            | (Relation::Support, Relation::Support)
+            | (Relation::Support, Relation::Viewer)
+            | (Relation::Support, Relation::Member)
+            | (Relation::Viewer, Relation::Viewer)
+            | (Relation::Viewer, Relation::Member)
+            | (Relation::Member, Relation::Member)
+    )
+}
+
+fn import_auth_scope_entity(
+    scope: ImportAuthGrantScope,
+    site_id: Option<&str>,
+    storefront_id: &str,
+) -> Result<Entity, ImportModelError> {
+    match scope {
+        ImportAuthGrantScope::Site => {
+            let site_id = site_id.ok_or_else(|| ImportModelError::ManifestParse {
+                message: "live user import requires a non-empty `site`".to_string(),
+            })?;
+            if site_id.is_empty() {
+                return Err(ImportModelError::ManifestParse {
+                    message: "live user import requires a non-empty `site`".to_string(),
+                });
+            }
+            Ok(Entity::site(site_id.to_string()))
+        }
+        ImportAuthGrantScope::Storefront => Ok(Entity::storefront(storefront_id.to_string())),
     }
 }
 
@@ -9776,6 +10864,7 @@ mod tests {
         content_type: &'static str,
         body: Vec<u8>,
         headers: BTreeMap<String, String>,
+        authenticated: Option<Box<LiveProbeResponse>>,
     }
 
     impl LiveProbeResponse {
@@ -9785,6 +10874,7 @@ mod tests {
                 content_type: "text/html; charset=utf-8",
                 body: body.into().into_bytes(),
                 headers: BTreeMap::new(),
+                authenticated: None,
             }
         }
 
@@ -9794,11 +10884,17 @@ mod tests {
                 content_type: "application/octet-stream",
                 body,
                 headers: BTreeMap::new(),
+                authenticated: None,
             }
         }
 
         fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
             self.headers.insert(name.into(), value.into());
+            self
+        }
+
+        fn with_authenticated_response(mut self, response: LiveProbeResponse) -> Self {
+            self.authenticated = Some(Box::new(response));
             self
         }
     }
@@ -10449,6 +11545,20 @@ mod tests {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut request_line = String::new();
         reader.read_line(&mut request_line).unwrap();
+        let mut cookie_header = None;
+        loop {
+            let mut header_line = String::new();
+            reader.read_line(&mut header_line).unwrap();
+            let trimmed = header_line.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = trimmed.split_once(':') {
+                if name.eq_ignore_ascii_case("cookie") {
+                    cookie_header = Some(value.trim().to_string());
+                }
+            }
+        }
         let path = request_line
             .split_whitespace()
             .nth(1)
@@ -10456,6 +11566,9 @@ mod tests {
             .split('?')
             .next()
             .unwrap_or("/");
+        let authenticated_request = cookie_header
+            .as_deref()
+            .is_some_and(|cookie| !cookie.trim().is_empty());
 
         let (status, content_type, response_body, response_headers) = match path {
             "/health" => (
@@ -10481,6 +11594,12 @@ mod tests {
                 let response = routes.get(route).cloned().unwrap_or_else(|| {
                     LiveProbeResponse::html(404, format!("<html><body>{route}</body></html>"))
                 });
+                let authenticated_response = response.authenticated.as_deref().cloned();
+                let response = if authenticated_request {
+                    authenticated_response.unwrap_or(response)
+                } else {
+                    response
+                };
                 let status = reqwest::StatusCode::from_u16(response.status_code)
                     .ok()
                     .and_then(|status| {
@@ -10657,9 +11776,11 @@ enabled = ["cms"]
         let root = std::env::temp_dir().join(format!("davenda-cli-workflow-{suffix}"));
         let config_dir = root.join("config");
         let app_root = root.join("apps").join("showcase-events");
+        let auth_root = app_root.join("auth").join("harbor-auth");
         let templates_root = app_root.join("templates").join("pages");
 
         fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&auth_root).unwrap();
         fs::create_dir_all(&templates_root).unwrap();
         fs::write(
             config_dir.join("platform.toml"),
@@ -10674,6 +11795,21 @@ enabled = ["cms"]
         fs::write(
             templates_root.join("home.html"),
             "<html><body><main>Showcase Events</main></body></html>",
+        )
+        .unwrap();
+        fs::write(
+            auth_root.join("package.toml"),
+            "name = \"harbor-auth\"\nversion = \"0.1.0\"\nmode = \"extend\"\nstorage_schema_version = 1\nmodel_version = 1\ncapability_binding_version = 1\nimports = [\"platform-default-auth\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            auth_root.join("model.auth"),
+            "type product\n  relations\n    merchandiser: user | group#member\n  permissions\n    featured_edit = merchandiser\n",
+        )
+        .unwrap();
+        fs::write(
+            auth_root.join("capabilities.toml"),
+            "[bindings.\"catalog.featured.edit\"]\nresource_type = \"product\"\npermission = \"featured_edit\"\n",
         )
         .unwrap();
 
@@ -11163,10 +12299,33 @@ source_path = "fixtures/media.json"
         required_checks: &[&str],
         sample_users: &[&str],
     ) -> PathBuf {
+        write_cutover_observe_manifest_with_users_routes_and_checks(
+            fixture,
+            name,
+            observation_window_minutes,
+            required_checks,
+            &["/", "/events"],
+            sample_users,
+        )
+    }
+
+    fn write_cutover_observe_manifest_with_users_routes_and_checks(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+        required_checks: &[&str],
+        sample_routes: &[&str],
+        sample_users: &[&str],
+    ) -> PathBuf {
         let manifest_path = fixture.root.join("imports").join(name);
         let required = required_checks
             .iter()
             .map(|check| format!("\"{check}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sample_routes = sample_routes
+            .iter()
+            .map(|route| format!("\"{route}\""))
             .collect::<Vec<_>>()
             .join(", ");
         let sample_users = sample_users
@@ -11193,7 +12352,7 @@ expected_modules = ["media"]
 
 [verification]
 required = [{required}]
-sample_routes = ["/", "/events"]
+sample_routes = [{sample_routes}]
 sample_users = [{sample_users}]
 
 [cutover]
@@ -11570,8 +12729,15 @@ source_path = "fixtures/media.json"
                 .contains("platform cache warm [--config <path>] --scope public --route <path>")
         );
         assert!(rendered.contains("platform jobs status [--config <path>] [--queue <name>]"));
+        assert!(
+            rendered
+                .contains("platform jobs ready [--config <path>] [--queue <name>] [--limit <n>]")
+        );
         assert!(rendered.contains(
             "platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>]"
+        ));
+        assert!(rendered.contains(
+            "platform jobs in-flight [--config <path>] [--queue <name>] [--worker-id <id>] [--limit <n>]"
         ));
         assert!(rendered.contains(
             "platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes]"
@@ -11747,7 +12913,7 @@ expect = true
         let config_path = customer_app_fixture();
         let configured = fs::read_to_string(&config_path).unwrap().replace(
             "package = \"platform-default-auth\"",
-            "package = \"platform-extended-auth\"",
+            "package = \"harbor-auth\"",
         );
         fs::write(&config_path, configured).unwrap();
         let app_manifest_path = config_path
@@ -11760,7 +12926,7 @@ expect = true
             .join("app.toml");
         let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
             "package = \"platform-default-auth\"",
-            "package = \"platform-extended-auth\"",
+            "package = \"harbor-auth\"",
         );
         fs::write(&app_manifest_path, app_manifest).unwrap();
 
@@ -11774,9 +12940,9 @@ expect = true
         .unwrap();
 
         assert!(rendered.contains("auth package inspect"));
-        assert!(rendered.contains("platform-extended-auth"));
-        assert!(rendered.contains("runtime_shape"));
-        assert!(rendered.contains("reuses the shipped default schema and capability bindings"));
+        assert!(rendered.contains("harbor-auth"));
+        assert!(rendered.contains("runtime_source"));
+        assert!(rendered.contains("loaded auth package implementation"));
     }
 
     #[test]
@@ -11803,14 +12969,28 @@ expect = true
 
     #[test]
     fn run_from_args_uses_the_live_backend_when_deployment_enables_auth_explain() {
-        let config_path = PathBuf::from("/tmp/davenda-cli-enabled.toml");
-        let enabled_config = DISABLED_EXPLAIN_CONFIG
+        let config_path = customer_app_fixture();
+        let enabled_config = fs::read_to_string(&config_path)
+            .unwrap()
             .replace("explain_api = false", "explain_api = true")
             .replace(
                 "package = \"platform-default-auth\"",
-                "package = \"platform-extended-auth\"",
+                "package = \"harbor-auth\"",
             );
         fs::write(&config_path, enabled_config).unwrap();
+        let app_manifest_path = config_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "package = \"platform-default-auth\"",
+            "package = \"harbor-auth\"",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
 
         let error = run_from_args([
             "auth".to_string(),
@@ -12170,6 +13350,8 @@ expect = true
             .with_required("cache_leaks")
             .unwrap()
             .with_sample_route("/events")
+            .unwrap()
+            .with_sample_user("alice")
             .unwrap();
         let support = CutoverVerificationSupport::default();
 
@@ -12177,7 +13359,32 @@ expect = true
         let rendered = render_supported_verification_checks(&verification, checks);
 
         assert!(checks.cache_leaks);
-        assert!(rendered.contains("cache_leaks(observe)"));
+        assert!(rendered.contains("cache_leaks(local+observe)"));
+    }
+
+    #[test]
+    fn verification_readiness_executes_local_cache_leak_checks_when_declared() {
+        let fixture = import_fixture();
+        let cutover_manifest = write_cutover_observe_manifest_with_users_and_checks(
+            &fixture,
+            "cutover-local-cache-leaks.toml",
+            60,
+            &["record_counts", "cache_leaks"],
+            &["alice"],
+        );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
+        let support = build_cutover_verification_support(&runtime.built);
+        let verification = manifest.verification.as_ref().unwrap();
+
+        let (ready, detail) =
+            evaluate_verification_readiness(verification, &runtime.built, &support);
+
+        assert!(ready, "{detail}");
+        assert!(detail.contains("cache_leaks(routes:"));
     }
 
     #[test]
@@ -12644,11 +13851,6 @@ expect = true
         let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest =
             write_cutover_observe_manifest(&fixture, "cutover-observe-fail.toml", 0);
-        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
-        let manifest_root = cutover_manifest.parent().unwrap();
-        let runtime = build_import_runtime_context(manifest_root, &manifest)
-            .unwrap()
-            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -12920,6 +14122,108 @@ expect = true
         .unwrap();
 
         assert!(rendered.contains("auth_gate_ok"));
+    }
+
+    #[test]
+    fn run_from_args_marks_cache_leak_observation_failures_for_rollback_review() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_with_users_and_checks(
+            &fixture,
+            "cutover-observe-cache-leaks.toml",
+            0,
+            &["record_counts", "cache_leaks"],
+            &["alice"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
+            "healthy",
+            "healthy",
+            false,
+            ["/", "/events"]
+                .iter()
+                .map(|route| {
+                    let response = if *route == "/" {
+                        LiveProbeResponse::html(200, "<html><body>public storefront</body></html>")
+                            .with_header("Cache-Control", "public, max-age=300")
+                            .with_header("Surrogate-Key", "route:home locale:en")
+                            .with_authenticated_response(
+                                LiveProbeResponse::html(
+                                    200,
+                                    "<html><body>hello alice</body></html>",
+                                )
+                                .with_header("Cache-Control", "public, max-age=300")
+                                .with_header("Surrogate-Key", "route:home locale:en"),
+                            )
+                    } else {
+                        LiveProbeResponse::html(200, format!("<html><body>{route}</body></html>"))
+                    };
+                    ((*route).to_string(), response)
+                })
+                .collect(),
+        );
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
+        unsafe {
+            std::env::set_var(
+                "DATABASE_URL",
+                "postgres://davenda:test@127.0.0.1:5432/davenda",
+            );
+            std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
+            std::env::set_var("DAVENDA_COOKIE_SECRET", "01234567012345670123456701234567");
+            std::env::set_var("DAVENDA_CSRF_SECRET", "76543210765432107654321076543210");
+            std::env::set_var(CUTOVER_SYNTHETIC_SESSION_ENV, "1");
+        }
+        let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _runtime_guard = tokio_runtime.enter();
+
+        let error = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("requires rollback review"),
+            "{error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("retaining the anonymous cache policy"),
+            "{error}"
+        );
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"rollback_required\""));
+        assert!(journal.contains("retaining the anonymous cache policy"));
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+            std::env::remove_var("REDIS_URL");
+            std::env::remove_var("DAVENDA_COOKIE_SECRET");
+            std::env::remove_var("DAVENDA_CSRF_SECRET");
+            std::env::remove_var(CUTOVER_SYNTHETIC_SESSION_ENV);
+        }
     }
 
     #[test]
@@ -13754,6 +15058,130 @@ expect = true
     }
 
     #[test]
+    fn run_from_args_rejects_jobs_ready_without_live_coordinator_state() {
+        let config_path = customer_app_fixture();
+        let original_database_url = std::env::var("DATABASE_URL").ok();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _guard = runtime.enter();
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+        }
+
+        let error = run_from_args([
+            "jobs".to_string(),
+            "ready".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--queue".to_string(),
+            "jobs.work".to_string(),
+            "--limit".to_string(),
+            "10".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("live jobs coordinator state is required to inspect ready jobs")
+        );
+        assert!(error.to_string().contains("DATABASE_URL"));
+
+        if let Some(database_url) = original_database_url {
+            unsafe {
+                std::env::set_var("DATABASE_URL", database_url);
+            }
+        }
+    }
+
+    #[test]
+    fn run_from_args_rejects_jobs_ready_for_unknown_queue_filters() {
+        let config_path = customer_app_fixture();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _guard = runtime.enter();
+
+        let error = run_from_args([
+            "jobs".to_string(),
+            "ready".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--queue".to_string(),
+            "jobs.not-real".to_string(),
+            "--limit".to_string(),
+            "10".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("queue filter `jobs.not-real` is not defined")
+        );
+        assert!(error.to_string().contains("jobs.work"));
+    }
+
+    #[test]
+    fn build_jobs_ready_report_keeps_normal_backlog_at_ok_status() {
+        let config_path = customer_app_fixture_with_modules(&["cms", "media"]);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _guard = runtime.enter();
+        let built = build_customer_app_runtime_context(&config_path, true).unwrap();
+        let topology = built.runtime_plan.runtime.jobs.describe().clone();
+        let now = JobInstant::from_unix_seconds(unix_timestamp_now().unwrap());
+        let job_id = davenda_jobs::JobId::new("job:ready-probe").unwrap();
+        let job_name = davenda_jobs::JobName::new("ops.search.reindex".to_string()).unwrap();
+        let ready_jobs = vec![davenda_jobs::QueuedJobRecord {
+            spec: davenda_jobs::JobSpec::new(
+                job_id.clone(),
+                job_name.clone(),
+                topology.work_queue.clone(),
+                "cli_ready_probe",
+            )
+            .unwrap()
+            .with_idempotency_key(davenda_jobs::IdempotencyKey::new("cli_ready_probe").unwrap()),
+            attempts: 1,
+            enqueued_at: now,
+        }];
+
+        let report = build_jobs_ready_report(
+            built.manifest.id.as_str(),
+            &topology,
+            built.runtime_plan.runtime.jobs.backend,
+            built.runtime_plan.runtime.jobs.default_retry_limit,
+            &ready_jobs,
+            Some(topology.work_queue.as_str()),
+            10,
+        )
+        .unwrap();
+
+        assert_eq!(report.status, ReportStatus::Ok);
+        assert_eq!(report.rows.len(), 1);
+        assert_eq!(
+            report.rows[0].cells.get("job_id"),
+            Some(&job_id.to_string())
+        );
+        assert_eq!(
+            report.rows[0].cells.get("job_name"),
+            Some(&job_name.to_string())
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "jobs.ready"
+                    && diagnostic.severity == DiagnosticSeverity::Info)
+        );
+    }
+
+    #[test]
     fn run_from_args_renders_jobs_dead_letters_report_for_a_customer_app_runtime_plan() {
         let config_path = customer_app_fixture();
 
@@ -13773,6 +15201,116 @@ expect = true
         assert!(rendered.contains("showcase-events"));
         assert!(rendered.contains("dead_letter_id"));
         assert!(rendered.contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn run_from_args_renders_jobs_in_flight_report_for_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "jobs".to_string(),
+            "in-flight".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--queue".to_string(),
+            "jobs.work".to_string(),
+            "--worker-id".to_string(),
+            "worker-a".to_string(),
+            "--limit".to_string(),
+            "10".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("jobs in-flight"));
+        assert!(rendered.contains("worker_id"));
+        assert!(rendered.contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn run_from_args_renders_live_jobs_in_flight_for_leased_jobs() {
+        let config_path = customer_app_fixture_with_modules(&["cms", "media"]);
+        let now_unix_seconds = unix_timestamp_now().unwrap();
+        unsafe {
+            std::env::set_var(
+                "DATABASE_URL",
+                "postgres://davenda:test@127.0.0.1:5432/davenda",
+            );
+        }
+
+        let rendered = {
+            let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let _runtime_guard = tokio_runtime.enter();
+            let built = build_customer_app_runtime_context(&config_path, true).unwrap();
+            let mut host = built
+                .runtime_plan
+                .runtime
+                .jobs_host("platform-jobs-in-flight-seed")
+                .unwrap();
+            let definition = host
+                .registered_jobs
+                .iter()
+                .find(|definition| {
+                    matches!(
+                        definition.contract.trigger,
+                        davenda_core::JobTriggerKind::Operator
+                            | davenda_core::JobTriggerKind::Webhook
+                            | davenda_core::JobTriggerKind::InlineFollowup
+                    )
+                })
+                .cloned()
+                .expect("fixture runtime should register a leaseable job");
+            let mut request = davenda_runtime::JobDispatchRequest::new(
+                definition.contract.name.clone(),
+                "cli_in_flight_probe",
+            )
+            .unwrap();
+            if definition.retry_policy.is_retrying() {
+                request = request.with_idempotency_key("cli_in_flight_probe").unwrap();
+            }
+            let Ok(job_id) = host.enqueue_job(request, JobInstant::from_unix_seconds(now_unix_seconds)) else {
+                return;
+            };
+            let Ok(mut leases) = host.lease_ready_jobs(
+                &definition.queue,
+                "worker-live",
+                JobInstant::from_unix_seconds(now_unix_seconds),
+                Duration::from_secs(60),
+                1,
+            ) else {
+                return;
+            };
+            let Some(_lease) = leases.pop() else {
+                return;
+            };
+
+            let rendered = run_from_args([
+                "jobs".to_string(),
+                "in-flight".to_string(),
+                "--config".to_string(),
+                config_path.display().to_string(),
+                "--queue".to_string(),
+                definition.queue.to_string(),
+                "--worker-id".to_string(),
+                "worker-live".to_string(),
+                "--limit".to_string(),
+                "10".to_string(),
+            ])
+            .unwrap();
+
+            assert!(rendered.contains(job_id.as_str()));
+            assert!(rendered.contains("worker-live"));
+            assert!(rendered.contains("status: leased"));
+            rendered
+        };
+
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+        }
+
+        assert!(rendered.contains("jobs in-flight"));
     }
 
     #[test]
@@ -14218,6 +15756,106 @@ expect = true
     }
 
     #[test]
+    fn membership_subscription_import_transaction_batches_account_and_membership_writes() {
+        let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:subscription:gold",
+            "target_id": "sub-gold",
+            "checksum": "subscription-gold-v1",
+            "normalized": {
+                "principal_id": "alice",
+                "email": "alice@example.com",
+                "username": "alice",
+                "display_name": "Alice Example",
+                "status": "active",
+                "tier_id": "tier-gold",
+                "entitlement_key": "membership.gold",
+                "entitlement_id": "entitlement:sub-gold",
+                "active": true,
+                "renews_at": 1770000000
+            }
+        });
+
+        let runtime = DataRuntime::from_config(&DatabaseConfig::default()).unwrap();
+        let (account_mutation, _) =
+            subscription_member_account_bootstrap_mutation(&staged).unwrap();
+        let (mutations, _, _) =
+            subscription_import_persistence(&staged, "showcase-events").unwrap();
+        let compiled = compile_membership_import_transaction(
+            &runtime,
+            "import.membership.subscription",
+            &[
+                ("membership_member_accounts", "upsert"),
+                ("membership_subscriptions", "upsert"),
+                ("membership_entitlements", "upsert"),
+            ],
+            std::iter::once(account_mutation).chain(mutations).collect(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            compiled.statements[0].sql,
+            "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"
+        );
+        assert!(
+            compiled
+                .statements
+                .iter()
+                .any(|statement| statement.sql.contains("\"membership_member_accounts\""))
+        );
+        assert!(
+            compiled
+                .statements
+                .iter()
+                .any(|statement| statement.sql.contains("\"membership_subscriptions\""))
+        );
+        assert!(
+            compiled
+                .statements
+                .iter()
+                .any(|statement| statement.sql.contains("\"membership_entitlements\""))
+        );
+    }
+
+    #[test]
+    fn subscription_member_account_bootstrap_statement_targets_member_accounts_table() {
+        let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:subscription:gold",
+            "target_id": "sub-gold",
+            "checksum": "subscription-gold-v1",
+            "normalized": {
+                "principal_id": "alice",
+                "email": "alice@example.com",
+                "username": "alice",
+                "display_name": "Alice Example",
+                "status": "active",
+                "tier_id": "tier-gold",
+                "entitlement_key": "membership.gold",
+                "entitlement_id": "entitlement:sub-gold",
+                "active": true,
+                "renews_at": 1770000000
+            }
+        });
+
+        let (statement, persisted) =
+            subscription_member_account_bootstrap_statement(&staged).unwrap();
+
+        assert!(statement.sql.contains("\"membership_member_accounts\""));
+        assert!(statement.sql.contains("ON CONFLICT (\"id\") DO NOTHING"));
+        assert!(
+            statement
+                .bind_values
+                .contains(&DataValue::String("alice@example.com".to_string()))
+        );
+        assert_eq!(persisted["table"], "membership_member_accounts");
+        assert_eq!(persisted["member_account_id"], "alice");
+        assert_eq!(persisted["email"], "alice@example.com");
+        assert_eq!(persisted["display_name"], "Alice Example");
+        assert_eq!(persisted["bootstrap"], "subscription");
+    }
+
+    #[test]
     fn user_account_import_mutation_targets_live_member_account_table() {
         let staged = serde_json::json!({
             "source_system": "wordpress",
@@ -14244,22 +15882,82 @@ expect = true
         assert_eq!(persisted["display_name"], "Alice Example");
     }
 
+    fn test_import_auth_mapping(markdown: &str) -> ImportAuthMapping {
+        ImportAuthMapping::from_markdown_str(markdown).expect("auth mapping should parse")
+    }
+
     #[test]
-    fn user_import_updates_map_administrators_into_group_and_site_admin_tuples() {
+    fn user_import_updates_parse_auth_mapping_markdown_entries() {
+        let mapping = test_import_auth_mapping(
+            "# Auth Mapping\n\n- `administrator` -> `cms.page.publish`, `asset.publish`, `events.booking.manage`\n- `shop_manager` -> `events.booking.manage`\n",
+        );
+
+        assert_eq!(
+            mapping
+                .capabilities_for_role("administrator")
+                .unwrap()
+                .to_vec(),
+            vec![
+                "cms.page.publish".to_string(),
+                "asset.publish".to_string(),
+                "events.booking.manage".to_string(),
+            ]
+        );
+        assert_eq!(
+            mapping
+                .capabilities_for_role("shop_manager")
+                .unwrap()
+                .to_vec(),
+            vec!["events.booking.manage".to_string()]
+        );
+    }
+
+    #[test]
+    fn validate_import_auth_mapping_rejects_unsupported_capabilities_before_live_import() {
+        let mapping = ImportAuthMapping::new()
+            .with_role_capabilities("legacy-ops", ["system.cluster.rotate"])
+            .unwrap();
+        let auth_package = configured_auth_model_package("platform-default-auth");
+
+        let error = validate_import_auth_mapping(&mapping, &auth_package).unwrap_err();
+
+        assert!(error.to_string().contains("legacy-ops"));
+        assert!(error.to_string().contains("system.cluster.rotate"));
+        assert!(error.to_string().contains("unsupported capability"));
+    }
+
+    #[test]
+    fn user_import_updates_map_administrators_into_group_and_site_admin_tuples_from_auth_mapping() {
         let staged = serde_json::json!({
             "normalized": {
                 "principal_id": "alice",
                 "legacy_roles": ["administrator"]
             }
         });
+        let auth_mapping = test_import_auth_mapping(
+            "- `administrator` -> `cms.page.publish`, `asset.publish`, `events.booking.manage`\n",
+        );
+        let auth_package = configured_auth_model_package("platform-default-auth");
 
-        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
+        let (updates, persisted) = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap();
 
         assert_eq!(updates.len(), 2);
         assert_eq!(persisted["table"], "auth_tuples");
         assert_eq!(persisted["principal_id"], "alice");
         assert_eq!(persisted["site_id"], "main");
+        assert_eq!(persisted["storefront_id"], "harbor-shop");
         assert_eq!(persisted["writes"], 2);
+        assert_eq!(
+            persisted["mapped_capabilities"]["administrator"],
+            serde_json::json!(["cms.page.publish", "asset.publish", "events.booking.manage"])
+        );
         assert!(
             updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
                 Entity::group("legacy-role:administrator"),
@@ -14280,15 +15978,25 @@ expect = true
     }
 
     #[test]
-    fn user_import_updates_map_editors_into_group_and_site_editor_tuples() {
+    fn user_import_updates_map_editors_into_group_and_site_editor_tuples_from_auth_mapping() {
         let staged = serde_json::json!({
             "normalized": {
                 "principal_id": "alice",
                 "legacy_roles": ["editor"]
             }
         });
+        let auth_mapping =
+            test_import_auth_mapping("- `editor` -> `cms.page.publish`, `asset.publish`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
 
-        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
+        let (updates, persisted) = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap();
 
         assert_eq!(updates.len(), 2);
         assert_eq!(persisted["roles"], serde_json::json!(["editor"]));
@@ -14302,54 +16010,73 @@ expect = true
     }
 
     #[test]
-    fn user_import_updates_preserve_lower_privilege_wordpress_roles_as_legacy_groups_only() {
-        for role in [
-            "author",
-            "contributor",
-            "subscriber",
-            "customer",
-            "shop_manager",
-        ] {
-            let staged = serde_json::json!({
-                "normalized": {
-                    "principal_id": "alice",
-                    "legacy_roles": [role]
-                }
-            });
+    fn user_import_updates_map_customer_into_storefront_member_without_site_scope() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["customer"]
+            }
+        });
+        let auth_mapping = test_import_auth_mapping("- `customer` -> `checkout.session.create`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
 
-            let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
+        let (updates, persisted) =
+            user_import_updates(&staged, None, "harbor-shop", &auth_package, &auth_mapping)
+                .unwrap();
 
-            assert_eq!(updates.len(), 1, "{role}");
-            assert_eq!(
-                persisted["legacy_roles"],
-                serde_json::json!([role]),
-                "{role}"
-            );
-            assert_eq!(persisted["roles"], serde_json::json!([]), "{role}");
-            assert_eq!(
-                persisted["preserved_only_roles"],
-                serde_json::json!([role]),
-                "{role}"
-            );
-            assert!(
-                updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
-                    Entity::group(format!("legacy-role:{role}")),
-                    Relation::Member,
-                    DefaultSubject::entity(Entity::user("alice")),
-                ))),
-                "{role}"
-            );
-            assert!(
-                !updates.iter().any(|update| matches!(
-                    update,
-                    DefaultTupleUpdate::Write(DefaultTuple {
-                        object: Entity::Site(_),
-                        ..
-                    })
-                )),
-                "{role}"
-            );
-        }
+        assert_eq!(updates.len(), 2);
+        assert_eq!(persisted["site_id"], serde_json::Value::Null);
+        assert_eq!(persisted["roles"], serde_json::json!(["member"]));
+        assert_eq!(
+            persisted["mapped_capabilities"]["customer"],
+            serde_json::json!(["checkout.session.create"])
+        );
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::storefront("harbor-shop"),
+                Relation::Member,
+                DefaultSubject::userset(Entity::group("legacy-role:customer"), Relation::Member),
+            )))
+        );
+    }
+
+    #[test]
+    fn user_import_updates_map_shop_manager_into_site_admin_from_auth_mapping() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["shop_manager"]
+            }
+        });
+        let auth_mapping =
+            test_import_auth_mapping("- `shop_manager` -> `events.booking.manage`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
+
+        let (updates, persisted) = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap();
+
+        assert_eq!(updates.len(), 2);
+        assert_eq!(persisted["roles"], serde_json::json!(["admin"]));
+        assert_eq!(
+            persisted["mapped_capabilities"]["shop_manager"],
+            serde_json::json!(["events.booking.manage"])
+        );
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::site("main"),
+                Relation::Admin,
+                DefaultSubject::userset(
+                    Entity::group("legacy-role:shop_manager"),
+                    Relation::Member
+                ),
+            )))
+        );
     }
 
     #[test]
@@ -14360,28 +16087,63 @@ expect = true
                 "legacy_roles": []
             }
         });
+        let auth_mapping = test_import_auth_mapping("- `administrator` -> `cms.page.publish`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
 
-        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
+        let (updates, persisted) = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap();
 
         assert!(updates.is_empty());
         assert_eq!(persisted["legacy_roles"], serde_json::json!([]));
         assert_eq!(persisted["roles"], serde_json::json!([]));
-        assert_eq!(persisted["preserved_only_roles"], serde_json::json!([]));
         assert_eq!(persisted["writes"], 0);
     }
 
     #[test]
-    fn user_import_updates_rejects_unknown_legacy_roles() {
+    fn user_import_updates_rejects_legacy_roles_missing_from_auth_mapping() {
         let staged = serde_json::json!({
             "normalized": {
                 "principal_id": "alice",
                 "legacy_roles": ["seo_manager"]
             }
         });
+        let auth_mapping = test_import_auth_mapping("- `administrator` -> `cms.page.publish`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
 
-        let error = user_import_updates(&staged, Some("main")).unwrap_err();
+        let error = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("seo_manager"));
-        assert!(error.to_string().contains("cannot be imported safely"));
+        assert!(error.to_string().contains("auth mapping"));
+    }
+
+    #[test]
+    fn user_import_updates_rejects_site_scoped_capabilities_without_site_context() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["editor"]
+            }
+        });
+        let auth_mapping =
+            test_import_auth_mapping("- `editor` -> `cms.page.publish`, `asset.publish`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
+
+        let error = user_import_updates(&staged, None, "harbor-shop", &auth_package, &auth_mapping)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("non-empty `site`"));
     }
 
     #[test]
@@ -14391,8 +16153,63 @@ expect = true
                 "legacy_roles": ["administrator"]
             }
         });
+        let auth_mapping = test_import_auth_mapping("- `administrator` -> `cms.page.publish`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
 
-        let error = user_import_updates(&staged, Some("main")).unwrap_err();
+        let error = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("normalized.principal_id"));
+    }
+
+    #[test]
+    fn user_import_updates_reject_tenant_scoped_capabilities_from_auth_mapping() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["ops_admin"]
+            }
+        });
+        let auth_mapping = test_import_auth_mapping("- `ops_admin` -> `system.config.write`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
+
+        let error = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("tenant-scoped auth"));
+    }
+
+    #[test]
+    fn user_import_updates_rejects_read_public_capabilities_without_resource_specific_tuples() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["media_guest"]
+            }
+        });
+        let auth_mapping = test_import_auth_mapping("- `media_guest` -> `asset.read_public`\n");
+        let auth_package = configured_auth_model_package("platform-default-auth");
+
+        let error = user_import_updates(
+            &staged,
+            Some("main"),
+            "harbor-shop",
+            &auth_package,
+            &auth_mapping,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("read_public"));
+        assert!(error.to_string().contains("cannot be granted safely"));
     }
 }

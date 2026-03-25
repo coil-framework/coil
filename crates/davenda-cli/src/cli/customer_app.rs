@@ -88,7 +88,7 @@ pub(crate) fn load_official_modules(
     Ok(modules)
 }
 
-fn resolve_customer_app_root(
+pub(crate) fn resolve_customer_app_root(
     config_path: &Path,
     app_name: &str,
 ) -> Result<PathBuf, CliRunError> {

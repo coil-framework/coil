@@ -238,6 +238,112 @@ source_path = "fixtures/pages.json"
 }
 
 #[test]
+fn import_auth_mapping_parses_markdown_role_capabilities() {
+    let mapping = ImportAuthMapping::from_markdown_str(
+        r#"
+# Harbor Shop Auth Mapping
+
+- `administrator` -> `cms.page.publish`, `asset.publish`, `events.booking.manage`
+- `customer` -> `checkout.session.create`
+
+Legacy role names are inputs only.
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(mapping.role_mappings().len(), 2);
+    assert_eq!(
+        mapping.capabilities_for_role("administrator"),
+        Some(
+            [
+                "cms.page.publish".to_string(),
+                "asset.publish".to_string(),
+                "events.booking.manage".to_string(),
+            ]
+            .as_slice()
+        )
+    );
+    assert_eq!(
+        mapping.capabilities_for_role("customer"),
+        Some(["checkout.session.create".to_string()].as_slice())
+    );
+}
+
+#[test]
+fn import_auth_mapping_rejects_duplicate_role_entries() {
+    let error = ImportAuthMapping::from_markdown_str(
+        r#"
+- `administrator` -> `cms.page.publish`
+- `administrator` -> `asset.publish`
+"#,
+    )
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("duplicates legacy role `administrator`")
+    );
+}
+
+#[test]
+fn import_manifest_load_auth_mapping_reads_declared_artifact() {
+    let root = unique_dir("auth-mapping-load");
+    write_text(
+        root.join("auth-mapping.md"),
+        "- `editor` -> `cms.page.publish`",
+    );
+
+    let manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-cutover").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap()
+    .with_migration_artifacts(
+        ImportMigrationArtifacts::new(
+            "capability-map.md",
+            "auth-mapping.md",
+            "redirect-plan.csv",
+            "extraction-spec.md",
+            "cutover-runbook.md",
+        )
+        .unwrap(),
+    );
+
+    let mapping = manifest.load_auth_mapping(&root).unwrap();
+
+    assert_eq!(
+        mapping.capabilities_for_role("editor"),
+        Some(["cms.page.publish".to_string()].as_slice())
+    );
+}
+
+#[test]
+fn import_manifest_load_auth_mapping_requires_declared_artifact() {
+    let manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-cutover").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap();
+
+    let error = manifest
+        .load_auth_mapping(std::env::temp_dir())
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ImportModelError::InvalidManifestContract {
+            field: "migration_artifacts.auth_mapping",
+            message: "live user import requires a migration auth mapping document".to_string(),
+        }
+    );
+}
+
+#[test]
 fn manifest_rejects_cycles_and_unknown_dependencies() {
     let unknown = ImportManifest::new(
         ImportRunId::new("bad-import").unwrap(),
@@ -667,6 +773,9 @@ fn publish_validated_membership_imports_resolve_tiers_and_user_links() {
                 "subscription_id": "sub-gold",
                 "tier_source_key": "legacy:tier:gold",
                 "user_source_key": "wp:user:alice",
+                "email": "alice@example.com",
+                "username": "alice",
+                "display_name": "Alice Harbor",
                 "status": "active",
                 "entitlement_key": "membership.gold",
                 "renews_at": 1770000000
@@ -750,6 +859,15 @@ fn publish_validated_membership_imports_resolve_tiers_and_user_links() {
     assert_eq!(subscriptions[0]["target_id"], "sub-gold");
     assert_eq!(subscriptions[0]["normalized"]["tier_id"], "tier-gold");
     assert_eq!(subscriptions[0]["normalized"]["principal_id"], "alice");
+    assert_eq!(
+        subscriptions[0]["normalized"]["email"],
+        json!("alice@example.com")
+    );
+    assert_eq!(subscriptions[0]["normalized"]["username"], json!("alice"));
+    assert_eq!(
+        subscriptions[0]["normalized"]["display_name"],
+        json!("Alice Harbor")
+    );
     assert_eq!(subscriptions[0]["normalized"]["active"], json!(true));
 }
 

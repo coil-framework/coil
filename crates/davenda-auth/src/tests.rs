@@ -166,6 +166,51 @@ fn capability_registry_contains_expected_bindings() {
 }
 
 #[test]
+fn checked_in_customer_auth_package_loads_real_manifest_bindings_and_schema_extensions() {
+    let app_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("apps")
+        .join("harbor-shop");
+    let package = load_auth_model_package_at("harbor-auth", &app_root).unwrap();
+
+    assert_eq!(package.manifest().name, "harbor-auth");
+    assert_eq!(package.manifest().mode, PackageMode::Extend);
+    assert_eq!(
+        package.manifest().imports,
+        vec!["platform-default-auth".to_string()]
+    );
+    assert_eq!(
+        package
+            .binding_for(Capability::CatalogFeaturedEdit)
+            .unwrap(),
+        &CapabilityBinding {
+            capability: Capability::CatalogFeaturedEdit,
+            resource_namespaces: vec![Namespace::Product],
+            relation: Relation::FeaturedEdit,
+        }
+    );
+    assert_eq!(
+        package
+            .schema()
+            .namespaces
+            .get(Namespace::Product.as_str())
+            .unwrap()
+            .rules
+            .get(Relation::FeaturedEdit.as_str()),
+        Some(&vec![RelationRule::Inherit(
+            Relation::Merchandiser.as_str().into()
+        )])
+    );
+    assert_eq!(
+        package.binding_for(Capability::CmsPageRead).unwrap(),
+        DefaultAuthModelPackage::default()
+            .binding_for(Capability::CmsPageRead)
+            .unwrap()
+    );
+}
+
+#[test]
 fn capability_parser_accepts_checked_in_import_mapping_names() {
     assert_eq!(
         Capability::from_str("events.booking.manage"),

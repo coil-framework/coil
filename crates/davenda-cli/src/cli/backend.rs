@@ -1,12 +1,14 @@
 use async_trait::async_trait;
 use davenda_auth::{
     CapabilityExplanation, LiveAuthExplainHost, LiveAuthExplainRequest,
-    configured_auth_model_package_selection,
+    load_auth_model_package_selection_at,
 };
 use davenda_config::PlatformConfig;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::cli::args::AuthExplainInvocation;
+use crate::cli::customer_app::resolve_customer_app_root;
 use crate::cli::error::CliRunError;
 
 #[async_trait]
@@ -23,8 +25,28 @@ pub(crate) struct LiveAuthExplainBackend {
 }
 
 impl LiveAuthExplainBackend {
+    pub(crate) fn from_config_path(config_path: &Path) -> Result<Self, CliRunError> {
+        let config = PlatformConfig::from_file(config_path).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to load platform config from `{}`: {error}",
+                config_path.display()
+            ))
+        })?;
+        let package = resolve_deployment_configured_auth_package_selection(config_path, &config)?;
+        let explainer = LiveAuthExplainHost::from_config(&config, package).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to initialize the live auth explain backend: {error}"
+            ))
+        })?;
+
+        Ok(Self {
+            explainer: Arc::new(explainer),
+        })
+    }
+
     pub(crate) fn from_config(config: &PlatformConfig) -> Result<Self, CliRunError> {
-        let package = resolve_deployment_configured_auth_package_selection(config);
+        let package =
+            davenda_auth::configured_auth_model_package_selection(config.auth.package.clone());
         let explainer = LiveAuthExplainHost::from_config(config, package).map_err(|error| {
             CliRunError::execution(format!(
                 "failed to initialize the live auth explain backend: {error}"
@@ -60,12 +82,30 @@ impl AuthExplainBackend for LiveAuthExplainBackend {
 }
 
 fn resolve_deployment_configured_auth_package_selection(
+    config_path: &Path,
     config: &PlatformConfig,
-) -> davenda_auth::AuthModelPackageSelection {
-    // The CLI explain path is keyed by the deployment-configured auth package identity.
-    // This keeps the live backend aligned with replacement packages instead of assuming
-    // the default package name is the only valid deployment configuration.
-    configured_auth_model_package_selection(config.auth.package.clone())
+) -> Result<davenda_auth::AuthModelPackageSelection, CliRunError> {
+    if config.auth.package == davenda_auth::default_manifest().name {
+        return load_auth_model_package_selection_at(
+            &config.auth.package,
+            std::path::Path::new("."),
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to load auth package `{}`: {error}",
+                config.auth.package
+            ))
+        });
+    }
+
+    let app_root = resolve_customer_app_root(config_path, &config.app.name)?;
+    load_auth_model_package_selection_at(&config.auth.package, &app_root).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load auth package `{}` from customer app `{}`: {error}",
+            config.auth.package,
+            app_root.display()
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -119,7 +159,9 @@ mod tests {
         Entity, ExplainDecision, ExplainOptions, ExplainStep, ExplainTrace,
     };
     use davenda_config::PlatformConfig;
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const BASE_CONFIG: &str = r#"
 [app]
@@ -208,6 +250,74 @@ publish_manifest = false
         config
     }
 
+    fn customer_auth_fixture() -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("davenda-cli-auth-backend-{suffix}"));
+        let config_dir = root.join("config");
+        let app_root = root.join("apps").join("showcase-events");
+        let auth_root = app_root.join("auth").join("harbor-auth");
+
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&auth_root).unwrap();
+        fs::write(
+            config_dir.join("platform.toml"),
+            BASE_CONFIG
+                .replace("explain_api = true", "explain_api = false")
+                .replace(
+                    "package = \"platform-default-auth\"",
+                    "package = \"harbor-auth\"",
+                ),
+        )
+        .unwrap();
+        fs::write(
+            app_root.join("app.toml"),
+            r#"[app]
+name = "showcase-events"
+display_name = "Showcase Events"
+
+[domains]
+canonical = "example.com"
+
+[i18n]
+default_locale = "en"
+supported_locales = ["en"]
+
+[theme]
+active = "showcase"
+template_namespaces = ["customer-app"]
+asset_roots = []
+
+[auth]
+mode = "extend"
+package = "harbor-auth"
+
+[modules]
+enabled = ["cms"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            auth_root.join("package.toml"),
+            "name = \"harbor-auth\"\nversion = \"0.1.0\"\nmode = \"extend\"\nstorage_schema_version = 1\nmodel_version = 1\ncapability_binding_version = 1\nimports = [\"platform-default-auth\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            auth_root.join("model.auth"),
+            "type product\n  relations\n    merchandiser: user | group#member\n  permissions\n    featured_edit = merchandiser\n",
+        )
+        .unwrap();
+        fs::write(
+            auth_root.join("capabilities.toml"),
+            "[bindings.\"catalog.featured.edit\"]\nresource_type = \"product\"\npermission = \"featured_edit\"\n",
+        )
+        .unwrap();
+
+        config_dir.join("platform.toml")
+    }
+
     fn invocation() -> AuthExplainInvocation {
         AuthExplainInvocation {
             config_path: PathBuf::from("/tmp/platform.toml"),
@@ -249,16 +359,25 @@ publish_manifest = false
     }
 
     #[test]
-    fn from_config_accepts_replacement_package_identity() {
-        let mut config = config(true);
-        config.auth.package = "platform-extended-auth".to_string();
+    fn from_config_path_loads_checked_in_customer_auth_package() {
+        let config_path = customer_auth_fixture();
+        let rendered = fs::read_to_string(&config_path)
+            .unwrap()
+            .replace("explain_api = false", "explain_api = true");
+        fs::write(&config_path, rendered).unwrap();
+        let config = PlatformConfig::from_file(&config_path).unwrap();
 
-        let package = resolve_deployment_configured_auth_package_selection(&config);
+        let package =
+            resolve_deployment_configured_auth_package_selection(&config_path, &config).unwrap();
 
-        assert_eq!(package.manifest().name, "platform-extended-auth");
-        assert_ne!(
-            package.manifest().name,
-            DefaultAuthModelPackage::default().manifest().name
+        assert_eq!(package.manifest().name, "harbor-auth");
+        assert_eq!(
+            package
+                .package()
+                .binding_for(Capability::CatalogFeaturedEdit)
+                .unwrap()
+                .relation,
+            davenda_auth::Relation::FeaturedEdit
         );
         assert_eq!(
             package
@@ -270,8 +389,8 @@ publish_manifest = false
                 .unwrap()
         );
 
-        let backend = LiveAuthExplainBackend::from_config(&config).unwrap();
-        assert!(format!("{backend:?}").contains("platform-extended-auth"));
+        let backend = LiveAuthExplainBackend::from_config_path(&config_path).unwrap();
+        assert!(format!("{backend:?}").contains("harbor-auth"));
     }
 
     #[test]

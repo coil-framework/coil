@@ -665,6 +665,8 @@ version = "0.1.0"
 dependencies = [
  "davenda-config",
  "davenda-data",
+ "serde",
+ "toml",
  "zanzibar",
 ]
 

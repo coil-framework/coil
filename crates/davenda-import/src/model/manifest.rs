@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,11 +163,201 @@ impl ImportMigrationArtifacts {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportAuthRoleMapping {
+    pub legacy_role: String,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImportAuthMapping {
+    role_mappings: Vec<ImportAuthRoleMapping>,
+}
+
+impl ImportAuthMapping {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_role_capabilities<I, S>(
+        mut self,
+        legacy_role: impl Into<String>,
+        capabilities: I,
+    ) -> Result<Self, ImportModelError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let legacy_role = validate_token("auth_mapping.legacy_role", legacy_role.into())?;
+        if self
+            .role_mappings
+            .iter()
+            .any(|mapping| mapping.legacy_role == legacy_role)
+        {
+            return Err(ImportModelError::ManifestParse {
+                message: format!("import auth mapping duplicates legacy role `{legacy_role}`"),
+            });
+        }
+
+        let mut normalized = Vec::new();
+        let mut seen = BTreeSet::new();
+        for capability in capabilities {
+            let capability = validate_token("auth_mapping.capability", capability.into())?;
+            if seen.insert(capability.clone()) {
+                normalized.push(capability);
+            }
+        }
+
+        if normalized.is_empty() {
+            return Err(ImportModelError::ManifestParse {
+                message: format!(
+                    "import auth mapping for legacy role `{legacy_role}` must declare at least one capability"
+                ),
+            });
+        }
+
+        self.role_mappings.push(ImportAuthRoleMapping {
+            legacy_role,
+            capabilities: normalized,
+        });
+        Ok(self)
+    }
+
+    pub fn role_mappings(&self) -> &[ImportAuthRoleMapping] {
+        &self.role_mappings
+    }
+
+    pub fn capabilities_for_role(&self, legacy_role: &str) -> Option<&[String]> {
+        self.role_mappings
+            .iter()
+            .find(|mapping| mapping.legacy_role == legacy_role)
+            .map(|mapping| mapping.capabilities.as_slice())
+    }
+
+    pub fn from_markdown_str(input: &str) -> Result<Self, ImportModelError> {
+        let mut mapping = Self::default();
+
+        for (index, raw_line) in input.lines().enumerate() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some(body) = line
+                .strip_prefix("- ")
+                .or_else(|| line.strip_prefix("* "))
+                .map(str::trim)
+            else {
+                continue;
+            };
+            let Some((legacy_spec, capability_spec)) = body.split_once("->") else {
+                continue;
+            };
+
+            let legacy_roles = markdown_code_spans(legacy_spec);
+            if legacy_roles.len() != 1 {
+                return Err(ImportModelError::ManifestParse {
+                    message: format!(
+                        "import auth mapping line {} must declare exactly one legacy role in backticks",
+                        index + 1
+                    ),
+                });
+            }
+            let capabilities = markdown_code_spans(capability_spec);
+            if capabilities.is_empty() {
+                return Err(ImportModelError::ManifestParse {
+                    message: format!(
+                        "import auth mapping line {} must declare at least one capability in backticks",
+                        index + 1
+                    ),
+                });
+            }
+
+            mapping = mapping.with_role_capabilities(
+                legacy_roles
+                    .into_iter()
+                    .next()
+                    .expect("legacy role presence already checked"),
+                capabilities,
+            )?;
+        }
+
+        if mapping.role_mappings.is_empty() {
+            return Err(ImportModelError::ManifestParse {
+                message: "import auth mapping document does not declare any legacy role mappings"
+                    .to_string(),
+            });
+        }
+
+        Ok(mapping)
+    }
+
+    pub fn from_markdown_file(path: impl AsRef<Path>) -> Result<Self, ImportModelError> {
+        let path = path.as_ref();
+        let input = fs::read_to_string(path).map_err(|error| ImportModelError::ManifestRead {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+        Self::from_markdown_str(&input).map_err(|error| match error {
+            ImportModelError::ManifestParse { message } => ImportModelError::ManifestParse {
+                message: format!(
+                    "failed to parse import auth mapping document `{}`: {message}",
+                    path.display()
+                ),
+            },
+            other => other,
+        })
+    }
+}
+
+fn markdown_code_spans(input: &str) -> Vec<String> {
+    input
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ImportVerification {
     pub required: Vec<String>,
     pub sample_routes: Vec<String>,
     pub sample_users: Vec<String>,
+    pub webhooks: Vec<ImportWebhookVerification>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportWebhookVerification {
+    pub source: String,
+    pub event: String,
+    pub max_verification_failures: u32,
+    pub max_replay_rejections: u32,
+}
+
+impl ImportWebhookVerification {
+    pub fn new(
+        source: impl Into<String>,
+        event: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            source: validate_token("verification_webhook_source", source.into())?,
+            event: validate_token("verification_webhook_event", event.into())?,
+            max_verification_failures: 0,
+            max_replay_rejections: 0,
+        })
+    }
+
+    pub fn with_max_verification_failures(mut self, failures: u32) -> Self {
+        self.max_verification_failures = failures;
+        self
+    }
+
+    pub fn with_max_replay_rejections(mut self, rejections: u32) -> Self {
+        self.max_replay_rejections = rejections;
+        self
+    }
 }
 
 impl ImportVerification {
@@ -176,22 +367,23 @@ impl ImportVerification {
         Ok(self)
     }
 
-    pub fn with_sample_route(
-        mut self,
-        route: impl Into<String>,
-    ) -> Result<Self, ImportModelError> {
-        self.sample_routes
-            .push(require_non_empty("verification_sample_route", route.into())?);
+    pub fn with_sample_route(mut self, route: impl Into<String>) -> Result<Self, ImportModelError> {
+        self.sample_routes.push(require_non_empty(
+            "verification_sample_route",
+            route.into(),
+        )?);
         Ok(self)
     }
 
-    pub fn with_sample_user(
-        mut self,
-        user: impl Into<String>,
-    ) -> Result<Self, ImportModelError> {
+    pub fn with_sample_user(mut self, user: impl Into<String>) -> Result<Self, ImportModelError> {
         self.sample_users
             .push(require_non_empty("verification_sample_user", user.into())?);
         Ok(self)
+    }
+
+    pub fn with_webhook(mut self, webhook: ImportWebhookVerification) -> Self {
+        self.webhooks.push(webhook);
+        self
     }
 }
 
@@ -231,7 +423,10 @@ impl ImportCutover {
         mut self,
         switch_method: impl Into<String>,
     ) -> Result<Self, ImportModelError> {
-        self.switch_method = Some(validate_token("cutover_switch_method", switch_method.into())?);
+        self.switch_method = Some(validate_token(
+            "cutover_switch_method",
+            switch_method.into(),
+        )?);
         Ok(self)
     }
 
@@ -451,7 +646,11 @@ impl ImportManifest {
         let manifest_root = manifest_root.as_ref();
 
         if let Some(target) = &self.target {
-            ensure_manifest_path_exists(manifest_root, "target.app_manifest", &target.app_manifest)?;
+            ensure_manifest_path_exists(
+                manifest_root,
+                "target.app_manifest",
+                &target.app_manifest,
+            )?;
             ensure_manifest_path_exists(
                 manifest_root,
                 "target.platform_config",
@@ -467,11 +666,7 @@ impl ImportManifest {
                         input_id: input.id.clone(),
                     });
                 }
-                ensure_manifest_path_exists(
-                    manifest_root,
-                    "source.inputs.path",
-                    &input.path,
-                )?;
+                ensure_manifest_path_exists(manifest_root, "source.inputs.path", &input.path)?;
             }
         }
 
@@ -637,6 +832,19 @@ impl ImportManifest {
             ordered_importers: ordered,
         })
     }
+
+    pub fn load_auth_mapping(
+        &self,
+        manifest_root: impl AsRef<Path>,
+    ) -> Result<ImportAuthMapping, ImportModelError> {
+        let artifacts = self.migration_artifacts.as_ref().ok_or_else(|| {
+            ImportModelError::InvalidManifestContract {
+                field: "migration_artifacts.auth_mapping",
+                message: "live user import requires a migration auth mapping document".to_string(),
+            }
+        })?;
+        ImportAuthMapping::from_markdown_file(manifest_root.as_ref().join(&artifacts.auth_mapping))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -663,11 +871,7 @@ impl ImportPlan {
         manifest_root: impl AsRef<Path>,
         journal_path: impl AsRef<Path>,
     ) -> Result<ImportExecution, ImportModelError> {
-        self.execute_with_handler(
-            manifest_root,
-            journal_path,
-            |_, _, _, _| Ok(()),
-        )
+        self.execute_with_handler(manifest_root, journal_path, |_, _, _, _| Ok(()))
     }
 
     pub fn execute_with_handler<F>(
@@ -677,7 +881,12 @@ impl ImportPlan {
         handler: F,
     ) -> Result<ImportExecution, ImportModelError>
     where
-        F: FnMut(&ImporterSpec, &ImportRecordReceipt, &Path, &mut serde_json::Value) -> Result<(), ImportModelError>,
+        F: FnMut(
+            &ImporterSpec,
+            &ImportRecordReceipt,
+            &Path,
+            &mut serde_json::Value,
+        ) -> Result<(), ImportModelError>,
     {
         super::execute_import_plan_with_handler(
             self,

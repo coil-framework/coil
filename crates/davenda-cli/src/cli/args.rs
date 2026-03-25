@@ -131,9 +131,24 @@ pub(crate) struct JobsStatusInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobsReadyInvocation {
+    pub config_path: PathBuf,
+    pub queue: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JobsDeadLettersInvocation {
     pub config_path: PathBuf,
     pub queue: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobsInFlightInvocation {
+    pub config_path: PathBuf,
+    pub queue: Option<String>,
+    pub worker_id: Option<String>,
     pub limit: usize,
 }
 
@@ -263,9 +278,17 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         invocation: JobsStatusInvocation,
     },
+    JobsReady {
+        output_mode: OutputMode,
+        invocation: JobsReadyInvocation,
+    },
     JobsDeadLetters {
         output_mode: OutputMode,
         invocation: JobsDeadLettersInvocation,
+    },
+    JobsInFlight {
+        output_mode: OutputMode,
+        invocation: JobsInFlightInvocation,
     },
     JobsRetry {
         output_mode: OutputMode,
@@ -338,6 +361,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut cache_routes = Vec::new();
     let mut cache_tags = Vec::new();
     let mut jobs_queue: Option<String> = None;
+    let mut jobs_worker_id: Option<String> = None;
     let mut jobs_limit: Option<usize> = None;
     let mut tls_certificate_id: Option<String> = None;
     let mut tls_replacement_certificate_id: Option<String> = None;
@@ -400,6 +424,9 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             }
             "--queue" => {
                 jobs_queue = Some(next_value(&mut iter, "--queue")?);
+            }
+            "--worker-id" => {
+                jobs_worker_id = Some(next_value(&mut iter, "--worker-id")?);
             }
             "--limit" => {
                 let parsed = next_value(&mut iter, "--limit")?
@@ -921,6 +948,24 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 },
             })
         }
+        [command, subcommand] if command == "jobs" && subcommand == "ready" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`jobs ready` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::JobsReady {
+                output_mode,
+                invocation: JobsReadyInvocation {
+                    config_path,
+                    queue: jobs_queue,
+                    limit: jobs_limit.unwrap_or(50),
+                },
+            })
+        }
         [command, subcommand] if command == "jobs" && subcommand == "dead-letters" => {
             let config_path = config_path
                 .or_else(discover_default_config_path)
@@ -935,6 +980,25 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: JobsDeadLettersInvocation {
                     config_path,
                     queue: jobs_queue,
+                    limit: jobs_limit.unwrap_or(50),
+                },
+            })
+        }
+        [command, subcommand] if command == "jobs" && subcommand == "in-flight" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`jobs in-flight` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::JobsInFlight {
+                output_mode,
+                invocation: JobsInFlightInvocation {
+                    config_path,
+                    queue: jobs_queue,
+                    worker_id: jobs_worker_id,
                     limit: jobs_limit.unwrap_or(50),
                 },
             })
@@ -2002,6 +2066,35 @@ mod tests {
     }
 
     #[test]
+    fn parse_jobs_ready_accepts_queue_and_limit() {
+        let input = parse([
+            "jobs".to_string(),
+            "ready".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--queue".to_string(),
+            "jobs.work".to_string(),
+            "--limit".to_string(),
+            "25".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsReady {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected jobs ready input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.queue.as_deref(), Some("jobs.work"));
+        assert_eq!(invocation.limit, 25);
+    }
+
+    #[test]
     fn parse_jobs_dead_letters_accepts_queue_and_limit() {
         let input = parse([
             "jobs".to_string(),
@@ -2028,6 +2121,38 @@ mod tests {
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.queue.as_deref(), Some("jobs.dead-letter"));
         assert_eq!(invocation.limit, 25);
+    }
+
+    #[test]
+    fn parse_jobs_in_flight_accepts_queue_worker_and_limit() {
+        let input = parse([
+            "jobs".to_string(),
+            "in-flight".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--queue".to_string(),
+            "jobs.work".to_string(),
+            "--worker-id".to_string(),
+            "worker-a".to_string(),
+            "--limit".to_string(),
+            "5".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsInFlight {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected jobs in-flight input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.queue.as_deref(), Some("jobs.work"));
+        assert_eq!(invocation.worker_id.as_deref(), Some("worker-a"));
+        assert_eq!(invocation.limit, 5);
     }
 
     #[test]
@@ -2092,6 +2217,19 @@ mod tests {
     fn parse_jobs_dead_letters_defaults_limit_and_rejects_zero() {
         let input = parse([
             "jobs".to_string(),
+            "ready".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsReady { invocation, .. } = input else {
+            panic!("expected jobs ready input");
+        };
+        assert_eq!(invocation.limit, 50);
+
+        let input = parse([
+            "jobs".to_string(),
             "dead-letters".to_string(),
             "--config".to_string(),
             "/tmp/platform.toml".to_string(),
@@ -2100,6 +2238,19 @@ mod tests {
 
         let CliInput::JobsDeadLetters { invocation, .. } = input else {
             panic!("expected jobs dead-letters input");
+        };
+        assert_eq!(invocation.limit, 50);
+
+        let input = parse([
+            "jobs".to_string(),
+            "in-flight".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsInFlight { invocation, .. } = input else {
+            panic!("expected jobs in-flight input");
         };
         assert_eq!(invocation.limit, 50);
 

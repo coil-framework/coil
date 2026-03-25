@@ -1712,7 +1712,9 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
     assert!(checkout_body.contains("£58.00"), "{checkout_body}");
 
     let complete_body = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("email", "buyer@example.com")
+        .append_pair("checkout_email", "buyer@example.com")
+        .append_pair("payment_method", "card")
+        .append_pair("payment_last4", "4242")
         .finish();
     let complete_response = server
         .respond(
@@ -1748,6 +1750,14 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
         )
         .await
         .unwrap();
+    let payment_status = response_header(
+        &confirmation_response,
+        "x-davenda-storefront-payment-status",
+    );
+    let payment_reference = response_header(
+        &confirmation_response,
+        "x-davenda-storefront-payment-reference",
+    );
     let confirmation_body = String::from_utf8(
         to_bytes(confirmation_response.into_body(), usize::MAX)
             .await
@@ -1773,6 +1783,16 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
     );
     assert!(
         confirmation_body.contains("davenda-storefront-state"),
+        "{confirmation_body}"
+    );
+    assert_eq!(payment_status, "captured");
+    assert_eq!(payment_reference, "PAY-50001");
+    assert!(
+        confirmation_body.contains("\"status\":\"captured\""),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("\"reference\":\"PAY-50001\""),
         "{confirmation_body}"
     );
 
@@ -1804,6 +1824,195 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
         history_body.contains("\"sku\":\"harbor-cap\""),
         "{history_body}"
     );
+    assert!(
+        history_body.contains("\"reference\":\"PAY-50001\""),
+        "{history_body}"
+    );
+    assert!(
+        history_body.contains("\"checkout_email\":\"buyer@example.com\""),
+        "{history_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_rejects_checkout_completion_without_payment_details() {
+    let app_name = unique_app_name("harbor-shop-runtime-checkout-payment-required");
+    let config = config_with_app_name(&app_name);
+    let template_root = unique_temp_template_root("native-storefront-payment-required");
+    write_template_file(
+        &template_root,
+        "templates/commerce/cart.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="cart-page">
+      <h1>Cart</h1>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-page">
+      <h1>Checkout</h1>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout-confirmation.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="confirmation-page">
+      <h1>Confirmation</h1>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_cookie =
+        cookie_pair_from_response(&cart_bootstrap, "davenda_session").expect("session cookie");
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("sku", "harbor-cap")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("email", "buyer@example.com")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = complete_response.status();
+    let body = String::from_utf8(
+        to_bytes(complete_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("payment method"), "{body}");
 }
 
 #[tokio::test]

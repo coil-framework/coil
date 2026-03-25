@@ -1406,6 +1406,14 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
         .unwrap();
     assert_eq!(snapshot.cart.item_count, 0);
     assert_eq!(snapshot.cart.status, "completed");
+    assert_eq!(snapshot.payment.status, "captured");
+    assert_eq!(snapshot.payment.method.as_deref(), Some("card"));
+    assert_eq!(snapshot.payment.last4.as_deref(), Some("4242"));
+    assert_eq!(
+        snapshot.payment.checkout_email.as_deref(),
+        Some("member-live-1@example.com")
+    );
+    assert_eq!(snapshot.payment.reference.as_deref(), Some("PAY-50001"));
     assert_eq!(
         snapshot
             .latest_order
@@ -1420,6 +1428,13 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
             .map(|order| order.total_minor),
         Some(14_700)
     );
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
+            .and_then(|order| order.payment.reference.as_deref()),
+        Some("PAY-50001")
+    );
 
     let reopened = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
     let history = reopened
@@ -1428,12 +1443,15 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
     assert_eq!(history.orders.len(), 1);
     assert_eq!(history.orders[0].order_id, "ORD-10042");
     assert_eq!(history.orders[0].line_count, 3);
+    assert_eq!(history.orders[0].payment.method.as_deref(), Some("card"));
+    assert_eq!(history.orders[0].payment.last4.as_deref(), Some("4242"));
 
     let snapshot = reopened
         .snapshot("session-live-1", Some("member-live-1"))
         .unwrap();
     assert!(snapshot.cart.lines.is_empty());
     assert_eq!(snapshot.cart.status, "completed");
+    assert_eq!(snapshot.payment.reference.as_deref(), Some("PAY-50001"));
 
     fs::remove_dir_all(&root).unwrap();
 }

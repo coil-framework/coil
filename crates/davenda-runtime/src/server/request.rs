@@ -221,6 +221,10 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
         RuntimeServerError::Storefront(
             StorefrontStateError::UnknownSku { .. }
             | StorefrontStateError::InvalidQuantity
+            | StorefrontStateError::MissingPaymentMethod
+            | StorefrontStateError::MissingCheckoutEmail
+            | StorefrontStateError::InvalidPaymentLast4
+            | StorefrontStateError::CheckoutNotReady { .. }
             | StorefrontStateError::EmptyCart { .. },
         ) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
         RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
@@ -453,6 +457,25 @@ fn parse_quantity_field(value: Option<&str>) -> Option<u32> {
     value.and_then(|raw| raw.trim().parse::<u32>().ok())
 }
 
+fn storefront_payment_input_from_execution(
+    execution: &RequestExecution,
+) -> Result<StorefrontPaymentInput, RuntimeServerError> {
+    let method = execution_form_field(execution, "payment_method")
+        .or_else(|| execution_form_field(execution, "paymentMethod"));
+    let checkout_email = execution_form_field(execution, "checkout_email")
+        .or_else(|| execution_form_field(execution, "checkoutEmail"))
+        .or_else(|| execution_form_field(execution, "email"));
+    let last4 = execution_form_field(execution, "payment_last4")
+        .or_else(|| execution_form_field(execution, "paymentLast4"))
+        .map(str::to_string);
+    StorefrontPaymentInput::new(
+        method.unwrap_or_default(),
+        checkout_email.unwrap_or_default(),
+        last4,
+    )
+    .map_err(RuntimeServerError::Storefront)
+}
+
 fn apply_native_storefront_mutations(
     state: &RuntimeServerState,
     execution: &RequestExecution,
@@ -510,9 +533,11 @@ fn apply_native_storefront_mutations(
             )?;
         }
         "commerce.checkout-complete" => {
+            let payment = storefront_payment_input_from_execution(execution)?;
             let snapshot = state.storefront.checkout_complete(
                 session_id,
                 execution.principal.principal_id.as_deref(),
+                &payment,
                 now.as_unix_seconds(),
             )?;
             let message = snapshot

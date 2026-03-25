@@ -19,6 +19,14 @@ pub enum StorefrontStateError {
     UnknownSku { sku: String },
     #[error("quantity must be greater than zero")]
     InvalidQuantity,
+    #[error("checkout requires a payment method")]
+    MissingPaymentMethod,
+    #[error("checkout requires a billing email")]
+    MissingCheckoutEmail,
+    #[error("card payments require a 4-digit last4 value")]
+    InvalidPaymentLast4,
+    #[error("checkout for session `{session_id}` is not ready for payment")]
+    CheckoutNotReady { session_id: String },
     #[error("cart for session `{session_id}` is empty")]
     EmptyCart { session_id: String },
     #[error("failed to serialize storefront state: {reason}")]
@@ -33,6 +41,61 @@ pub enum StorefrontStateError {
 pub struct StorefrontStateStore {
     path: PathBuf,
     connection: Arc<Mutex<Connection>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontPaymentSnapshot {
+    pub status: String,
+    pub method: Option<String>,
+    pub reference: Option<String>,
+    pub last4: Option<String>,
+    pub checkout_email: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorefrontPaymentInput {
+    pub method: String,
+    pub last4: Option<String>,
+    pub checkout_email: String,
+}
+
+impl StorefrontPaymentInput {
+    pub fn new(
+        method: impl Into<String>,
+        checkout_email: impl Into<String>,
+        last4: Option<String>,
+    ) -> Result<Self, StorefrontStateError> {
+        let method = method.into().trim().to_ascii_lowercase();
+        if method.is_empty() {
+            return Err(StorefrontStateError::MissingPaymentMethod);
+        }
+        let checkout_email = checkout_email.into().trim().to_string();
+        if checkout_email.is_empty() {
+            return Err(StorefrontStateError::MissingCheckoutEmail);
+        }
+        let last4 = last4
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let has_valid_last4 = last4
+            .as_deref()
+            .map(|value| value.len() == 4 && value.chars().all(|ch| ch.is_ascii_digit()))
+            .unwrap_or(false);
+        if method == "card" && !has_valid_last4 {
+            return Err(StorefrontStateError::InvalidPaymentLast4);
+        }
+        Ok(Self {
+            method,
+            last4,
+            checkout_email,
+        })
+    }
+
+    pub fn card(
+        checkout_email: impl Into<String>,
+        last4: impl Into<String>,
+    ) -> Result<Self, StorefrontStateError> {
+        Self::new("card", checkout_email, Some(last4.into()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -52,6 +115,7 @@ pub struct StorefrontCartLine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StorefrontCartSnapshot {
     pub status: String,
+    pub payment: StorefrontPaymentSnapshot,
     pub currency: String,
     pub item_count: u32,
     pub subtotal_minor: i64,
@@ -79,6 +143,7 @@ pub struct StorefrontOrderSnapshot {
     pub session_id: String,
     pub principal_id: Option<String>,
     pub status: String,
+    pub payment: StorefrontPaymentSnapshot,
     pub currency: String,
     pub line_count: u32,
     pub subtotal_minor: i64,
@@ -94,6 +159,7 @@ pub struct StorefrontStateSnapshot {
     pub session_id: String,
     pub principal_id: Option<String>,
     pub cart: StorefrontCartSnapshot,
+    pub payment: StorefrontPaymentSnapshot,
     pub recent_orders: Vec<StorefrontOrderSnapshot>,
     pub latest_order: Option<StorefrontOrderSnapshot>,
 }
@@ -159,6 +225,11 @@ impl StorefrontStateStore {
                     session_id TEXT PRIMARY KEY,
                     principal_id TEXT,
                     status TEXT NOT NULL,
+                    payment_status TEXT NOT NULL DEFAULT 'not_started',
+                    payment_method TEXT,
+                    payment_reference TEXT,
+                    payment_last4 TEXT,
+                    checkout_email TEXT,
                     currency TEXT NOT NULL,
                     updated_at_unix_seconds INTEGER NOT NULL
                 );
@@ -183,6 +254,11 @@ impl StorefrontStateStore {
                     session_id TEXT NOT NULL,
                     principal_id TEXT,
                     status TEXT NOT NULL,
+                    payment_status TEXT NOT NULL DEFAULT 'captured',
+                    payment_method TEXT,
+                    payment_reference TEXT,
+                    payment_last4 TEXT,
+                    checkout_email TEXT,
                     currency TEXT NOT NULL,
                     line_count INTEGER NOT NULL,
                     subtotal_minor INTEGER NOT NULL,
@@ -208,12 +284,16 @@ impl StorefrontStateStore {
                 INSERT INTO storefront_sequences (name, next_value)
                 VALUES ('order', 10042)
                 ON CONFLICT(name) DO NOTHING;
+                INSERT INTO storefront_sequences (name, next_value)
+                VALUES ('payment', 50001)
+                ON CONFLICT(name) DO NOTHING;
                 "#,
             )
             .map_err(|error| StorefrontStateError::Initialization {
                 path: path.display().to_string(),
                 reason: error.to_string(),
             })?;
+        ensure_storefront_columns(&connection)?;
 
         Ok(Self {
             path,
@@ -289,6 +369,7 @@ impl StorefrontStateStore {
         )
         .map_err(|error| query_error(format!("failed to add storefront cart line: {error}")))?;
         self.touch_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        self.update_cart_payment(&tx, session_id, "not_started", None, None)?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
             query_error(format!("failed to commit add-to-cart transaction: {error}"))
@@ -351,6 +432,7 @@ impl StorefrontStateStore {
             })?;
         }
         self.touch_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        self.update_cart_payment(&tx, session_id, "not_started", None, None)?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
             query_error(format!("failed to commit cart update transaction: {error}"))
@@ -377,6 +459,7 @@ impl StorefrontStateStore {
             });
         }
         self.touch_cart(&tx, session_id, principal_id, "checkout", now_unix_seconds)?;
+        self.update_cart_payment(&tx, session_id, "ready_for_payment", None, None)?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
             query_error(format!(
@@ -390,6 +473,7 @@ impl StorefrontStateStore {
         &self,
         session_id: &str,
         principal_id: Option<&str>,
+        payment: &StorefrontPaymentInput,
         now_unix_seconds: u64,
     ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
         let mut connection = self.lock_connection()?;
@@ -405,22 +489,35 @@ impl StorefrontStateStore {
                 session_id: session_id.to_string(),
             });
         }
+        let (cart_status, payment_status) = self.cart_status(&tx, session_id)?;
+        if cart_status != "checkout" || payment_status != "ready_for_payment" {
+            return Err(StorefrontStateError::CheckoutNotReady {
+                session_id: session_id.to_string(),
+            });
+        }
 
         let subtotal_minor = lines.iter().map(|line| line.total_minor).sum::<i64>();
         let line_count = lines.iter().map(|line| line.quantity).sum::<u32>();
         let order_id = next_order_id(&tx)?;
+        let payment_reference = next_payment_reference(&tx)?;
         tx.execute(
             r#"
             INSERT INTO orders (
-                order_id, session_id, principal_id, status, currency,
+                order_id, session_id, principal_id, status, payment_status, payment_method,
+                payment_reference, payment_last4, checkout_email, currency,
                 line_count, subtotal_minor, total_minor, created_at_unix_seconds
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             "#,
             params![
                 order_id,
                 session_id,
                 principal_id,
                 "paid",
+                "captured",
+                payment.method.as_str(),
+                payment_reference.as_str(),
+                payment.last4.as_deref(),
+                payment.checkout_email.as_str(),
                 DEFAULT_CURRENCY,
                 i64::from(line_count),
                 subtotal_minor,
@@ -459,6 +556,13 @@ impl StorefrontStateStore {
         )
         .map_err(|error| query_error(format!("failed to clear storefront cart lines: {error}")))?;
         self.touch_cart(&tx, session_id, principal_id, "completed", now_unix_seconds)?;
+        self.update_cart_payment(
+            &tx,
+            session_id,
+            "captured",
+            Some(payment),
+            Some(payment_reference.as_str()),
+        )?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
             query_error(format!(
@@ -505,6 +609,7 @@ impl StorefrontStateStore {
             "sessionId": snapshot.session_id,
             "principalId": snapshot.principal_id,
             "cart": snapshot.cart,
+            "payment": snapshot.payment,
             "recentOrders": snapshot.recent_orders,
             "latestOrder": snapshot.latest_order,
             "csrf": csrf_tokens,
@@ -529,6 +634,22 @@ impl StorefrontStateStore {
             "x-davenda-storefront-cart-status".to_string(),
             snapshot.cart.status.clone(),
         );
+        headers.insert(
+            "x-davenda-storefront-payment-status".to_string(),
+            snapshot.payment.status.clone(),
+        );
+        if let Some(method) = &snapshot.payment.method {
+            headers.insert(
+                "x-davenda-storefront-payment-method".to_string(),
+                method.clone(),
+            );
+        }
+        if let Some(reference) = &snapshot.payment.reference {
+            headers.insert(
+                "x-davenda-storefront-payment-reference".to_string(),
+                reference.clone(),
+            );
+        }
         headers.insert(
             "x-davenda-storefront-order-count".to_string(),
             snapshot.recent_orders.len().to_string(),
@@ -573,8 +694,19 @@ impl StorefrontStateStore {
     ) -> Result<(), StorefrontStateError> {
         tx.execute(
             r#"
-            INSERT INTO carts (session_id, principal_id, status, currency, updated_at_unix_seconds)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO carts (
+                session_id,
+                principal_id,
+                status,
+                payment_status,
+                payment_method,
+                payment_reference,
+                payment_last4,
+                checkout_email,
+                currency,
+                updated_at_unix_seconds
+            )
+            VALUES (?1, ?2, ?3, 'not_started', NULL, NULL, NULL, NULL, ?4, ?5)
             ON CONFLICT(session_id) DO UPDATE SET
                 principal_id = COALESCE(excluded.principal_id, carts.principal_id),
                 status = CASE
@@ -623,6 +755,58 @@ impl StorefrontStateStore {
         Ok(())
     }
 
+    fn update_cart_payment(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+        payment_status: &str,
+        payment: Option<&StorefrontPaymentInput>,
+        payment_reference: Option<&str>,
+    ) -> Result<(), StorefrontStateError> {
+        tx.execute(
+            r#"
+            UPDATE carts
+            SET payment_status = ?2,
+                payment_method = ?3,
+                payment_reference = ?4,
+                payment_last4 = ?5,
+                checkout_email = ?6
+            WHERE session_id = ?1
+            "#,
+            params![
+                session_id,
+                payment_status,
+                payment.as_ref().map(|value| value.method.as_str()),
+                payment_reference,
+                payment.as_ref().and_then(|value| value.last4.as_deref()),
+                payment.as_ref().map(|value| value.checkout_email.as_str()),
+            ],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to update storefront payment state: {error}"
+            ))
+        })?;
+        Ok(())
+    }
+
+    fn cart_status(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+    ) -> Result<(String, String), StorefrontStateError> {
+        tx.query_row(
+            "SELECT status, payment_status FROM carts WHERE session_id = ?1",
+            params![session_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| query_error(format!("failed to read storefront cart state: {error}")))?
+        .ok_or_else(|| StorefrontStateError::CheckoutNotReady {
+            session_id: session_id.to_string(),
+        })
+    }
+
     fn cart_line_count(
         &self,
         tx: &Transaction<'_>,
@@ -660,10 +844,12 @@ impl StorefrontStateStore {
             .map_err(|error| query_error(format!("failed to load storefront principal: {error}")))?
             .flatten()
             .or_else(|| principal_id.map(ToOwned::to_owned));
+        let payment = cart.payment.clone();
         Ok(StorefrontStateSnapshot {
             session_id: session_id.to_string(),
             principal_id: principal,
             cart,
+            payment,
             recent_orders,
             latest_order,
         })
@@ -688,8 +874,10 @@ impl StorefrontStateStore {
         let lines = self.load_cart_lines(tx, session_id)?;
         let item_count = lines.iter().map(|line| line.quantity).sum::<u32>();
         let subtotal_minor = lines.iter().map(|line| line.total_minor).sum::<i64>();
+        let payment = self.load_cart_payment(tx, session_id)?;
         Ok(StorefrontCartSnapshot {
             status,
+            payment,
             currency: DEFAULT_CURRENCY.to_string(),
             item_count,
             subtotal_minor,
@@ -748,6 +936,42 @@ impl StorefrontStateStore {
             })
     }
 
+    fn load_cart_payment(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+    ) -> Result<StorefrontPaymentSnapshot, StorefrontStateError> {
+        tx.query_row(
+            r#"
+            SELECT
+                payment_status,
+                payment_method,
+                payment_reference,
+                payment_last4,
+                checkout_email
+            FROM carts
+            WHERE session_id = ?1
+            "#,
+            params![session_id],
+            |row| {
+                Ok(StorefrontPaymentSnapshot {
+                    status: row.get::<_, String>(0)?,
+                    method: row.get::<_, Option<String>>(1)?,
+                    reference: row.get::<_, Option<String>>(2)?,
+                    last4: row.get::<_, Option<String>>(3)?,
+                    checkout_email: row.get::<_, Option<String>>(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| query_error(format!("failed to load storefront payment state: {error}")))?
+        .ok_or_else(|| {
+            query_error(format!(
+                "storefront cart `{session_id}` is missing payment state"
+            ))
+        })
+    }
+
     fn load_orders(
         &self,
         tx: &Transaction<'_>,
@@ -762,8 +986,9 @@ impl StorefrontStateStore {
             tx.prepare(
                 r#"
                 SELECT
-                    order_id, session_id, principal_id, status, currency,
-                    line_count, subtotal_minor, total_minor, created_at_unix_seconds
+                    order_id, session_id, principal_id, status, payment_status,
+                    payment_method, payment_reference, payment_last4, checkout_email,
+                    currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
                 FROM orders
                 WHERE session_id = ?1 OR principal_id = ?2
                 ORDER BY created_at_unix_seconds DESC, order_id DESC
@@ -774,8 +999,9 @@ impl StorefrontStateStore {
             tx.prepare(
                 r#"
                 SELECT
-                    order_id, session_id, principal_id, status, currency,
-                    line_count, subtotal_minor, total_minor, created_at_unix_seconds
+                    order_id, session_id, principal_id, status, payment_status,
+                    payment_method, payment_reference, payment_last4, checkout_email,
+                    currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
                 FROM orders
                 WHERE session_id = ?1
                 ORDER BY created_at_unix_seconds DESC, order_id DESC
@@ -798,10 +1024,15 @@ impl StorefrontStateStore {
                             row.get::<_, Option<String>>(2)?,
                             row.get::<_, String>(3)?,
                             row.get::<_, String>(4)?,
-                            row.get::<_, i64>(5)?,
-                            row.get::<_, i64>(6)?,
-                            row.get::<_, i64>(7)?,
-                            row.get::<_, i64>(8)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                            row.get::<_, String>(9)?,
+                            row.get::<_, i64>(10)?,
+                            row.get::<_, i64>(11)?,
+                            row.get::<_, i64>(12)?,
+                            row.get::<_, i64>(13)?,
                         ))
                     },
                 )
@@ -820,10 +1051,15 @@ impl StorefrontStateStore {
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, i64>(7)?,
-                        row.get::<_, i64>(8)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, i64>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, i64>(12)?,
+                        row.get::<_, i64>(13)?,
                     ))
                 })
                 .map_err(|error| {
@@ -840,6 +1076,11 @@ impl StorefrontStateStore {
             order_session_id,
             order_principal_id,
             status,
+            payment_status,
+            payment_method,
+            payment_reference,
+            payment_last4,
+            checkout_email,
             currency,
             line_count_i64,
             subtotal_minor,
@@ -857,6 +1098,13 @@ impl StorefrontStateStore {
                 session_id: order_session_id,
                 principal_id: order_principal_id,
                 status,
+                payment: StorefrontPaymentSnapshot {
+                    status: payment_status,
+                    method: payment_method,
+                    reference: payment_reference,
+                    last4: payment_last4,
+                    checkout_email,
+                },
                 currency,
                 line_count: u32::try_from(line_count_i64)
                     .map_err(|_| query_error("storefront order line count overflowed".into()))?,
@@ -935,6 +1183,105 @@ fn next_order_id(tx: &Transaction<'_>) -> Result<String, StorefrontStateError> {
         ))
     })?;
     Ok(format!("ORD-{next_value:05}"))
+}
+
+fn next_payment_reference(tx: &Transaction<'_>) -> Result<String, StorefrontStateError> {
+    let next_value: i64 = tx
+        .query_row(
+            "SELECT next_value FROM storefront_sequences WHERE name = 'payment'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| {
+            query_error(format!(
+                "failed to load storefront payment sequence: {error}"
+            ))
+        })?
+        .unwrap_or(50_001);
+    tx.execute(
+        r#"
+        INSERT INTO storefront_sequences (name, next_value)
+        VALUES ('payment', ?1)
+        ON CONFLICT(name) DO UPDATE SET next_value = excluded.next_value
+        "#,
+        params![next_value.saturating_add(1)],
+    )
+    .map_err(|error| {
+        query_error(format!(
+            "failed to advance storefront payment sequence: {error}"
+        ))
+    })?;
+    Ok(format!("PAY-{next_value:05}"))
+}
+
+fn ensure_storefront_columns(connection: &Connection) -> Result<(), StorefrontStateError> {
+    ensure_table_columns(
+        connection,
+        "carts",
+        &[
+            "payment_status TEXT NOT NULL DEFAULT 'not_started'",
+            "payment_method TEXT",
+            "payment_reference TEXT",
+            "payment_last4 TEXT",
+            "checkout_email TEXT",
+        ],
+    )?;
+    ensure_table_columns(
+        connection,
+        "orders",
+        &[
+            "payment_status TEXT NOT NULL DEFAULT 'captured'",
+            "payment_method TEXT",
+            "payment_reference TEXT",
+            "payment_last4 TEXT",
+            "checkout_email TEXT",
+        ],
+    )?;
+    Ok(())
+}
+
+fn ensure_table_columns(
+    connection: &Connection,
+    table: &str,
+    columns: &[&str],
+) -> Result<(), StorefrontStateError> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| {
+            query_error(format!(
+                "failed to inspect storefront table `{table}`: {error}"
+            ))
+        })?;
+    let existing = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| {
+            query_error(format!(
+                "failed to read storefront table `{table}` columns: {error}"
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            query_error(format!(
+                "failed to collect storefront table `{table}` columns: {error}"
+            ))
+        })?;
+    for column in columns {
+        let Some(name) = column.split_whitespace().next() else {
+            continue;
+        };
+        if existing.iter().any(|candidate| candidate == name) {
+            continue;
+        }
+        connection
+            .execute(&format!("ALTER TABLE {table} ADD COLUMN {column}"), [])
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to add storefront column `{table}.{name}`: {error}"
+                ))
+            })?;
+    }
+    Ok(())
 }
 
 fn query_error(reason: String) -> StorefrontStateError {

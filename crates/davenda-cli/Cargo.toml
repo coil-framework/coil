@@ -18,6 +18,7 @@ davenda-config = { path = "../davenda-config" }
 davenda-data = { path = "../davenda-data" }
 davenda-events = { path = "../davenda-events" }
 davenda-import = { path = "../davenda-import" }
+davenda-jobs = { path = "../davenda-jobs" }
 davenda-media = { path = "../davenda-media" }
 davenda-memberships = { path = "../davenda-memberships" }
 davenda-ops = { path = "../davenda-ops" }

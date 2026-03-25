@@ -695,6 +695,7 @@ dependencies = [
  "davenda-data",
  "davenda-events",
  "davenda-import",
+ "davenda-jobs",
  "davenda-media",
  "davenda-memberships",
  "davenda-ops",

@@ -231,6 +231,13 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
         .with_dry_run()
         .requiring_confirmation(),
         CommandDescriptor::new(
+            ["jobs", "promote"],
+            CommandOwner::Core,
+            "Promote due scheduled jobs into the ready queue under an explicit scheduler lease",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["tls", "status"],
             CommandOwner::Core,
             "Inspect TLS mode, provider state, and managed certificate inventory",
@@ -312,5 +319,16 @@ mod tests {
             .expect("jobs retry descriptor should exist");
         assert!(retry.supports_dry_run);
         assert!(retry.requires_confirmation);
+    }
+
+    #[test]
+    fn baseline_commands_include_jobs_promote() {
+        let commands = baseline_commands("harbor-shop").unwrap();
+        let promote = commands
+            .iter()
+            .find(|descriptor| descriptor.path == vec!["jobs".to_string(), "promote".to_string()])
+            .expect("jobs promote descriptor should exist");
+        assert!(promote.supports_dry_run);
+        assert!(promote.requires_confirmation);
     }
 }

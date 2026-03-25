@@ -120,6 +120,12 @@ pub(crate) struct JobsRetryInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobsPromoteInvocation {
+    pub config_path: PathBuf,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TlsRenewInvocation {
     pub config_path: PathBuf,
     pub certificate_id: String,
@@ -222,6 +228,11 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         dry_run: bool,
         invocation: JobsRetryInvocation,
+    },
+    JobsPromote {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: JobsPromoteInvocation,
     },
     TlsStatus {
         output_mode: OutputMode,
@@ -789,6 +800,24 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: JobsRetryInvocation {
                     config_path,
                     dead_letter_id: dead_letter_id.to_string(),
+                    confirmed,
+                },
+            })
+        }
+        [command, subcommand] if command == "jobs" && subcommand == "promote" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`jobs promote` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::JobsPromote {
+                output_mode,
+                dry_run,
+                invocation: JobsPromoteInvocation {
+                    config_path,
                     confirmed,
                 },
             })
@@ -1634,6 +1663,34 @@ mod tests {
         assert!(dry_run);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.dead_letter_id, "dead-letter:job-retry");
+        assert!(invocation.confirmed);
+    }
+
+    #[test]
+    fn parse_jobs_promote_accepts_dry_run_and_confirmation_flags() {
+        let input = parse([
+            "jobs".to_string(),
+            "promote".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--dry-run".to_string(),
+            "--yes".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsPromote {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected jobs promote input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert!(invocation.confirmed);
     }
 

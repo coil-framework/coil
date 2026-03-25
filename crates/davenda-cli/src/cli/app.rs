@@ -3,9 +3,9 @@ use crate::cli::args::{
     AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
     AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation,
     AuthTestModelInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
-    JobsDeadLettersInvocation, JobsRetryInvocation, JobsStatusInvocation, MigrateApplyInvocation,
-    ModuleDisableInvocation, ModuleEnableInvocation, ModuleInspectInvocation,
-    StorageInspectInvocation, TlsRenewInvocation, parse,
+    JobsDeadLettersInvocation, JobsPromoteInvocation, JobsRetryInvocation, JobsStatusInvocation,
+    MigrateApplyInvocation, ModuleDisableInvocation, ModuleEnableInvocation,
+    ModuleInspectInvocation, StorageInspectInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -35,6 +35,7 @@ use davenda_import::{
     CutoverCheck, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord, ImportManifest,
     ImportModelError, PublicationMode, RollbackTrigger,
 };
+use davenda_jobs::JobInstant;
 use davenda_memberships::{
     BillingInterval, MemberAccountId, MembershipTierId, SubscriptionId, SubscriptionStatus,
     TierVisibility,
@@ -333,6 +334,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_jobs_retry(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::JobsPromote {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_jobs_promote(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::TlsStatus {
             output_mode,
             config_path,
@@ -428,6 +437,7 @@ fn usage() -> String {
         "  platform jobs status [--config <path>] [--queue <name>] [--json]",
         "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
         "  platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes] [--json]",
+        "  platform jobs promote [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform tls status [--config <path>] [--json]",
         "  platform tls renew [--config <path>] --certificate <id> --replacement <id> [--dry-run] [--yes] [--json]",
         "  platform storage inspect [--config <path>] [--json]",
@@ -461,6 +471,7 @@ fn usage() -> String {
         "  platform jobs status --config config/platform.toml",
         "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
         "  platform jobs retry dead-letter:job-retry --config config/platform.toml --dry-run",
+        "  platform jobs promote --config config/platform.toml --dry-run",
         "  platform tls status --config config/platform.toml",
         "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
         "  platform storage inspect --config config/platform.toml",
@@ -2601,6 +2612,161 @@ fn run_jobs_retry(
             dead_letter.dead_letter_id, retried_job_id
         ),
     )?;
+
+    Ok(report)
+}
+
+fn run_jobs_promote(
+    invocation: &JobsPromoteInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    if !dry_run && !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`jobs promote` requires `--yes` unless `--dry-run` is used",
+        ));
+    }
+
+    let now_unix_seconds = unix_timestamp_now()?;
+    let now = JobInstant::from_unix_seconds(now_unix_seconds);
+    let mut report = CommandReport::new(
+        ["jobs", "promote"],
+        if dry_run {
+            format!(
+                "Planned promotion of due scheduled jobs for customer app `{}`",
+                built.manifest.id
+            )
+        } else {
+            format!(
+                "Promoted due scheduled jobs for customer app `{}`",
+                built.manifest.id
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns(["job_id", "queue", "scheduled_for", "status"])
+    .map_err(report_build_error)?;
+
+    let database_url = std::env::var("DATABASE_URL").ok();
+    let Some(_database_url) = database_url else {
+        report = report.with_status(ReportStatus::Warning);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "jobs.runtime.unavailable",
+            format!(
+                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to promote due scheduled jobs",
+                built.manifest.id
+            ),
+        )?;
+        return Ok(report);
+    };
+
+    let mut host = built
+        .runtime_plan
+        .runtime
+        .jobs_host("platform-jobs-promote")
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build jobs promote host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let due_jobs = host
+        .coordinator()
+        .scheduled_jobs()
+        .iter()
+        .filter_map(|record| {
+            let scheduled_for = record.spec.scheduled_for?;
+            (scheduled_for.as_unix_seconds() <= now_unix_seconds).then_some((
+                record.spec.job_id.to_string(),
+                record.spec.queue.to_string(),
+                scheduled_for.as_unix_seconds(),
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    if dry_run {
+        for (job_id, queue, scheduled_for) in &due_jobs {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("job_id", job_id.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("queue", queue.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("scheduled_for", scheduled_for.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("status", "planned")
+                    .map_err(report_build_error)?,
+            );
+        }
+        if due_jobs.is_empty() {
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Info,
+                "jobs.promote.plan",
+                "no due scheduled jobs are ready for promotion".to_string(),
+            )?;
+        } else {
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Info,
+                "jobs.promote.plan",
+                format!("{} due scheduled job(s) would be promoted", due_jobs.len()),
+            )?;
+        }
+        return Ok(report);
+    }
+
+    host.acquire_scheduler_leadership(now, Duration::from_secs(30))
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to acquire scheduler leadership for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let promoted = host.promote_due_jobs(now).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to promote due jobs for `{}`: {error}",
+            built.manifest.id
+        ))
+    })?;
+    for job_id in &promoted {
+        let (queue, scheduled_for) = due_jobs
+            .iter()
+            .find(|(candidate, _, _)| candidate == job_id.as_str())
+            .map(|(_, queue, scheduled_for)| (queue.clone(), scheduled_for.to_string()))
+            .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+        report.push_row(
+            ReportRow::new()
+                .with_cell("job_id", job_id.to_string())
+                .map_err(report_build_error)?
+                .with_cell("queue", queue)
+                .map_err(report_build_error)?
+                .with_cell("scheduled_for", scheduled_for)
+                .map_err(report_build_error)?
+                .with_cell("status", "promoted")
+                .map_err(report_build_error)?,
+        );
+    }
+    if promoted.is_empty() {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "jobs.promote.result",
+            "no due scheduled jobs were promoted".to_string(),
+        )?;
+    } else {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "jobs.promote.result",
+            format!(
+                "promoted {} scheduled job(s) into the ready queue",
+                promoted.len()
+            ),
+        )?;
+    }
 
     Ok(report)
 }
@@ -7847,6 +8013,7 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains(
             "platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes]"
         ));
+        assert!(rendered.contains("platform jobs promote [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform storage inspect [--config <path>]"));
         assert!(rendered.contains("platform storage verify [--config <path>] [--policy]"));
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
@@ -9190,6 +9357,43 @@ expect = true
 
         assert!(rendered.contains("jobs retry"));
         assert!(rendered.contains("dead-letter:job-retry"));
+        assert!(rendered.contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn run_from_args_requires_confirmation_for_jobs_promote() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "jobs".to_string(),
+            "promote".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 2);
+        assert!(
+            error
+                .to_string()
+                .contains("`jobs promote` requires `--yes` unless `--dry-run` is used")
+        );
+    }
+
+    #[test]
+    fn run_from_args_warns_when_jobs_promote_cannot_access_live_state() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "jobs".to_string(),
+            "promote".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("jobs promote"));
         assert!(rendered.contains("DATABASE_URL"));
     }
 

@@ -8,4 +8,7 @@ pub struct ImportRunInvocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportCutoverInvocation {
     pub manifest_path: PathBuf,
+    pub apply: bool,
+    pub confirmed: bool,
+    pub legacy_freeze_confirmed: bool,
 }

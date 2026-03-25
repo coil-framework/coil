@@ -983,3 +983,41 @@ fn cutover_plan_surfaces_readiness_and_rollback_triggers() {
     assert_eq!(report.status, ReportStatus::Unsafe);
     assert_eq!(report.diagnostics.len(), 1);
 }
+
+#[test]
+fn cutover_execution_journal_round_trips_and_reports_prepared_steps() {
+    let root = unique_dir("cutover-journal");
+    let journal_path = root.join("cutover.json");
+    let run_id = ImportRunId::new("wordpress-cutover").unwrap();
+    let mut journal = CutoverExecutionJournal::new(
+        &run_id,
+        "harbor-shop",
+        vec![
+            CutoverStepRecord::new("final.import", "Final import").unwrap(),
+            CutoverStepRecord::new("cutover.readiness", "Readiness check").unwrap(),
+        ],
+    );
+    journal.confirm_freeze();
+    journal
+        .mark_step_completed("final.import", "final import completed")
+        .unwrap();
+    journal
+        .mark_step_completed("cutover.readiness", "cutover is green")
+        .unwrap();
+    journal.mark_prepared();
+    journal.save(&journal_path).unwrap();
+
+    let loaded = CutoverExecutionJournal::load(
+        &journal_path,
+        &run_id,
+        "harbor-shop",
+        vec![CutoverStepRecord::new("storage.verify", "Storage verification").unwrap()],
+    )
+    .unwrap();
+    assert_eq!(loaded.state, CutoverExecutionState::Prepared);
+    assert_eq!(loaded.steps.len(), 3);
+    assert!(loaded.step_completed("final.import"));
+    let report = loaded.command_report().unwrap();
+    assert_eq!(report.status, ReportStatus::Ok);
+    assert_eq!(report.rows.len(), 3);
+}

@@ -180,7 +180,7 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
         CommandDescriptor::new(
             ["import", "cutover"],
             CommandOwner::Core,
-            "Evaluate cutover readiness for an import package and its target customer app",
+            "Evaluate or execute cutover preparation for an import package and its target customer app",
         )?,
     ])
 }

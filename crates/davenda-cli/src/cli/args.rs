@@ -103,6 +103,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut output_mode = OutputMode::Human;
     let mut dry_run = false;
     let mut confirmed = false;
+    let mut apply_cutover = false;
+    let mut legacy_freeze_confirmed = false;
     let mut verify_policy = false;
     let mut cache_scope: Option<String> = None;
     let mut cache_routes = Vec::new();
@@ -120,6 +122,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--json" => output_mode = OutputMode::Json,
             "--dry-run" => dry_run = true,
             "--yes" => confirmed = true,
+            "--apply" => apply_cutover = true,
+            "--legacy-freeze-confirmed" => legacy_freeze_confirmed = true,
             "--policy" => verify_policy = true,
             "--scope" => {
                 cache_scope = Some(next_value(&mut iter, "--scope")?);
@@ -364,6 +368,9 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 output_mode,
                 invocation: ImportCutoverInvocation {
                     manifest_path: PathBuf::from(manifest_path),
+                    apply: apply_cutover,
+                    confirmed,
+                    legacy_freeze_confirmed,
                 },
             })
         }
@@ -565,6 +572,9 @@ mod tests {
             "import".to_string(),
             "cutover".to_string(),
             "imports/wordpress-events.toml".to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+            "--legacy-freeze-confirmed".to_string(),
             "--json".to_string(),
         ])
         .unwrap();
@@ -582,6 +592,9 @@ mod tests {
             invocation.manifest_path,
             PathBuf::from("imports/wordpress-events.toml")
         );
+        assert!(invocation.apply);
+        assert!(invocation.confirmed);
+        assert!(invocation.legacy_freeze_confirmed);
     }
 
     #[test]

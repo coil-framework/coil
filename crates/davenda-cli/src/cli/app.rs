@@ -7,7 +7,7 @@ use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
 use crate::cli::customer_app::{load_customer_app_context, load_official_modules};
 use crate::cli::error::CliRunError;
-use crate::cli::import::ImportCutoverInvocation;
+use crate::cli::import::{ImportCutoverInvocation, ImportRunInvocation};
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
@@ -23,7 +23,8 @@ use davenda_data::{
     DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient,
 };
 use davenda_import::{
-    CutoverCheck, CutoverPlan, ImportManifest, ImportModelError, PublicationMode, RollbackTrigger,
+    CutoverCheck, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord, ImportManifest,
+    ImportModelError, PublicationMode, RollbackTrigger,
 };
 use davenda_runtime::{
     CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod, RequestInput,
@@ -263,159 +264,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             dry_run,
             invocation,
         } => {
-            let manifest =
-                ImportManifest::from_file(&invocation.manifest_path).map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to load import manifest from `{}`: {error}",
-                        invocation.manifest_path.display()
-                    ))
-                })?;
-            let manifest_root = invocation
-                .manifest_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            manifest.validate_at(manifest_root).map_err(|error| {
-                CliRunError::execution(format!(
-                    "failed to validate import manifest `{}`: {error}",
-                    invocation.manifest_path.display()
-                ))
-            })?;
-            let plan = manifest.plan().map_err(|error| {
-                CliRunError::execution(format!(
-                    "failed to plan import manifest `{}`: {error}",
-                    invocation.manifest_path.display()
-                ))
-            })?;
-            let import_runtime = build_import_runtime_context(manifest_root, &manifest)?;
-            if plan.publication_mode == PublicationMode::PublishValidated
-                && import_runtime.is_none()
-            {
-                return Err(CliRunError::execution(format!(
-                    "publish-validated import manifest `{}` requires a `[target]` runtime configuration",
-                    invocation.manifest_path.display()
-                )));
-            }
-
-            let report = if dry_run {
-                plan.command_report().map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to render import plan `{}`: {error}",
-                        invocation.manifest_path.display()
-                    ))
-                })?
-            } else {
-                let journal_path = import_journal_path(&invocation.manifest_path, &manifest.run_id);
-                let execution = if let Some(runtime) = import_runtime.as_ref() {
-                    let storage_host = runtime.storage_host.clone();
-                    let default_locale = runtime.built.manifest.default_locale.to_string();
-                    let publish_validated =
-                        plan.publication_mode == PublicationMode::PublishValidated;
-                    if publish_validated && manifest.site.is_none() {
-                        return Err(CliRunError::execution(format!(
-                            "publish-validated import manifest `{}` requires `site` to materialize live auth state",
-                            invocation.manifest_path.display()
-                        )));
-                    }
-                    let data_runtime = runtime.built.runtime_plan.runtime.data.clone();
-                    let mut data_client = None;
-                    let tokio_runtime = if publish_validated {
-                        Some(
-                            tokio::runtime::Builder::new_current_thread()
-                                .enable_all()
-                                .build()
-                                .map_err(|error| {
-                                    CliRunError::execution(format!(
-                                        "failed to start runtime for live import materialization: {error}"
-                                    ))
-                                })?,
-                        )
-                    } else {
-                        None
-                    };
-                    let mut auth_context = match (publish_validated, tokio_runtime.as_ref()) {
-                        (true, Some(tokio_runtime)) => Some(build_import_auth_context(
-                            runtime,
-                            &manifest,
-                            tokio_runtime,
-                        )?),
-                        _ => None,
-                    };
-                    plan.execute_with_handler(
-                        manifest_root,
-                        &journal_path,
-                        |importer, _, manifest_root, staged_record| {
-                            match importer.resource_kind.as_str() {
-                                "asset" => {
-                                    materialize_asset_record(
-                                        &storage_host,
-                                        manifest.asset_storage_default,
-                                        manifest_root,
-                                        staged_record,
-                                    )?;
-                                }
-                                "page" if publish_validated => {
-                                    let client =
-                                        ensure_import_data_client(&data_runtime, &mut data_client)?;
-                                    materialize_page_record(
-                                        tokio_runtime
-                                            .as_ref()
-                                            .expect("publish-validated imports build a runtime"),
-                                        &client,
-                                        &default_locale,
-                                        staged_record,
-                                    )?;
-                                }
-                                "event" if publish_validated => {
-                                    let client =
-                                        ensure_import_data_client(&data_runtime, &mut data_client)?;
-                                    materialize_event_record(
-                                        tokio_runtime
-                                            .as_ref()
-                                            .expect("publish-validated imports build a runtime"),
-                                        &client,
-                                        staged_record,
-                                    )?;
-                                }
-                                "user" if publish_validated => {
-                                    let auth_context = auth_context.as_mut().expect(
-                                        "publish-validated imports build a live auth context",
-                                    );
-                                    materialize_user_record(
-                                        tokio_runtime
-                                            .as_ref()
-                                            .expect("publish-validated imports build a runtime"),
-                                        auth_context,
-                                        staged_record,
-                                    )?;
-                                }
-                                _ => {}
-                            }
-                            Ok(())
-                        },
-                    )
-                } else {
-                    plan.execute(manifest_root, &journal_path)
-                }
-                .map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to execute import manifest `{}`: {error}",
-                        invocation.manifest_path.display()
-                    ))
-                })?;
-                let mut report = execution.command_report().map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to render import execution `{}`: {error}",
-                        invocation.manifest_path.display()
-                    ))
-                })?;
-                if let Some(runtime) = import_runtime.as_ref() {
-                    materialize_import_assets(&mut report, manifest_root, runtime, &execution)?;
-                    materialize_import_pages(&mut report, manifest_root, runtime, &execution)?;
-                    materialize_import_events(&mut report, manifest_root, runtime, &execution)?;
-                    materialize_import_users(&mut report, manifest_root, runtime, &execution)?;
-                }
-                report
-            };
+            let report = run_import_manifest(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
         CliInput::ImportCutover {
@@ -457,7 +306,7 @@ fn usage() -> String {
         "  platform storage verify [--config <path>] [--policy] [--json]",
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
-        "  platform import cutover <manifest-path> [--json]",
+        "  platform import cutover <manifest-path> [--apply] [--yes] [--legacy-freeze-confirmed] [--json]",
         "",
         "Examples:",
         "  platform dev server --config config/platform.toml",
@@ -473,6 +322,7 @@ fn usage() -> String {
         "  platform import run imports/wordpress-events.toml",
         "  platform import run imports/wordpress-events.toml --dry-run",
         "  platform import cutover imports/wordpress-events.toml",
+        "  platform import cutover imports/wordpress-events.toml --apply --yes --legacy-freeze-confirmed",
         "",
         "Environment:",
         "  DAVENDA_COOKIE_SECRET and DAVENDA_CSRF_SECRET are required for `dev server`",
@@ -1080,7 +930,10 @@ fn run_storage_verify(
     Ok(report)
 }
 
-fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandReport, CliRunError> {
+fn run_import_manifest(
+    invocation: &ImportRunInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
     let manifest = ImportManifest::from_file(&invocation.manifest_path).map_err(|error| {
         CliRunError::execution(format!(
             "failed to load import manifest from `{}`: {error}",
@@ -1094,6 +947,385 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
     manifest.validate_at(manifest_root).map_err(|error| {
         CliRunError::execution(format!(
             "failed to validate import manifest `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let plan = manifest.plan().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to plan import manifest `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let import_runtime = build_import_runtime_context(manifest_root, &manifest)?;
+    if plan.publication_mode == PublicationMode::PublishValidated && import_runtime.is_none() {
+        return Err(CliRunError::execution(format!(
+            "publish-validated import manifest `{}` requires a `[target]` runtime configuration",
+            invocation.manifest_path.display()
+        )));
+    }
+
+    if dry_run {
+        return plan.command_report().map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to render import plan `{}`: {error}",
+                invocation.manifest_path.display()
+            ))
+        });
+    }
+
+    let journal_path = import_journal_path(&invocation.manifest_path, &manifest.run_id);
+    let execution = if let Some(runtime) = import_runtime.as_ref() {
+        let storage_host = runtime.storage_host.clone();
+        let default_locale = runtime.built.manifest.default_locale.to_string();
+        let publish_validated = plan.publication_mode == PublicationMode::PublishValidated;
+        let requires_live_data = publish_validated
+            && plan
+                .ordered_importers
+                .iter()
+                .any(|importer| matches!(importer.resource_kind.as_str(), "page" | "event"));
+        let requires_live_auth = publish_validated
+            && plan
+                .ordered_importers
+                .iter()
+                .any(|importer| importer.resource_kind == "user");
+        if requires_live_auth && manifest.site.is_none() {
+            return Err(CliRunError::execution(format!(
+                "publish-validated import manifest `{}` requires `site` to materialize live auth state",
+                invocation.manifest_path.display()
+            )));
+        }
+        let data_runtime = runtime.built.runtime_plan.runtime.data.clone();
+        let mut data_client = None;
+        let tokio_runtime = if requires_live_data || requires_live_auth {
+            Some(
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| {
+                        CliRunError::execution(format!(
+                            "failed to start runtime for live import materialization: {error}"
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        };
+        let mut auth_context = match (requires_live_auth, tokio_runtime.as_ref()) {
+            (true, Some(tokio_runtime)) => {
+                Some(build_import_auth_context(runtime, &manifest, tokio_runtime)?)
+            }
+            _ => None,
+        };
+        plan.execute_with_handler(
+            manifest_root,
+            &journal_path,
+            |importer, _, manifest_root, staged_record| {
+                match importer.resource_kind.as_str() {
+                    "asset" => {
+                        materialize_asset_record(
+                            &storage_host,
+                            manifest.asset_storage_default,
+                            manifest_root,
+                            staged_record,
+                        )?;
+                    }
+                    "page" if publish_validated => {
+                        let client =
+                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        materialize_page_record(
+                            tokio_runtime
+                                .as_ref()
+                                .expect("publish-validated imports build a runtime"),
+                            &client,
+                            &default_locale,
+                            staged_record,
+                        )?;
+                    }
+                    "event" if publish_validated => {
+                        let client =
+                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        materialize_event_record(
+                            tokio_runtime
+                                .as_ref()
+                                .expect("publish-validated imports build a runtime"),
+                            &client,
+                            staged_record,
+                        )?;
+                    }
+                    "user" if publish_validated => {
+                        let auth_context = auth_context
+                            .as_mut()
+                            .expect("publish-validated imports build a live auth context");
+                        materialize_user_record(
+                            tokio_runtime
+                                .as_ref()
+                                .expect("publish-validated imports build a runtime"),
+                            auth_context,
+                            staged_record,
+                        )?;
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+        )
+    } else {
+        plan.execute(manifest_root, &journal_path)
+    }
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to execute import manifest `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let mut report = execution.command_report().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to render import execution `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    if let Some(runtime) = import_runtime.as_ref() {
+        materialize_import_assets(&mut report, manifest_root, runtime, &execution)?;
+        materialize_import_pages(&mut report, manifest_root, runtime, &execution)?;
+        materialize_import_events(&mut report, manifest_root, runtime, &execution)?;
+        materialize_import_users(&mut report, manifest_root, runtime, &execution)?;
+    }
+    Ok(report)
+}
+
+struct EvaluatedImportCutover {
+    manifest: ImportManifest,
+    cutover: davenda_import::ImportCutover,
+    runtime: BuiltImportRuntimeContext,
+    config_path: PathBuf,
+    cutover_plan: CutoverPlan,
+    report: CommandReport,
+}
+
+fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandReport, CliRunError> {
+    let evaluated = evaluate_import_cutover(invocation)?;
+    if !invocation.apply {
+        return Ok(evaluated.report);
+    }
+
+    if !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`import cutover --apply` requires `--yes`",
+        ));
+    }
+    if evaluated.cutover.freeze_legacy_writes && !invocation.legacy_freeze_confirmed {
+        return Err(CliRunError::usage(
+            "`import cutover --apply` requires `--legacy-freeze-confirmed` when the manifest freezes legacy writes",
+        ));
+    }
+    if !cutover_preflight_ready(&evaluated.cutover_plan) {
+        return Err(CliRunError::execution(format!(
+            "cutover `{}` is not executable yet; rerun `platform import cutover {}` to inspect the blocking readiness checks",
+            evaluated.manifest.run_id,
+            invocation.manifest_path.display()
+        )));
+    }
+
+    let journal_path = cutover_journal_path(&invocation.manifest_path, &evaluated.manifest.run_id);
+    let expected_steps = cutover_steps(&evaluated.cutover)?;
+    let mut journal = CutoverExecutionJournal::load(
+        &journal_path,
+        &evaluated.manifest.run_id,
+        evaluated.manifest.customer_app_id.as_str(),
+        expected_steps,
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load cutover journal for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+    if evaluated.cutover.freeze_legacy_writes {
+        journal.confirm_freeze();
+        save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
+    }
+
+    run_cutover_step(
+        &mut journal,
+        &journal_path,
+        &evaluated.manifest.run_id,
+        "final.import",
+        || {
+            let report = run_import_manifest(
+                &ImportRunInvocation {
+                    manifest_path: invocation.manifest_path.clone(),
+                },
+                false,
+            )?;
+            if report.status != ReportStatus::Ok {
+                return Err(CliRunError::execution(format!(
+                    "final import for `{}` must finish without staged or failed records",
+                    evaluated.manifest.run_id
+                )));
+            }
+            Ok(report.summary.clone())
+        },
+    )?;
+
+    if evaluated.cutover.requires_storage_validation {
+        run_cutover_step(
+            &mut journal,
+            &journal_path,
+            &evaluated.manifest.run_id,
+            "storage.verify",
+            || {
+                let report = run_storage_verify(&evaluated.config_path, true)?;
+                if report.status != ReportStatus::Ok {
+                    return Err(CliRunError::execution(format!(
+                        "storage verification for `{}` is not green",
+                        evaluated.manifest.run_id
+                    )));
+                }
+                Ok(report.summary.clone())
+            },
+        )?;
+    }
+
+    if evaluated.cutover.requires_assets_publish {
+        run_cutover_step(
+            &mut journal,
+            &journal_path,
+            &evaluated.manifest.run_id,
+            "assets.publish",
+            || {
+                let report = run_assets_publish(
+                    &AssetsPublishInvocation {
+                        config_path: evaluated.config_path.clone(),
+                        confirmed: true,
+                    },
+                    false,
+                )?;
+                if report.status != ReportStatus::Ok {
+                    return Err(CliRunError::execution(format!(
+                        "asset publication for `{}` is not green",
+                        evaluated.manifest.run_id
+                    )));
+                }
+                Ok(report.summary.clone())
+            },
+        )?;
+    }
+
+    if evaluated.cutover.requires_migrate_apply {
+        run_cutover_step(
+            &mut journal,
+            &journal_path,
+            &evaluated.manifest.run_id,
+            "migrate.apply",
+            || {
+                let report = run_migrate_apply(
+                    &MigrateApplyInvocation {
+                        config_path: evaluated.config_path.clone(),
+                        confirmed: true,
+                    },
+                    false,
+                )?;
+                if report.status != ReportStatus::Ok {
+                    return Err(CliRunError::execution(format!(
+                        "migrate apply for `{}` is not green",
+                        evaluated.manifest.run_id
+                    )));
+                }
+                Ok(report.summary.clone())
+            },
+        )?;
+    }
+
+    if evaluated.cutover.requires_cache_warm {
+        let routes = evaluated
+            .manifest
+            .verification
+            .as_ref()
+            .map(|verification| verification.sample_routes.clone())
+            .unwrap_or_default();
+        run_cutover_step(
+            &mut journal,
+            &journal_path,
+            &evaluated.manifest.run_id,
+            "cache.warm",
+            || {
+                if routes.is_empty() {
+                    return Err(CliRunError::execution(
+                        "cutover cache warm requires verification.sample_routes".to_string(),
+                    ));
+                }
+                let report = warm_cache_routes(&evaluated.runtime.built, &routes, "public", false)?;
+                if report.status != ReportStatus::Ok {
+                    return Err(CliRunError::execution(format!(
+                        "cache warm for `{}` is not green",
+                        evaluated.manifest.run_id
+                    )));
+                }
+                Ok(report.summary.clone())
+            },
+        )?;
+    }
+
+    run_cutover_step(
+        &mut journal,
+        &journal_path,
+        &evaluated.manifest.run_id,
+        "cutover.readiness",
+        || {
+            let refreshed = evaluate_import_cutover(invocation)?;
+            if refreshed.report.status != ReportStatus::Ok {
+                return Err(CliRunError::execution(format!(
+                    "cutover `{}` is still not fully ready after executing the owned preparation steps",
+                    refreshed.manifest.run_id
+                )));
+            }
+            Ok(refreshed.report.summary.clone())
+        },
+    )?;
+
+    journal.mark_prepared();
+    save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
+    let mut report = journal.command_report().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to render cutover execution report for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+    report.summary = format!(
+        "Cutover preparation for import run `{}` into customer app `{}` is prepared",
+        evaluated.manifest.run_id, evaluated.manifest.customer_app_id
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.journal",
+        format!("cutover journal persisted at `{}`", journal_path.display()),
+    )?;
+    Ok(report)
+}
+
+fn evaluate_import_cutover(
+    invocation: &ImportCutoverInvocation,
+) -> Result<EvaluatedImportCutover, CliRunError> {
+    let manifest = ImportManifest::from_file(&invocation.manifest_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load import manifest from `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let manifest_root = invocation
+        .manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    manifest.validate_at(manifest_root).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to validate import manifest `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let plan = manifest.plan().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to plan import manifest `{}`: {error}",
             invocation.manifest_path.display()
         ))
     })?;
@@ -1133,6 +1365,15 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
             ),
             true,
             true,
+        )?)
+        .with_check(build_cutover_check(
+            "final.import.mode",
+            format!(
+                "import publication mode `{}` can materialize live runtime state",
+                publication_mode_label(plan.publication_mode)
+            ),
+            true,
+            plan.publication_mode == PublicationMode::PublishValidated,
         )?);
 
     if let Some(verification) = &manifest.verification {
@@ -1160,9 +1401,9 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
         })?;
     cutover_plan = cutover_plan.with_check(build_cutover_check(
         "release.doctor",
-        "release doctor must be fully green before traffic moves",
+        "release doctor must not report blocking findings before traffic moves",
         true,
-        release_report.status == ReportStatus::Ok,
+        release_report.status != ReportStatus::Unsafe,
     )?);
 
     if cutover.requires_storage_validation {
@@ -1280,7 +1521,135 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
         ),
     )?;
 
-    Ok(report)
+    Ok(EvaluatedImportCutover {
+        manifest,
+        cutover,
+        runtime,
+        config_path,
+        cutover_plan,
+        report,
+    })
+}
+
+fn cutover_preflight_ready(plan: &CutoverPlan) -> bool {
+    plan.checks.iter().all(|check| {
+        if !check.required {
+            return true;
+        }
+        match check.id.as_str() {
+            "import.package" | "target.runtime" | "final.import.mode" | "release.doctor" => {
+                check.satisfied
+            }
+            _ => true,
+        }
+    })
+}
+
+fn cutover_steps(
+    cutover: &davenda_import::ImportCutover,
+) -> Result<Vec<CutoverStepRecord>, CliRunError> {
+    let mut steps = vec![
+        CutoverStepRecord::new(
+            "final.import",
+            "Final publish-validated import executed against the target runtime",
+        )
+        .map_err(import_model_error)?,
+    ];
+    if cutover.requires_storage_validation {
+        steps.push(
+            CutoverStepRecord::new(
+                "storage.verify",
+                "Storage policy and backend validation completed against the target runtime",
+            )
+            .map_err(import_model_error)?,
+        );
+    }
+    if cutover.requires_assets_publish {
+        steps.push(
+            CutoverStepRecord::new(
+                "assets.publish",
+                "Theme asset publication completed against the target runtime",
+            )
+            .map_err(import_model_error)?,
+        );
+    }
+    if cutover.requires_migrate_apply {
+        steps.push(
+            CutoverStepRecord::new(
+                "migrate.apply",
+                "Pending executable migrations were applied to the target runtime",
+            )
+            .map_err(import_model_error)?,
+        );
+    }
+    if cutover.requires_cache_warm {
+        steps.push(
+            CutoverStepRecord::new(
+                "cache.warm",
+                "Representative public routes were warmed through the live runtime",
+            )
+            .map_err(import_model_error)?,
+        );
+    }
+    steps.push(
+        CutoverStepRecord::new(
+            "cutover.readiness",
+            "Readiness was re-evaluated after preparation and returned green",
+        )
+        .map_err(import_model_error)?,
+    );
+    Ok(steps)
+}
+
+fn run_cutover_step<F>(
+    journal: &mut CutoverExecutionJournal,
+    journal_path: &Path,
+    run_id: &impl std::fmt::Display,
+    step_id: &str,
+    step: F,
+) -> Result<(), CliRunError>
+where
+    F: FnOnce() -> Result<String, CliRunError>,
+{
+    if journal.step_completed(step_id) {
+        return Ok(());
+    }
+
+    match step() {
+        Ok(detail) => {
+            journal
+                .mark_step_completed(step_id, detail)
+                .map_err(import_model_error)?;
+            save_cutover_journal(journal, journal_path, run_id)
+        }
+        Err(error) => {
+            journal
+                .mark_step_failed(step_id, error.to_string())
+                .map_err(import_model_error)?;
+            save_cutover_journal(journal, journal_path, run_id)?;
+            Err(error)
+        }
+    }
+}
+
+fn save_cutover_journal(
+    journal: &CutoverExecutionJournal,
+    journal_path: &Path,
+    run_id: &impl std::fmt::Display,
+) -> Result<(), CliRunError> {
+    journal.save(journal_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to persist cutover journal for `{run_id}`: {error}"
+        ))
+    })
+}
+
+fn publication_mode_label(mode: PublicationMode) -> &'static str {
+    match mode {
+        PublicationMode::ValidateOnly => "validate_only",
+        PublicationMode::StageValidated => "stage_validated",
+        PublicationMode::PublishValidated => "publish_validated",
+    }
 }
 
 fn build_customer_app_runtime_context(
@@ -1648,6 +2017,10 @@ fn report_build_error(error: impl std::fmt::Display) -> CliRunError {
     CliRunError::execution(format!("failed to build command report: {error}"))
 }
 
+fn import_model_error(error: ImportModelError) -> CliRunError {
+    CliRunError::execution(format!("failed to build import model data: {error}"))
+}
+
 fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
     let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
         CliRunError::execution(format!(
@@ -1716,6 +2089,17 @@ fn import_journal_path(manifest_path: &Path, run_id: &impl std::fmt::Display) ->
     parent
         .join(".davenda")
         .join("import-runs")
+        .join(format!("{run_id}.json"))
+}
+
+fn cutover_journal_path(manifest_path: &Path, run_id: &impl std::fmt::Display) -> PathBuf {
+    let parent = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    parent
+        .join(".davenda")
+        .join("cutover-runs")
         .join(format!("{run_id}.json"))
 }
 
@@ -3482,6 +3866,133 @@ dependencies = ["users", "media"]
         assert!(rendered.contains("release.doctor"));
         assert!(rendered.contains("storage.verify"));
         assert!(rendered.contains("legacy writes must be frozen"));
+    }
+
+    #[test]
+    fn run_from_args_executes_cutover_preparation_and_persists_a_journal() {
+        let fixture = import_fixture();
+        let cutover_manifest = fixture.root.join("imports").join("cutover-apply.toml");
+        let config_path = fixture.root.join("config").join("platform.toml");
+        let app_manifest_path = fixture
+            .root
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&config_path, config).unwrap();
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+        fs::write(
+            &cutover_manifest,
+            format!(
+                "run_id = \"wordpress-events\"\nsource_system = \"wordpress\"\nsnapshot_at = \"2026-03-19T00:00:00Z\"\ncustomer_app_id = \"showcase-events\"\nmodules = [\"media\"]\npublication_mode = \"publish_validated\"\nasset_storage_default = \"public_upload\"\n\n[target]\napp_manifest = \"../apps/showcase-events/app.toml\"\nplatform_config = \"../config/platform.toml\"\nexpected_modules = [\"media\", \"admin\", \"ops\"]\n\n[verification]\nrequired = [\"record_counts\"]\n\n[cutover]\nfreeze_legacy_writes = true\nswitch_method = \"dns\"\nhostnames = [\"shop.example.com\"]\nrequires_assets_publish = false\nrequires_migrate_apply = false\nrequires_storage_validation = true\nrequires_cache_warm = false\nobservation_window_minutes = 60\n\n[[cutover.rollback_triggers]]\nid = \"auth-failure\"\ndescription = \"Auth failure\"\n\n[[importers]]\nid = \"media\"\nphase = 20\nresource_kind = \"asset\"\ndescription = \"Import media\"\nsource_path = \"fixtures/media.json\"\n"
+            ),
+        )
+        .unwrap();
+
+        let rendered = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+            "--legacy-freeze-confirmed".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("Cutover preparation for import run `wordpress-events`"));
+        assert!(rendered.contains("prepared"));
+        assert!(rendered.contains("final.import"));
+        assert!(rendered.contains("storage.verify"));
+        assert!(rendered.contains("cutover.readiness"));
+
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"prepared\""));
+        assert!(journal.contains("\"final.import\""));
+        assert!(journal.contains("\"storage.verify\""));
+
+        let rerun = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+            "--legacy-freeze-confirmed".to_string(),
+        ])
+        .unwrap();
+        assert!(rerun.contains("prepared"));
+    }
+
+    #[test]
+    fn run_from_args_requires_legacy_freeze_confirmation_for_cutover_apply() {
+        let fixture = import_fixture();
+        let cutover_manifest = fixture.root.join("imports").join("cutover-apply.toml");
+        let manifest = fs::read_to_string(&fixture.manifest_path).unwrap();
+        fs::write(
+            &cutover_manifest,
+            format!(
+                "publication_mode = \"publish_validated\"\nsite = \"showcase-events\"\n{manifest}\n[verification]\nrequired = [\"record_counts\"]\n[cutover]\nfreeze_legacy_writes = true\nswitch_method = \"dns\"\nhostnames = [\"shop.example.com\"]\nrequires_assets_publish = false\nrequires_migrate_apply = false\nrequires_storage_validation = true\nrequires_cache_warm = false\nobservation_window_minutes = 60\n\n[[cutover.rollback_triggers]]\nid = \"auth-failure\"\ndescription = \"Auth failure\"\n"
+            ),
+        )
+        .unwrap();
+
+        let error = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("`import cutover --apply` requires `--legacy-freeze-confirmed`"),
+            "{}",
+            error
+        );
+    }
+
+    #[test]
+    fn run_from_args_rejects_cutover_apply_when_import_manifest_is_not_publish_validated() {
+        let fixture = import_fixture();
+        let cutover_manifest = fixture.root.join("imports").join("cutover-stage-only.toml");
+        let manifest = fs::read_to_string(&fixture.manifest_path).unwrap();
+        fs::write(
+            &cutover_manifest,
+            format!(
+                "{manifest}\n[verification]\nrequired = [\"record_counts\"]\n[cutover]\nfreeze_legacy_writes = false\nswitch_method = \"dns\"\nhostnames = [\"shop.example.com\"]\nrequires_assets_publish = false\nrequires_migrate_apply = false\nrequires_storage_validation = true\nrequires_cache_warm = false\nobservation_window_minutes = 60\n\n[[cutover.rollback_triggers]]\nid = \"auth-failure\"\ndescription = \"Auth failure\"\n"
+            ),
+        )
+        .unwrap();
+
+        let error = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("cutover `wordpress-events` is not executable yet"),
+            "{}",
+            error
+        );
     }
 
     #[test]

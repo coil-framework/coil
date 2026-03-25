@@ -62,9 +62,7 @@ pub enum ImportModelError {
         importer_id: String,
         resource_kind: String,
     },
-    #[error(
-        "importer `{importer_id}` record `{record}` is invalid: {message}"
-    )]
+    #[error("importer `{importer_id}` record `{record}` is invalid: {message}")]
     InvalidSourceRecord {
         importer_id: String,
         record: String,
@@ -72,7 +70,9 @@ pub enum ImportModelError {
     },
     #[error("failed to persist import artifact `{path}`: {message}")]
     ArtifactWrite { path: String, message: String },
-    #[error("import execution hook failed for importer `{importer_id}` record `{record}`: {message}")]
+    #[error(
+        "import execution hook failed for importer `{importer_id}` record `{record}`: {message}"
+    )]
     ExecutionHook {
         importer_id: String,
         record: String,
@@ -88,6 +88,22 @@ pub enum ImportModelError {
         "import journal `{path}` belongs to run `{actual_run_id}` for customer app `{actual_customer_app_id}`, not `{expected_run_id}` / `{expected_customer_app_id}`"
     )]
     JournalRunMismatch {
+        path: String,
+        expected_run_id: String,
+        actual_run_id: String,
+        expected_customer_app_id: String,
+        actual_customer_app_id: String,
+    },
+    #[error("failed to read cutover journal `{path}`: {message}")]
+    CutoverJournalRead { path: String, message: String },
+    #[error("failed to write cutover journal `{path}`: {message}")]
+    CutoverJournalWrite { path: String, message: String },
+    #[error("failed to parse cutover journal `{path}`: {message}")]
+    CutoverJournalParse { path: String, message: String },
+    #[error(
+        "cutover journal `{path}` belongs to run `{actual_run_id}` for customer app `{actual_customer_app_id}`, not `{expected_run_id}` / `{expected_customer_app_id}`"
+    )]
+    CutoverJournalRunMismatch {
         path: String,
         expected_run_id: String,
         actual_run_id: String,

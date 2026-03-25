@@ -239,6 +239,229 @@ impl ImportJournal {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutoverExecutionState {
+    Planned,
+    FreezeConfirmed,
+    Prepared,
+    Failed,
+}
+
+impl CutoverExecutionState {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Planned => "planned",
+            Self::FreezeConfirmed => "freeze_confirmed",
+            Self::Prepared => "prepared",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutoverStepStatus {
+    Pending,
+    Completed,
+    Failed,
+}
+
+impl CutoverStepStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CutoverStepRecord {
+    pub id: String,
+    pub description: String,
+    pub status: CutoverStepStatus,
+    pub detail: Option<String>,
+}
+
+impl CutoverStepRecord {
+    pub fn new(
+        id: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            id: validate_token("cutover_step_id", id.into())?,
+            description: require_non_empty("cutover_step_description", description.into())?,
+            status: CutoverStepStatus::Pending,
+            detail: None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CutoverExecutionJournal {
+    run_id: String,
+    customer_app_id: String,
+    pub state: CutoverExecutionState,
+    #[serde(default)]
+    pub steps: Vec<CutoverStepRecord>,
+}
+
+impl CutoverExecutionJournal {
+    pub fn new(run_id: &ImportRunId, customer_app_id: &str, steps: Vec<CutoverStepRecord>) -> Self {
+        Self {
+            run_id: run_id.to_string(),
+            customer_app_id: customer_app_id.to_string(),
+            state: CutoverExecutionState::Planned,
+            steps,
+        }
+    }
+
+    pub fn load(
+        path: impl AsRef<Path>,
+        run_id: &ImportRunId,
+        customer_app_id: &str,
+        expected_steps: Vec<CutoverStepRecord>,
+    ) -> Result<Self, ImportModelError> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(Self::new(run_id, customer_app_id, expected_steps));
+        }
+
+        let input =
+            fs::read_to_string(path).map_err(|error| ImportModelError::CutoverJournalRead {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            })?;
+        let mut journal: Self = serde_json::from_str(&input).map_err(|error| {
+            ImportModelError::CutoverJournalParse {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            }
+        })?;
+        if journal.run_id != run_id.as_str() || journal.customer_app_id != customer_app_id {
+            return Err(ImportModelError::CutoverJournalRunMismatch {
+                path: path.display().to_string(),
+                expected_run_id: run_id.to_string(),
+                actual_run_id: journal.run_id,
+                expected_customer_app_id: customer_app_id.to_string(),
+                actual_customer_app_id: journal.customer_app_id,
+            });
+        }
+
+        for expected in expected_steps {
+            if !journal
+                .steps
+                .iter()
+                .any(|existing| existing.id == expected.id)
+            {
+                journal.steps.push(expected);
+            }
+        }
+
+        Ok(journal)
+    }
+
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), ImportModelError> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| ImportModelError::CutoverJournalWrite {
+                path: parent.display().to_string(),
+                message: error.to_string(),
+            })?;
+        }
+        let output = serde_json::to_string_pretty(self).map_err(|error| {
+            ImportModelError::CutoverJournalWrite {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            }
+        })?;
+        fs::write(path, output).map_err(|error| ImportModelError::CutoverJournalWrite {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })
+    }
+
+    pub fn confirm_freeze(&mut self) {
+        if self.state == CutoverExecutionState::Planned {
+            self.state = CutoverExecutionState::FreezeConfirmed;
+        }
+    }
+
+    pub fn step_completed(&self, step_id: &str) -> bool {
+        self.steps
+            .iter()
+            .find(|step| step.id == step_id)
+            .is_some_and(|step| step.status == CutoverStepStatus::Completed)
+    }
+
+    pub fn mark_step_completed(
+        &mut self,
+        step_id: &str,
+        detail: impl Into<String>,
+    ) -> Result<(), ImportModelError> {
+        let detail = require_non_empty("cutover_step_detail", detail.into())?;
+        if let Some(step) = self.steps.iter_mut().find(|step| step.id == step_id) {
+            step.status = CutoverStepStatus::Completed;
+            step.detail = Some(detail);
+        }
+        Ok(())
+    }
+
+    pub fn mark_step_failed(
+        &mut self,
+        step_id: &str,
+        detail: impl Into<String>,
+    ) -> Result<(), ImportModelError> {
+        let detail = require_non_empty("cutover_step_detail", detail.into())?;
+        self.state = CutoverExecutionState::Failed;
+        if let Some(step) = self.steps.iter_mut().find(|step| step.id == step_id) {
+            step.status = CutoverStepStatus::Failed;
+            step.detail = Some(detail);
+        }
+        Ok(())
+    }
+
+    pub fn mark_prepared(&mut self) {
+        self.state = CutoverExecutionState::Prepared;
+    }
+
+    pub fn command_report(&self) -> Result<CommandReport, ImportModelError> {
+        let mut report = CommandReport::new(
+            ["import", "cutover"],
+            format!(
+                "Cutover execution for import run `{}` is currently `{}`",
+                self.run_id,
+                self.state.label()
+            ),
+        )?
+        .with_columns(["step", "status", "description", "detail"])?;
+        report = report.with_status(match self.state {
+            CutoverExecutionState::Prepared => ReportStatus::Ok,
+            CutoverExecutionState::Failed => ReportStatus::Unsafe,
+            CutoverExecutionState::Planned | CutoverExecutionState::FreezeConfirmed => {
+                ReportStatus::Warning
+            }
+        });
+
+        for step in &self.steps {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("step", step.id.clone())?
+                    .with_cell("status", step.status.label())?
+                    .with_cell("description", step.description.clone())?
+                    .with_cell(
+                        "detail",
+                        step.detail.clone().unwrap_or_else(|| "pending".to_string()),
+                    )?,
+            );
+        }
+
+        Ok(report)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportExecution {
     pub run_id: ImportRunId,

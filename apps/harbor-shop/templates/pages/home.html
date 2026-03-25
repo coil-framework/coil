@@ -19,7 +19,35 @@
     <main class="site-main">
       <section class="home-page">
         <div dv:replace="~{components/hero}"></div>
-        <div dv:replace="~{commerce/collection-grid}"></div>
+        <div dv:replace="~{commerce/collection-grid :: grid}"></div>
+        <div dv:replace="~{commerce/product-grid :: grid}"></div>
+        <section class="catalog-sections">
+          <article class="catalog-section">
+            <p class="catalog-section__eyebrow">Start here</p>
+            <h2>New to Harbor Shop?</h2>
+            <p>
+              Begin with the catalog to see the current storefront edit, then use collection pages
+              to narrow toward the basket you want to build.
+            </p>
+            <div class="checkout-actions">
+              <a class="button" href="/shop">Open catalog</a>
+              <a class="button button--secondary" href="/collections">Browse collections</a>
+            </div>
+          </article>
+          <article class="catalog-section">
+            <p class="catalog-section__eyebrow">Already buying?</p>
+            <h2>Keep the journey short</h2>
+            <p>
+              Product cards can move directly into cart or checkout, and account pages pick the
+              journey back up after confirmation.
+            </p>
+            <div class="checkout-actions">
+              <a class="button" href="/cart">Review cart</a>
+              <a class="button button--secondary" href="/account">Open account</a>
+            </div>
+          </article>
+        </section>
+        <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
       </section>
     </main>
     <footer class="site-footer">

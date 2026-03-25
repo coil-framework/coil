@@ -58,16 +58,19 @@
 
       <div dv:replace="~{commerce/collection-grid :: grid}"></div>
       <div dv:replace="~{commerce/product-grid :: grid}"></div>
+      <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
 
       <section class="catalog-assurance">
         <article>
-          <h2>Why this flow works in production</h2>
-          <ul>
-            <li>Collection-led merchandising keeps the first click meaningful.</li>
-            <li>Product cards now post directly into cart and checkout start actions.</li>
-            <li>Cart review, checkout submission, and confirmation all stay on first-party routes.</li>
-            <li>Membership links stay visible for repeat customers and subscribers.</li>
-          </ul>
+          <h2>Start with the route your customer needs</h2>
+          <p>
+            New shoppers can begin in featured collections, high-intent buyers can jump directly
+            into product detail, and repeat customers can head straight to cart or account.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/shop/collections/featured">Open featured collection</a>
+            <a class="button button--secondary" href="/cart">Review cart</a>
+          </div>
         </article>
       </section>
     </main>

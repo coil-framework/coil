@@ -4,16 +4,24 @@
     Browse the current storefront collections, then carry the basket through to
     checkout and account follow-up.
   </p>
-  <ul class="collection-grid__list" dv:if="${catalogSections}">
-    <li class="collection-grid__item" dv:each="section : ${catalogSections}">
-      <a class="collection-grid__link" href="/shop/collections/featured" dv:href="${section.url}">
-        <span dv:text="${section.title}">Featured</span>
+  <div class="collection-grid__list" dv:if="${catalogSections}">
+    <article class="catalog-section collection-grid__item" dv:each="section : ${catalogSections}">
+      <p class="catalog-section__eyebrow" dv:text="${section.label}">Featured edit</p>
+      <h3 dv:text="${section.title}">Featured</h3>
+      <p dv:text="${section.summary}">
+        Seasonal landing pages that help customers start from a clear merchandising promise.
+      </p>
+      <a class="button" href="/shop/collections/featured" dv:href="${section.url}">
+        Open collection
       </a>
-    </li>
-  </ul>
-  <ul class="collection-grid__list" dv:unless="${catalogSections}">
-    <li class="collection-grid__item">
-      <a class="collection-grid__link" href="/shop/collections/featured">Featured</a>
-    </li>
-  </ul>
+    </article>
+  </div>
+  <div class="collection-grid__list" dv:unless="${catalogSections}">
+    <article class="catalog-section collection-grid__item">
+      <p class="catalog-section__eyebrow">Featured edit</p>
+      <h3>Featured</h3>
+      <p>Start with the current harbor edit, then move directly into products and checkout.</p>
+      <a class="button" href="/shop/collections/featured">Open collection</a>
+    </article>
+  </div>
 </section>

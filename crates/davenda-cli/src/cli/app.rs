@@ -1,7 +1,7 @@
 use crate::CliModelError;
 use crate::cli::args::{
     AssetsPublishInvocation, AuthPackageValidateInvocation, CacheWarmInvocation, CliInput,
-    DevServerInvocation, MigrateApplyInvocation, parse,
+    DevServerInvocation, MigrateApplyInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -39,6 +39,7 @@ use davenda_runtime::{
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
+use davenda_tls::{CertificateId, TlsInstant};
 use reqwest::Url;
 use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::redirect::Policy as RedirectPolicy;
@@ -259,6 +260,21 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_cache_warm(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::TlsStatus {
+            output_mode,
+            config_path,
+        } => {
+            let report = run_tls_status(&config_path)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::TlsRenew {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_tls_renew(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::StorageVerify {
             output_mode,
             config_path,
@@ -320,6 +336,8 @@ fn usage() -> String {
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
         "  platform cache warm [--config <path>] --scope public --route <path> [--route <path> ...] [--dry-run] [--json]",
+        "  platform tls status [--config <path>] [--json]",
+        "  platform tls renew [--config <path>] --certificate <id> --replacement <id> [--dry-run] [--yes] [--json]",
         "  platform storage verify [--config <path>] [--policy] [--json]",
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
@@ -336,6 +354,8 @@ fn usage() -> String {
         "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
         "  platform cache warm --config config/platform.toml --scope public --route /en-GB/home",
+        "  platform tls status --config config/platform.toml",
+        "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
         "  platform storage verify --config config/platform.toml --policy",
         "  platform assets publish --config apps/harbor-shop/platform.toml --dry-run",
         "  platform import run imports/wordpress-events.toml",
@@ -673,6 +693,238 @@ fn run_cache_warm(
 ) -> Result<CommandReport, CliRunError> {
     let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
     warm_cache_routes(&built, &invocation.routes, &invocation.scope, dry_run)
+}
+
+fn run_tls_status(config_path: &Path) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(config_path, true)?;
+    if built.runtime_plan.runtime.tls.mode == davenda_config::TlsMode::External {
+        let mut report = CommandReport::new(
+            ["tls", "status"],
+            format!("TLS status for customer app `{}`", built.manifest.id),
+        )
+        .map_err(report_build_error)?
+        .with_columns([
+            "certificate",
+            "status",
+            "provider",
+            "hostnames",
+            "not_after",
+            "replacement",
+        ])
+        .map_err(report_build_error)?;
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "tls.mode",
+            format!(
+                "mode={:?} edge_mode={:?} provider=none inventory=0 queued_renewals=0 pending_challenges=0 hot_reload_events=0",
+                built.runtime_plan.runtime.tls.mode, built.runtime_plan.runtime.tls.edge_mode
+            ),
+        )?;
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "tls.external_termination",
+            "TLS is externally terminated for this customer app, so the platform does not manage certificate inventory",
+        )?;
+        return Ok(report);
+    }
+    let host = built.runtime_plan.runtime.tls_host().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to build TLS host for `{}`: {error}",
+            built.manifest.id
+        ))
+    })?;
+    let snapshot = host.status();
+
+    let mut report = CommandReport::new(
+        ["tls", "status"],
+        format!("TLS status for customer app `{}`", built.manifest.id),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "certificate",
+        "status",
+        "provider",
+        "hostnames",
+        "not_after",
+        "replacement",
+    ])
+    .map_err(report_build_error)?;
+
+    for record in snapshot.inventory.certificates() {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("certificate", record.id.to_string())
+                .map_err(report_build_error)?
+                .with_cell("status", format!("{:?}", record.status).to_lowercase())
+                .map_err(report_build_error)?
+                .with_cell("provider", format!("{:?}", record.provider).to_lowercase())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "hostnames",
+                    record
+                        .bindings
+                        .iter()
+                        .map(|binding| binding.hostname.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )
+                .map_err(report_build_error)?
+                .with_cell("not_after", record.not_after.to_string())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "replacement",
+                    record
+                        .replacing_certificate
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| "none".to_string()),
+                )
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "tls.mode",
+        format!(
+            "mode={:?} edge_mode={:?} provider={} inventory={} queued_renewals={} pending_challenges={} hot_reload_events={}",
+            snapshot.mode,
+            snapshot.edge_mode,
+            snapshot
+                .provider
+                .map(|provider| provider.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            snapshot.inventory.certificates().len(),
+            snapshot.queued_renewals.len(),
+            snapshot.pending_challenges.len(),
+            snapshot.hot_reload_events.len()
+        ),
+    )?;
+    if snapshot.inventory.certificates().is_empty() {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "tls.inventory.empty",
+            "no managed TLS certificates are currently present in the platform control plane",
+        )?;
+    }
+
+    Ok(report)
+}
+
+fn run_tls_renew(
+    invocation: &TlsRenewInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    if !dry_run && !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`tls renew` requires `--yes` unless `--dry-run` is used",
+        ));
+    }
+
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    if built.runtime_plan.runtime.tls.mode == davenda_config::TlsMode::External {
+        return Err(CliRunError::execution(format!(
+            "tls renew is unavailable for customer app `{}` because tls.mode is `external`",
+            built.manifest.id
+        )));
+    }
+    let certificate_id =
+        CertificateId::new(invocation.certificate_id.clone()).map_err(|error| {
+            CliRunError::usage(format!(
+                "invalid `--certificate` value `{}`: {error}",
+                invocation.certificate_id
+            ))
+        })?;
+    let replacement_certificate_id =
+        CertificateId::new(invocation.replacement_certificate_id.clone()).map_err(|error| {
+            CliRunError::usage(format!(
+                "invalid `--replacement` value `{}`: {error}",
+                invocation.replacement_certificate_id
+            ))
+        })?;
+    let mut host = built.runtime_plan.runtime.tls_host().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to build TLS host for `{}`: {error}",
+            built.manifest.id
+        ))
+    })?;
+    let snapshot = host.status();
+    let record = snapshot.inventory.record(&certificate_id).ok_or_else(|| {
+        CliRunError::execution(format!(
+            "TLS certificate `{}` is not present for customer app `{}`",
+            certificate_id, built.manifest.id
+        ))
+    })?;
+
+    let mut report = CommandReport::new(
+        ["tls", "renew"],
+        if dry_run {
+            format!(
+                "Planned TLS renewal for certificate `{}` on customer app `{}`",
+                certificate_id, built.manifest.id
+            )
+        } else {
+            format!(
+                "Renewed TLS certificate `{}` on customer app `{}`",
+                certificate_id, built.manifest.id
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "certificate",
+        "replacement",
+        "status",
+        "hostnames",
+        "not_after",
+    ])
+    .map_err(report_build_error)?;
+
+    let replacement_status = if dry_run {
+        "planned".to_string()
+    } else {
+        let renewed = host
+            .renew_certificate(
+                &certificate_id,
+                replacement_certificate_id.clone(),
+                TlsInstant::from_unix_seconds(unix_timestamp_now()?),
+            )
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to renew TLS certificate `{}` for `{}`: {error}",
+                    certificate_id, built.manifest.id
+                ))
+            })?;
+        format!("{:?}", renewed.status).to_lowercase()
+    };
+
+    report.push_row(
+        ReportRow::new()
+            .with_cell("certificate", certificate_id.to_string())
+            .map_err(report_build_error)?
+            .with_cell("replacement", replacement_certificate_id.to_string())
+            .map_err(report_build_error)?
+            .with_cell("status", replacement_status)
+            .map_err(report_build_error)?
+            .with_cell(
+                "hostnames",
+                record
+                    .bindings
+                    .iter()
+                    .map(|binding| binding.hostname.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+            .map_err(report_build_error)?
+            .with_cell("not_after", record.not_after.to_string())
+            .map_err(report_build_error)?,
+    );
+
+    Ok(report)
 }
 
 fn warm_cache_routes(
@@ -4431,6 +4683,15 @@ enabled = ["cms"]
         fs::write(path, content).unwrap();
     }
 
+    fn ensure_test_tls_material_key() {
+        unsafe {
+            std::env::set_var(
+                "DAVENDA_TLS_MATERIAL_KEY",
+                "davenda-test-tls-material-key-seed",
+            );
+        }
+    }
+
     fn import_fixture() -> ImportFixture {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -5402,6 +5663,73 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("cache warm"));
         assert!(rendered.contains("status: planned"));
         assert!(rendered.contains("/en-GB/pages/home"));
+    }
+
+    #[test]
+    fn run_from_args_renders_tls_status_for_a_customer_app_runtime_plan() {
+        ensure_test_tls_material_key();
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "tls".to_string(),
+            "status".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("tls status"));
+        assert!(rendered.contains("showcase-events"));
+        assert!(rendered.contains("externally terminated"));
+    }
+
+    #[test]
+    fn run_from_args_requires_confirmation_for_tls_renew() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "tls".to_string(),
+            "renew".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--certificate".to_string(),
+            "cert-live".to_string(),
+            "--replacement".to_string(),
+            "cert-next".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 2);
+        assert!(
+            error
+                .to_string()
+                .contains("`tls renew` requires `--yes` unless `--dry-run` is used")
+        );
+    }
+
+    #[test]
+    fn run_from_args_rejects_tls_renew_for_external_termination() {
+        ensure_test_tls_material_key();
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "tls".to_string(),
+            "renew".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--certificate".to_string(),
+            "cert-live".to_string(),
+            "--replacement".to_string(),
+            "cert-next".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("tls renew is unavailable"),
+            "{}",
+            error
+        );
     }
 
     #[test]

@@ -165,6 +165,18 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
         )?
         .with_dry_run(),
         CommandDescriptor::new(
+            ["tls", "status"],
+            CommandOwner::Core,
+            "Inspect TLS mode, provider state, and managed certificate inventory",
+        )?,
+        CommandDescriptor::new(
+            ["tls", "renew"],
+            CommandOwner::Core,
+            "Renew a managed TLS certificate by issuing and activating a replacement",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["storage", "verify"],
             CommandOwner::Core,
             "Verify storage policy planning and backend availability for the active customer app",

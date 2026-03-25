@@ -44,6 +44,14 @@ pub(crate) struct CacheWarmInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TlsRenewInvocation {
+    pub config_path: PathBuf,
+    pub certificate_id: String,
+    pub replacement_certificate_id: String,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliInput {
     Help,
     DevServer {
@@ -83,6 +91,15 @@ pub(crate) enum CliInput {
         dry_run: bool,
         invocation: CacheWarmInvocation,
     },
+    TlsStatus {
+        output_mode: OutputMode,
+        config_path: PathBuf,
+    },
+    TlsRenew {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: TlsRenewInvocation,
+    },
     StorageVerify {
         output_mode: OutputMode,
         config_path: PathBuf,
@@ -119,6 +136,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut verify_policy = false;
     let mut cache_scope: Option<String> = None;
     let mut cache_routes = Vec::new();
+    let mut tls_certificate_id: Option<String> = None;
+    let mut tls_replacement_certificate_id: Option<String> = None;
     let mut subject: Option<DefaultSubject> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
@@ -145,6 +164,12 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             }
             "--route" => {
                 cache_routes.push(next_value(&mut iter, "--route")?);
+            }
+            "--certificate" => {
+                tls_certificate_id = Some(next_value(&mut iter, "--certificate")?);
+            }
+            "--replacement" => {
+                tls_replacement_certificate_id = Some(next_value(&mut iter, "--replacement")?);
             }
             "--config" => {
                 config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
@@ -349,6 +374,44 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     config_path,
                     scope,
                     routes: cache_routes,
+                },
+            })
+        }
+        [command, subcommand] if command == "tls" && subcommand == "status" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`tls status` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::TlsStatus {
+                output_mode,
+                config_path,
+            })
+        }
+        [command, subcommand] if command == "tls" && subcommand == "renew" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`tls renew` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+            let certificate_id = tls_certificate_id
+                .ok_or_else(|| CliRunError::usage("`tls renew` requires `--certificate <id>`"))?;
+            let replacement_certificate_id = tls_replacement_certificate_id
+                .ok_or_else(|| CliRunError::usage("`tls renew` requires `--replacement <id>`"))?;
+
+            Ok(CliInput::TlsRenew {
+                output_mode,
+                dry_run,
+                invocation: TlsRenewInvocation {
+                    config_path,
+                    certificate_id,
+                    replacement_certificate_id,
+                    confirmed,
                 },
             })
         }
@@ -726,6 +789,62 @@ mod tests {
             invocation.routes,
             vec!["/en-GB/home".to_string(), "/en-GB/events".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_tls_status_uses_explicit_config_path() {
+        let input = parse([
+            "tls".to_string(),
+            "status".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::TlsStatus {
+            output_mode,
+            config_path,
+        } = input
+        else {
+            panic!("expected tls status input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(config_path, PathBuf::from("/tmp/platform.toml"));
+    }
+
+    #[test]
+    fn parse_tls_renew_accepts_certificate_replacement_and_dry_run() {
+        let input = parse([
+            "tls".to_string(),
+            "renew".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--certificate".to_string(),
+            "cert-live".to_string(),
+            "--replacement".to_string(),
+            "cert-next".to_string(),
+            "--dry-run".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::TlsRenew {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected tls renew input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.certificate_id, "cert-live");
+        assert_eq!(invocation.replacement_certificate_id, "cert-next");
+        assert!(!invocation.confirmed);
     }
 
     #[test]

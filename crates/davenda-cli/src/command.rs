@@ -132,6 +132,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Explain why a subject can or cannot exercise a capability",
         )?,
         CommandDescriptor::new(
+            ["auth", "package", "validate"],
+            CommandOwner::Core,
+            "Validate the configured auth package against the installed module capability contracts",
+        )?,
+        CommandDescriptor::new(
             ["module", "list"],
             CommandOwner::Core,
             "List installed modules for the active customer app",

@@ -15,6 +15,11 @@ pub struct AuthExplainInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthPackageValidateInvocation {
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DevServerInvocation {
     pub config_path: PathBuf,
 }
@@ -51,6 +56,10 @@ pub(crate) enum CliInput {
     AuthExplain {
         output_mode: OutputMode,
         invocation: AuthExplainInvocation,
+    },
+    AuthPackageValidate {
+        output_mode: OutputMode,
+        invocation: AuthPackageValidateInvocation,
     },
     ModuleList {
         output_mode: OutputMode,
@@ -235,6 +244,22 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     resource,
                     options,
                 },
+            })
+        }
+        [command, group, subcommand]
+            if command == "auth" && group == "package" && subcommand == "validate" =>
+        {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`auth package validate` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::AuthPackageValidate {
+                output_mode,
+                invocation: AuthPackageValidateInvocation { config_path },
             })
         }
         [command, subcommand] if command == "module" && subcommand == "list" => {
@@ -544,6 +569,30 @@ mod tests {
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
         assert_eq!(invocation.resource, Entity::admin_module("app"));
         assert!(invocation.options.cycle_protection);
+    }
+
+    #[test]
+    fn parse_auth_package_validate_uses_explicit_config_path() {
+        let input = parse([
+            "auth".to_string(),
+            "package".to_string(),
+            "validate".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::AuthPackageValidate {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected auth package validate input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
     }
 
     #[test]

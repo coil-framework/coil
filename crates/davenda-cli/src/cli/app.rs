@@ -1,7 +1,7 @@
 use crate::CliModelError;
 use crate::cli::args::{
-    AssetsPublishInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
-    MigrateApplyInvocation, parse,
+    AssetsPublishInvocation, AuthPackageValidateInvocation, CacheWarmInvocation, CliInput,
+    DevServerInvocation, MigrateApplyInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -14,12 +14,13 @@ use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, Repo
 use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::{
-    DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
-    configured_auth_model_package,
+    AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity,
+    Relation, configured_auth_model_package,
 };
 use davenda_cache::CacheInstant;
 use davenda_commerce::EntitlementKey;
 use davenda_config::{PlatformConfig, StorageClass};
+use davenda_core::validate_module_capabilities;
 use davenda_data::{
     DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient,
 };
@@ -166,6 +167,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             };
             render_auth_explain(&result, output_mode)
         }
+        CliInput::AuthPackageValidate {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_auth_package_validate(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::ModuleList {
             output_mode,
             config_path,
@@ -306,6 +314,7 @@ fn usage() -> String {
         "  platform dev server [--config <path>]",
         "  platform config validate [--config <path>] [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
+        "  platform auth package validate [--config <path>] [--json]",
         "  platform module list [--config <path>] [--json]",
         "  platform migrate plan [--config <path>] [--json]",
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
@@ -321,6 +330,7 @@ fn usage() -> String {
         "  platform dev server --config config/platform.toml",
         "  platform config validate --config config/platform.toml",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
+        "  platform auth package validate --config config/platform.toml",
         "  platform module list --config config/platform.toml",
         "  platform migrate plan --config config/platform.toml",
         "  platform migrate apply --config config/platform.toml --dry-run",
@@ -359,6 +369,105 @@ struct LiveImportAuthContext {
     auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
     site_id: Option<String>,
     storefront_id: String,
+}
+
+fn run_auth_package_validate(
+    invocation: &AuthPackageValidateInvocation,
+) -> Result<CommandReport, CliRunError> {
+    let context = load_customer_app_context(&invocation.config_path)?;
+    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let package_manifest = auth_package.manifest().clone();
+    let mut report = CommandReport::new(
+        ["auth", "package", "validate"],
+        format!(
+            "Validated auth package `{}` against customer app `{}`",
+            package_manifest.name, context.manifest.id
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "module",
+        "status",
+        "required_capabilities",
+        "optional_capabilities",
+        "detail",
+    ])
+    .map_err(report_build_error)?;
+
+    for installed in &context.manifest.modules {
+        let manifest = context
+            .module_manifests
+            .iter()
+            .find(|candidate| candidate.name == installed.id.as_str())
+            .ok_or_else(|| {
+                CliRunError::execution(format!(
+                    "customer app `{}` declares unknown module `{}`",
+                    context.manifest.id, installed.id
+                ))
+            })?;
+        let result = validate_module_capabilities(&auth_package, manifest);
+        let status = if result.is_ok() { "valid" } else { "invalid" };
+        if result.is_err() {
+            report = report.with_status(ReportStatus::Unsafe);
+        }
+        report.push_row(
+            ReportRow::new()
+                .with_cell("module", manifest.name.clone())
+                .map_err(report_build_error)?
+                .with_cell("status", status)
+                .map_err(report_build_error)?
+                .with_cell(
+                    "required_capabilities",
+                    manifest.required_capabilities.len().to_string(),
+                )
+                .map_err(report_build_error)?
+                .with_cell(
+                    "optional_capabilities",
+                    manifest.optional_capabilities.len().to_string(),
+                )
+                .map_err(report_build_error)?
+                .with_cell(
+                    "detail",
+                    result
+                        .map(|_| {
+                            format!(
+                                "{} bound capability contracts validated",
+                                manifest.required_capabilities.len()
+                            )
+                        })
+                        .unwrap_or_else(|error| error.to_string()),
+                )
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.package.manifest",
+        format!(
+            "package={} version={} mode={} storage_schema_version={} model_version={} capability_binding_version={} bindings={}",
+            package_manifest.name,
+            package_manifest.version,
+            package_manifest.mode,
+            package_manifest.storage_schema_version,
+            package_manifest.model_version,
+            package_manifest.capability_binding_version,
+            auth_package.capability_bindings().len()
+        ),
+    )?;
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.package.modules",
+        format!(
+            "validated {} installed module(s) for customer app `{}`",
+            context.manifest.modules.len(),
+            context.manifest.id
+        ),
+    )?;
+
+    Ok(report)
 }
 
 fn run_migrate_apply(
@@ -5184,6 +5293,25 @@ source_path = "fixtures/media.json"
 
         assert!(rendered.contains("module list"));
         assert!(rendered.contains("cms"));
+    }
+
+    #[test]
+    fn run_from_args_validates_the_configured_auth_package_against_installed_modules() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "auth".to_string(),
+            "package".to_string(),
+            "validate".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("auth package validate"));
+        assert!(rendered.contains("platform-default-auth"));
+        assert!(rendered.contains("cms"));
+        assert!(rendered.contains("valid"));
     }
 
     #[test]

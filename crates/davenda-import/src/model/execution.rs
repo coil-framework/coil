@@ -928,6 +928,12 @@ fn transform_record(
         "asset" => transform_asset(plan, importer, raw_record, source_key, checksum),
         "user" => transform_user(plan, importer, raw_record, source_key, checksum),
         "event" => transform_event(plan, importer, journal, raw_record, source_key, checksum),
+        "membership_tier" => {
+            transform_membership_tier(plan, importer, raw_record, source_key, checksum)
+        }
+        "subscription" => {
+            transform_subscription(plan, importer, journal, raw_record, source_key, checksum)
+        }
         other => Err(ImportModelError::UnsupportedResourceKind {
             importer_id: importer.id.to_string(),
             resource_kind: other.to_string(),
@@ -1121,6 +1127,108 @@ fn transform_event(
     })
 }
 
+fn transform_membership_tier(
+    _plan: &ImportPlan,
+    _importer: &ImporterSpec,
+    raw_record: &Value,
+    _source_key: &SourceRecordKey,
+    checksum: &str,
+) -> Result<TransformedRecord, String> {
+    let tier_id = optional_string(raw_record, "tier_id")?
+        .or_else(|| optional_string(raw_record, "slug").ok().flatten())
+        .ok_or_else(|| "membership tier record must define `tier_id` or `slug`".to_string())?;
+    let tier_id =
+        validate_token("membership_tier_id", tier_id).map_err(|error| error.to_string())?;
+    let target_id = optional_string(raw_record, "target_id")?.unwrap_or_else(|| tier_id.clone());
+    let interval = validate_membership_interval(
+        optional_string(raw_record, "interval")?.unwrap_or_else(|| "monthly".to_string()),
+    )?;
+    let visibility = validate_membership_visibility(
+        optional_string(raw_record, "visibility")?.unwrap_or_else(|| "public".to_string()),
+    )?;
+
+    Ok(TransformedRecord {
+        target_id,
+        normalized: json!({
+            "kind": "membership_tier",
+            "title": required_string(raw_record, "title")?,
+            "tier_id": tier_id,
+            "entitlement_key": required_string(raw_record, "entitlement_key")?,
+            "rank": optional_u64(raw_record, "rank")?.unwrap_or_default(),
+            "interval": interval,
+            "grace_period_days": optional_u64(raw_record, "grace_period_days")?.unwrap_or_default(),
+            "visibility": visibility,
+            "status": optional_string(raw_record, "status")?.unwrap_or_else(|| "active".to_string()),
+            "fingerprint": checksum,
+        }),
+    })
+}
+
+fn transform_subscription(
+    plan: &ImportPlan,
+    _importer: &ImporterSpec,
+    journal: &ImportJournal,
+    raw_record: &Value,
+    _source_key: &SourceRecordKey,
+    checksum: &str,
+) -> Result<TransformedRecord, String> {
+    let subscription_id = optional_string(raw_record, "subscription_id")?
+        .or_else(|| optional_string(raw_record, "slug").ok().flatten())
+        .ok_or_else(|| "subscription record must define `subscription_id` or `slug`".to_string())?;
+    let subscription_id =
+        validate_token("subscription_id", subscription_id).map_err(|error| error.to_string())?;
+    let target_id =
+        optional_string(raw_record, "target_id")?.unwrap_or_else(|| subscription_id.clone());
+    let tier_id = match optional_string(raw_record, "tier_source_key")? {
+        Some(reference) => journal
+            .resolved_target_for_kind(&plan.ordered_importers, "membership_tier", &reference)
+            .ok_or_else(|| {
+                format!(
+                    "membership tier reference `{reference}` does not resolve to an imported tier"
+                )
+            })?,
+        None => required_string(raw_record, "tier_id")?,
+    };
+    let principal_id = match optional_string(raw_record, "user_source_key")? {
+        Some(reference) => journal
+            .resolved_target_for_kind(&plan.ordered_importers, "user", &reference)
+            .ok_or_else(|| {
+                format!("user reference `{reference}` does not resolve to an imported user")
+            })?,
+        None => required_string(raw_record, "principal_id")?,
+    };
+    let status = required_string(raw_record, "status")?;
+    if !matches!(status.as_str(), "active" | "in_grace_period") {
+        return Err(format!(
+            "subscription status `{status}` is not supported by the current live import path"
+        ));
+    }
+    let entitlement_key = required_string(raw_record, "entitlement_key")?;
+    let renews_at = required_u64(raw_record, "renews_at")?;
+    let grace_period_ends_at = match status.as_str() {
+        "in_grace_period" => Some(required_u64(raw_record, "grace_period_ends_at")?),
+        _ => optional_u64(raw_record, "grace_period_ends_at")?,
+    };
+    let active = matches!(status.as_str(), "active" | "in_grace_period");
+
+    Ok(TransformedRecord {
+        target_id,
+        normalized: json!({
+            "kind": "subscription",
+            "subscription_id": subscription_id,
+            "tier_id": tier_id,
+            "principal_id": principal_id,
+            "status": status,
+            "entitlement_key": entitlement_key,
+            "entitlement_id": format!("entitlement:{subscription_id}"),
+            "active": active,
+            "renews_at": renews_at,
+            "grace_period_ends_at": grace_period_ends_at,
+            "fingerprint": checksum,
+        }),
+    })
+}
+
 fn required_string(record: &Value, field: &'static str) -> Result<String, String> {
     match record.get(field).and_then(Value::as_str) {
         Some(value) => {
@@ -1153,6 +1261,50 @@ fn optional_string_array(record: &Value, field: &'static str) -> Result<Vec<Stri
             })
             .collect(),
         Some(_) => Err(format!("`{field}` must be an array of strings")),
+    }
+}
+
+fn optional_u64(record: &Value, field: &'static str) -> Result<Option<u64>, String> {
+    match record.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(value)) => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| format!("`{field}` must be an unsigned integer")),
+        Some(Value::String(value)) if value.trim().is_empty() => Ok(None),
+        Some(Value::String(value)) => value
+            .parse::<u64>()
+            .map(Some)
+            .map_err(|_| format!("`{field}` must be an unsigned integer")),
+        Some(_) => Err(format!("`{field}` must be an unsigned integer")),
+    }
+}
+
+fn required_u64(record: &Value, field: &'static str) -> Result<u64, String> {
+    optional_u64(record, field)?.ok_or_else(|| format!("missing required `{field}`"))
+}
+
+fn validate_membership_interval(value: String) -> Result<String, String> {
+    match value.as_str() {
+        "monthly" | "quarterly" | "annual" => Ok(value),
+        _ if value
+            .strip_prefix("custom_days:")
+            .is_some_and(|days| days.parse::<u16>().is_ok()) =>
+        {
+            Ok(value)
+        }
+        _ => Err(format!(
+            "membership tier interval `{value}` must be `monthly`, `quarterly`, `annual`, or `custom_days:<days>`"
+        )),
+    }
+}
+
+fn validate_membership_visibility(value: String) -> Result<String, String> {
+    match value.as_str() {
+        "public" | "invite_only" | "staff_managed" => Ok(value),
+        _ => Err(format!(
+            "membership tier visibility `{value}` must be `public`, `invite_only`, or `staff_managed`"
+        )),
     }
 }
 

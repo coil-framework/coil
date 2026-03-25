@@ -632,6 +632,128 @@ fn publish_validated_user_imports_normalize_principal_ids_and_legacy_roles() {
 }
 
 #[test]
+fn publish_validated_membership_imports_resolve_tiers_and_user_links() {
+    let root = unique_dir("execute-memberships");
+    write_json(
+        root.join("users.json"),
+        json!([
+            {
+                "source_key": "wp:user:alice",
+                "checksum": "user-v1",
+                "principal_id": "alice",
+                "legacy_roles": ["administrator"]
+            }
+        ]),
+    );
+    write_json(
+        root.join("tiers.json"),
+        json!([
+            {
+                "source_key": "legacy:tier:gold",
+                "checksum": "tier-gold-v1",
+                "tier_id": "tier-gold",
+                "title": "Gold",
+                "entitlement_key": "membership.gold",
+                "status": "active"
+            }
+        ]),
+    );
+    write_json(
+        root.join("subscriptions.json"),
+        json!([
+            {
+                "source_key": "legacy:subscription:alice-gold",
+                "checksum": "sub-gold-v1",
+                "subscription_id": "sub-gold",
+                "tier_source_key": "legacy:tier:gold",
+                "user_source_key": "wp:user:alice",
+                "status": "active",
+                "entitlement_key": "membership.gold",
+                "renews_at": 1770000000
+            }
+        ]),
+    );
+
+    let mut manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-memberships").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap()
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("users").unwrap(),
+            10,
+            "user",
+            "Import users",
+        )
+        .unwrap()
+        .with_source_path("users.json")
+        .unwrap(),
+    )
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("tiers").unwrap(),
+            20,
+            "membership_tier",
+            "Import membership tiers",
+        )
+        .unwrap()
+        .with_source_path("tiers.json")
+        .unwrap(),
+    )
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("subscriptions").unwrap(),
+            30,
+            "subscription",
+            "Import subscriptions",
+        )
+        .unwrap()
+        .with_source_path("subscriptions.json")
+        .unwrap()
+        .depending_on(ImporterId::new("users").unwrap())
+        .depending_on(ImporterId::new("tiers").unwrap()),
+    );
+    manifest.publication_mode = PublicationMode::PublishValidated;
+    let execution = manifest
+        .plan()
+        .unwrap()
+        .execute(&root, journal_path(&root, "wordpress-memberships"))
+        .unwrap();
+    assert_eq!(execution.importer_records.len(), 3);
+
+    let tiers: Vec<serde_json::Value> = serde_json::from_str(
+        &fs::read_to_string(
+            execution.importer_records[1]
+                .staged_path
+                .as_ref()
+                .expect("tier staged artifact exists"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tiers[0]["target_id"], "tier-gold");
+    assert_eq!(tiers[0]["normalized"]["entitlement_key"], "membership.gold");
+
+    let subscriptions: Vec<serde_json::Value> = serde_json::from_str(
+        &fs::read_to_string(
+            execution.importer_records[2]
+                .staged_path
+                .as_ref()
+                .expect("subscription staged artifact exists"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(subscriptions[0]["target_id"], "sub-gold");
+    assert_eq!(subscriptions[0]["normalized"]["tier_id"], "tier-gold");
+    assert_eq!(subscriptions[0]["normalized"]["principal_id"], "alice");
+    assert_eq!(subscriptions[0]["normalized"]["active"], json!(true));
+}
+
+#[test]
 fn user_import_records_require_a_principal_identifier() {
     let root = unique_dir("execute-users-missing-principal");
     write_json(

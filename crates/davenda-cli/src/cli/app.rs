@@ -347,7 +347,7 @@ struct BuiltImportRuntimeContext {
 #[derive(Clone)]
 struct LiveImportAuthContext {
     auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
-    site_id: String,
+    site_id: Option<String>,
 }
 
 fn run_migrate_apply(
@@ -982,12 +982,17 @@ fn run_import_manifest(
             && plan
                 .ordered_importers
                 .iter()
-                .any(|importer| matches!(importer.resource_kind.as_str(), "page" | "event"));
+                .any(|importer| {
+                    matches!(
+                        importer.resource_kind.as_str(),
+                        "page" | "event" | "membership_tier" | "subscription"
+                    )
+                });
         let requires_live_auth = publish_validated
             && plan
                 .ordered_importers
                 .iter()
-                .any(|importer| importer.resource_kind == "user");
+                .any(|importer| matches!(importer.resource_kind.as_str(), "user" | "subscription"));
         if requires_live_auth && manifest.site.is_none() {
             return Err(CliRunError::execution(format!(
                 "publish-validated import manifest `{}` requires `site` to materialize live auth state",
@@ -1052,6 +1057,32 @@ fn run_import_manifest(
                             staged_record,
                         )?;
                     }
+                    "membership_tier" if publish_validated => {
+                        let client =
+                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        materialize_membership_tier_record(
+                            tokio_runtime
+                                .as_ref()
+                                .expect("publish-validated imports build a runtime"),
+                            &client,
+                            staged_record,
+                        )?;
+                    }
+                    "subscription" if publish_validated => {
+                        let client =
+                            ensure_import_data_client(&data_runtime, &mut data_client)?;
+                        let auth_context = auth_context.as_mut().expect(
+                            "publish-validated subscription imports build a live auth context",
+                        );
+                        materialize_subscription_record(
+                            tokio_runtime
+                                .as_ref()
+                                .expect("publish-validated imports build a runtime"),
+                            &client,
+                            auth_context,
+                            staged_record,
+                        )?;
+                    }
                     "user" if publish_validated => {
                         let auth_context = auth_context
                             .as_mut()
@@ -1089,6 +1120,7 @@ fn run_import_manifest(
         materialize_import_pages(&mut report, manifest_root, runtime, &execution)?;
         materialize_import_events(&mut report, manifest_root, runtime, &execution)?;
         materialize_import_users(&mut report, manifest_root, runtime, &execution)?;
+        materialize_import_memberships(&mut report, manifest_root, runtime, &execution)?;
     }
     Ok(report)
 }
@@ -2209,12 +2241,6 @@ fn build_import_auth_context(
     manifest: &ImportManifest,
     tokio_runtime: &tokio::runtime::Runtime,
 ) -> Result<LiveImportAuthContext, CliRunError> {
-    let site_id = manifest.site.clone().ok_or_else(|| {
-        CliRunError::execution(format!(
-            "publish-validated import manifest for `{}` requires `site` to materialize live auth state",
-            manifest.customer_app_id
-        ))
-    })?;
     let client = runtime
         .built
         .runtime_plan
@@ -2247,7 +2273,10 @@ fn build_import_auth_context(
             ))
         })?;
 
-    Ok(LiveImportAuthContext { auth, site_id })
+    Ok(LiveImportAuthContext {
+        auth,
+        site_id: manifest.site.clone(),
+    })
 }
 
 fn materialize_import_assets(
@@ -2485,6 +2514,88 @@ fn materialize_import_users(
     Ok(())
 }
 
+fn materialize_import_memberships(
+    report: &mut CommandReport,
+    manifest_root: &Path,
+    runtime: &BuiltImportRuntimeContext,
+    execution: &davenda_import::ImportExecution,
+) -> Result<(), CliRunError> {
+    let mut membership_counts = HashMap::<String, usize>::new();
+
+    for record in &execution.importer_records {
+        if !matches!(
+            record.resource_kind.as_str(),
+            "membership_tier" | "subscription"
+        ) {
+            continue;
+        }
+        let Some(staged_path) = record.staged_path.as_ref() else {
+            continue;
+        };
+        let staged_path = PathBuf::from(staged_path);
+        let input = fs::read_to_string(&staged_path).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read staged membership import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+        let records: Vec<Value> = serde_json::from_str(&input).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse staged membership import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+
+        for table in records.iter().flat_map(persisted_tables) {
+            *membership_counts.entry(table).or_insert(0) += 1;
+        }
+    }
+
+    for (table, count) in membership_counts {
+        report.push_diagnostic(
+            DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.membership.persisted",
+                format!(
+                    "persisted {count} imported membership records into `{table}` for `{}` from `{}`",
+                    runtime.built.manifest.id,
+                    manifest_root.display()
+                ),
+            )
+            .map_err(report_build_error)?,
+        );
+    }
+
+    Ok(())
+}
+
+fn persisted_tables(record: &Value) -> Vec<String> {
+    let Some(normalized) = record.get("normalized").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let Some(persisted) = normalized.get("persisted") else {
+        return Vec::new();
+    };
+
+    match persisted {
+        Value::Object(object) => object
+            .get("table")
+            .and_then(Value::as_str)
+            .map(|table| vec![table.to_string()])
+            .unwrap_or_default(),
+        Value::Array(entries) => entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .get("table")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn materialize_asset_record(
     storage_host: &StorageHost,
     asset_storage_default: davenda_import::AssetStorageDefault,
@@ -2649,7 +2760,7 @@ fn materialize_user_record(
     auth_context: &LiveImportAuthContext,
     staged_record: &mut Value,
 ) -> Result<(), ImportModelError> {
-    let (updates, persisted) = user_import_updates(staged_record, &auth_context.site_id)?;
+    let (updates, persisted) = user_import_updates(staged_record, auth_context.site_id.as_deref())?;
     tokio_runtime
         .block_on(async { auth_context.auth.write(updates).await })
         .map_err(|error| ImportModelError::ManifestParse {
@@ -2666,9 +2777,64 @@ fn materialize_user_record(
     Ok(())
 }
 
+fn materialize_membership_tier_record(
+    tokio_runtime: &tokio::runtime::Runtime,
+    data_client: &PostgresDataClient,
+    staged_record: &mut Value,
+) -> Result<(), ImportModelError> {
+    let (mutation, persisted) = membership_tier_import_mutation(staged_record)?;
+    let statement = mutation.compile(1).map_err(import_data_model_error)?;
+    tokio_runtime
+        .block_on(async { data_client.execute_statement(&statement).await })
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to persist imported membership tier: {error}"),
+        })?;
+
+    let normalized = staged_record
+        .get_mut("normalized")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged membership tier record is missing `normalized` object data"
+                .to_string(),
+        })?;
+    normalized.insert("persisted".to_string(), persisted);
+    Ok(())
+}
+
+fn materialize_subscription_record(
+    tokio_runtime: &tokio::runtime::Runtime,
+    data_client: &PostgresDataClient,
+    auth_context: &LiveImportAuthContext,
+    staged_record: &mut Value,
+) -> Result<(), ImportModelError> {
+    let (mutations, auth_updates, persisted) = subscription_import_persistence(staged_record)?;
+    for mutation in mutations {
+        let statement = mutation.compile(1).map_err(import_data_model_error)?;
+        tokio_runtime
+            .block_on(async { data_client.execute_statement(&statement).await })
+            .map_err(|error| ImportModelError::ManifestParse {
+                message: format!("failed to persist imported subscription state: {error}"),
+            })?;
+    }
+    tokio_runtime
+        .block_on(async { auth_context.auth.write(auth_updates).await })
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to persist imported subscription auth state: {error}"),
+        })?;
+
+    let normalized = staged_record
+        .get_mut("normalized")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged subscription record is missing `normalized` object data".to_string(),
+        })?;
+    normalized.insert("persisted".to_string(), persisted);
+    Ok(())
+}
+
 fn user_import_updates(
     staged_record: &Value,
-    site_id: &str,
+    site_id: Option<&str>,
 ) -> Result<(Vec<DefaultTupleUpdate>, Value), ImportModelError> {
     let normalized = staged_record
         .get("normalized")
@@ -2677,6 +2843,9 @@ fn user_import_updates(
             message: "staged user record is missing `normalized` object data".to_string(),
         })?;
     let principal_id = required_normalized_string(normalized, "principal_id")?;
+    let site_id = site_id.ok_or_else(|| ImportModelError::ManifestParse {
+        message: "live user import requires a non-empty `site`".to_string(),
+    })?;
     if site_id.is_empty() {
         return Err(ImportModelError::ManifestParse {
             message: "live user import requires a non-empty `site`".to_string(),
@@ -2888,6 +3057,111 @@ fn event_import_mutation(staged_record: &Value) -> Result<(MutationSpec, Value),
     ))
 }
 
+fn membership_tier_import_mutation(
+    staged_record: &Value,
+) -> Result<(MutationSpec, Value), ImportModelError> {
+    let target_id = required_staged_string(staged_record, "target_id")?;
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged membership tier record is missing `normalized` object data"
+                .to_string(),
+        })?;
+    let title = required_normalized_string(normalized, "title")?;
+    let status = required_normalized_string(normalized, "status")?;
+
+    let mutation = MutationSpec::new("membership_tiers", MutationAction::Upsert)
+        .and_then(|mutation| mutation.with_assignment("id", target_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("name", title))
+        .and_then(|mutation| mutation.with_assignment("status", status.clone()))
+        .and_then(|mutation| mutation.on_conflict_field("id"))
+        .map_err(import_data_model_error)?;
+
+    Ok((
+        mutation,
+        serde_json::json!({
+            "table": "membership_tiers",
+            "tier_id": target_id,
+            "status": status,
+        }),
+    ))
+}
+
+fn subscription_import_persistence(
+    staged_record: &Value,
+) -> Result<(Vec<MutationSpec>, Vec<DefaultTupleUpdate>, Value), ImportModelError> {
+    let target_id = required_staged_string(staged_record, "target_id")?;
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged subscription record is missing `normalized` object data".to_string(),
+        })?;
+    let tier_id = required_normalized_string(normalized, "tier_id")?;
+    let principal_id = required_normalized_string(normalized, "principal_id")?;
+    let status = required_normalized_string(normalized, "status")?;
+    let entitlement_key = required_normalized_string(normalized, "entitlement_key")?;
+    let entitlement_id = required_normalized_string(normalized, "entitlement_id")?;
+    let active = normalized
+        .get("active")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged subscription record is missing `normalized.active`".to_string(),
+        })?;
+    let renews_at = optional_normalized_u64(normalized, "renews_at")?;
+
+    let subscription_mutation =
+        MutationSpec::new("membership_subscriptions", MutationAction::Upsert)
+            .and_then(|mutation| mutation.with_assignment("id", target_id.clone()))
+            .and_then(|mutation| mutation.with_assignment("tier_id", tier_id.clone()))
+            .and_then(|mutation| mutation.with_assignment("status", status.clone()))
+            .and_then(|mutation| {
+                mutation.with_assignment("renews_at", renews_at.unwrap_or_default())
+            })
+            .and_then(|mutation| mutation.on_conflict_field("id"))
+            .map_err(import_data_model_error)?;
+    let entitlement_mutation = MutationSpec::new("membership_entitlements", MutationAction::Upsert)
+        .and_then(|mutation| mutation.with_assignment("id", entitlement_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("subscription_id", target_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("entitlement_key", entitlement_key.clone()))
+        .and_then(|mutation| mutation.with_assignment("active", active))
+        .and_then(|mutation| mutation.on_conflict_field("id"))
+        .map_err(import_data_model_error)?;
+    let auth_updates = vec![DefaultTupleUpdate::Write(DefaultTuple::new(
+        Entity::subscription(target_id.clone()),
+        Relation::Owner,
+        DefaultSubject::entity(Entity::user(principal_id.clone())),
+    ))];
+
+    Ok((
+        vec![subscription_mutation, entitlement_mutation],
+        auth_updates,
+        serde_json::json!([
+            {
+                "table": "membership_subscriptions",
+                "subscription_id": target_id,
+                "tier_id": tier_id,
+                "status": status,
+                "renews_at": renews_at,
+            },
+            {
+                "table": "membership_entitlements",
+                "entitlement_id": entitlement_id,
+                "subscription_id": target_id,
+                "entitlement_key": entitlement_key,
+                "active": active,
+            },
+            {
+                "table": "auth_tuples",
+                "principal_id": principal_id,
+                "subscription_id": target_id,
+                "writes": 1,
+            }
+        ]),
+    ))
+}
+
 fn required_staged_string(record: &Value, field: &str) -> Result<String, ImportModelError> {
     record
         .get(field)
@@ -2923,6 +3197,35 @@ fn optional_normalized_string(
         Some(Value::String(value)) => Ok(Some(value.clone())),
         Some(_) => Err(ImportModelError::ManifestParse {
             message: format!("staged import record field `normalized.{field}` must be a string"),
+        }),
+    }
+}
+
+fn optional_normalized_u64(
+    record: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<u64>, ImportModelError> {
+    match record.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(value)) => value.as_u64().map(Some).ok_or_else(|| {
+            ImportModelError::ManifestParse {
+                message: format!(
+                    "staged import record field `normalized.{field}` must be an unsigned integer"
+                ),
+            }
+        }),
+        Some(Value::String(value)) if value.is_empty() => Ok(None),
+        Some(Value::String(value)) => value.parse::<u64>().map(Some).map_err(|_| {
+            ImportModelError::ManifestParse {
+                message: format!(
+                    "staged import record field `normalized.{field}` must be an unsigned integer"
+                ),
+            }
+        }),
+        Some(_) => Err(ImportModelError::ManifestParse {
+            message: format!(
+                "staged import record field `normalized.{field}` must be an unsigned integer"
+            ),
         }),
     }
 }
@@ -4333,6 +4636,74 @@ dependencies = ["users", "media"]
     }
 
     #[test]
+    fn membership_tier_import_mutation_targets_live_membership_tiers_table() {
+        let staged = serde_json::json!({
+            "target_id": "tier-gold",
+            "normalized": {
+                "title": "Gold",
+                "status": "active"
+            }
+        });
+
+        let (mutation, persisted) = membership_tier_import_mutation(&staged).unwrap();
+        let compiled = mutation.compile(1).unwrap();
+
+        assert!(compiled.sql.contains("\"membership_tiers\""));
+        assert!(compiled.sql.contains("ON CONFLICT (\"id\")"));
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("Gold".to_string()))
+        );
+        assert_eq!(persisted["table"], "membership_tiers");
+        assert_eq!(persisted["tier_id"], "tier-gold");
+    }
+
+    #[test]
+    fn subscription_import_persistence_targets_membership_tables_and_owner_tuples() {
+        let staged = serde_json::json!({
+            "target_id": "sub-gold",
+            "normalized": {
+                "tier_id": "tier-gold",
+                "principal_id": "alice",
+                "status": "active",
+                "entitlement_key": "membership.gold",
+                "entitlement_id": "entitlement:sub-gold",
+                "active": true,
+                "renews_at": 1770000000
+            }
+        });
+
+        let (mutations, updates, persisted) = subscription_import_persistence(&staged).unwrap();
+
+        assert_eq!(mutations.len(), 2);
+        let compiled_subscription = mutations[0].compile(1).unwrap();
+        let compiled_entitlement = mutations[1].compile(1).unwrap();
+        assert!(
+            compiled_subscription
+                .sql
+                .contains("\"membership_subscriptions\"")
+        );
+        assert!(
+            compiled_entitlement
+                .sql
+                .contains("\"membership_entitlements\"")
+        );
+        assert_eq!(updates.len(), 1);
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::subscription("sub-gold"),
+                Relation::Owner,
+                DefaultSubject::entity(Entity::user("alice")),
+            )))
+        );
+        assert_eq!(persisted.as_array().unwrap().len(), 3);
+        assert_eq!(persisted[0]["table"], "membership_subscriptions");
+        assert_eq!(persisted[1]["table"], "membership_entitlements");
+        assert_eq!(persisted[2]["table"], "auth_tuples");
+    }
+
+    #[test]
     fn user_import_updates_map_administrators_into_group_and_site_admin_tuples() {
         let staged = serde_json::json!({
             "normalized": {
@@ -4341,7 +4712,7 @@ dependencies = ["users", "media"]
             }
         });
 
-        let (updates, persisted) = user_import_updates(&staged, "main").unwrap();
+        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
 
         assert_eq!(updates.len(), 2);
         assert_eq!(persisted["table"], "auth_tuples");
@@ -4376,7 +4747,7 @@ dependencies = ["users", "media"]
             }
         });
 
-        let (updates, persisted) = user_import_updates(&staged, "main").unwrap();
+        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
 
         assert_eq!(updates.len(), 2);
         assert_eq!(persisted["roles"], serde_json::json!(["editor"]));
@@ -4398,7 +4769,7 @@ dependencies = ["users", "media"]
             }
         });
 
-        let error = user_import_updates(&staged, "main").unwrap_err();
+        let error = user_import_updates(&staged, Some("main")).unwrap_err();
         assert!(error.to_string().contains("cannot be mapped safely"));
     }
 
@@ -4410,7 +4781,7 @@ dependencies = ["users", "media"]
             }
         });
 
-        let error = user_import_updates(&staged, "main").unwrap_err();
+        let error = user_import_updates(&staged, Some("main")).unwrap_err();
         assert!(error.to_string().contains("normalized.principal_id"));
     }
 }

@@ -30,6 +30,7 @@ fn baseline_runtime_registers_core_command_families() {
     assert!(paths.contains(&"jobs status".to_string()));
     assert!(paths.contains(&"tls status".to_string()));
     assert!(paths.contains(&"tls renew".to_string()));
+    assert!(paths.contains(&"storage inspect".to_string()));
     assert!(paths.contains(&"storage verify".to_string()));
     assert!(paths.contains(&"assets publish".to_string()));
     assert!(paths.contains(&"import run".to_string()));

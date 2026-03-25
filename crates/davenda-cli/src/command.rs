@@ -217,6 +217,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
         .with_dry_run()
         .requiring_confirmation(),
         CommandDescriptor::new(
+            ["storage", "inspect"],
+            CommandOwner::Core,
+            "Inspect storage topology, delivery posture, and object-store readiness for the active customer app",
+        )?,
+        CommandDescriptor::new(
             ["storage", "verify"],
             CommandOwner::Core,
             "Verify storage policy planning and backend availability for the active customer app",

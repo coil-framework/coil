@@ -107,6 +107,11 @@ pub(crate) struct TlsRenewInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StorageInspectInvocation {
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliInput {
     Help,
     DevServer {
@@ -186,6 +191,10 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         dry_run: bool,
         invocation: TlsRenewInvocation,
+    },
+    StorageInspect {
+        output_mode: OutputMode,
+        invocation: StorageInspectInvocation,
     },
     StorageVerify {
         output_mode: OutputMode,
@@ -724,6 +733,20 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 output_mode,
                 config_path,
                 verify_policy,
+            })
+        }
+        [command, subcommand] if command == "storage" && subcommand == "inspect" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`storage inspect` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::StorageInspect {
+                output_mode,
+                invocation: StorageInspectInvocation { config_path },
             })
         }
         [command, subcommand] if command == "assets" && subcommand == "publish" => {
@@ -1569,5 +1592,28 @@ mod tests {
         assert_eq!(output_mode, OutputMode::Json);
         assert!(verify_policy);
         assert_eq!(config_path, PathBuf::from("/tmp/davenda.toml"));
+    }
+
+    #[test]
+    fn parse_storage_inspect_uses_explicit_config_path() {
+        let input = parse([
+            "storage".to_string(),
+            "inspect".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::StorageInspect {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected storage inspect input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
     }
 }

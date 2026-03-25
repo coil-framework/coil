@@ -4,7 +4,7 @@ use crate::cli::args::{
     AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation,
     AuthTestModelInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
     JobsDeadLettersInvocation, JobsStatusInvocation, MigrateApplyInvocation,
-    ModuleInspectInvocation, TlsRenewInvocation, parse,
+    ModuleInspectInvocation, StorageInspectInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -336,6 +336,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_tls_renew(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::StorageInspect {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_storage_inspect(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::StorageVerify {
             output_mode,
             config_path,
@@ -407,6 +414,7 @@ fn usage() -> String {
         "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
         "  platform tls status [--config <path>] [--json]",
         "  platform tls renew [--config <path>] --certificate <id> --replacement <id> [--dry-run] [--yes] [--json]",
+        "  platform storage inspect [--config <path>] [--json]",
         "  platform storage verify [--config <path>] [--policy] [--json]",
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
@@ -435,6 +443,7 @@ fn usage() -> String {
         "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
         "  platform tls status --config config/platform.toml",
         "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
+        "  platform storage inspect --config config/platform.toml",
         "  platform storage verify --config config/platform.toml --policy",
         "  platform assets publish --config apps/harbor-shop/platform.toml --dry-run",
         "  platform import run imports/wordpress-events.toml",
@@ -2387,6 +2396,140 @@ fn cache_disposition_label(disposition: CacheDisposition) -> &'static str {
         CacheDisposition::Private => "private",
         CacheDisposition::Uncacheable => "uncacheable",
     }
+}
+
+fn run_storage_inspect(
+    invocation: &StorageInspectInvocation,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    let runtime = &built.runtime_plan.runtime;
+    let storage_host = runtime.storage_host();
+    let topology = storage_host.planner.topology().clone();
+    let object_store_result = runtime.object_store_client_config(&EnvironmentSecretResolver);
+    let object_store_status = match &object_store_result {
+        Ok(Some(config)) => format!("resolved bucket={} region={}", config.bucket, config.region),
+        Ok(None) => "not configured".to_string(),
+        Err(error) => format!("invalid: {error}"),
+    };
+    let object_store_backend = match &topology.object_store {
+        Some(target) => format!("{:?}", target.backend_kind()),
+        None => "none".to_string(),
+    };
+    let cdn_base_url = built
+        .runtime_plan
+        .runtime
+        .config
+        .assets
+        .cdn_base_url
+        .clone()
+        .unwrap_or_else(|| "none".to_string());
+    let mut report = CommandReport::new(
+        ["storage", "inspect"],
+        format!(
+            "Inspected storage topology for customer app `{}`",
+            built.manifest.id
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns(["section", "key", "value", "detail"])
+    .map_err(report_build_error)?;
+
+    for (section, key, value, detail) in [
+        (
+            "topology",
+            "default_class",
+            storage_class_label(topology.default_class).to_string(),
+            "default storage class used when no explicit rule is requested".to_string(),
+        ),
+        (
+            "topology",
+            "deployment",
+            storage_deployment_label(topology.deployment).to_string(),
+            "deployment scope used for durable and single-node planning".to_string(),
+        ),
+        (
+            "topology",
+            "single_node_escape_hatch",
+            format!("{:?}", topology.single_node_escape_hatch),
+            "whether explicit local-only storage remains available".to_string(),
+        ),
+        (
+            "topology",
+            "local_root",
+            topology.local_root.clone(),
+            "local storage root for single-node and escape-hatch writes".to_string(),
+        ),
+        (
+            "object_store",
+            "backend",
+            object_store_backend,
+            "resolved scalable object-store backend kind from config".to_string(),
+        ),
+        (
+            "object_store",
+            "status",
+            object_store_status,
+            "live object-store secret and client resolution state".to_string(),
+        ),
+        (
+            "delivery",
+            "cdn_base_url",
+            cdn_base_url,
+            "base URL used for public CDN delivery and manifest publication".to_string(),
+        ),
+    ] {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("section", section)
+                .map_err(report_build_error)?
+                .with_cell("key", key)
+                .map_err(report_build_error)?
+                .with_cell("value", value)
+                .map_err(report_build_error)?
+                .with_cell("detail", detail)
+                .map_err(report_build_error)?,
+        );
+    }
+
+    match object_store_result {
+        Ok(Some(config)) => {
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Info,
+                "storage.inspect.object_store",
+                format!(
+                    "object store resolved for bucket `{}` in region `{}`",
+                    config.bucket, config.region
+                ),
+            )?;
+        }
+        Ok(None) => {
+            report = report.with_status(ReportStatus::Warning);
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Warning,
+                "storage.inspect.object_store",
+                format!(
+                    "customer app `{}` has no configured object store; scalable asset publication is unavailable",
+                    built.manifest.id
+                ),
+            )?;
+        }
+        Err(error) => {
+            report = report.with_status(ReportStatus::Unsafe);
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Error,
+                "storage.inspect.object_store",
+                format!(
+                    "failed to resolve object-store backend for `{}`: {error}",
+                    built.manifest.id
+                ),
+            )?;
+        }
+    }
+
+    Ok(report)
 }
 
 fn run_storage_verify(
@@ -7015,6 +7158,7 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains(
             "platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>]"
         ));
+        assert!(rendered.contains("platform storage inspect [--config <path>]"));
         assert!(rendered.contains("platform storage verify [--config <path>] [--policy]"));
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
@@ -8164,6 +8308,24 @@ expect = true
         assert!(rendered.contains("showcase-events"));
         assert!(rendered.contains("dead_letter_id"));
         assert!(rendered.contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn run_from_args_renders_storage_inspect_for_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "storage".to_string(),
+            "inspect".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("storage inspect"));
+        assert!(rendered.contains("default_class"));
+        assert!(rendered.contains("public_upload"));
+        assert!(rendered.contains("cdn_base_url"));
     }
 
     #[test]

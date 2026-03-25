@@ -2,7 +2,7 @@ use crate::error::CommerceModelError;
 use crate::identifiers::{CheckoutId, CurrencyCode, OrderId, Sku};
 use crate::model::{CheckoutStatus, Money, OrderStatus, ProductKind};
 use crate::orders::Order;
-use crate::pricing::{PriceQuote, PricingPolicy, ensure_same_currency};
+use crate::pricing::{ensure_same_currency, PriceQuote, PricingPolicy};
 use crate::validation::require_non_empty;
 use davenda_data::{DomainWrite, TransactionIsolation, TransactionPlan};
 use std::collections::BTreeMap;
@@ -161,6 +161,15 @@ impl CheckoutSession {
         self.transition_to(CheckoutStatus::Completed)
     }
 
+    pub fn finalize(
+        &mut self,
+        order_id: OrderId,
+        pricing: &PricingPolicy,
+    ) -> Result<Order, CommerceModelError> {
+        self.complete()?;
+        self.to_order(order_id, pricing)
+    }
+
     pub fn cancel(&mut self) -> Result<(), CommerceModelError> {
         self.transition_to(CheckoutStatus::Cancelled)
     }
@@ -206,6 +215,7 @@ impl CheckoutSession {
         .and_then(|plan| {
             plan.with_after_commit_event(format!("commerce.order.created:{}", order.id))
         })
+        .and_then(|plan| plan.with_after_commit_event(format!("commerce.order.paid:{}", order.id)))
         .map_err(Into::into)
     }
 
@@ -237,5 +247,75 @@ impl CheckoutSession {
                 to: next,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identifiers::{CheckoutId, CurrencyCode, EntitlementKey, OrderId, ProductId};
+    use crate::model::{CheckoutStatus, OrderStatus, ProductKind};
+
+    fn gbp(amount_minor: i64) -> Money {
+        Money::new(CurrencyCode::new("GBP").unwrap(), amount_minor).unwrap()
+    }
+
+    fn membership_checkout() -> CheckoutSession {
+        let mut checkout = CheckoutSession::new(
+            CheckoutId::new("chk-finalize").unwrap(),
+            CurrencyCode::new("GBP").unwrap(),
+        );
+        checkout
+            .add_line(
+                CheckoutLine::new(
+                    ProductId::new("product-gold-membership").unwrap(),
+                    ProductKind::Membership {
+                        entitlement_key: EntitlementKey::new("membership.gold").unwrap(),
+                    },
+                    "Gold Membership",
+                    Sku::new("sku-gold-membership").unwrap(),
+                    "Annual plan",
+                    1,
+                    gbp(8_900),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        checkout.ready_for_payment().unwrap();
+        checkout.awaiting_payment().unwrap();
+        checkout.mark_paid().unwrap();
+        checkout
+    }
+
+    #[test]
+    fn finalize_completes_a_paid_checkout_into_an_order() {
+        let pricing = PricingPolicy::new(CurrencyCode::new("GBP").unwrap());
+        let mut checkout = membership_checkout();
+        let order = checkout
+            .finalize(OrderId::new("ord-finalize").unwrap(), &pricing)
+            .unwrap();
+
+        assert_eq!(checkout.status, CheckoutStatus::Completed);
+        assert_eq!(order.status, OrderStatus::Paid);
+        assert_eq!(order.id.to_string(), "ord-finalize");
+    }
+
+    #[test]
+    fn completion_transaction_plan_emits_paid_confirmation_event() {
+        let pricing = PricingPolicy::new(CurrencyCode::new("GBP").unwrap());
+        let checkout = membership_checkout();
+        let order = checkout
+            .to_order(OrderId::new("ord-plan").unwrap(), &pricing)
+            .unwrap();
+
+        let plan = checkout.completion_transaction_plan(&order).unwrap();
+        assert!(plan
+            .after_commit_events
+            .iter()
+            .any(|event| event == "commerce.order.created:ord-plan"));
+        assert!(plan
+            .after_commit_events
+            .iter()
+            .any(|event| event == "commerce.order.paid:ord-plan"));
     }
 }

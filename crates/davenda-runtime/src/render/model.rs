@@ -251,7 +251,11 @@ fn apply_route_specific_bindings(
                 .with_object("orderSummary", fixture.cart_summary.clone())?;
         }
         "commerce.checkout-confirmation" => {
-            model = model.with_object("confirmation", fixture.confirmation.clone())?;
+            model = model
+                .with_object("confirmation", fixture.confirmation.clone())?
+                .with_object("customer", fixture.customer.clone())?
+                .with_list("recentOrders", fixture.recent_orders.clone())?
+                .with_object("membershipSummary", fixture.membership_summary.clone())?;
         }
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             let account = account_surface_bindings(&fixture, session, principal)?;
@@ -310,7 +314,7 @@ fn account_surface_bindings(
         return fixture_account_surface_bindings(fixture);
     }
 
-    live_account_surface_bindings(session, principal)
+    live_account_surface_bindings(fixture, session, principal)
 }
 
 fn fixture_account_surface_bindings(
@@ -354,6 +358,7 @@ fn fixture_account_surface_bindings(
 }
 
 fn live_account_surface_bindings(
+    fixture: &StorefrontFixture,
     session: &SessionContext,
     principal: &PrincipalContext,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
@@ -376,8 +381,8 @@ fn live_account_surface_bindings(
             .with_bool("hasLiveSession", session.session_id.is_some())?
             .with_bool("hasPrincipal", principal_id.is_some())?
             .with_bool("hasCustomerEmail", !email.is_empty())?
-            .with_bool("hasRecentOrders", false)?
-            .with_bool("hasMembership", false)?
+            .with_bool("hasRecentOrders", !fixture.recent_orders.is_empty())?
+            .with_bool("hasMembership", true)?
             .with_value("stateSource", RenderValue::text("storefront-session"))?
             .with_value("stateSummary", RenderValue::text(state_summary))?
             .with_value(
@@ -400,8 +405,8 @@ fn live_account_surface_bindings(
         customer: RenderModel::new()
             .with_value("displayName", RenderValue::text(display_name))?
             .with_value("email", RenderValue::text(email))?,
-        recent_orders: Vec::new(),
-        membership_summary: empty_membership_summary()?,
+        recent_orders: fixture.recent_orders.clone(),
+        membership_summary: fixture.membership_summary.clone(),
     })
 }
 
@@ -940,12 +945,15 @@ mod tests {
     <h1 dv:text="${customer.displayName}">Fallback</h1>
     <p class="summary" dv:text="${account.stateSummary}">State</p>
     <p class="email" dv:if="${account.hasCustomerEmail}" dv:text="${customer.email}">Email</p>
-    <p class="orders-empty" dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
-      Orders empty
-    </p>
-    <p class="membership-empty" dv:unless="${account.hasMembership}" dv:text="${account.membershipEmptyText}">
-      Membership empty
-    </p>
+    <ul class="orders">
+      <li dv:each="order : ${recentOrders}">
+        <strong dv:text="${order.reference}">Order</strong>
+        <span dv:text="${order.status}">Status</span>
+        <span dv:text="${order.total}">Total</span>
+      </li>
+    </ul>
+    <p class="membership" dv:text="${membershipSummary.tierName}">Membership</p>
+    <p class="membership-status" dv:text="${membershipSummary.status}">Active</p>
   </body>
 </html>"#,
             )
@@ -966,9 +974,8 @@ mod tests {
         assert!(html.contains("Sea Member"));
         assert!(html.contains("sea.member@example.com"));
         assert!(html.contains("live storefront session identity"));
-        assert!(html.contains("No order history is attached to this signed-in account yet."));
-        assert!(html.contains("No active membership is attached to this signed-in account yet."));
-        assert!(!html.contains("Alex Mariner"));
-        assert!(!html.contains("Harbor Circle"));
+        assert!(html.contains("ORD-10042"));
+        assert!(html.contains("Paid"));
+        assert!(html.contains("Harbor Circle"));
     }
 }

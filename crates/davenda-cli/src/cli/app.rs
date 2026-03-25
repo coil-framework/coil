@@ -1,10 +1,10 @@
 use crate::CliModelError;
-use crate::cli::customer_app::{load_customer_app_context, load_official_modules};
 use crate::cli::args::{
     AssetsPublishInvocation, CliInput, DevServerInvocation, MigrateApplyInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
+use crate::cli::customer_app::{load_customer_app_context, load_official_modules};
 use crate::cli::error::CliRunError;
 use crate::cli::import::ImportCutoverInvocation;
 use crate::cli::render::{render_auth_explain, render_command_report};
@@ -12,22 +12,26 @@ use crate::registry::CliRuntime;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
 use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
-use davenda_auth::configured_auth_model_package;
+use davenda_auth::{
+    DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
+    configured_auth_model_package,
+};
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_data::{
     DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient,
 };
 use davenda_import::{
-    CutoverCheck, CutoverPlan, ImportManifest, ImportModelError, PublicationMode,
-    RollbackTrigger,
+    CutoverCheck, CutoverPlan, ImportManifest, ImportModelError, PublicationMode, RollbackTrigger,
 };
+use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder, StorageHost};
+use davenda_storage::{
+    StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
+};
+use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder, StorageHost};
-use davenda_storage::{StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride};
-use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliApplication {
@@ -153,8 +157,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             config_path,
         } => {
             let context = load_customer_app_context(&config_path)?;
-            let auth_package =
-                configured_auth_model_package(context.config.auth.package.clone());
+            let auth_package = configured_auth_model_package(context.config.auth.package.clone());
             let composition = context
                 .manifest
                 .compose(&auth_package, &context.module_manifests)
@@ -177,12 +180,10 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             config_path,
         } => {
             let context = load_customer_app_context(&config_path)?;
-            let auth_package =
-                configured_auth_model_package(context.config.auth.package.clone());
-            let migration_summary =
-                context
-                    .manifest
-                    .migration_summary(auth_package, &context.modules);
+            let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+            let migration_summary = context
+                .manifest
+                .migration_summary(auth_package, &context.modules);
             let report = migration_summary.command_report().map_err(|error| {
                 CliRunError::execution(format!(
                     "failed to render migration plan for `{}`: {error}",
@@ -204,8 +205,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             config_path,
         } => {
             let context = load_customer_app_context(&config_path)?;
-            let auth_package =
-                configured_auth_model_package(context.config.auth.package.clone());
+            let auth_package = configured_auth_model_package(context.config.auth.package.clone());
             let report = context
                 .manifest
                 .release_doctor_with_extensions(
@@ -274,6 +274,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 ))
             })?;
             let import_runtime = build_import_runtime_context(manifest_root, &manifest)?;
+            if plan.publication_mode == PublicationMode::PublishValidated
+                && import_runtime.is_none()
+            {
+                return Err(CliRunError::execution(format!(
+                    "publish-validated import manifest `{}` requires a `[target]` runtime configuration",
+                    invocation.manifest_path.display()
+                )));
+            }
 
             let report = if dry_run {
                 plan.command_report().map_err(|error| {
@@ -289,6 +297,12 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                     let default_locale = runtime.built.manifest.default_locale.to_string();
                     let publish_validated =
                         plan.publication_mode == PublicationMode::PublishValidated;
+                    if publish_validated && manifest.site.is_none() {
+                        return Err(CliRunError::execution(format!(
+                            "publish-validated import manifest `{}` requires `site` to materialize live auth state",
+                            invocation.manifest_path.display()
+                        )));
+                    }
                     let data_runtime = runtime.built.runtime_plan.runtime.data.clone();
                     let mut data_client = None;
                     let tokio_runtime = if publish_validated {
@@ -304,6 +318,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                         )
                     } else {
                         None
+                    };
+                    let mut auth_context = match (publish_validated, tokio_runtime.as_ref()) {
+                        (true, Some(tokio_runtime)) => Some(build_import_auth_context(
+                            runtime,
+                            &manifest,
+                            tokio_runtime,
+                        )?),
+                        _ => None,
                     };
                     plan.execute_with_handler(
                         manifest_root,
@@ -341,6 +363,18 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                                         staged_record,
                                     )?;
                                 }
+                                "user" if publish_validated => {
+                                    let auth_context = auth_context.as_mut().expect(
+                                        "publish-validated imports build a live auth context",
+                                    );
+                                    materialize_user_record(
+                                        tokio_runtime
+                                            .as_ref()
+                                            .expect("publish-validated imports build a runtime"),
+                                        auth_context,
+                                        staged_record,
+                                    )?;
+                                }
                                 _ => {}
                             }
                             Ok(())
@@ -365,6 +399,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                     materialize_import_assets(&mut report, manifest_root, runtime, &execution)?;
                     materialize_import_pages(&mut report, manifest_root, runtime, &execution)?;
                     materialize_import_events(&mut report, manifest_root, runtime, &execution)?;
+                    materialize_import_users(&mut report, manifest_root, runtime, &execution)?;
                 }
                 report
             };
@@ -442,6 +477,12 @@ struct BuiltCustomerAppContext {
 struct BuiltImportRuntimeContext {
     built: BuiltCustomerAppContext,
     storage_host: StorageHost,
+}
+
+#[derive(Clone)]
+struct LiveImportAuthContext {
+    auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+    site_id: String,
 }
 
 fn run_migrate_apply(
@@ -956,9 +997,9 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
         );
     }
 
-    let mut report = cutover_plan
-        .command_report()
-        .map_err(|error| CliRunError::execution(format!("failed to render cutover plan: {error}")))?;
+    let mut report = cutover_plan.command_report().map_err(|error| {
+        CliRunError::execution(format!("failed to render cutover plan: {error}"))
+    })?;
     report.command = vec!["import".to_string(), "cutover".to_string()];
     report.summary = format!(
         "Cutover readiness for import run `{}` into customer app `{}` via `{}`",
@@ -1112,7 +1153,8 @@ fn build_migrate_apply_report(
         .ordered_steps()
         .iter()
         .filter(|step| {
-            applied_keys.is_none_or(|keys| !keys.contains(&(step.owner.to_string(), step.id.to_string())))
+            applied_keys
+                .is_none_or(|keys| !keys.contains(&(step.owner.to_string(), step.id.to_string())))
         })
         .count();
     let total_steps = executable_plan.ordered_steps().len();
@@ -1124,7 +1166,9 @@ fn build_migrate_apply_report(
             .ordered_steps()
             .iter()
             .filter(|step| {
-                applied_keys.is_none_or(|keys| !keys.contains(&(step.owner.to_string(), step.id.to_string())))
+                applied_keys.is_none_or(|keys| {
+                    !keys.contains(&(step.owner.to_string(), step.id.to_string()))
+                })
             })
             .map(|step| step.statements.len() + 1)
             .sum::<usize>()
@@ -1272,7 +1316,10 @@ fn build_assets_publish_report(
                 .map_err(report_build_error)?
                 .with_cell("hashed_path", published.artifact().hashed_path())
                 .map_err(report_build_error)?
-                .with_cell("delivery", format_asset_delivery_target(published.delivery().target()))
+                .with_cell(
+                    "delivery",
+                    format_asset_delivery_target(published.delivery().target()),
+                )
                 .map_err(report_build_error)?
                 .with_cell("bytes", published.artifact().byte_length().to_string())
                 .map_err(report_build_error)?
@@ -1440,13 +1487,15 @@ fn build_import_runtime_context(
         )));
     }
 
-    let resolved_manifest = CustomerAppManifest::from_file(manifest_root.join(&target.app_manifest))
-        .map_err(|error| {
-            CliRunError::execution(format!(
-                "failed to load import target app manifest `{}`: {error}",
-                manifest_root.join(&target.app_manifest).display()
-            ))
-        })?;
+    let resolved_manifest = CustomerAppManifest::from_file(
+        manifest_root.join(&target.app_manifest),
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load import target app manifest `{}`: {error}",
+            manifest_root.join(&target.app_manifest).display()
+        ))
+    })?;
     if resolved_manifest.id != built.manifest.id {
         return Err(CliRunError::execution(format!(
             "import target app manifest `{}` resolves `{}`, but runtime config resolves `{}`",
@@ -1516,7 +1565,56 @@ fn build_import_runtime_context(
         .runtime
         .storage_host_with_object_store(object_store);
 
-    Ok(Some(BuiltImportRuntimeContext { built, storage_host }))
+    Ok(Some(BuiltImportRuntimeContext {
+        built,
+        storage_host,
+    }))
+}
+
+fn build_import_auth_context(
+    runtime: &BuiltImportRuntimeContext,
+    manifest: &ImportManifest,
+    tokio_runtime: &tokio::runtime::Runtime,
+) -> Result<LiveImportAuthContext, CliRunError> {
+    let site_id = manifest.site.clone().ok_or_else(|| {
+        CliRunError::execution(format!(
+            "publish-validated import manifest for `{}` requires `site` to materialize live auth state",
+            manifest.customer_app_id
+        ))
+    })?;
+    let client = runtime
+        .built
+        .runtime_plan
+        .runtime
+        .data
+        .connect_lazy_postgres()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to connect live auth import backend for `{}`: {error}",
+                runtime.built.manifest.id
+            ))
+        })?;
+    let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
+    let auth = DavendaAuth::new(engine, runtime.built.runtime_plan.runtime.tenant_id());
+    let auth_package_name = runtime
+        .built
+        .runtime_plan
+        .runtime
+        .config
+        .auth
+        .package
+        .clone();
+    let auth_package = configured_auth_model_package(auth_package_name.clone());
+    tokio_runtime
+        .block_on(async { auth.apply_model_package(&auth_package).await })
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to apply auth model package `{}` for live import: {error}",
+                auth_package_name
+            ))
+        })?;
+
+    Ok(LiveImportAuthContext { auth, site_id })
 }
 
 fn materialize_import_assets(
@@ -1694,6 +1792,66 @@ fn materialize_import_events(
     Ok(())
 }
 
+fn materialize_import_users(
+    report: &mut CommandReport,
+    manifest_root: &Path,
+    runtime: &BuiltImportRuntimeContext,
+    execution: &davenda_import::ImportExecution,
+) -> Result<(), CliRunError> {
+    let mut user_counts = HashMap::<String, usize>::new();
+
+    for record in &execution.importer_records {
+        if record.resource_kind != "user" {
+            continue;
+        }
+        let Some(staged_path) = record.staged_path.as_ref() else {
+            continue;
+        };
+        let staged_path = PathBuf::from(staged_path);
+        let input = fs::read_to_string(&staged_path).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read staged user import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+        let records: Vec<Value> = serde_json::from_str(&input).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse staged user import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+
+        for table in records.iter().filter_map(|record| {
+            record
+                .get("normalized")
+                .and_then(Value::as_object)
+                .and_then(|normalized| normalized.get("persisted"))
+                .and_then(Value::as_object)
+                .and_then(|persisted| persisted.get("table"))
+                .and_then(Value::as_str)
+        }) {
+            *user_counts.entry(table.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    for (table, count) in user_counts {
+        report.push_diagnostic(
+            DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.user.persisted",
+                format!(
+                    "persisted {count} imported users into `{table}` for `{}` from `{}`",
+                    runtime.built.manifest.id,
+                    manifest_root.display()
+                ),
+            )
+            .map_err(report_build_error)?,
+        );
+    }
+
+    Ok(())
+}
+
 fn materialize_asset_record(
     storage_host: &StorageHost,
     asset_storage_default: davenda_import::AssetStorageDefault,
@@ -1748,18 +1906,20 @@ fn materialize_asset_record(
     let override_policy = storage_override_for_import_default(asset_storage_default);
     let revision = storage_host
         .plan_managed_revision(
-            RevisionId::new(format!("rev-{target_id}")).map_err(|error| ImportModelError::ManifestParse {
-                message: error.to_string(),
+            RevisionId::new(format!("rev-{target_id}")).map_err(|error| {
+                ImportModelError::ManifestParse {
+                    message: error.to_string(),
+                }
             })?,
             logical_path,
             override_policy,
             content_type,
             bytes.len() as u64,
-            ContentFingerprint::new(FingerprintAlgorithm::Sha256, checksum.clone()).map_err(|error| {
-                ImportModelError::ManifestParse {
+            ContentFingerprint::new(FingerprintAlgorithm::Sha256, checksum.clone()).map_err(
+                |error| ImportModelError::ManifestParse {
                     message: error.to_string(),
-                }
-            })?,
+                },
+            )?,
         )
         .map_err(|error| ImportModelError::ManifestParse {
             message: error.to_string(),
@@ -1794,11 +1954,12 @@ fn ensure_import_data_client(
         return Ok(client.clone());
     }
 
-    let connected = data_runtime
-        .connect_lazy_postgres()
-        .map_err(|error| ImportModelError::ManifestParse {
-            message: format!("failed to connect live import data client: {error}"),
-        })?;
+    let connected =
+        data_runtime
+            .connect_lazy_postgres()
+            .map_err(|error| ImportModelError::ManifestParse {
+                message: format!("failed to connect live import data client: {error}"),
+            })?;
     *client = Some(connected.clone());
     Ok(connected)
 }
@@ -1848,6 +2009,114 @@ fn materialize_event_record(
         })?;
     normalized.insert("persisted".to_string(), persisted);
     Ok(())
+}
+
+fn materialize_user_record(
+    tokio_runtime: &tokio::runtime::Runtime,
+    auth_context: &LiveImportAuthContext,
+    staged_record: &mut Value,
+) -> Result<(), ImportModelError> {
+    let (updates, persisted) = user_import_updates(staged_record, &auth_context.site_id)?;
+    tokio_runtime
+        .block_on(async { auth_context.auth.write(updates).await })
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to persist imported user auth state: {error}"),
+        })?;
+
+    let normalized = staged_record
+        .get_mut("normalized")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged user record is missing `normalized` object data".to_string(),
+        })?;
+    normalized.insert("persisted".to_string(), persisted);
+    Ok(())
+}
+
+fn user_import_updates(
+    staged_record: &Value,
+    site_id: &str,
+) -> Result<(Vec<DefaultTupleUpdate>, Value), ImportModelError> {
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged user record is missing `normalized` object data".to_string(),
+        })?;
+    let principal_id = required_normalized_string(normalized, "principal_id")?;
+    if site_id.is_empty() {
+        return Err(ImportModelError::ManifestParse {
+            message: "live user import requires a non-empty `site`".to_string(),
+        });
+    }
+    let legacy_roles = normalized
+        .get("legacy_roles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged user record is missing `normalized.legacy_roles`".to_string(),
+        })?;
+    if legacy_roles.is_empty() {
+        return Err(ImportModelError::ManifestParse {
+            message: "live user import requires at least one `legacy_roles` entry".to_string(),
+        });
+    }
+
+    let user = DefaultSubject::entity(Entity::user(principal_id.clone()));
+    let site = Entity::site(site_id.to_string());
+    let mut updates = Vec::new();
+    let mut effective_roles = Vec::new();
+
+    for role in legacy_roles {
+        let role = role
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| ImportModelError::ManifestParse {
+                message: "staged user record has a non-string `normalized.legacy_roles` entry"
+                    .to_string(),
+            })?;
+        let group = Entity::group(format!("legacy-role:{role}"));
+        updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
+            group.clone(),
+            Relation::Member,
+            user.clone(),
+        )));
+        match role {
+            "administrator" => {
+                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
+                    site.clone(),
+                    Relation::Admin,
+                    DefaultSubject::userset(group, Relation::Member),
+                )));
+                effective_roles.push(role.to_string());
+            }
+            "editor" => {
+                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
+                    site.clone(),
+                    Relation::Editor,
+                    DefaultSubject::userset(group, Relation::Member),
+                )));
+                effective_roles.push(role.to_string());
+            }
+            unsupported => {
+                return Err(ImportModelError::ManifestParse {
+                    message: format!(
+                        "legacy role `{unsupported}` cannot be mapped safely into the shipped auth model yet"
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok((
+        updates.clone(),
+        serde_json::json!({
+            "table": "auth_tuples",
+            "principal_id": principal_id,
+            "site_id": site_id,
+            "roles": effective_roles,
+            "writes": updates.len(),
+        }),
+    ))
 }
 
 fn page_import_mutation(
@@ -2136,19 +2405,21 @@ mod tests {
             let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
             let stop_thread = Arc::clone(&stop);
             let store_thread = Arc::clone(&store);
-            let handle = thread::spawn(move || loop {
-                if stop_thread.load(Ordering::SeqCst) {
-                    break;
-                }
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let store = Arc::clone(&store_thread);
-                        handle_object_store_request(stream, &store);
+            let handle = thread::spawn(move || {
+                loop {
+                    if stop_thread.load(Ordering::SeqCst) {
+                        break;
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            let store = Arc::clone(&store_thread);
+                            handle_object_store_request(stream, &store);
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("object-store test server failed: {error}"),
                     }
-                    Err(error) => panic!("object-store test server failed: {error}"),
                 }
             });
 
@@ -2517,8 +2788,10 @@ enabled = ["cms", "media", "events"]
   {
     "source_key": "wp:user:alice",
     "checksum": "user-alice-v1",
+    "principal_id": "alice",
     "email": "alice@example.com",
-    "username": "alice"
+    "username": "alice",
+    "legacy_roles": ["administrator"]
   }
 ]"#,
         );
@@ -2672,11 +2945,7 @@ dependencies = ["users", "media"]
             );
         }
         fs::write(config_dir.join("platform.toml"), config).unwrap();
-        fs::write(
-            app_root.join("app.toml"),
-            CUSTOMER_APP_MANIFEST_WITH_ASSETS,
-        )
-        .unwrap();
+        fs::write(app_root.join("app.toml"), CUSTOMER_APP_MANIFEST_WITH_ASSETS).unwrap();
         fs::write(
             templates_root.join("home.html"),
             "<html><body><main>Showcase Events</main></body></html>",
@@ -2890,7 +3159,9 @@ dependencies = ["users", "media"]
         .unwrap_err();
 
         assert!(
-            error.to_string().contains("import manifest locale `fr` is not supported"),
+            error
+                .to_string()
+                .contains("import manifest locale `fr` is not supported"),
             "{}",
             error
         );
@@ -3275,5 +3546,87 @@ dependencies = ["users", "media"]
 
         let error = event_import_mutation(&staged).unwrap_err();
         assert!(error.to_string().contains("normalized.title"));
+    }
+
+    #[test]
+    fn user_import_updates_map_administrators_into_group_and_site_admin_tuples() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["administrator"]
+            }
+        });
+
+        let (updates, persisted) = user_import_updates(&staged, "main").unwrap();
+
+        assert_eq!(updates.len(), 2);
+        assert_eq!(persisted["table"], "auth_tuples");
+        assert_eq!(persisted["principal_id"], "alice");
+        assert_eq!(persisted["site_id"], "main");
+        assert_eq!(persisted["writes"], 2);
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::group("legacy-role:administrator"),
+                Relation::Member,
+                DefaultSubject::entity(Entity::user("alice")),
+            )))
+        );
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::site("main"),
+                Relation::Admin,
+                DefaultSubject::userset(
+                    Entity::group("legacy-role:administrator"),
+                    Relation::Member
+                ),
+            )))
+        );
+    }
+
+    #[test]
+    fn user_import_updates_map_editors_into_group_and_site_editor_tuples() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["editor"]
+            }
+        });
+
+        let (updates, persisted) = user_import_updates(&staged, "main").unwrap();
+
+        assert_eq!(updates.len(), 2);
+        assert_eq!(persisted["roles"], serde_json::json!(["editor"]));
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::site("main"),
+                Relation::Editor,
+                DefaultSubject::userset(Entity::group("legacy-role:editor"), Relation::Member),
+            )))
+        );
+    }
+
+    #[test]
+    fn user_import_updates_reject_unsupported_legacy_roles() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["shop_manager"]
+            }
+        });
+
+        let error = user_import_updates(&staged, "main").unwrap_err();
+        assert!(error.to_string().contains("cannot be mapped safely"));
+    }
+
+    #[test]
+    fn user_import_updates_reject_missing_required_fields() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "legacy_roles": ["administrator"]
+            }
+        });
+
+        let error = user_import_updates(&staged, "main").unwrap_err();
+        assert!(error.to_string().contains("normalized.principal_id"));
     }
 }

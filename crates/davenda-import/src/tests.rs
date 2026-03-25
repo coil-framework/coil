@@ -97,7 +97,10 @@ fn manifest_plans_importers_in_dependency_order() {
 fn manifest_validate_at_rejects_missing_referenced_paths_and_cutover_contracts() {
     let root = unique_dir("manifest-validate-at");
     write_text(root.join("app.toml"), "[app]\nname = \"harbor-shop\"\n");
-    write_text(root.join("platform.toml"), "[app]\nname = \"harbor-shop\"\n");
+    write_text(
+        root.join("platform.toml"),
+        "[app]\nname = \"harbor-shop\"\n",
+    );
     write_text(root.join("pages.json"), "[]");
     write_text(root.join("capability-map.md"), "capability map");
     write_text(root.join("auth-mapping.md"), "auth mapping");
@@ -214,18 +217,24 @@ source_path = "fixtures/pages.json"
     assert!(plan.cutover.is_some());
 
     let report = plan.command_report().unwrap();
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "import.target"));
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "import.verification"));
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "import.cutover"));
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "import.target")
+    );
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "import.verification")
+    );
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "import.cutover")
+    );
 }
 
 #[test]
@@ -410,13 +419,9 @@ fn import_execution_stages_media_then_pages_with_resolved_asset_references() {
         2
     );
 
-    let pages_path = PathBuf::from(
-        execution.importer_records[1]
-            .staged_path
-            .clone()
-            .unwrap(),
-    );
-    let pages: serde_json::Value = serde_json::from_str(&fs::read_to_string(pages_path).unwrap()).unwrap();
+    let pages_path = PathBuf::from(execution.importer_records[1].staged_path.clone().unwrap());
+    let pages: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(pages_path).unwrap()).unwrap();
     assert_eq!(
         pages[0]["normalized"]["media_references"][0].as_str(),
         Some("asset:harbor-hero")
@@ -424,10 +429,12 @@ fn import_execution_stages_media_then_pages_with_resolved_asset_references() {
 
     let report = execution.command_report().unwrap();
     assert_eq!(report.status, ReportStatus::Warning);
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "import.pages.staged"));
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "import.pages.staged")
+    );
 }
 
 #[test]
@@ -565,6 +572,106 @@ fn strict_validation_stops_invalid_records_and_permissive_mode_stages_exceptions
 }
 
 #[test]
+fn publish_validated_user_imports_normalize_principal_ids_and_legacy_roles() {
+    let root = unique_dir("execute-users");
+    write_json(
+        root.join("users.json"),
+        json!([
+            {
+                "source_key": "wp:user:alice",
+                "checksum": "user-v1",
+                "principal_id": "alice",
+                "email": "alice@example.com",
+                "display_name": "Alice",
+                "legacy_roles": ["administrator"]
+            }
+        ]),
+    );
+
+    let mut manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-users").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap()
+    .with_site("main")
+    .unwrap()
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("users").unwrap(),
+            10,
+            "user",
+            "Import users",
+        )
+        .unwrap()
+        .with_source_path("users.json")
+        .unwrap(),
+    );
+    manifest.publication_mode = PublicationMode::PublishValidated;
+    let plan = manifest.plan().unwrap();
+    let journal = journal_path(&root, "wordpress-users");
+
+    let execution = plan.execute(&root, &journal).unwrap();
+    assert_eq!(execution.importer_records[0].imported_records, 1);
+
+    let staged_path = PathBuf::from(
+        execution.importer_records[0]
+            .staged_path
+            .as_ref()
+            .expect("publish-validated imports still persist staged artifacts"),
+    );
+    let staged: Vec<serde_json::Value> =
+        serde_json::from_str(&fs::read_to_string(staged_path).unwrap()).unwrap();
+    assert_eq!(staged[0]["target_id"], "alice");
+    assert_eq!(staged[0]["normalized"]["principal_id"], "alice");
+    assert_eq!(
+        staged[0]["normalized"]["legacy_roles"],
+        json!(["administrator"])
+    );
+}
+
+#[test]
+fn user_import_records_require_a_principal_identifier() {
+    let root = unique_dir("execute-users-missing-principal");
+    write_json(
+        root.join("users.json"),
+        json!([
+            {
+                "source_key": "wp:user:alice",
+                "checksum": "user-v1",
+                "email": "alice@example.com",
+                "legacy_roles": ["administrator"]
+            }
+        ]),
+    );
+
+    let manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-users").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap()
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("users").unwrap(),
+            10,
+            "user",
+            "Import users",
+        )
+        .unwrap()
+        .with_source_path("users.json")
+        .unwrap(),
+    );
+    let plan = manifest.plan().unwrap();
+    let journal = journal_path(&root, "wordpress-users");
+
+    let error = plan.execute(&root, &journal).unwrap_err();
+    assert!(error.to_string().contains("principal_id` or `username`"));
+}
+
+#[test]
 fn import_execution_requires_source_paths_and_well_formed_source_batches() {
     let root = unique_dir("execute-source-shape");
 
@@ -691,10 +798,12 @@ fn checked_in_wordpress_fixture_manifest_executes_end_to_end() {
     assert!(manifest.migration_artifacts.is_some());
     assert!(manifest.verification.is_some());
     assert!(manifest.cutover.is_some());
-    assert!(execution
-        .importer_records
-        .iter()
-        .all(|record| record.staged_records == 1));
+    assert!(
+        execution
+            .importer_records
+            .iter()
+            .all(|record| record.staged_records == 1)
+    );
     assert_eq!(
         execution.summary.status_counts()[&ImportRecordStatus::StagedForReview],
         4
@@ -794,11 +903,7 @@ dependencies = ["pages"]
     );
     assert_eq!(manifest.source.as_ref().unwrap().inputs.len(), 1);
     assert_eq!(
-        manifest
-            .migration_artifacts
-            .as_ref()
-            .unwrap()
-            .redirect_plan,
+        manifest.migration_artifacts.as_ref().unwrap().redirect_plan,
         "docs/redirect-plan.csv".to_string()
     );
     assert_eq!(
@@ -847,7 +952,10 @@ source_path = "pages.json"
     let manifest = ImportManifest::from_file(&path).unwrap();
     assert_eq!(manifest.importers.len(), 1);
     assert_eq!(manifest.importers[0].id, ImporterId::new("pages").unwrap());
-    assert_eq!(manifest.importers[0].source_path.as_deref(), Some("pages.json"));
+    assert_eq!(
+        manifest.importers[0].source_path.as_deref(),
+        Some("pages.json")
+    );
 }
 
 #[test]

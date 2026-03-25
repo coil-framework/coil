@@ -358,7 +358,12 @@ pub(crate) fn execute_import_plan_with_handler<F>(
     handler: F,
 ) -> Result<ImportExecution, ImportModelError>
 where
-    F: FnMut(&ImporterSpec, &ImportRecordReceipt, &Path, &mut Value) -> Result<(), ImportModelError>,
+    F: FnMut(
+        &ImporterSpec,
+        &ImportRecordReceipt,
+        &Path,
+        &mut Value,
+    ) -> Result<(), ImportModelError>,
 {
     execute_import_plan_internal(plan, manifest_root, journal_path, Some(handler))
 }
@@ -370,13 +375,20 @@ fn execute_import_plan_internal<F>(
     mut handler: Option<F>,
 ) -> Result<ImportExecution, ImportModelError>
 where
-    F: FnMut(&ImporterSpec, &ImportRecordReceipt, &Path, &mut Value) -> Result<(), ImportModelError>,
+    F: FnMut(
+        &ImporterSpec,
+        &ImportRecordReceipt,
+        &Path,
+        &mut Value,
+    ) -> Result<(), ImportModelError>,
 {
     let mut journal = ImportJournal::load(journal_path, &plan.run_id, &plan.customer_app_id)?;
     let run_root = import_run_root(journal_path);
-    fs::create_dir_all(run_root.join("staged")).map_err(|error| ImportModelError::ArtifactWrite {
-        path: run_root.join("staged").display().to_string(),
-        message: error.to_string(),
+    fs::create_dir_all(run_root.join("staged")).map_err(|error| {
+        ImportModelError::ArtifactWrite {
+            path: run_root.join("staged").display().to_string(),
+            message: error.to_string(),
+        }
     })?;
     fs::create_dir_all(run_root.join("exceptions")).map_err(|error| {
         ImportModelError::ArtifactWrite {
@@ -389,12 +401,11 @@ where
     let mut summary = ImportRunSummary::new();
 
     for importer in &plan.ordered_importers {
-        let source_rel = importer
-            .source_path
-            .as_ref()
-            .ok_or_else(|| ImportModelError::MissingImporterSourcePath {
+        let source_rel = importer.source_path.as_ref().ok_or_else(|| {
+            ImportModelError::MissingImporterSourcePath {
                 importer_id: importer.id.to_string(),
-            })?;
+            }
+        })?;
         let source_path = resolve_source_path(manifest_root, source_rel);
         let raw_records = load_source_records(importer, &source_path)?;
         let staged_path = run_root
@@ -417,13 +428,13 @@ where
             match process_record(plan, importer, &journal, &raw_record) {
                 Ok((receipt, Some(mut staged_record))) => {
                     if let Some(handler) = handler.as_mut() {
-                        handler(importer, &receipt, manifest_root, &mut staged_record).map_err(|error| {
-                            ImportModelError::ExecutionHook {
+                        handler(importer, &receipt, manifest_root, &mut staged_record).map_err(
+                            |error| ImportModelError::ExecutionHook {
                                 importer_id: importer.id.to_string(),
                                 record: receipt.source_key.to_string(),
                                 message: error.to_string(),
-                            }
-                        })?;
+                            },
+                        )?;
                     }
                     update_counts(
                         receipt.status,
@@ -522,7 +533,9 @@ where
             skipped_records,
             staged_records: staged_records_count,
             failed_records,
-            staged_path: staged_path.exists().then(|| staged_path.display().to_string()),
+            staged_path: staged_path
+                .exists()
+                .then(|| staged_path.display().to_string()),
             exception_path: exception_path
                 .exists()
                 .then(|| exception_path.display().to_string()),
@@ -556,7 +569,10 @@ fn resolve_source_path(manifest_root: &Path, source_path: &str) -> PathBuf {
     }
 }
 
-fn load_source_records(importer: &ImporterSpec, source_path: &Path) -> Result<Vec<Value>, ImportModelError> {
+fn load_source_records(
+    importer: &ImporterSpec,
+    source_path: &Path,
+) -> Result<Vec<Value>, ImportModelError> {
     match importer.source_format {
         ImportSourceFormat::Json => {}
     }
@@ -565,11 +581,12 @@ fn load_source_records(importer: &ImporterSpec, source_path: &Path) -> Result<Ve
         path: source_path.display().to_string(),
         message: error.to_string(),
     })?;
-    let value: Value = serde_json::from_str(&input).map_err(|error| ImportModelError::SourceParse {
-        importer_id: importer.id.to_string(),
-        path: source_path.display().to_string(),
-        message: error.to_string(),
-    })?;
+    let value: Value =
+        serde_json::from_str(&input).map_err(|error| ImportModelError::SourceParse {
+            importer_id: importer.id.to_string(),
+            path: source_path.display().to_string(),
+            message: error.to_string(),
+        })?;
 
     match value {
         Value::Array(records) => Ok(records),
@@ -595,8 +612,8 @@ fn process_record(
 ) -> Result<(ImportRecordReceipt, Option<Value>), String> {
     let source_key = SourceRecordKey::new(required_string(raw_record, "source_key")?)
         .map_err(|error| error.to_string())?;
-    let checksum = optional_string(raw_record, "checksum")?
-        .unwrap_or_else(|| canonical_checksum(raw_record));
+    let checksum =
+        optional_string(raw_record, "checksum")?.unwrap_or_else(|| canonical_checksum(raw_record));
     if journal
         .previous_receipt(&importer.id, &source_key)
         .and_then(|receipt| receipt.checksum.as_deref())
@@ -612,17 +629,24 @@ fn process_record(
             .previous_receipt(&importer.id, &source_key)
             .and_then(|receipt| receipt.target_id.as_deref())
         {
-            receipt = receipt
-                .targeting(TargetRecordId::new(target_id.to_string()).map_err(|error| error.to_string())?);
+            receipt = receipt.targeting(
+                TargetRecordId::new(target_id.to_string()).map_err(|error| error.to_string())?,
+            );
         }
-        receipt = receipt.with_checksum(checksum).map_err(|error| error.to_string())?;
+        receipt = receipt
+            .with_checksum(checksum)
+            .map_err(|error| error.to_string())?;
         return Ok((receipt, None));
     }
 
-    let transformed = transform_record(plan, importer, journal, raw_record, &source_key, &checksum)?;
+    let transformed =
+        transform_record(plan, importer, journal, raw_record, &source_key, &checksum)?;
     let status = match plan.publication_mode {
         PublicationMode::PublishValidated => {
-            if journal.previous_receipt(&importer.id, &source_key).is_some() {
+            if journal
+                .previous_receipt(&importer.id, &source_key)
+                .is_some()
+            {
                 ImportRecordStatus::Updated
             } else {
                 ImportRecordStatus::Imported
@@ -639,8 +663,12 @@ fn process_record(
         status,
     )
     .map_err(|error| error.to_string())?
-    .targeting(TargetRecordId::new(transformed.target_id.clone()).map_err(|error| error.to_string())?);
-    receipt = receipt.with_checksum(checksum.clone()).map_err(|error| error.to_string())?;
+    .targeting(
+        TargetRecordId::new(transformed.target_id.clone()).map_err(|error| error.to_string())?,
+    );
+    receipt = receipt
+        .with_checksum(checksum.clone())
+        .map_err(|error| error.to_string())?;
 
     Ok((
         receipt,
@@ -677,13 +705,11 @@ fn transform_record(
         "asset" => transform_asset(plan, importer, raw_record, source_key, checksum),
         "user" => transform_user(plan, importer, raw_record, source_key, checksum),
         "event" => transform_event(plan, importer, journal, raw_record, source_key, checksum),
-        other => Err(
-            ImportModelError::UnsupportedResourceKind {
-                importer_id: importer.id.to_string(),
-                resource_kind: other.to_string(),
-            }
-            .to_string(),
-        ),
+        other => Err(ImportModelError::UnsupportedResourceKind {
+            importer_id: importer.id.to_string(),
+            resource_kind: other.to_string(),
+        }
+        .to_string()),
     }
 }
 
@@ -725,11 +751,13 @@ fn transform_page(
         .map(|reference| {
             journal
                 .resolved_target_for_kind(&plan.ordered_importers, "asset", &reference)
-                .ok_or_else(|| format!("media reference `{reference}` does not resolve to an imported asset"))
+                .ok_or_else(|| {
+                    format!("media reference `{reference}` does not resolve to an imported asset")
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let target_id = optional_string(raw_record, "target_id")?
-        .unwrap_or_else(|| format!("page:{slug}"));
+    let target_id =
+        optional_string(raw_record, "target_id")?.unwrap_or_else(|| format!("page:{slug}"));
 
     Ok(TransformedRecord {
         target_id,
@@ -773,8 +801,8 @@ fn transform_asset(
                 .to_string(),
         );
     }
-    let target_id = optional_string(raw_record, "target_id")?
-        .unwrap_or_else(|| format!("asset:{slug}"));
+    let target_id =
+        optional_string(raw_record, "target_id")?.unwrap_or_else(|| format!("asset:{slug}"));
     let folder = optional_string(raw_record, "folder")?;
     let storage_class = optional_string(raw_record, "storage_class")?
         .unwrap_or_else(|| asset_storage_default_label(plan.asset_storage_default).to_string());
@@ -814,27 +842,24 @@ fn transform_user(
 ) -> Result<TransformedRecord, String> {
     let email = optional_string(raw_record, "email")?;
     let username = optional_string(raw_record, "username")?;
-    let target_id = optional_string(raw_record, "target_id")?.unwrap_or_else(|| {
-        format!(
-            "user:{}",
-            username
-                .clone()
-                .or_else(|| email.clone().map(|email| email.replace('@', "-at-")))
-                .unwrap_or_else(|| "unknown".to_string())
-        )
-    });
-    if email.is_none() && username.is_none() {
-        return Err("user record must define `email` or `username`".to_string());
-    }
+    let principal_id = optional_string(raw_record, "principal_id")?
+        .or_else(|| username.clone())
+        .ok_or_else(|| {
+            "user record must define `principal_id` or `username` for live auth import".to_string()
+        })?;
+    let legacy_roles = optional_string_array(raw_record, "legacy_roles")?;
+    let target_id =
+        optional_string(raw_record, "target_id")?.unwrap_or_else(|| principal_id.clone());
 
     Ok(TransformedRecord {
         target_id,
         normalized: json!({
             "kind": "user",
+            "principal_id": principal_id,
             "email": email,
             "username": username,
             "display_name": optional_string(raw_record, "display_name")?,
-            "capabilities": optional_string_array(raw_record, "capabilities")?,
+            "legacy_roles": legacy_roles,
             "fingerprint": checksum,
         }),
     })
@@ -850,14 +875,13 @@ fn transform_event(
 ) -> Result<TransformedRecord, String> {
     let slug = validate_token("event_slug", required_string(raw_record, "slug")?)
         .map_err(|error| error.to_string())?;
-    let target_id = optional_string(raw_record, "target_id")?
-        .unwrap_or_else(|| format!("event:{slug}"));
-    let hero_asset = optional_string(raw_record, "hero_asset_source_key")?
-        .map(|reference| {
-            journal
-                .resolved_target_for_kind(&plan.ordered_importers, "asset", &reference)
-                .unwrap_or(reference)
-        });
+    let target_id =
+        optional_string(raw_record, "target_id")?.unwrap_or_else(|| format!("event:{slug}"));
+    let hero_asset = optional_string(raw_record, "hero_asset_source_key")?.map(|reference| {
+        journal
+            .resolved_target_for_kind(&plan.ordered_importers, "asset", &reference)
+            .unwrap_or(reference)
+    });
 
     Ok(TransformedRecord {
         target_id,
@@ -876,7 +900,9 @@ fn transform_event(
 
 fn required_string(record: &Value, field: &'static str) -> Result<String, String> {
     match record.get(field).and_then(Value::as_str) {
-        Some(value) => require_non_empty(field, value.to_string()).map_err(|error| error.to_string()),
+        Some(value) => {
+            require_non_empty(field, value.to_string()).map_err(|error| error.to_string())
+        }
         None => Err(format!("missing required `{field}`")),
     }
 }
@@ -897,7 +923,9 @@ fn optional_string_array(record: &Value, field: &'static str) -> Result<Vec<Stri
         Some(Value::Array(values)) => values
             .iter()
             .map(|value| match value.as_str() {
-                Some(item) => require_non_empty(field, item.to_string()).map_err(|error| error.to_string()),
+                Some(item) => {
+                    require_non_empty(field, item.to_string()).map_err(|error| error.to_string())
+                }
                 None => Err(format!("`{field}` entries must be strings")),
             })
             .collect(),
@@ -924,10 +952,11 @@ fn persist_artifact(path: &Path, records: &[Value]) -> Result<(), ImportModelErr
             message: error.to_string(),
         })?;
     }
-    let output = serde_json::to_string_pretty(records).map_err(|error| ImportModelError::ArtifactWrite {
-        path: path.display().to_string(),
-        message: error.to_string(),
-    })?;
+    let output =
+        serde_json::to_string_pretty(records).map_err(|error| ImportModelError::ArtifactWrite {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
     fs::write(path, output).map_err(|error| ImportModelError::ArtifactWrite {
         path: path.display().to_string(),
         message: error.to_string(),

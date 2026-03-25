@@ -40,7 +40,7 @@ cutover_runbook = "docs/cutover-runbook.md"
 
 [verification]
 required = ["record_counts", "route_resolution", "canonical_urls", "media_reachability"]
-sample_routes = ["/en-GB/home", "/en-GB/events/harbor-festival"]
+sample_routes = ["/en-GB/pages/home", "/en-GB/events/harbor-festival"]
 sample_users = ["alice@example.com"]
 
 [cutover]

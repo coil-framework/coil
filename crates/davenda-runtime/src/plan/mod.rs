@@ -301,6 +301,24 @@ impl RuntimePlan {
         )
     }
 
+    pub fn wasm_host_with_secret_resolver<R: SecretResolver>(
+        &self,
+        resolver: &R,
+    ) -> Result<WasmHost, RuntimeServerError> {
+        let wasm_secrets = self.wasm_secret_values(resolver)?;
+        let storage_host =
+            self.storage_host_with_object_store(self.object_store_client_config(resolver)?);
+        Ok(WasmHost::with_host_services(
+            self.clone(),
+            self.config.app.name.clone(),
+            self.wasm.clone(),
+            self.extension_registry.clone(),
+            self.config.i18n.default_locale.clone(),
+            self.registered_runtime_jobs.clone(),
+            RuntimeWasmHostServices::with_runtime_secrets(self.clone(), storage_host, wasm_secrets),
+        ))
+    }
+
     pub fn wasm_secret_values<R: SecretResolver>(
         &self,
         resolver: &R,

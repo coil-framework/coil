@@ -16,6 +16,10 @@ mod services;
 
 pub use principal::ExtensionPrincipal;
 pub(crate) use services::{MetadataAuditSnapshot, RuntimeWasmHostServices};
+pub use services::{
+    WebhookObservationBackendKind, WebhookObservationEvent, WebhookObservationSnapshot,
+    WebhookObservationStatus, WebhookObservationStatusCounts,
+};
 
 #[derive(Debug, Error)]
 pub enum LiveWasmExecutionError {
@@ -131,6 +135,13 @@ impl WasmHost {
         self.host_services.metadata_location()
     }
 
+    pub fn webhook_observation_snapshot(
+        &self,
+        limit: usize,
+    ) -> Result<WebhookObservationSnapshot, String> {
+        self.host_services.webhook_observation_snapshot(limit)
+    }
+
     pub fn compile_module(&self, bytes: &[u8]) -> Result<CompiledWasmModule, WasmModelError> {
         self.engine.compile_module(bytes)
     }
@@ -163,6 +174,15 @@ impl WasmHost {
                 .map(|session| self.execute_installed_session(session))
                 .transpose(),
         }
+    }
+
+    pub fn execute_leased_job(
+        &self,
+        lease: &JobLease,
+    ) -> Result<Option<ExecutionReceipt>, LiveWasmExecutionError> {
+        self.begin_leased_job_invocation(lease)?
+            .map(|session| self.execute_installed_session(session))
+            .transpose()
     }
 
     pub fn execute_render_hook_slot(

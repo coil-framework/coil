@@ -5,9 +5,9 @@ use crate::cli::args::{
     AuthPackageValidateInvocation, AuthTestModelInvocation, CacheInspectInvocation,
     CacheInvalidateInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
     JobsDeadLettersInvocation, JobsInFlightInvocation, JobsPromoteInvocation, JobsReadyInvocation,
-    JobsRetryInvocation, JobsStatusInvocation, MigrateApplyInvocation, ModuleDisableInvocation,
-    ModuleEnableInvocation, ModuleInspectInvocation, ModuleInstallInvocation,
-    StorageInspectInvocation, TlsRenewInvocation, parse,
+    JobsRetryInvocation, JobsRunInvocation, JobsStatusInvocation, MigrateApplyInvocation,
+    ModuleDisableInvocation, ModuleEnableInvocation, ModuleInspectInvocation,
+    ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -42,7 +42,7 @@ use davenda_import::{
     CutoverSwitchExecution, CutoverTrafficTargetChange, ImportAuthMapping, ImportManifest,
     ImportModelError, PublicationMode, RollbackTrigger,
 };
-use davenda_jobs::JobInstant;
+use davenda_jobs::{DeadLetterReason, JobFailureDisposition, JobInstant, QueueKind};
 use davenda_memberships::{
     BillingInterval, MemberAccountId, MembershipTierId, SubscriptionId, SubscriptionStatus,
     TierVisibility,
@@ -348,6 +348,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_jobs_status(&invocation)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::JobsRun {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_jobs_run(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::JobsReady {
             output_mode,
             invocation,
@@ -484,6 +492,7 @@ fn usage() -> String {
         "  platform cache inspect [--config <path>] --route <path> [--json]",
         "  platform cache invalidate [--config <path>] --tag <tag> [--tag <tag> ...] [--dry-run] --yes [--json]",
         "  platform jobs status [--config <path>] [--queue <name>] [--json]",
+        "  platform jobs run [--config <path>] [--queue <name>] [--worker-id <id>] [--limit <n>] [--dry-run] [--json]",
         "  platform jobs ready [--config <path>] [--queue <name>] [--limit <n>] [--json]",
         "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
         "  platform jobs in-flight [--config <path>] [--queue <name>] [--worker-id <id>] [--limit <n>] [--json]",
@@ -524,6 +533,7 @@ fn usage() -> String {
         "  platform cache inspect --config config/platform.toml --route /en-GB/home",
         "  platform cache invalidate --config config/platform.toml --tag route:events.list --tag locale:en-GB --yes",
         "  platform jobs status --config config/platform.toml",
+        "  platform jobs run --config config/platform.toml --worker-id worker-a --limit 25",
         "  platform jobs ready --config config/platform.toml --queue jobs.work --limit 25",
         "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
         "  platform jobs in-flight --config config/platform.toml --queue jobs.work --worker-id worker-a --limit 25",
@@ -1379,7 +1389,7 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
         || installed_spec
             .and_then(|spec| spec.version_req.as_ref())
             .is_none()
-     {
+    {
         report = report.with_status(ReportStatus::Warning);
     }
 
@@ -1758,7 +1768,7 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
     } else if installed_spec
         .and_then(|spec| spec.version_req.as_ref())
         .is_none()
-     {
+    {
         push_report_diagnostic(
             &mut report,
             DiagnosticSeverity::Warning,
@@ -2858,6 +2868,506 @@ fn build_jobs_ready_report(
     )?;
 
     Ok(report)
+}
+
+fn run_jobs_run(
+    invocation: &JobsRunInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    let topology = built.runtime_plan.runtime.jobs.describe().clone();
+    let queue_filter = invocation.queue.as_deref();
+    let executable_queues =
+        executable_jobs_queues(&built.manifest.id.to_string(), &topology, queue_filter)?;
+    let worker_id = invocation
+        .worker_id
+        .clone()
+        .unwrap_or_else(|| format!("platform-jobs-run:{}", built.manifest.id));
+    let mut report = CommandReport::new(
+        ["jobs", "run"],
+        if dry_run {
+            format!(
+                "Planned worker batch for customer app `{}`",
+                built.manifest.id
+            )
+        } else {
+            format!(
+                "Executed worker batch for customer app `{}`",
+                built.manifest.id
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "job_id",
+        "job_name",
+        "queue",
+        "worker_id",
+        "attempt",
+        "status",
+        "detail",
+    ])
+    .map_err(report_build_error)?;
+
+    let probe_runtime = build_cli_async_runtime()?;
+    if let Some(reason) =
+        live_jobs_state_unavailable_reason(&built, &probe_runtime, "run queued jobs")?
+    {
+        report = report.with_status(ReportStatus::Warning);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "jobs.runtime.unavailable",
+            reason,
+        )?;
+        return Ok(report);
+    }
+
+    let (runtime, mut host) = build_cli_jobs_host(&built, "platform-jobs-run", "run")?;
+    let _runtime_guard = runtime.enter();
+    let now_unix_seconds = unix_timestamp_now()?;
+    let now = JobInstant::from_unix_seconds(now_unix_seconds);
+
+    let due_scheduled_jobs = host
+        .coordinator()
+        .scheduled_jobs()
+        .iter()
+        .filter_map(|record| {
+            let scheduled_for = record.spec.scheduled_for?;
+            if scheduled_for.as_unix_seconds() > now_unix_seconds {
+                return None;
+            }
+            queue_filter
+                .map_or(record.spec.queue == topology.scheduled_queue, |filter| {
+                    record.spec.queue.as_str() == filter
+                })
+                .then_some((
+                    record.spec.job_id.to_string(),
+                    record.spec.job_name.to_string(),
+                    record.spec.queue.to_string(),
+                    scheduled_for.as_unix_seconds(),
+                ))
+        })
+        .collect::<Vec<_>>();
+
+    if dry_run {
+        for (job_id, job_name, queue, scheduled_for) in
+            due_scheduled_jobs.iter().take(invocation.limit)
+        {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("job_id", job_id.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("job_name", job_name.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("queue", queue.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("worker_id", worker_id.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("attempt", "next".to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("status", "planned")
+                    .map_err(report_build_error)?
+                    .with_cell(
+                        "detail",
+                        format!(
+                            "due scheduled job would be promoted and executed at {scheduled_for}"
+                        ),
+                    )
+                    .map_err(report_build_error)?,
+            );
+        }
+
+        let remaining = invocation.limit.saturating_sub(report.rows.len());
+        for record in host
+            .coordinator()
+            .ready_jobs()
+            .iter()
+            .filter(|record| {
+                executable_queues
+                    .iter()
+                    .any(|queue| queue == &record.spec.queue)
+            })
+            .take(remaining)
+        {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("job_id", record.spec.job_id.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("job_name", record.spec.job_name.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("queue", record.spec.queue.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("worker_id", worker_id.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("attempt", (record.attempts.saturating_add(1)).to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("status", "planned")
+                    .map_err(report_build_error)?
+                    .with_cell(
+                        "detail",
+                        "ready job would be leased and executed in this worker batch",
+                    )
+                    .map_err(report_build_error)?,
+            );
+        }
+
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "jobs.run.plan",
+            format!(
+                "worker_id={} queue_filter={} limit={} due_scheduled={} ready_jobs={}",
+                worker_id,
+                queue_filter.unwrap_or("all"),
+                invocation.limit,
+                due_scheduled_jobs.len(),
+                host.coordinator()
+                    .ready_jobs()
+                    .iter()
+                    .filter(|record| {
+                        executable_queues
+                            .iter()
+                            .any(|queue| queue == &record.spec.queue)
+                    })
+                    .count()
+            ),
+        )?;
+        push_jobs_topology_diagnostic(
+            &mut report,
+            &topology,
+            built.runtime_plan.runtime.jobs.backend,
+            built.runtime_plan.runtime.jobs.default_retry_limit,
+        )?;
+        return Ok(report);
+    }
+
+    let wasm_host = built
+        .runtime_plan
+        .runtime
+        .wasm_host_with_secret_resolver(&EnvironmentSecretResolver)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build worker execution host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+
+    let mut scheduler_warning = None;
+    if executable_queues
+        .iter()
+        .any(|queue| queue == &topology.scheduled_queue)
+        && !due_scheduled_jobs.is_empty()
+    {
+        match host
+            .acquire_scheduler_leadership(now, Duration::from_secs(30))
+            .and_then(|_| host.promote_due_jobs(now))
+        {
+            Ok(promoted) => {
+                push_report_diagnostic(
+                    &mut report,
+                    DiagnosticSeverity::Info,
+                    "jobs.run.promote",
+                    format!(
+                        "promoted {} due scheduled job(s) before worker leasing",
+                        promoted.len()
+                    ),
+                )?;
+            }
+            Err(error) => {
+                report = report.with_status(ReportStatus::Warning);
+                let message =
+                    format!("failed to promote due scheduled jobs before execution: {error}");
+                scheduler_warning = Some(message.clone());
+                push_report_diagnostic(
+                    &mut report,
+                    DiagnosticSeverity::Warning,
+                    "jobs.run.promote.unavailable",
+                    message,
+                )?;
+            }
+        }
+    }
+
+    let mut completed_jobs = 0usize;
+    let mut retried_jobs = 0usize;
+    let mut dead_lettered_jobs = 0usize;
+    let mut remaining = invocation.limit;
+
+    for queue in executable_queues {
+        if remaining == 0 {
+            break;
+        }
+
+        let leases = host
+            .lease_ready_jobs(
+                &queue,
+                worker_id.clone(),
+                JobInstant::from_unix_seconds(unix_timestamp_now()?),
+                Duration::from_secs(60),
+                remaining,
+            )
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to lease ready jobs from `{queue}` for `{}`: {error}",
+                    built.manifest.id
+                ))
+            })?;
+
+        for lease in leases {
+            let attempt = lease.record.attempts.saturating_add(1);
+            match wasm_host.execute_leased_job(&lease) {
+                Ok(Some(receipt)) => {
+                    host.acknowledge_completed(
+                        &lease,
+                        JobInstant::from_unix_seconds(unix_timestamp_now()?),
+                    )
+                    .map_err(|error| {
+                        CliRunError::execution(format!(
+                            "failed to acknowledge completed job `{}` for `{}`: {error}",
+                            lease.record.spec.job_id, built.manifest.id
+                        ))
+                    })?;
+                    completed_jobs += 1;
+                    report.push_row(
+                        ReportRow::new()
+                            .with_cell("job_id", lease.record.spec.job_id.to_string())
+                            .map_err(report_build_error)?
+                            .with_cell("job_name", lease.record.spec.job_name.to_string())
+                            .map_err(report_build_error)?
+                            .with_cell("queue", lease.record.spec.queue.to_string())
+                            .map_err(report_build_error)?
+                            .with_cell("worker_id", worker_id.clone())
+                            .map_err(report_build_error)?
+                            .with_cell("attempt", attempt.to_string())
+                            .map_err(report_build_error)?
+                            .with_cell("status", "completed")
+                            .map_err(report_build_error)?
+                            .with_cell(
+                                "detail",
+                                format!(
+                                    "extension={} outcome={:?} runtime_ms={}",
+                                    receipt.extension_id,
+                                    receipt.outcome,
+                                    receipt.runtime.as_millis()
+                                ),
+                            )
+                            .map_err(report_build_error)?,
+                    );
+                }
+                Ok(None) => {
+                    let detail = format!(
+                        "job `{}` has no installed handler capable of execution",
+                        lease.record.spec.job_name
+                    );
+                    let disposition = host
+                        .acknowledge_failed(
+                            &lease,
+                            JobInstant::from_unix_seconds(unix_timestamp_now()?),
+                            DeadLetterReason::PolicyViolation,
+                            detail.clone(),
+                        )
+                        .map_err(|error| {
+                            CliRunError::execution(format!(
+                                "failed to acknowledge non-executable job `{}` for `{}`: {error}",
+                                lease.record.spec.job_id, built.manifest.id
+                            ))
+                        })?;
+                    push_jobs_run_failure_row(
+                        &mut report,
+                        &lease,
+                        &worker_id,
+                        attempt,
+                        disposition,
+                        detail,
+                        &mut retried_jobs,
+                        &mut dead_lettered_jobs,
+                    )?;
+                }
+                Err(error) => {
+                    let detail = error.to_string();
+                    let disposition = host
+                        .acknowledge_failed(
+                            &lease,
+                            JobInstant::from_unix_seconds(unix_timestamp_now()?),
+                            jobs_run_dead_letter_reason(&error),
+                            detail.clone(),
+                        )
+                        .map_err(|ack_error| {
+                            CliRunError::execution(format!(
+                                "failed to acknowledge failed job `{}` for `{}`: {ack_error}",
+                                lease.record.spec.job_id, built.manifest.id
+                            ))
+                        })?;
+                    push_jobs_run_failure_row(
+                        &mut report,
+                        &lease,
+                        &worker_id,
+                        attempt,
+                        disposition,
+                        detail,
+                        &mut retried_jobs,
+                        &mut dead_lettered_jobs,
+                    )?;
+                }
+            }
+            remaining = remaining.saturating_sub(1);
+            if remaining == 0 {
+                break;
+            }
+        }
+    }
+
+    if dead_lettered_jobs > 0 {
+        report = report.with_status(ReportStatus::Unsafe);
+    } else if retried_jobs > 0 || scheduler_warning.is_some() {
+        report = report.with_status(ReportStatus::Warning);
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        if dead_lettered_jobs > 0 {
+            DiagnosticSeverity::Warning
+        } else {
+            DiagnosticSeverity::Info
+        },
+        "jobs.run.result",
+        format!(
+            "worker_id={} queue_filter={} limit={} completed={} retried={} dead_lettered={}",
+            worker_id,
+            queue_filter.unwrap_or("all"),
+            invocation.limit,
+            completed_jobs,
+            retried_jobs,
+            dead_lettered_jobs
+        ),
+    )?;
+    push_jobs_topology_diagnostic(
+        &mut report,
+        &topology,
+        built.runtime_plan.runtime.jobs.backend,
+        built.runtime_plan.runtime.jobs.default_retry_limit,
+    )?;
+
+    Ok(report)
+}
+
+fn executable_jobs_queues(
+    app_id: &str,
+    topology: &davenda_jobs::QueueTopology,
+    queue_filter: Option<&str>,
+) -> Result<Vec<davenda_jobs::JobQueueName>, CliRunError> {
+    if let Some(filter) = queue_filter {
+        let known_queues = topology
+            .queues
+            .iter()
+            .map(|queue| queue.name.to_string())
+            .collect::<Vec<_>>();
+        if !known_queues.iter().any(|queue| queue == filter) {
+            return Err(CliRunError::execution(format!(
+                "queue filter `{filter}` is not defined for customer app `{app_id}`; expected one of: {}",
+                known_queues.join(", ")
+            )));
+        }
+        if filter == topology.dead_letter_queue.as_str() {
+            return Err(CliRunError::execution(format!(
+                "`jobs run` cannot execute the dead-letter queue for customer app `{app_id}`; use `jobs retry` instead"
+            )));
+        }
+    }
+
+    Ok(topology
+        .queues
+        .iter()
+        .filter(|queue| queue.kind != QueueKind::DeadLetter)
+        .filter(|queue| queue_filter.map_or(true, |filter| queue.name.as_str() == filter))
+        .map(|queue| queue.name.clone())
+        .collect())
+}
+
+fn push_jobs_topology_diagnostic(
+    report: &mut CommandReport,
+    topology: &davenda_jobs::QueueTopology,
+    backend: davenda_config::JobBackend,
+    default_retry_limit: u32,
+) -> Result<(), CliRunError> {
+    push_report_diagnostic(
+        report,
+        DiagnosticSeverity::Info,
+        "jobs.topology",
+        format!(
+            "backend={:?} work_queue={} scheduled_queue={} domain_events_queue={} dead_letter_queue={} default_retry_limit={}",
+            backend,
+            topology.work_queue,
+            topology.scheduled_queue,
+            topology.domain_events_queue,
+            topology.dead_letter_queue,
+            default_retry_limit
+        ),
+    )
+}
+
+fn jobs_run_dead_letter_reason(
+    _error: &davenda_runtime::LiveWasmExecutionError,
+) -> DeadLetterReason {
+    DeadLetterReason::HandlerPanic
+}
+
+fn push_jobs_run_failure_row(
+    report: &mut CommandReport,
+    lease: &davenda_jobs::JobLease,
+    worker_id: &str,
+    attempt: u32,
+    disposition: JobFailureDisposition,
+    detail: String,
+    retried_jobs: &mut usize,
+    dead_lettered_jobs: &mut usize,
+) -> Result<(), CliRunError> {
+    let (status, detail) = match disposition {
+        JobFailureDisposition::Retried {
+            next_attempt_at,
+            queue,
+            ..
+        } => {
+            *retried_jobs += 1;
+            (
+                "retried",
+                format!(
+                    "{detail}; requeued to {queue} for retry at {}",
+                    next_attempt_at.as_unix_seconds()
+                ),
+            )
+        }
+        JobFailureDisposition::DeadLettered(outcome) => {
+            *dead_lettered_jobs += 1;
+            (
+                "dead_lettered",
+                format!(
+                    "{detail}; dead-letter={} reason={:?}",
+                    outcome.dead_letter_id, outcome.reason
+                ),
+            )
+        }
+    };
+
+    report.push_row(
+        ReportRow::new()
+            .with_cell("job_id", lease.record.spec.job_id.to_string())
+            .map_err(report_build_error)?
+            .with_cell("job_name", lease.record.spec.job_name.to_string())
+            .map_err(report_build_error)?
+            .with_cell("queue", lease.record.spec.queue.to_string())
+            .map_err(report_build_error)?
+            .with_cell("worker_id", worker_id.to_string())
+            .map_err(report_build_error)?
+            .with_cell("attempt", attempt.to_string())
+            .map_err(report_build_error)?
+            .with_cell("status", status)
+            .map_err(report_build_error)?
+            .with_cell("detail", detail)
+            .map_err(report_build_error)?,
+    );
+    Ok(())
 }
 
 fn run_jobs_dead_letters(
@@ -11294,6 +11804,11 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    fn database_env_test_lock() -> &'static Mutex<()> {
+        static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
     struct CustomerAppAssetFixture {
         config_path: PathBuf,
         _server: ObjectStoreTestServer,
@@ -12776,6 +13291,9 @@ source_path = "fixtures/media.json"
                 .contains("platform cache warm [--config <path>] --scope public --route <path>")
         );
         assert!(rendered.contains("platform jobs status [--config <path>] [--queue <name>]"));
+        assert!(rendered.contains(
+            "platform jobs run [--config <path>] [--queue <name>] [--worker-id <id>] [--limit <n>] [--dry-run]"
+        ));
         assert!(
             rendered
                 .contains("platform jobs ready [--config <path>] [--queue <name>] [--limit <n>]")
@@ -12828,7 +13346,7 @@ source_path = "fixtures/media.json"
 
     #[test]
     fn run_from_args_reports_live_auth_check_config_load_failures_as_backend_initialization_failures()
-    {
+     {
         let config_path = PathBuf::from("/tmp/davenda-cli-missing-auth-check.toml");
 
         let error = run_from_args([
@@ -13047,7 +13565,7 @@ expect = true
 
     #[test]
     fn run_from_args_reports_live_auth_explain_config_load_failures_as_backend_initialization_failures()
-    {
+     {
         let config_path = PathBuf::from("/tmp/davenda-cli-missing-auth-explain.toml");
 
         let error = run_from_args([
@@ -13305,6 +13823,7 @@ expect = true
 
     #[test]
     fn verification_readiness_executes_local_cutover_checks_when_declared() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let fixture = import_fixture();
         let cutover_manifest = write_cutover_observe_manifest_with_users_and_checks(
             &fixture,
@@ -13347,6 +13866,7 @@ expect = true
 
     #[test]
     fn verification_readiness_executes_local_transactional_cutover_checks_when_declared() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let fixture = import_fixture();
         let cutover_manifest = write_cutover_observe_manifest_with_routes_and_checks(
             &fixture,
@@ -14235,6 +14755,7 @@ expect = true
 
     #[test]
     fn run_from_args_marks_cache_leak_observation_failures_for_rollback_review() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let fixture = import_fixture();
         enable_admin_and_ops_for_import_fixture(&fixture);
         let dns = configure_dns_cutover_for_import_fixture(&fixture);
@@ -15149,6 +15670,7 @@ expect = true
 
     #[test]
     fn run_from_args_renders_jobs_status_for_a_customer_app_runtime_plan() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let config_path = customer_app_fixture();
 
         let rendered = run_from_args([
@@ -15167,7 +15689,48 @@ expect = true
     }
 
     #[test]
+    fn run_from_args_rejects_jobs_run_for_dead_letter_queue() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "jobs".to_string(),
+            "run".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--queue".to_string(),
+            "jobs.dead-letter".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("`jobs run` cannot execute the dead-letter queue")
+        );
+    }
+
+    #[test]
+    fn run_from_args_warns_when_jobs_run_cannot_access_live_state() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "jobs".to_string(),
+            "run".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("jobs run"));
+        assert!(rendered.contains("DATABASE_URL"));
+    }
+
+    #[test]
     fn run_from_args_rejects_jobs_ready_without_live_coordinator_state() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let config_path = customer_app_fixture();
         let original_database_url = std::env::var("DATABASE_URL").ok();
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -15292,6 +15855,7 @@ expect = true
 
     #[test]
     fn run_from_args_renders_jobs_dead_letters_report_for_a_customer_app_runtime_plan() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let config_path = customer_app_fixture();
 
         let rendered = run_from_args([
@@ -15337,6 +15901,7 @@ expect = true
 
     #[test]
     fn run_from_args_renders_live_jobs_in_flight_for_leased_jobs() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let config_path = customer_app_fixture_with_modules(&["cms", "media"]);
         let now_unix_seconds = unix_timestamp_now().unwrap();
         unsafe {
@@ -15427,6 +15992,88 @@ expect = true
     }
 
     #[test]
+    fn run_from_args_executes_jobs_run_against_live_queue_state() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
+        let config_path = customer_app_fixture_with_modules(&["cms", "media"]);
+        let now_unix_seconds = unix_timestamp_now().unwrap();
+        unsafe {
+            std::env::set_var(
+                "DATABASE_URL",
+                "postgres://davenda:test@127.0.0.1:5432/davenda",
+            );
+        }
+
+        let (rendered, job_id) = {
+            let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let _runtime_guard = tokio_runtime.enter();
+            let built = build_customer_app_runtime_context(&config_path, true).unwrap();
+            let Ok(mut host) = built
+                .runtime_plan
+                .runtime
+                .jobs_host("platform-jobs-run-seed")
+            else {
+                return;
+            };
+            let definition = host
+                .registered_jobs
+                .iter()
+                .find(|definition| {
+                    matches!(
+                        definition.contract.trigger,
+                        davenda_core::JobTriggerKind::Operator
+                            | davenda_core::JobTriggerKind::Webhook
+                            | davenda_core::JobTriggerKind::InlineFollowup
+                    )
+                })
+                .cloned()
+                .expect("fixture runtime should register a leaseable job");
+            let mut request = davenda_runtime::JobDispatchRequest::new(
+                definition.contract.name.clone(),
+                "cli_run_probe",
+            )
+            .unwrap();
+            if definition.retry_policy.is_retrying() {
+                request = request.with_idempotency_key("cli_run_probe").unwrap();
+            }
+            let Ok(job_id) =
+                host.enqueue_job(request, JobInstant::from_unix_seconds(now_unix_seconds))
+            else {
+                return;
+            };
+
+            let rendered = run_from_args([
+                "jobs".to_string(),
+                "run".to_string(),
+                "--config".to_string(),
+                config_path.display().to_string(),
+                "--queue".to_string(),
+                definition.queue.to_string(),
+                "--worker-id".to_string(),
+                "worker-live".to_string(),
+                "--limit".to_string(),
+                "1".to_string(),
+            ])
+            .unwrap();
+
+            (rendered, job_id)
+        };
+
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+        }
+
+        assert!(rendered.contains("jobs run"));
+        assert!(rendered.contains(job_id.as_str()));
+        assert!(
+            rendered.contains("status: retried") || rendered.contains("status: dead_lettered"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
     fn run_from_args_requires_confirmation_for_jobs_retry() {
         let config_path = customer_app_fixture();
 
@@ -15449,6 +16096,7 @@ expect = true
 
     #[test]
     fn run_from_args_warns_when_jobs_retry_cannot_access_live_state() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let config_path = customer_app_fixture();
 
         let rendered = run_from_args([
@@ -15488,6 +16136,7 @@ expect = true
 
     #[test]
     fn run_from_args_warns_when_jobs_promote_cannot_access_live_state() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
         let config_path = customer_app_fixture();
 
         let rendered = run_from_args([

@@ -131,6 +131,14 @@ pub(crate) struct JobsStatusInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobsRunInvocation {
+    pub config_path: PathBuf,
+    pub queue: Option<String>,
+    pub worker_id: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JobsReadyInvocation {
     pub config_path: PathBuf,
     pub queue: Option<String>,
@@ -277,6 +285,11 @@ pub(crate) enum CliInput {
     JobsStatus {
         output_mode: OutputMode,
         invocation: JobsStatusInvocation,
+    },
+    JobsRun {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: JobsRunInvocation,
     },
     JobsReady {
         output_mode: OutputMode,
@@ -945,6 +958,26 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: JobsStatusInvocation {
                     config_path,
                     queue: jobs_queue,
+                },
+            })
+        }
+        [command, subcommand] if command == "jobs" && subcommand == "run" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`jobs run` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::JobsRun {
+                output_mode,
+                dry_run,
+                invocation: JobsRunInvocation {
+                    config_path,
+                    queue: jobs_queue,
+                    worker_id: jobs_worker_id,
+                    limit: jobs_limit.unwrap_or(50),
                 },
             })
         }
@@ -2063,6 +2096,41 @@ mod tests {
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.queue.as_deref(), Some("jobs.work"));
+    }
+
+    #[test]
+    fn parse_jobs_run_accepts_queue_worker_limit_and_dry_run() {
+        let input = parse([
+            "jobs".to_string(),
+            "run".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--queue".to_string(),
+            "jobs.work".to_string(),
+            "--worker-id".to_string(),
+            "worker-a".to_string(),
+            "--limit".to_string(),
+            "5".to_string(),
+            "--dry-run".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsRun {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected jobs run input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.queue.as_deref(), Some("jobs.work"));
+        assert_eq!(invocation.worker_id.as_deref(), Some("worker-a"));
+        assert_eq!(invocation.limit, 5);
     }
 
     #[test]

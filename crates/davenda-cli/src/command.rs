@@ -243,6 +243,12 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Inspect registered runtime jobs, queue topology, and current queue health",
         )?,
         CommandDescriptor::new(
+            ["jobs", "run"],
+            CommandOwner::Core,
+            "Run a worker batch by promoting due jobs, leasing executable queues, and acknowledging execution outcomes",
+        )?
+        .with_dry_run(),
+        CommandDescriptor::new(
             ["jobs", "ready"],
             CommandOwner::Core,
             "Inspect ready jobs waiting for worker pickup, including backlog shape and idempotency context",
@@ -332,6 +338,17 @@ mod tests {
         assert!(commands.iter().any(|descriptor| {
             descriptor.path == vec!["jobs".to_string(), "ready".to_string()]
         }));
+    }
+
+    #[test]
+    fn baseline_commands_include_jobs_run() {
+        let commands = baseline_commands("harbor-shop").unwrap();
+        let run = commands
+            .iter()
+            .find(|descriptor| descriptor.path == vec!["jobs".to_string(), "run".to_string()])
+            .expect("jobs run descriptor should exist");
+        assert!(run.supports_dry_run);
+        assert!(!run.requires_confirmation);
     }
 
     #[test]

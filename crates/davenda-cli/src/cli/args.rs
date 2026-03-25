@@ -62,6 +62,13 @@ pub(crate) struct ModuleInspectInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleInstallInvocation {
+    pub config_path: PathBuf,
+    pub module: String,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModuleEnableInvocation {
     pub config_path: PathBuf,
     pub module: String,
@@ -183,6 +190,11 @@ pub(crate) enum CliInput {
     ModuleInspect {
         output_mode: OutputMode,
         invocation: ModuleInspectInvocation,
+    },
+    ModuleInstall {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: ModuleInstallInvocation,
     },
     ModuleEnable {
         output_mode: OutputMode,
@@ -619,6 +631,25 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: ModuleInspectInvocation {
                     config_path,
                     module: module.to_string(),
+                },
+            })
+        }
+        [command, subcommand, module] if command == "module" && subcommand == "install" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`module install` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ModuleInstall {
+                output_mode,
+                dry_run,
+                invocation: ModuleInstallInvocation {
+                    config_path,
+                    module: module.to_string(),
+                    confirmed,
                 },
             })
         }
@@ -1299,6 +1330,36 @@ mod tests {
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.module, "cms");
+    }
+
+    #[test]
+    fn parse_module_install_accepts_dry_run_and_confirmation_flags() {
+        let input = parse([
+            "module".to_string(),
+            "install".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--dry-run".to_string(),
+            "--yes".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ModuleInstall {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected module install input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.module, "media");
+        assert!(invocation.confirmed);
     }
 
     #[test]

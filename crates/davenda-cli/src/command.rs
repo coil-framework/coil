@@ -172,6 +172,13 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Inspect the installed module manifest, dependency contracts, and operator-relevant contributions",
         )?,
         CommandDescriptor::new(
+            ["module", "install"],
+            CommandOwner::Core,
+            "Install an official module by registering it in the active customer app composition",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["module", "enable"],
             CommandOwner::Core,
             "Enable an official module and synchronize the platform config with the customer app manifest",
@@ -295,6 +302,13 @@ mod tests {
     #[test]
     fn baseline_commands_include_module_enable_and_disable() {
         let commands = baseline_commands("harbor-shop").unwrap();
+        let install = commands
+            .iter()
+            .find(|descriptor| descriptor.path == vec!["module".to_string(), "install".to_string()])
+            .expect("module install descriptor should exist");
+        assert!(install.supports_dry_run);
+        assert!(install.requires_confirmation);
+
         let enable = commands
             .iter()
             .find(|descriptor| descriptor.path == vec!["module".to_string(), "enable".to_string()])

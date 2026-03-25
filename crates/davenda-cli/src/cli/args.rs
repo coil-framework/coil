@@ -1,6 +1,6 @@
 use crate::cli::config::ConfigValidateInvocation;
 use crate::cli::error::CliRunError;
-use crate::cli::import::ImportRunInvocation;
+use crate::cli::import::{ImportCutoverInvocation, ImportRunInvocation};
 use crate::command::OutputMode;
 use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Relation};
 use std::path::PathBuf;
@@ -76,6 +76,10 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         dry_run: bool,
         invocation: ImportRunInvocation,
+    },
+    ImportCutover {
+        output_mode: OutputMode,
+        invocation: ImportCutoverInvocation,
     },
 }
 
@@ -305,6 +309,14 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 },
             })
         }
+        [command, subcommand, manifest_path] if command == "import" && subcommand == "cutover" => {
+            Ok(CliInput::ImportCutover {
+                output_mode,
+                invocation: ImportCutoverInvocation {
+                    manifest_path: PathBuf::from(manifest_path),
+                },
+            })
+        }
         [command, subcommand] => Err(CliRunError::usage(format!(
             "unsupported command `{command} {subcommand}`"
         ))),
@@ -491,6 +503,31 @@ mod tests {
 
         assert_eq!(output_mode, OutputMode::Json);
         assert!(dry_run);
+        assert_eq!(
+            invocation.manifest_path,
+            PathBuf::from("imports/wordpress-events.toml")
+        );
+    }
+
+    #[test]
+    fn parse_import_cutover_accepts_a_manifest_path() {
+        let input = parse([
+            "import".to_string(),
+            "cutover".to_string(),
+            "imports/wordpress-events.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ImportCutover {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected import cutover input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(
             invocation.manifest_path,
             PathBuf::from("imports/wordpress-events.toml")

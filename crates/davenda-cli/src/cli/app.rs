@@ -6,6 +6,7 @@ use crate::cli::args::{
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
 use crate::cli::error::CliRunError;
+use crate::cli::import::ImportCutoverInvocation;
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
@@ -14,7 +15,7 @@ use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorit
 use davenda_auth::configured_auth_model_package;
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_data::{MigrationPlan, MigrationRegistry};
-use davenda_import::{ImportManifest, ImportModelError};
+use davenda_import::{CutoverCheck, CutoverPlan, ImportManifest, ImportModelError, RollbackTrigger};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -316,6 +317,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             };
             render_command_report(&report, output_mode)
         }
+        CliInput::ImportCutover {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_import_cutover(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
     }
 }
 
@@ -347,6 +355,7 @@ fn usage() -> String {
         "  platform storage verify [--config <path>] [--policy] [--json]",
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
+        "  platform import cutover <manifest-path> [--json]",
         "",
         "Examples:",
         "  platform dev server --config config/platform.toml",
@@ -360,6 +369,7 @@ fn usage() -> String {
         "  platform assets publish --config apps/harbor-shop/platform.toml --dry-run",
         "  platform import run imports/wordpress-events.toml",
         "  platform import run imports/wordpress-events.toml --dry-run",
+        "  platform import cutover imports/wordpress-events.toml",
         "",
         "Environment:",
         "  DAVENDA_COOKIE_SECRET and DAVENDA_CSRF_SECRET are required for `dev server`",
@@ -755,6 +765,181 @@ fn run_storage_verify(
     Ok(report)
 }
 
+fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandReport, CliRunError> {
+    let manifest = ImportManifest::from_file(&invocation.manifest_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load import manifest from `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let manifest_root = invocation
+        .manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    manifest.validate_at(manifest_root).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to validate import manifest `{}`: {error}",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let cutover = manifest.cutover.clone().ok_or_else(|| {
+        CliRunError::execution(format!(
+            "import manifest `{}` does not declare a `[cutover]` section",
+            invocation.manifest_path.display()
+        ))
+    })?;
+    let runtime = build_import_runtime_context(manifest_root, &manifest)?.ok_or_else(|| {
+        CliRunError::execution(format!(
+            "import manifest `{}` does not declare a target runtime",
+            invocation.manifest_path.display()
+        ))
+    })?;
+
+    let config_path = manifest_root.join(
+        manifest
+            .target
+            .as_ref()
+            .expect("validated cutover manifests always declare a target")
+            .platform_config
+            .as_str(),
+    );
+    let mut cutover_plan = CutoverPlan::new()
+        .with_check(build_cutover_check(
+            "import.package",
+            "import package references, target alignment, and cutover metadata validated",
+            true,
+            true,
+        )?)
+        .with_check(build_cutover_check(
+            "target.runtime",
+            format!(
+                "target runtime `{}` resolves the declared customer app and modules",
+                runtime.built.manifest.id
+            ),
+            true,
+            true,
+        )?);
+
+    if let Some(verification) = &manifest.verification {
+        cutover_plan = cutover_plan.with_check(build_cutover_check(
+            "verification.plan",
+            format!(
+                "verification checks declared: {}",
+                verification.required.join(", ")
+            ),
+            true,
+            !verification.required.is_empty(),
+        )?);
+    }
+
+    let release_report = runtime
+        .built
+        .runtime_plan
+        .release_doctor
+        .command_report()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to render release doctor report for cutover `{}`: {error}",
+                invocation.manifest_path.display()
+            ))
+        })?;
+    cutover_plan = cutover_plan.with_check(build_cutover_check(
+        "release.doctor",
+        "release doctor must be fully green before traffic moves",
+        true,
+        release_report.status == ReportStatus::Ok,
+    )?);
+
+    if cutover.requires_storage_validation {
+        let storage_report = run_storage_verify(&config_path, true)?;
+        cutover_plan = cutover_plan.with_check(build_cutover_check(
+            "storage.verify",
+            "storage policy and backend validation must be green",
+            true,
+            storage_report.status == ReportStatus::Ok,
+        )?);
+    }
+
+    if cutover.requires_assets_publish {
+        let assets_report = run_assets_publish(
+            &AssetsPublishInvocation {
+                config_path: config_path.clone(),
+                confirmed: false,
+            },
+            true,
+        )?;
+        cutover_plan = cutover_plan.with_check(build_cutover_check(
+            "assets.publish",
+            "theme asset publication must plan cleanly against the target runtime",
+            true,
+            assets_report.status == ReportStatus::Ok,
+        )?);
+    }
+
+    if cutover.requires_migrate_apply {
+        let (migrations_ready, migrations_detail) =
+            evaluate_cutover_migration_readiness(&runtime.built)?;
+        cutover_plan = cutover_plan.with_check(build_cutover_check(
+            "migrate.apply",
+            migrations_detail,
+            true,
+            migrations_ready,
+        )?);
+    }
+
+    if cutover.requires_cache_warm {
+        cutover_plan = cutover_plan.with_check(build_cutover_check(
+            "cache.warm",
+            "cache warm command surface is not implemented yet for production cutover",
+            true,
+            false,
+        )?);
+    }
+
+    for trigger in &cutover.rollback_triggers {
+        cutover_plan = cutover_plan.with_trigger(
+            RollbackTrigger::new(trigger.id.clone(), trigger.description.clone())
+                .map_err(|error| CliRunError::execution(error.to_string()))?,
+        );
+    }
+
+    let mut report = cutover_plan
+        .command_report()
+        .map_err(|error| CliRunError::execution(format!("failed to render cutover plan: {error}")))?;
+    report.command = vec!["import".to_string(), "cutover".to_string()];
+    report.summary = format!(
+        "Cutover readiness for import run `{}` into customer app `{}` via `{}`",
+        manifest.run_id,
+        runtime.built.manifest.id,
+        cutover.switch_method.as_deref().unwrap_or("unknown")
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.hostnames",
+        format!("cutover hostnames: {}", cutover.hostnames.join(", ")),
+    )?;
+    if cutover.freeze_legacy_writes {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "cutover.freeze",
+            "legacy writes must be frozen before the final import and switch",
+        )?;
+    }
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.observation_window",
+        format!(
+            "observation window: {} minutes",
+            cutover.observation_window_minutes.unwrap_or_default()
+        ),
+    )?;
+
+    Ok(report)
+}
+
 fn build_customer_app_runtime_context(
     config_path: &Path,
     suppress_asset_publication: bool,
@@ -784,6 +969,62 @@ fn build_customer_app_runtime_context(
         manifest: context.manifest,
         runtime_plan,
     })
+}
+
+fn evaluate_cutover_migration_readiness(
+    built: &BuiltCustomerAppContext,
+) -> Result<(bool, String), CliRunError> {
+    let executable_plan = &built.runtime_plan.runtime.install_migrations;
+    let advisory = count_advisory_migration_entries(&built.runtime_plan);
+    let client = match built.runtime_plan.runtime.data.connect_lazy_postgres() {
+        Ok(client) => client,
+        Err(error) => {
+            return Ok((
+                false,
+                format!(
+                    "failed to connect to the migration database for `{}`: {error}",
+                    built.manifest.id
+                ),
+            ));
+        }
+    };
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let applied_keys = tokio_runtime
+        .block_on(async { client.applied_migration_keys().await })
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read applied migrations for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let pending_plan = pending_migration_plan(executable_plan, &applied_keys)?;
+    let pending_steps = pending_plan.ordered_steps().len();
+    let ready = pending_steps == 0 && advisory == 0;
+    let detail = if ready {
+        format!(
+            "no pending executable or advisory migration work remains for `{}`",
+            built.manifest.id
+        )
+    } else {
+        format!(
+            "{} pending executable migration steps and {} advisory migration entries remain for `{}`",
+            pending_steps, advisory, built.manifest.id
+        )
+    };
+    Ok((ready, detail))
+}
+
+fn build_cutover_check(
+    id: impl Into<String>,
+    description: impl Into<String>,
+    required: bool,
+    satisfied: bool,
+) -> Result<CutoverCheck, CliRunError> {
+    CutoverCheck::new(id, description, required, satisfied)
+        .map_err(|error| CliRunError::execution(format!("failed to build cutover check: {error}")))
 }
 
 fn pending_migration_plan(
@@ -2049,6 +2290,7 @@ dependencies = ["users", "media"]
         assert!(rendered.contains("platform storage verify [--config <path>] [--policy]"));
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
+        assert!(rendered.contains("platform import cutover <manifest-path>"));
     }
 
     #[test]
@@ -2255,6 +2497,33 @@ dependencies = ["users", "media"]
             "{}",
             error
         );
+    }
+
+    #[test]
+    fn run_from_args_reports_cutover_readiness_from_a_manifest() {
+        let fixture = import_fixture();
+        let cutover_manifest = fixture.root.join("imports").join("cutover.toml");
+        let manifest = fs::read_to_string(&fixture.manifest_path).unwrap();
+        fs::write(
+            &cutover_manifest,
+            format!(
+                "{manifest}\n[verification]\nrequired = [\"record_counts\"]\n[cutover]\nfreeze_legacy_writes = true\nswitch_method = \"dns\"\nhostnames = [\"shop.example.com\"]\nrequires_assets_publish = false\nrequires_migrate_apply = false\nrequires_storage_validation = true\nrequires_cache_warm = false\nobservation_window_minutes = 60\n\n[[cutover.rollback_triggers]]\nid = \"auth-failure\"\ndescription = \"Auth failure\"\n"
+            ),
+        )
+        .unwrap();
+
+        let rendered = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("import cutover"));
+        assert!(rendered.contains("Cutover readiness for import run `wordpress-events`"));
+        assert!(rendered.contains("release.doctor"));
+        assert!(rendered.contains("storage.verify"));
+        assert!(rendered.contains("legacy writes must be frozen"));
     }
 
     #[test]

@@ -22,6 +22,7 @@ fn baseline_runtime_registers_core_command_families() {
     assert!(paths.contains(&"storage verify".to_string()));
     assert!(paths.contains(&"assets publish".to_string()));
     assert!(paths.contains(&"import run".to_string()));
+    assert!(paths.contains(&"import cutover".to_string()));
 }
 
 #[test]

@@ -171,5 +171,10 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Run a staged content or data import into the current customer app",
         )?
         .with_dry_run(),
+        CommandDescriptor::new(
+            ["import", "cutover"],
+            CommandOwner::Core,
+            "Evaluate cutover readiness for an import package and its target customer app",
+        )?,
     ])
 }

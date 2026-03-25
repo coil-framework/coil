@@ -6,6 +6,7 @@ default-run = "platform"
 
 [dependencies]
 async-trait = "0.1"
+axum = "0.8"
 davenda-admin = { path = "../davenda-admin" }
 davenda-assets = { path = "../davenda-assets" }
 davenda-auth = { path = "../davenda-auth" }

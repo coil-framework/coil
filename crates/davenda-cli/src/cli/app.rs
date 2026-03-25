@@ -33,9 +33,8 @@ use davenda_data::{
     PostgresDataClient,
 };
 use davenda_import::{
-    CutoverCheck, CutoverDnsRecordChange, CutoverExecutionJournal, CutoverPlan,
-    CutoverStepRecord, CutoverSwitchExecution, ImportManifest, ImportModelError,
-    PublicationMode, RollbackTrigger,
+    CutoverCheck, CutoverDnsRecordChange, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord,
+    CutoverSwitchExecution, ImportManifest, ImportModelError, PublicationMode, RollbackTrigger,
 };
 use davenda_jobs::JobInstant;
 use davenda_memberships::{
@@ -43,16 +42,17 @@ use davenda_memberships::{
     TierVisibility,
 };
 use davenda_runtime::{
-    CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod, RequestInput,
-    RuntimeBuilder, SecretResolver, StorageHost,
+    BrowserInstant, CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod,
+    RequestExecutionError, RequestInput, RouteArea, RouteAuthGate, RuntimeBuilder, SecretResolver,
+    SessionIssueRequest, StorageHost,
 };
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
 use davenda_tls::{CertificateId, CertificateStatus, TlsInstant};
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Url;
 use reqwest::blocking::Client as BlockingHttpClient;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect::Policy as RedirectPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -3240,7 +3240,10 @@ fn inspect_cache_route(
     let (execution, cache_key) = resolve_cache_route_execution(built, route)?;
     let mut report = CommandReport::new(
         ["cache", "inspect"],
-        format!("Cache inspection for `{}` route `{route}`", built.manifest.id),
+        format!(
+            "Cache inspection for `{}` route `{route}`",
+            built.manifest.id
+        ),
     )
     .map_err(report_build_error)?
     .with_columns([
@@ -3299,7 +3302,10 @@ fn inspect_cache_route(
                     "scope",
                     format!(
                         "{:?}",
-                        application_plan.expect("checked above").scope().visibility()
+                        application_plan
+                            .expect("checked above")
+                            .scope()
+                            .visibility()
                     )
                     .to_lowercase(),
                 )
@@ -3339,7 +3345,10 @@ fn inspect_cache_route(
                         "scope",
                         format!(
                             "{:?}",
-                            application_plan.expect("checked above").scope().visibility()
+                            application_plan
+                                .expect("checked above")
+                                .scope()
+                                .visibility()
                         )
                         .to_lowercase(),
                     )
@@ -3375,7 +3384,10 @@ fn inspect_cache_route(
                         "scope",
                         format!(
                             "{:?}",
-                            application_plan.expect("checked above").scope().visibility()
+                            application_plan
+                                .expect("checked above")
+                                .scope()
+                                .visibility()
                         )
                         .to_lowercase(),
                     )
@@ -3426,7 +3438,10 @@ fn inspect_cache_route(
                 "scope",
                 format!(
                     "{:?}",
-                    application_plan.expect("checked above").scope().visibility()
+                    application_plan
+                        .expect("checked above")
+                        .scope()
+                        .visibility()
                 )
                 .to_lowercase(),
             )
@@ -3448,8 +3463,14 @@ fn inspect_cache_route(
             format!(
                 "ttl={}s tags={} stale_while_revalidate={}s needs_revalidation={}",
                 entry.freshness.ttl_seconds(),
-                entry.tags.header_value().unwrap_or_else(|| "none".to_string()),
-                entry.freshness.stale_while_revalidate_seconds().unwrap_or_default(),
+                entry
+                    .tags
+                    .header_value()
+                    .unwrap_or_else(|| "none".to_string()),
+                entry
+                    .freshness
+                    .stale_while_revalidate_seconds()
+                    .unwrap_or_default(),
                 lookup.needs_revalidation
             ),
         )?;
@@ -4163,7 +4184,20 @@ struct EvaluatedImportCutover {
     runtime: BuiltImportRuntimeContext,
     config_path: PathBuf,
     cutover_plan: CutoverPlan,
+    verification_support: CutoverVerificationSupport,
     report: CommandReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VerificationRouteProbe {
+    path: String,
+    auth: RouteAuthGate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct CutoverVerificationSupport {
+    fragment_probe: Option<VerificationRouteProbe>,
+    auth_probe: Option<VerificationRouteProbe>,
 }
 
 const CLOUDFLARE_API_BASE_URL_ENV: &str = "DAVENDA_CLOUDFLARE_API_BASE_URL";
@@ -4560,7 +4594,8 @@ fn execute_dns_cutover_switch(
 
     let mut execution = CutoverSwitchExecution::new("dns").map_err(import_model_error)?;
     for hostname in &evaluated.cutover.hostnames {
-        let record = fetch_cloudflare_cname_record(&client, &credentials, &request.zone_id, hostname)?;
+        let record =
+            fetch_cloudflare_cname_record(&client, &credentials, &request.zone_id, hostname)?;
         let updated = update_cloudflare_cname_record(
             &client,
             &credentials,
@@ -4631,7 +4666,9 @@ fn validate_cutover_dns_hostnames(evaluated: &EvaluatedImportCutover) -> Result<
 }
 
 fn validate_cutover_tls_readiness(evaluated: &EvaluatedImportCutover) -> Result<(), CliRunError> {
-    if evaluated.runtime.built.runtime_plan.runtime.config.tls.mode == davenda_config::TlsMode::External {
+    if evaluated.runtime.built.runtime_plan.runtime.config.tls.mode
+        == davenda_config::TlsMode::External
+    {
         return Ok(());
     }
 
@@ -4653,7 +4690,12 @@ fn validate_cutover_tls_readiness(evaluated: &EvaluatedImportCutover) -> Result<
         .certificates()
         .iter()
         .filter(|record| record.status == CertificateStatus::Active)
-        .flat_map(|record| record.bindings.iter().map(|binding| binding.hostname.to_string()))
+        .flat_map(|record| {
+            record
+                .bindings
+                .iter()
+                .map(|binding| binding.hostname.to_string())
+        })
         .collect::<BTreeSet<_>>();
     let missing = evaluated
         .cutover
@@ -4704,16 +4746,10 @@ impl CloudflareCredentials {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        if let Some(token) = self
-            .payload
-            .cloudflare_api_token
-            .as_deref()
-            .or_else(|| {
-                (!self.raw.trim().is_empty()
-                    && !self.raw.trim_start().starts_with('{'))
+        if let Some(token) = self.payload.cloudflare_api_token.as_deref().or_else(|| {
+            (!self.raw.trim().is_empty() && !self.raw.trim_start().starts_with('{'))
                 .then_some(self.raw.as_str())
-            })
-        {
+        }) {
             let auth = format!("Bearer {token}");
             headers.insert(
                 AUTHORIZATION,
@@ -4770,7 +4806,14 @@ impl CloudflareCredentials {
 fn resolve_cloudflare_credentials(
     built: &BuiltCustomerAppContext,
 ) -> Result<CloudflareCredentials, CliRunError> {
-    if let Some(secret) = built.runtime_plan.runtime.config.tls.account_secret.as_ref() {
+    if let Some(secret) = built
+        .runtime_plan
+        .runtime
+        .config
+        .tls
+        .account_secret
+        .as_ref()
+    {
         if let Ok(value) = EnvironmentSecretResolver.resolve(secret) {
             return Ok(CloudflareCredentials::from_secret(value));
         }
@@ -4789,9 +4832,7 @@ fn build_cutover_provider_client(label: &str) -> Result<BlockingHttpClient, CliR
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|error| {
-            CliRunError::execution(format!(
-                "failed to build HTTP client for {label}: {error}"
-            ))
+            CliRunError::execution(format!("failed to build HTTP client for {label}: {error}"))
         })
 }
 
@@ -4929,9 +4970,13 @@ struct CutoverObservationProbe {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct ObservationVerificationChecks {
+    record_counts: bool,
     route_resolution: bool,
     canonical_urls: bool,
     media_reachability: bool,
+    fragment_rendering: bool,
+    session_creation: bool,
+    auth_failures: bool,
 }
 
 fn observe_import_cutover(
@@ -4960,7 +5005,9 @@ fn observe_import_cutover(
         .manifest
         .verification
         .as_ref()
-        .map(build_observation_verification_checks)
+        .map(|verification| {
+            build_cutover_verification_checks(verification, &evaluated.verification_support)
+        })
         .transpose()?
         .unwrap_or_default();
     if sample_routes.is_empty() {
@@ -5004,8 +5051,13 @@ fn observe_import_cutover(
     save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
 
     let client = build_cutover_probe_client()?;
-    let probe =
-        execute_cutover_observation_probe(&client, base_url, &sample_routes, verification_checks)?;
+    let probe = execute_cutover_observation_probe(
+        &client,
+        base_url,
+        &sample_routes,
+        evaluated.verification_support.auth_probe.as_ref(),
+        verification_checks,
+    )?;
 
     if !probe.failures.is_empty() {
         journal
@@ -5203,8 +5255,10 @@ fn restore_cutover_switch(
     built: &BuiltCustomerAppContext,
 ) -> Result<String, CliRunError> {
     let Some(execution) = journal.switch_execution.as_ref() else {
-        return Ok("no provider-managed switch state was recorded; rollback remained operator-owned"
-            .to_string());
+        return Ok(
+            "no provider-managed switch state was recorded; rollback remained operator-owned"
+                .to_string(),
+        );
     };
 
     match execution.method.as_str() {
@@ -5270,6 +5324,7 @@ fn evaluate_import_cutover(
             invocation.manifest_path.display()
         ))
     })?;
+    let verification_support = build_cutover_verification_support(&runtime.built);
 
     let config_path = manifest_root.join(
         manifest
@@ -5307,7 +5362,7 @@ fn evaluate_import_cutover(
 
     if let Some(verification) = &manifest.verification {
         let (verification_ready, verification_detail) =
-            evaluate_verification_readiness(verification);
+            evaluate_verification_readiness(verification, &runtime.built, &verification_support);
         cutover_plan = cutover_plan.with_check(build_cutover_check(
             "verification.plan",
             verification_detail,
@@ -5455,6 +5510,7 @@ fn evaluate_import_cutover(
         runtime,
         config_path,
         cutover_plan,
+        verification_support,
         report,
     })
 }
@@ -5605,34 +5661,74 @@ fn build_cutover_probe_client() -> Result<BlockingHttpClient, CliRunError> {
         })
 }
 
+fn build_cutover_verification_support(
+    built: &BuiltCustomerAppContext,
+) -> CutoverVerificationSupport {
+    let fragment_probe = built
+        .runtime_plan
+        .runtime
+        .http
+        .routes
+        .iter()
+        .find(|route| route.area == RouteArea::Fragment && !route.path.contains('{'))
+        .map(|route| VerificationRouteProbe {
+            path: route.path.clone(),
+            auth: route.auth,
+        });
+    let auth_probe = built
+        .runtime_plan
+        .runtime
+        .http
+        .routes
+        .iter()
+        .find(|route| !matches!(route.auth, RouteAuthGate::Public) && !route.path.contains('{'))
+        .map(|route| VerificationRouteProbe {
+            path: route.path.clone(),
+            auth: route.auth,
+        });
+
+    CutoverVerificationSupport {
+        fragment_probe,
+        auth_probe,
+    }
+}
+
 fn evaluate_verification_readiness(
     verification: &davenda_import::ImportVerification,
+    built: &BuiltCustomerAppContext,
+    support: &CutoverVerificationSupport,
 ) -> (bool, String) {
-    match build_observation_verification_checks(verification) {
-        Ok(checks) => (
-            true,
-            format!(
-                "verification checks supported: {}",
-                render_supported_verification_checks(verification, checks)
-            ),
-        ),
+    match build_cutover_verification_checks(verification, support).and_then(|checks| {
+        let detail =
+            execute_local_cutover_verification_checks(verification, built, support, checks)?;
+        Ok(format!(
+            "verification checks supported: {}; {}",
+            render_supported_verification_checks(verification, checks),
+            detail
+        ))
+    }) {
+        Ok(detail) => (true, detail),
         Err(error) => (false, error.to_string()),
     }
 }
 
-fn build_observation_verification_checks(
+fn build_cutover_verification_checks(
     verification: &davenda_import::ImportVerification,
+    support: &CutoverVerificationSupport,
 ) -> Result<ObservationVerificationChecks, CliRunError> {
     let mut checks = ObservationVerificationChecks::default();
     for required in &verification.required {
         match required.as_str() {
-            "record_counts" => {}
+            "record_counts" => checks.record_counts = true,
             "route_resolution" => checks.route_resolution = true,
             "canonical_urls" => checks.canonical_urls = true,
             "media_reachability" => checks.media_reachability = true,
+            "fragment_rendering" => checks.fragment_rendering = true,
+            "session_creation" => checks.session_creation = true,
+            "auth_failure" | "auth_failures" => checks.auth_failures = true,
             other => {
                 return Err(CliRunError::execution(format!(
-                    "verification check `{other}` is not yet supported by cutover observation"
+                    "verification check `{other}` is not yet supported by cutover verification"
                 )));
             }
         }
@@ -5646,6 +5742,24 @@ fn build_observation_verification_checks(
                 .to_string(),
         ));
     }
+    if checks.fragment_rendering && support.fragment_probe.is_none() {
+        return Err(CliRunError::execution(
+            "verification check `fragment_rendering` requires at least one fragment route in the target runtime"
+                .to_string(),
+        ));
+    }
+    if checks.session_creation && verification.sample_users.is_empty() {
+        return Err(CliRunError::execution(
+            "verification check `session_creation` requires `[verification].sample_users`"
+                .to_string(),
+        ));
+    }
+    if checks.auth_failures && support.auth_probe.is_none() {
+        return Err(CliRunError::execution(
+            "verification check `auth_failures` requires at least one session- or capability-gated route in the target runtime"
+                .to_string(),
+        ));
+    }
 
     Ok(checks)
 }
@@ -5655,12 +5769,22 @@ fn render_supported_verification_checks(
     checks: ObservationVerificationChecks,
 ) -> String {
     let mut rendered = Vec::new();
-    if verification
-        .required
-        .iter()
-        .any(|check| check == "record_counts")
+    if checks.record_counts
+        || verification
+            .required
+            .iter()
+            .any(|check| check == "record_counts")
     {
         rendered.push("record_counts(import-run)");
+    }
+    if checks.fragment_rendering {
+        rendered.push("fragment_rendering(local)");
+    }
+    if checks.session_creation {
+        rendered.push("session_creation(local)");
+    }
+    if checks.auth_failures {
+        rendered.push("auth_failures(local+observe)");
     }
     if checks.route_resolution {
         rendered.push("route_resolution(observe)");
@@ -5674,10 +5798,247 @@ fn render_supported_verification_checks(
     rendered.join(", ")
 }
 
+fn execute_local_cutover_verification_checks(
+    verification: &davenda_import::ImportVerification,
+    built: &BuiltCustomerAppContext,
+    support: &CutoverVerificationSupport,
+    checks: ObservationVerificationChecks,
+) -> Result<String, CliRunError> {
+    let mut completed = Vec::new();
+
+    if checks.session_creation {
+        let sample_user = verification
+            .sample_users
+            .first()
+            .ok_or_else(|| {
+                CliRunError::execution(
+                    "verification check `session_creation` requires `[verification].sample_users`"
+                        .to_string(),
+                )
+            })?
+            .clone();
+        verify_session_creation_probe(built, &sample_user)?;
+        completed.push(format!("session_creation(user:{sample_user})"));
+    }
+
+    if checks.fragment_rendering {
+        let route = support.fragment_probe.as_ref().ok_or_else(|| {
+            CliRunError::execution(
+                "verification check `fragment_rendering` requires a fragment probe route"
+                    .to_string(),
+            )
+        })?;
+        verify_fragment_rendering_probe(built, route, verification.sample_users.first())?;
+        completed.push(format!("fragment_rendering({})", route.path));
+    }
+
+    if checks.auth_failures {
+        let route = support.auth_probe.as_ref().ok_or_else(|| {
+            CliRunError::execution(
+                "verification check `auth_failures` requires an auth probe route".to_string(),
+            )
+        })?;
+        verify_local_auth_failure_probe(built, route)?;
+        completed.push(format!("auth_failures({})", route.path));
+    }
+
+    if completed.is_empty() {
+        completed.push("no local verification probes required".to_string());
+    }
+
+    Ok(format!(
+        "local verification probes passed: {}",
+        completed.join(", ")
+    ))
+}
+
+fn verify_session_creation_probe(
+    built: &BuiltCustomerAppContext,
+    principal_id: &str,
+) -> Result<(), CliRunError> {
+    let server = built
+        .runtime_plan
+        .runtime
+        .server_host(
+            &EnvironmentSecretResolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build server host for session verification in `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let now = BrowserInstant::from_unix_seconds(unix_timestamp_now()?);
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .map_err(|error| CliRunError::execution(error.to_string()))?,
+            now,
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to issue a session for verification user `{principal_id}`: {error}"
+            ))
+        })?;
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/diagnostics")
+        .header(
+            "host",
+            built
+                .runtime_plan
+                .runtime
+                .config
+                .seo
+                .canonical_host
+                .as_str(),
+        )
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
+        .body(axum::body::Body::empty())
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build session verification diagnostics request: {error}"
+            ))
+        })?;
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let response = tokio_runtime
+        .block_on(async { server.respond(request).await })
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to execute session verification request for `{principal_id}`: {error}"
+            ))
+        })?;
+    if response.status().as_u16() != 403 {
+        return Err(CliRunError::execution(format!(
+            "session verification expected an authenticated diagnostics denial (403) but received {}",
+            response.status().as_u16()
+        )));
+    }
+    Ok(())
+}
+
+fn verify_fragment_rendering_probe(
+    built: &BuiltCustomerAppContext,
+    route: &VerificationRouteProbe,
+    sample_user: Option<&String>,
+) -> Result<(), CliRunError> {
+    let mut request = RequestInput::new(
+        HttpMethod::Get,
+        built
+            .runtime_plan
+            .runtime
+            .config
+            .seo
+            .canonical_host
+            .as_str(),
+        route.path.as_str(),
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to prepare fragment verification request `{}`: {error}",
+            route.path
+        ))
+    })?;
+    if let Some(user) = sample_user {
+        request = request.with_principal(user.clone());
+    }
+    if let RouteAuthGate::Capability(capability) = route.auth {
+        request = request.grant_capability(capability);
+    }
+    let execution = built
+        .runtime_plan
+        .runtime
+        .execute_request(
+            request,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to execute fragment verification route `{}`: {error}",
+                route.path
+            ))
+        })?;
+    let fragment = match &execution.response {
+        HandlerResponse::Fragment(fragment) => fragment,
+        other => {
+            return Err(CliRunError::execution(format!(
+                "fragment verification route `{}` returned `{:?}` instead of a fragment response",
+                route.path, other
+            )));
+        }
+    };
+    let rendered = built
+        .runtime_plan
+        .runtime
+        .render_fragment_response(&execution, fragment)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to render fragment verification route `{}`: {error}",
+                route.path
+            ))
+        })?;
+    if rendered.trim().is_empty() {
+        return Err(CliRunError::execution(format!(
+            "fragment verification route `{}` rendered empty output",
+            route.path
+        )));
+    }
+    Ok(())
+}
+
+fn verify_local_auth_failure_probe(
+    built: &BuiltCustomerAppContext,
+    route: &VerificationRouteProbe,
+) -> Result<(), CliRunError> {
+    let request = RequestInput::new(
+        HttpMethod::Get,
+        built
+            .runtime_plan
+            .runtime
+            .config
+            .seo
+            .canonical_host
+            .as_str(),
+        route.path.as_str(),
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to prepare auth-failure verification request `{}`: {error}",
+            route.path
+        ))
+    })?;
+    let error = built
+        .runtime_plan
+        .runtime
+        .execute_request(
+            request,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap_err();
+    match error {
+        RequestExecutionError::SessionRequired { .. }
+        | RequestExecutionError::CapabilityRequired { .. } => Ok(()),
+        other => Err(CliRunError::execution(format!(
+            "auth-failure verification route `{}` returned `{other}` instead of denying access",
+            route.path
+        ))),
+    }
+}
+
 fn execute_cutover_observation_probe(
     client: &BlockingHttpClient,
     base_url: &str,
     sample_routes: &[String],
+    auth_probe_route: Option<&VerificationRouteProbe>,
     verification_checks: ObservationVerificationChecks,
 ) -> Result<CutoverObservationProbe, CliRunError> {
     let base = Url::parse(base_url).map_err(|error| {
@@ -5787,6 +6148,43 @@ fn execute_cutover_observation_probe(
             route: route.clone(),
             status_code,
             outcome,
+        });
+    }
+
+    if verification_checks.auth_failures {
+        let route = auth_probe_route.ok_or_else(|| {
+            CliRunError::execution(
+                "verification requires auth_failures but the target runtime does not expose an auth probe route"
+                    .to_string(),
+            )
+        })?;
+        let url = base.join(route.path.as_str()).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve auth verification route `{}` against `{base_url}`: {error}",
+                route.path
+            ))
+        })?;
+        let response = client.get(url.clone()).send().map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to probe auth verification route `{}` at `{}`: {error}",
+                route.path, url
+            ))
+        })?;
+        let status_code = response.status().as_u16();
+        if status_code != 401 && status_code != 403 {
+            failures.push(format!(
+                "auth verification route `{}` returned {} instead of denying unauthenticated access",
+                route.path, status_code
+            ));
+        }
+        routes.push(ObservedCutoverRoute {
+            route: route.path.clone(),
+            status_code,
+            outcome: if status_code == 401 || status_code == 403 {
+                "auth_gate_ok".to_string()
+            } else {
+                "auth_gate_unexpected".to_string()
+            },
         });
     }
 
@@ -7173,7 +7571,6 @@ fn user_import_updates(
     let site = Entity::site(site_id.to_string());
     let mut updates = Vec::new();
     let mut effective_roles = Vec::new();
-    let mut manual_review_roles = Vec::new();
 
     for role in legacy_roles {
         let role = role
@@ -7214,23 +7611,12 @@ fn user_import_updates(
                 )));
                 effective_roles.push(role.to_string());
             }
-            "author" | "contributor" => {
-                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
-                    site.clone(),
-                    Relation::Viewer,
-                    DefaultSubject::userset(group, Relation::Member),
-                )));
-                effective_roles.push(format!("viewer:{role}"));
-                manual_review_roles.push(role.to_string());
-            }
             other => {
-                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
-                    site.clone(),
-                    Relation::Viewer,
-                    DefaultSubject::userset(group, Relation::Member),
-                )));
-                effective_roles.push(format!("viewer:{other}"));
-                manual_review_roles.push(other.to_string());
+                return Err(ImportModelError::ManifestParse {
+                    message: format!(
+                        "legacy role `{other}` cannot be imported safely into the current auth model; add an explicit supported mapping before publishing live user auth state"
+                    ),
+                });
             }
         }
     }
@@ -7242,8 +7628,6 @@ fn user_import_updates(
             "principal_id": principal_id,
             "site_id": site_id,
             "roles": effective_roles,
-            "manual_review_roles": manual_review_roles,
-            "manual_review_required": !manual_review_roles.is_empty(),
             "writes": updates.len(),
         }),
     ))
@@ -8268,11 +8652,9 @@ mod tests {
                         break;
                     }
                     match listener.accept() {
-                        Ok((stream, _)) => handle_cloudflare_test_request(
-                            stream,
-                            &zone_id_thread,
-                            &records_thread,
-                        ),
+                        Ok((stream, _)) => {
+                            handle_cloudflare_test_request(stream, &zone_id_thread, &records_thread)
+                        }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(10));
                         }
@@ -8479,8 +8861,8 @@ mod tests {
             ("PUT", put_path)
                 if put_path.starts_with(&format!("/zones/{expected_zone_id}/dns_records/")) =>
             {
-                let record_id = put_path
-                    .trim_start_matches(&format!("/zones/{expected_zone_id}/dns_records/"));
+                let record_id =
+                    put_path.trim_start_matches(&format!("/zones/{expected_zone_id}/dns_records/"));
                 let update: Value = serde_json::from_slice(&body).unwrap();
                 let hostname = update["name"].as_str().unwrap();
                 let content = update["content"].as_str().unwrap();
@@ -8558,6 +8940,8 @@ mod tests {
                 });
                 let status = match response.status_code {
                     200 => "200 OK",
+                    401 => "401 Unauthorized",
+                    403 => "403 Forbidden",
                     302 => "302 Found",
                     304 => "304 Not Modified",
                     500 => "500 Internal Server Error",
@@ -8773,9 +9157,7 @@ enabled = ["cms"]
         }
     }
 
-    fn configure_dns_cutover_for_import_fixture(
-        _fixture: &ImportFixture,
-    ) -> DnsCutoverTestContext {
+    fn configure_dns_cutover_for_import_fixture(_fixture: &ImportFixture) -> DnsCutoverTestContext {
         let lock = cloudflare_test_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -9065,6 +9447,72 @@ expected_modules = ["media"]
 [verification]
 required = [{required}]
 sample_routes = ["/", "/events"]
+
+[cutover]
+freeze_legacy_writes = false
+switch_method = "dns"
+hostnames = ["shop.example.com"]
+requires_assets_publish = false
+requires_migrate_apply = false
+requires_storage_validation = false
+requires_cache_warm = false
+observation_window_minutes = {observation_window_minutes}
+
+[[cutover.rollback_triggers]]
+id = "auth-failure"
+description = "Auth failure"
+
+[[importers]]
+id = "media"
+phase = 20
+resource_kind = "asset"
+description = "Import media"
+source_path = "fixtures/media.json"
+"#
+            ),
+        );
+        manifest_path
+    }
+
+    fn write_cutover_observe_manifest_with_users_and_checks(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+        required_checks: &[&str],
+        sample_users: &[&str],
+    ) -> PathBuf {
+        let manifest_path = fixture.root.join("imports").join(name);
+        let required = required_checks
+            .iter()
+            .map(|check| format!("\"{check}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sample_users = sample_users
+            .iter()
+            .map(|user| format!("\"{user}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        write_test_file(
+            &manifest_path,
+            &format!(
+                r#"
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "showcase-events"
+modules = ["media"]
+publication_mode = "publish_validated"
+asset_storage_default = "public_upload"
+
+[target]
+app_manifest = "../apps/showcase-events/app.toml"
+platform_config = "../config/platform.toml"
+expected_modules = ["media"]
+
+[verification]
+required = [{required}]
+sample_routes = ["/", "/events"]
+sample_users = [{sample_users}]
 
 [cutover]
 freeze_legacy_writes = false
@@ -9655,6 +10103,48 @@ expect = true
     }
 
     #[test]
+    fn verification_readiness_executes_local_cutover_checks_when_declared() {
+        let fixture = import_fixture();
+        let cutover_manifest = write_cutover_observe_manifest_with_users_and_checks(
+            &fixture,
+            "cutover-local-verification.toml",
+            60,
+            &["record_counts", "auth_failures"],
+            &["alice"],
+        );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        unsafe {
+            std::env::set_var(
+                "DATABASE_URL",
+                "postgres://davenda:test@127.0.0.1:5432/davenda",
+            );
+            std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
+        }
+        let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _runtime_guard = tokio_runtime.enter();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
+        let support = build_cutover_verification_support(&runtime.built);
+        let verification = manifest.verification.as_ref().unwrap();
+
+        let (ready, detail) =
+            evaluate_verification_readiness(verification, &runtime.built, &support);
+
+        assert!(ready, "{detail}");
+        assert!(detail.contains("local verification probes passed"));
+        assert!(detail.contains("auth_failures"));
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+            std::env::remove_var("REDIS_URL");
+        }
+    }
+
+    #[test]
     fn run_from_args_executes_cutover_preparation_and_persists_a_journal() {
         let fixture = import_fixture();
         let cutover_manifest = fixture.root.join("imports").join("cutover-apply.toml");
@@ -9736,11 +10226,7 @@ expect = true
         ])
         .unwrap();
 
-        let switched = run_dns_cutover_switch(
-            &cutover_manifest,
-            "https://shop.example.com",
-            &dns,
-        );
+        let switched = run_dns_cutover_switch(&cutover_manifest, "https://shop.example.com", &dns);
         assert!(switched.contains("Cutover switch"));
         assert_eq!(
             dns.server.record("shop.example.com").content,
@@ -9780,8 +10266,7 @@ expect = true
             false,
             BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 200_u16)]),
         );
-        let switched =
-            run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
+        let switched = run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
         assert!(switched.contains("Cutover switch"));
 
         let rendered = run_from_args([
@@ -10003,6 +10488,63 @@ expect = true
     }
 
     #[test]
+    fn run_from_args_observation_executes_auth_failure_checks() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_with_users_and_checks(
+            &fixture,
+            "cutover-observe-auth-failures.toml",
+            0,
+            &["record_counts", "auth_failures"],
+            &["alice"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
+            "healthy",
+            "healthy",
+            false,
+            BTreeMap::from([
+                (
+                    "/".to_string(),
+                    LiveProbeResponse::html(200, "<html><body>home</body></html>"),
+                ),
+                (
+                    "/events".to_string(),
+                    LiveProbeResponse::html(200, "<html><body>events</body></html>"),
+                ),
+                (
+                    "/admin/pages/preview".to_string(),
+                    LiveProbeResponse::html(401, "<html><body>unauthorized</body></html>"),
+                ),
+            ]),
+        );
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
+
+        let rendered = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("auth_gate_ok"));
+    }
+
+    #[test]
     fn run_from_args_records_cutover_rollbacks_after_the_live_switch() {
         let fixture = import_fixture();
         enable_admin_and_ops_for_import_fixture(&fixture);
@@ -10018,8 +10560,7 @@ expect = true
             "--yes".to_string(),
         ])
         .unwrap();
-        let switched =
-            run_dns_cutover_switch(&cutover_manifest, "https://shop.example.com", &dns);
+        let switched = run_dns_cutover_switch(&cutover_manifest, "https://shop.example.com", &dns);
         assert!(switched.contains("Cutover switch"));
 
         let rolled_back = run_from_args([
@@ -11153,10 +11694,6 @@ expect = true
         let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
 
         assert_eq!(persisted["roles"], serde_json::json!(["subscriber"]));
-        assert_eq!(
-            persisted["manual_review_required"],
-            serde_json::json!(false)
-        );
         assert!(
             updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
                 Entity::site("main"),
@@ -11167,7 +11704,7 @@ expect = true
     }
 
     #[test]
-    fn user_import_updates_flag_unknown_legacy_roles_for_manual_review_without_failing() {
+    fn user_import_updates_rejects_unsupported_legacy_roles() {
         let staged = serde_json::json!({
             "normalized": {
                 "principal_id": "alice",
@@ -11175,27 +11712,9 @@ expect = true
             }
         });
 
-        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
-
-        assert_eq!(persisted["manual_review_required"], serde_json::json!(true));
-        assert_eq!(
-            persisted["manual_review_roles"],
-            serde_json::json!(["shop_manager"])
-        );
-        assert_eq!(
-            persisted["roles"],
-            serde_json::json!(["viewer:shop_manager"])
-        );
-        assert!(
-            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
-                Entity::site("main"),
-                Relation::Viewer,
-                DefaultSubject::userset(
-                    Entity::group("legacy-role:shop_manager"),
-                    Relation::Member
-                ),
-            )))
-        );
+        let error = user_import_updates(&staged, Some("main")).unwrap_err();
+        assert!(error.to_string().contains("shop_manager"));
+        assert!(error.to_string().contains("cannot be imported safely"));
     }
 
     #[test]

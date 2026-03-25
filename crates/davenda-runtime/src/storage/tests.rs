@@ -116,13 +116,24 @@ cdn_base_url = "https://cdn.example.test"
     .unwrap()
 }
 
+fn unique_test_root() -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!("davenda-runtime-storage-tests-{nanos}"))
+}
+
 #[test]
 fn storage_host_plans_public_delivery_and_executes_local_escape_hatch_storage() {
-    let root = PathBuf::from("/tmp/davenda-runtime-storage-tests");
+    let root = unique_test_root();
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
 
-    let plan = RuntimeBuilder::new(test_config(), DefaultAuthModelPackage::default())
+    let mut config = test_config();
+    config.storage.local_root = root.display().to_string();
+    config.wasm.directory = root.display().to_string();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
     let host = plan.storage_host();
@@ -146,10 +157,7 @@ fn storage_host_plans_public_delivery_and_executes_local_escape_hatch_storage() 
         )
         .unwrap();
     let local_write = host.execute_write(&local_plan, b"local-bytes").unwrap();
-    assert_eq!(
-        local_write.path,
-        PathBuf::from("/tmp/davenda-runtime-storage-tests/secure/reports/march.csv")
-    );
+    assert_eq!(local_write.path, root.join("secure/reports/march.csv"));
     assert_eq!(
         host.execute_read(&local_plan).unwrap().bytes,
         b"local-bytes"
@@ -157,7 +165,7 @@ fn storage_host_plans_public_delivery_and_executes_local_escape_hatch_storage() 
     assert_eq!(
         host.delivery_location(&local_plan).unwrap(),
         StorageDeliveryLocation::LocalPath {
-            path: PathBuf::from("/tmp/davenda-runtime-storage-tests/secure/reports/march.csv"),
+            path: root.join("secure/reports/march.csv"),
         }
     );
 

@@ -12,6 +12,7 @@ use davenda_ops::OpsModule;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct CustomerAppContext {
+    pub app_root: PathBuf,
     pub config: PlatformConfig,
     pub manifest: CustomerAppManifest,
     pub modules: Vec<Box<dyn PlatformModule>>,
@@ -53,6 +54,7 @@ pub(crate) fn load_customer_app_context(
         .collect();
 
     Ok(CustomerAppContext {
+        app_root,
         config,
         manifest,
         modules,

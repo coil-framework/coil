@@ -142,10 +142,24 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Plan core, module, auth, and customer-app migrations",
         )?,
         CommandDescriptor::new(
+            ["migrate", "apply"],
+            CommandOwner::Core,
+            "Apply executable core and module migrations for the active customer app",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["release", "doctor"],
             CommandOwner::Core,
             "Check release compatibility for the active customer app",
         )?,
+        CommandDescriptor::new(
+            ["assets", "publish"],
+            CommandOwner::Core,
+            "Publish theme asset artifacts for the active customer app",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
         CommandDescriptor::new(
             ["import", "run"],
             CommandOwner::Core,

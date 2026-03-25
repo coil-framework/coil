@@ -20,6 +20,18 @@ pub(crate) struct DevServerInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MigrateApplyInvocation {
+    pub config_path: PathBuf,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AssetsPublishInvocation {
+    pub config_path: PathBuf,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliInput {
     Help,
     DevServer {
@@ -41,9 +53,19 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         config_path: PathBuf,
     },
+    MigrateApply {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: MigrateApplyInvocation,
+    },
     ReleaseDoctor {
         output_mode: OutputMode,
         config_path: PathBuf,
+    },
+    AssetsPublish {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: AssetsPublishInvocation,
     },
     ImportRun {
         output_mode: OutputMode,
@@ -59,6 +81,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
         .map(PathBuf::from);
     let mut output_mode = OutputMode::Human;
     let mut dry_run = false;
+    let mut confirmed = false;
     let mut subject: Option<DefaultSubject> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
@@ -72,6 +95,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--help" | "-h" => return Ok(CliInput::Help),
             "--json" => output_mode = OutputMode::Json,
             "--dry-run" => dry_run = true,
+            "--yes" => confirmed = true,
             "--config" => {
                 config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
             }
@@ -200,6 +224,24 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 config_path,
             })
         }
+        [command, subcommand] if command == "migrate" && subcommand == "apply" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`migrate apply` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::MigrateApply {
+                output_mode,
+                dry_run,
+                invocation: MigrateApplyInvocation {
+                    config_path,
+                    confirmed,
+                },
+            })
+        }
         [command, subcommand] if command == "release" && subcommand == "doctor" => {
             let config_path = config_path
                 .or_else(discover_default_config_path)
@@ -212,6 +254,24 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             Ok(CliInput::ReleaseDoctor {
                 output_mode,
                 config_path,
+            })
+        }
+        [command, subcommand] if command == "assets" && subcommand == "publish" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`assets publish` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::AssetsPublish {
+                output_mode,
+                dry_run,
+                invocation: AssetsPublishInvocation {
+                    config_path,
+                    confirmed,
+                },
             })
         }
         [command, subcommand, manifest_path] if command == "import" && subcommand == "run" => {
@@ -452,6 +512,60 @@ mod tests {
         };
 
         assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+    }
+
+    #[test]
+    fn parse_migrate_apply_accepts_dry_run_and_confirmation_flags() {
+        let input = parse([
+            "migrate".to_string(),
+            "apply".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--dry-run".to_string(),
+            "--yes".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::MigrateApply {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected migrate apply input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert!(invocation.confirmed);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+    }
+
+    #[test]
+    fn parse_assets_publish_accepts_dry_run_and_confirmation_flags() {
+        let input = parse([
+            "assets".to_string(),
+            "publish".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--dry-run".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::AssetsPublish {
+            dry_run,
+            invocation,
+            ..
+        } = input
+        else {
+            panic!("expected assets publish input");
+        };
+
+        assert!(dry_run);
+        assert!(invocation.confirmed);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
     }
 }

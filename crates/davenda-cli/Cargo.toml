@@ -7,12 +7,14 @@ default-run = "platform"
 [dependencies]
 async-trait = "0.1"
 davenda-admin = { path = "../davenda-admin" }
+davenda-assets = { path = "../davenda-assets" }
 davenda-auth = { path = "../davenda-auth" }
 davenda-app = { path = "../davenda-app" }
 davenda-core = { path = "../davenda-core" }
 davenda-cms = { path = "../davenda-cms" }
 davenda-commerce = { path = "../davenda-commerce" }
 davenda-config = { path = "../davenda-config" }
+davenda-data = { path = "../davenda-data" }
 davenda-events = { path = "../davenda-events" }
 davenda-import = { path = "../davenda-import" }
 davenda-media = { path = "../davenda-media" }

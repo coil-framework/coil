@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use davenda_config::DatabaseDriver;
@@ -6,7 +7,7 @@ use sqlx::{Column, Pool, Postgres, Row};
 
 use crate::{
     CompiledMigrationBatch, CompiledStatement, CompiledTransaction, DataModelError, DataRuntime,
-    DataValue,
+    DataValue, quote_identifier,
 };
 
 #[derive(Debug, Clone)]
@@ -197,6 +198,37 @@ impl PostgresDataClient {
         Ok(MigrationBatchExecution {
             statements_executed: batch.statements.len(),
         })
+    }
+
+    pub async fn applied_migration_keys(
+        &self,
+    ) -> Result<BTreeSet<(String, String)>, DataModelError> {
+        let migrations_table = quote_identifier(&format!(
+            "{}.{}",
+            self.runtime.schema, self.runtime.migrations_table
+        ));
+        sqlx::query(&format!(
+            "CREATE TABLE IF NOT EXISTS {migrations_table} (owner TEXT NOT NULL, migration_id TEXT NOT NULL, description TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (owner, migration_id))"
+        ))
+        .execute(&self.pool)
+        .await
+        .map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        let rows = sqlx::query(&format!(
+            "SELECT owner, migration_id FROM {migrations_table} ORDER BY owner ASC, migration_id ASC"
+        ))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| DataModelError::Sqlx {
+            reason: error.to_string(),
+        })?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.get("owner"), row.get("migration_id")))
+            .collect())
     }
 
     async fn apply_statement_timeout(&self) -> Result<(), DataModelError> {

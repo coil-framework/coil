@@ -17,7 +17,9 @@ fn baseline_runtime_registers_core_command_families() {
     assert!(paths.contains(&"auth explain".to_string()));
     assert!(paths.contains(&"module list".to_string()));
     assert!(paths.contains(&"migrate plan".to_string()));
+    assert!(paths.contains(&"migrate apply".to_string()));
     assert!(paths.contains(&"release doctor".to_string()));
+    assert!(paths.contains(&"assets publish".to_string()));
     assert!(paths.contains(&"import run".to_string()));
 }
 
@@ -88,6 +90,23 @@ fn invocation_plans_enforce_dry_run_and_confirmation_rules() {
         descriptor.unwrap().description,
         "Run a staged content or data import into the current customer app"
     );
+
+    let confirmation_required = runtime.plan(CommandInvocation::new(["migrate", "apply"]).unwrap());
+    assert_eq!(
+        confirmation_required.unwrap_err(),
+        CliModelError::ConfirmationRequired {
+            path: "migrate apply".to_string(),
+        }
+    );
+
+    let confirmed = runtime
+        .plan(
+            CommandInvocation::new(["assets", "publish"])
+                .unwrap()
+                .confirm(),
+        )
+        .unwrap();
+    assert_eq!(confirmed.descriptor.path, vec!["assets", "publish"]);
 }
 
 #[test]

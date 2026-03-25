@@ -1,16 +1,22 @@
 use crate::CliModelError;
 use crate::cli::customer_app::{load_customer_app_context, load_official_modules};
-use crate::cli::args::{CliInput, DevServerInvocation, parse};
+use crate::cli::args::{
+    AssetsPublishInvocation, CliInput, DevServerInvocation, MigrateApplyInvocation, parse,
+};
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
 use crate::cli::error::CliRunError;
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
-use crate::{CommandReport, ReportRow};
+use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
+use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
+use davenda_assets::AssetDeliveryTarget;
 use davenda_auth::configured_auth_model_package;
 use davenda_config::PlatformConfig;
+use davenda_data::{MigrationPlan, MigrationRegistry};
 use davenda_import::ImportManifest;
 use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
 use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +181,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             })?;
             render_command_report(&report, output_mode)
         }
+        CliInput::MigrateApply {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_migrate_apply(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::ReleaseDoctor {
             output_mode,
             config_path,
@@ -203,6 +217,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                         config_path.display()
                     ))
                 })?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::AssetsPublish {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_assets_publish(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
         CliInput::ImportRun {
@@ -274,7 +296,9 @@ fn usage() -> String {
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform module list [--config <path>] [--json]",
         "  platform migrate plan [--config <path>] [--json]",
+        "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
+        "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
         "",
         "Examples:",
@@ -283,7 +307,9 @@ fn usage() -> String {
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform module list --config config/platform.toml",
         "  platform migrate plan --config config/platform.toml",
+        "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
+        "  platform assets publish --config apps/harbor-shop/platform.toml --dry-run",
         "  platform import run imports/wordpress-events.toml",
         "  platform import run imports/wordpress-events.toml --dry-run",
         "",
@@ -292,6 +318,497 @@ fn usage() -> String {
         "  DATABASE_URL and OBJECT_STORE_URL are required by `config/platform.toml`",
     ]
     .join("\n")
+}
+
+#[derive(Debug)]
+struct BuiltCustomerAppContext {
+    app_root: PathBuf,
+    manifest: CustomerAppManifest,
+    runtime_plan: CustomerAppRuntimePlan,
+}
+
+fn run_migrate_apply(
+    invocation: &MigrateApplyInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    if !dry_run && !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`migrate apply` requires `--yes` unless `--dry-run` is used",
+        ));
+    }
+
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    let executable_plan = &built.runtime_plan.runtime.install_migrations;
+    let advisory_migration_entries = count_advisory_migration_entries(&built.runtime_plan);
+
+    if dry_run {
+        return build_migrate_apply_report(
+            &built.manifest,
+            executable_plan,
+            None,
+            None,
+            advisory_migration_entries,
+            true,
+        );
+    }
+
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let client = built
+        .runtime_plan
+        .runtime
+        .data
+        .connect_lazy_postgres()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to connect to the migration database for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let applied_keys = tokio_runtime
+        .block_on(async { client.applied_migration_keys().await })
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read applied migrations for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let pending_plan = pending_migration_plan(executable_plan, &applied_keys)?;
+    let executed_statements = if pending_plan.ordered_steps().is_empty() {
+        None
+    } else {
+        let mut registry = MigrationRegistry::new();
+        registry.register(&pending_plan).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to register executable migrations for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+        let batch = built
+            .runtime_plan
+            .runtime
+            .data
+            .compile_migrations(&registry)
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to compile executable migrations for `{}`: {error}",
+                    built.manifest.id
+                ))
+            })?;
+        let execution = tokio_runtime
+            .block_on(async { client.apply_migrations(&batch).await })
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to apply migrations for `{}`: {error}",
+                    built.manifest.id
+                ))
+            })?;
+        Some(execution.statements_executed)
+    };
+
+    build_migrate_apply_report(
+        &built.manifest,
+        executable_plan,
+        Some(&applied_keys),
+        executed_statements,
+        advisory_migration_entries,
+        false,
+    )
+}
+
+fn run_assets_publish(
+    invocation: &AssetsPublishInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    if !dry_run && !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`assets publish` requires `--yes` unless `--dry-run` is used",
+        ));
+    }
+
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    if built.manifest.theme.asset_roots().is_empty() {
+        let mut report = CommandReport::new(
+            ["assets", "publish"],
+            format!(
+                "No theme asset roots are configured for customer app `{}`",
+                built.manifest.id
+            ),
+        )
+        .map_err(report_build_error)?
+        .with_status(ReportStatus::Warning)
+        .with_columns(["root", "status"])
+        .map_err(report_build_error)?;
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "assets.roots.missing",
+            format!(
+                "customer app `{}` declares no theme asset roots, so asset publication is a no-op",
+                built.manifest.id
+            ),
+        )?;
+        return Ok(report);
+    }
+
+    let release_id = davenda_assets::ReleaseId::new(format!(
+        "{}-{}-theme-assets",
+        built.manifest.id, built.manifest.theme.active
+    ))
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to allocate a theme asset release id for `{}`: {error}",
+            built.manifest.id
+        ))
+    })?;
+    let publication = built
+        .manifest
+        .theme
+        .publication_plan(release_id, &built.app_root)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to prepare theme assets for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let cdn_base_url = built
+        .runtime_plan
+        .runtime
+        .config
+        .assets
+        .cdn_base_url
+        .as_deref()
+        .ok_or_else(|| {
+            CliRunError::execution(format!(
+                "customer app `{}` cannot publish theme assets without `assets.cdn_base_url`",
+                built.manifest.id
+            ))
+        })?;
+
+    if dry_run {
+        let manifest = publication
+            .publish(&built.runtime_plan.runtime.storage_planner, cdn_base_url)
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to plan theme asset publication for `{}`: {error}",
+                    built.manifest.id
+                ))
+            })?;
+        return build_assets_publish_report(&built.manifest, &manifest, None, true);
+    }
+
+    let object_store = built
+        .runtime_plan
+        .runtime
+        .object_store_client_config(&EnvironmentSecretResolver)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve storage backends for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let receipt = built
+        .runtime_plan
+        .runtime
+        .storage_host_with_object_store(object_store)
+        .publish_theme_assets(&publication)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to publish theme assets for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+
+    build_assets_publish_report(&built.manifest, receipt.manifest(), Some(&receipt), false)
+}
+
+fn build_customer_app_runtime_context(
+    config_path: &Path,
+    suppress_asset_publication: bool,
+) -> Result<BuiltCustomerAppContext, CliRunError> {
+    let context = load_customer_app_context(config_path)?;
+    let mut config = context.config.clone();
+    if suppress_asset_publication {
+        config.assets.publish_manifest = false;
+    }
+    let runtime_plan = context
+        .manifest
+        .build_runtime_plan_at(
+            config,
+            configured_auth_model_package(context.config.auth.package.clone()),
+            context.modules,
+            &context.app_root,
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build customer app runtime plan for `{}`: {error}",
+                context.manifest.id
+            ))
+        })?;
+
+    Ok(BuiltCustomerAppContext {
+        app_root: context.app_root,
+        manifest: context.manifest,
+        runtime_plan,
+    })
+}
+
+fn pending_migration_plan(
+    plan: &MigrationPlan,
+    applied_keys: &BTreeSet<(String, String)>,
+) -> Result<MigrationPlan, CliRunError> {
+    let mut pending = MigrationPlan::new();
+    for step in plan.ordered_steps() {
+        let key = (step.owner.to_string(), step.id.to_string());
+        if applied_keys.contains(&key) {
+            continue;
+        }
+        pending.insert(step.clone()).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to stage pending migration `{}` for apply: {error}",
+                step.id
+            ))
+        })?;
+    }
+    Ok(pending)
+}
+
+fn build_migrate_apply_report(
+    manifest: &CustomerAppManifest,
+    executable_plan: &MigrationPlan,
+    applied_keys: Option<&BTreeSet<(String, String)>>,
+    executed_statements: Option<usize>,
+    advisory_migration_entries: usize,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    let pending_steps = executable_plan
+        .ordered_steps()
+        .iter()
+        .filter(|step| {
+            applied_keys.is_none_or(|keys| !keys.contains(&(step.owner.to_string(), step.id.to_string())))
+        })
+        .count();
+    let total_steps = executable_plan.ordered_steps().len();
+    let already_applied = total_steps.saturating_sub(pending_steps);
+    let planned_sql_statements = if pending_steps == 0 {
+        0
+    } else {
+        1 + executable_plan
+            .ordered_steps()
+            .iter()
+            .filter(|step| {
+                applied_keys.is_none_or(|keys| !keys.contains(&(step.owner.to_string(), step.id.to_string())))
+            })
+            .map(|step| step.statements.len() + 1)
+            .sum::<usize>()
+    };
+
+    let summary = if dry_run {
+        if total_steps == 0 {
+            format!(
+                "No executable SQL migrations are defined for customer app `{}`",
+                manifest.id
+            )
+        } else {
+            format!(
+                "Planned migration apply for `{}` with {} executable steps and {} SQL statements",
+                manifest.id, pending_steps, planned_sql_statements
+            )
+        }
+    } else if pending_steps == 0 {
+        format!(
+            "No pending executable migrations remained for customer app `{}`",
+            manifest.id
+        )
+    } else {
+        format!(
+            "Applied {} executable migration steps for `{}` with {} SQL statements",
+            pending_steps,
+            manifest.id,
+            executed_statements.unwrap_or_default()
+        )
+    };
+
+    let mut report = CommandReport::new(["migrate", "apply"], summary)
+        .map_err(report_build_error)?
+        .with_columns([
+            "owner",
+            "step",
+            "order",
+            "online_safe",
+            "sql_statements",
+            "status",
+            "description",
+        ])
+        .map_err(report_build_error)?;
+    if executable_plan
+        .ordered_steps()
+        .iter()
+        .any(|step| !step.online_safe)
+    {
+        report = report.with_status(ReportStatus::Warning);
+    }
+
+    for step in executable_plan.ordered_steps() {
+        let already_applied_step = applied_keys
+            .is_some_and(|keys| keys.contains(&(step.owner.to_string(), step.id.to_string())));
+        let status = if already_applied_step {
+            "already_applied"
+        } else if dry_run {
+            "planned"
+        } else {
+            "applied"
+        };
+        report.push_row(
+            ReportRow::new()
+                .with_cell("owner", step.owner.to_string())
+                .map_err(report_build_error)?
+                .with_cell("step", step.id.to_string())
+                .map_err(report_build_error)?
+                .with_cell("order", step.order.to_string())
+                .map_err(report_build_error)?
+                .with_cell("online_safe", step.online_safe.to_string())
+                .map_err(report_build_error)?
+                .with_cell("sql_statements", step.statements.len().to_string())
+                .map_err(report_build_error)?
+                .with_cell("status", status)
+                .map_err(report_build_error)?
+                .with_cell("description", step.description.clone())
+                .map_err(report_build_error)?,
+        );
+    }
+
+    if already_applied > 0 {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "migrate.steps.already_applied",
+            format!(
+                "{} executable migration steps were already present in the migration ledger and were not replayed",
+                already_applied
+            ),
+        )?;
+    }
+    if advisory_migration_entries > 0 {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "migrate.steps.advisory_only",
+            format!(
+                "{} auth-package or customer-app migration steps remain advisory only because they do not yet compile into executable SQL batches",
+                advisory_migration_entries
+            ),
+        )?;
+    }
+
+    Ok(report)
+}
+
+fn build_assets_publish_report(
+    manifest: &CustomerAppManifest,
+    active_manifest: &davenda_assets::ActiveAssetManifest,
+    receipt: Option<&davenda_assets::ThemeAssetPublicationReceipt>,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    let summary = if dry_run {
+        format!(
+            "Planned theme asset publication for `{}` with {} artifacts",
+            manifest.id,
+            active_manifest.entries().len()
+        )
+    } else {
+        format!(
+            "Published theme assets for `{}` with {} artifacts",
+            manifest.id,
+            active_manifest.entries().len()
+        )
+    };
+    let mut report = CommandReport::new(["assets", "publish"], summary)
+        .map_err(report_build_error)?
+        .with_columns([
+            "logical_path",
+            "hashed_path",
+            "delivery",
+            "bytes",
+            "status",
+            "storage_path",
+        ])
+        .map_err(report_build_error)?;
+
+    let mut total_bytes = 0_u64;
+    for (index, (logical_path, published)) in active_manifest.entries().enumerate() {
+        let write = receipt.and_then(|value| value.writes().get(index));
+        total_bytes += published.artifact().byte_length();
+        report.push_row(
+            ReportRow::new()
+                .with_cell("logical_path", logical_path)
+                .map_err(report_build_error)?
+                .with_cell("hashed_path", published.artifact().hashed_path())
+                .map_err(report_build_error)?
+                .with_cell("delivery", format_asset_delivery_target(published.delivery().target()))
+                .map_err(report_build_error)?
+                .with_cell("bytes", published.artifact().byte_length().to_string())
+                .map_err(report_build_error)?
+                .with_cell("status", if dry_run { "planned" } else { "published" })
+                .map_err(report_build_error)?
+                .with_cell(
+                    "storage_path",
+                    write
+                        .map(|receipt| receipt.path.display().to_string())
+                        .unwrap_or_else(|| "not_written".to_string()),
+                )
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "assets.bytes.total",
+        format!(
+            "theme asset publication covers {} artifacts and {} bytes",
+            active_manifest.entries().len(),
+            total_bytes
+        ),
+    )?;
+
+    Ok(report)
+}
+
+fn count_advisory_migration_entries(runtime_plan: &CustomerAppRuntimePlan) -> usize {
+    runtime_plan
+        .migration_summary
+        .entries()
+        .iter()
+        .filter(|entry| entry.step_id.is_none())
+        .count()
+}
+
+fn format_asset_delivery_target(target: &AssetDeliveryTarget) -> String {
+    match target {
+        AssetDeliveryTarget::Cdn { public_url, .. } => public_url.clone(),
+        AssetDeliveryTarget::SignedObject { object_key } => format!("signed:{object_key}"),
+        AssetDeliveryTarget::AppProxy { path } => format!("app:{path}"),
+        AssetDeliveryTarget::LocalPath { path } => format!("local:{path}"),
+    }
+}
+
+fn push_report_diagnostic(
+    report: &mut CommandReport,
+    severity: DiagnosticSeverity,
+    code: &str,
+    message: impl Into<String>,
+) -> Result<(), CliRunError> {
+    report.push_diagnostic(
+        DiagnosticRecord::new(severity, code, message.into()).map_err(report_build_error)?,
+    );
+    Ok(())
+}
+
+fn report_build_error(error: impl std::fmt::Display) -> CliRunError {
+    CliRunError::execution(format!("failed to build command report: {error}"))
 }
 
 fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
@@ -383,9 +900,148 @@ fn storage_deployment_label(deployment: davenda_config::StorageDeployment) -> &'
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::fs;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    struct ObjectStoreTestServer {
+        endpoint: String,
+        stop: Arc<AtomicBool>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl ObjectStoreTestServer {
+        fn spawn() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let stop = Arc::new(AtomicBool::new(false));
+            let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
+            let stop_thread = Arc::clone(&stop);
+            let store_thread = Arc::clone(&store);
+            let handle = thread::spawn(move || loop {
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let store = Arc::clone(&store_thread);
+                        handle_object_store_request(stream, &store);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("object-store test server failed: {error}"),
+                }
+            });
+
+            Self {
+                endpoint,
+                stop,
+                handle: Some(handle),
+            }
+        }
+
+        fn endpoint(&self) -> &str {
+            &self.endpoint
+        }
+    }
+
+    impl Drop for ObjectStoreTestServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    struct CustomerAppAssetFixture {
+        config_path: PathBuf,
+        _server: ObjectStoreTestServer,
+        object_store_env_var: String,
+    }
+
+    impl Drop for CustomerAppAssetFixture {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var(&self.object_store_env_var);
+            }
+        }
+    }
+
+    fn handle_object_store_request(
+        mut stream: std::net::TcpStream,
+        store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    ) {
+        stream.set_nonblocking(false).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or("");
+        let path = parts
+            .next()
+            .unwrap_or("/")
+            .split('?')
+            .next()
+            .unwrap_or("/")
+            .trim_start_matches('/')
+            .trim_start_matches("runtime/")
+            .to_string();
+
+        let mut content_length = 0usize;
+        loop {
+            let mut header = String::new();
+            reader.read_line(&mut header).unwrap();
+            let trimmed = header.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = trimmed.split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().unwrap_or(0);
+                }
+            }
+        }
+
+        let mut body = vec![0_u8; content_length];
+        if content_length > 0 {
+            reader.read_exact(&mut body).unwrap();
+        }
+
+        let (status, response_body) = match method {
+            "PUT" => {
+                store.lock().unwrap().insert(path, body);
+                ("200 OK", Vec::new())
+            }
+            "GET" => match store.lock().unwrap().get(&path).cloned() {
+                Some(bytes) => ("200 OK", bytes),
+                None => ("404 Not Found", b"not found".to_vec()),
+            },
+            _ => ("405 Method Not Allowed", b"method not allowed".to_vec()),
+        };
+
+        let etag_header = if method == "PUT" {
+            "ETag: \"test-etag\"\r\n"
+        } else {
+            ""
+        };
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{etag_header}Connection: close\r\n\r\n",
+            response_body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+        if !response_body.is_empty() {
+            stream.write_all(&response_body).unwrap();
+        }
+    }
 
     const DISABLED_EXPLAIN_CONFIG: &str = r#"
 [app]
@@ -496,6 +1152,30 @@ order = 10
 description = "Migrate the customer navigation structure"
 "#;
 
+    const CUSTOMER_APP_MANIFEST_WITH_ASSETS: &str = r#"
+[app]
+name = "showcase-events"
+display_name = "Showcase Events"
+
+[domains]
+canonical = "example.com"
+
+[i18n]
+default_locale = "en"
+supported_locales = ["en"]
+
+[theme]
+active = "storefront"
+template_namespaces = ["pages", "layouts"]
+asset_roots = ["theme/assets"]
+
+[auth]
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms"]
+"#;
+
     fn customer_app_fixture() -> PathBuf {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -519,6 +1199,85 @@ description = "Migrate the customer navigation structure"
         config_dir.join("platform.toml")
     }
 
+    fn customer_app_fixture_with_assets(publish_manifest: bool) -> CustomerAppAssetFixture {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("davenda-cli-assets-{suffix}"));
+        let config_dir = root.join("config");
+        let app_root = root.join("apps").join("showcase-events");
+        let templates_root = app_root.join("templates").join("pages");
+        let asset_root = app_root.join("theme").join("assets");
+        let local_root = root.join("storage");
+        let object_store_server = ObjectStoreTestServer::spawn();
+        let object_store_env_var = format!("DAVENDA_OBJECT_STORE_URL_{suffix}");
+
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&templates_root).unwrap();
+        fs::create_dir_all(&asset_root).unwrap();
+        let mut config =
+            DISABLED_EXPLAIN_CONFIG.replace("/tmp/davenda-cli", &local_root.display().to_string());
+        config = config.replace(
+            "environment = \"production\"",
+            "environment = \"development\"",
+        );
+        config = config.replace(
+            &format!(
+                "single_node_escape_hatch = \"explicit_single_node\"\nlocal_root = \"{}\"",
+                local_root.display()
+            ),
+            &format!(
+                "single_node_escape_hatch = \"explicit_single_node\"\nlocal_root = \"{}\"\nobject_store = \"s3\"\nobject_store_secret = {{ kind = \"env\", var = \"{}\" }}",
+                local_root.display(),
+                object_store_env_var
+            ),
+        );
+        if publish_manifest {
+            config = config.replace(
+                "[assets]\npublish_manifest = false",
+                "[assets]\npublish_manifest = true\ncdn_base_url = \"https://cdn.example.com/assets\"",
+            );
+        } else {
+            config = config.replace(
+                "[assets]\npublish_manifest = false",
+                "[assets]\npublish_manifest = false\ncdn_base_url = \"https://cdn.example.com/assets\"",
+            );
+        }
+        fs::write(config_dir.join("platform.toml"), config).unwrap();
+        fs::write(
+            app_root.join("app.toml"),
+            CUSTOMER_APP_MANIFEST_WITH_ASSETS,
+        )
+        .unwrap();
+        fs::write(
+            templates_root.join("home.html"),
+            "<html><body><main>Showcase Events</main></body></html>",
+        )
+        .unwrap();
+        fs::write(asset_root.join("site.css"), "body { color: #123456; }\n").unwrap();
+        fs::write(
+            asset_root.join("app.js"),
+            "window.davenda = { ready: true };\n",
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var(
+                &object_store_env_var,
+                format!(
+                    "bucket = \"runtime\"\nregion = \"us-east-1\"\nendpoint_url = \"{}\"\naccess_key_id = \"runtime-access\"\nsecret_access_key = \"runtime-secret\"\nallow_http = true",
+                    object_store_server.endpoint()
+                ),
+            );
+        }
+
+        CustomerAppAssetFixture {
+            config_path: config_dir.join("platform.toml"),
+            _server: object_store_server,
+            object_store_env_var,
+        }
+    }
+
     fn harbor_shop_platform_config() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/harbor-shop/platform.toml")
@@ -533,7 +1292,9 @@ description = "Migrate the customer navigation structure"
         assert!(rendered.contains("platform auth explain [--config <path>]"));
         assert!(rendered.contains("platform module list [--config <path>]"));
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
+        assert!(rendered.contains("platform migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform release doctor [--config <path>]"));
+        assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
     }
 
@@ -737,6 +1498,44 @@ description = "Import pages"
     }
 
     #[test]
+    fn run_from_args_requires_confirmation_for_migrate_apply() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "migrate".to_string(),
+            "apply".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 2);
+        assert!(
+            error
+                .to_string()
+                .contains("`migrate apply` requires `--yes` unless `--dry-run` is used")
+        );
+    }
+
+    #[test]
+    fn run_from_args_renders_migrate_apply_dry_run_for_executable_module_migrations() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "migrate".to_string(),
+            "apply".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("migrate apply"));
+        assert!(rendered.contains("module:cms"));
+        assert!(rendered.contains("status: planned"));
+    }
+
+    #[test]
     fn run_from_args_renders_release_doctor_from_a_customer_app_runtime_plan() {
         let config_path = customer_app_fixture();
 
@@ -750,6 +1549,64 @@ description = "Import pages"
 
         assert!(rendered.contains("release doctor"));
         assert!(rendered.contains("showcase-events"));
+    }
+
+    #[test]
+    fn run_from_args_requires_confirmation_for_assets_publish() {
+        let fixture = customer_app_fixture_with_assets(true);
+
+        let error = run_from_args([
+            "assets".to_string(),
+            "publish".to_string(),
+            "--config".to_string(),
+            fixture.config_path.display().to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 2);
+        assert!(
+            error
+                .to_string()
+                .contains("`assets publish` requires `--yes` unless `--dry-run` is used")
+        );
+    }
+
+    #[test]
+    fn run_from_args_renders_assets_publish_dry_run_from_customer_app_theme_assets() {
+        let fixture = customer_app_fixture_with_assets(true);
+
+        let rendered = run_from_args([
+            "assets".to_string(),
+            "publish".to_string(),
+            "--config".to_string(),
+            fixture.config_path.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("assets publish"));
+        assert!(rendered.contains("site.css"));
+        assert!(rendered.contains("status: planned"));
+    }
+
+    #[test]
+    fn run_from_args_publishes_assets_into_the_configured_storage_root() {
+        let fixture = customer_app_fixture_with_assets(true);
+
+        let rendered = run_from_args([
+            "assets".to_string(),
+            "publish".to_string(),
+            "--config".to_string(),
+            fixture.config_path.display().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("Published theme assets"));
+        assert!(rendered.contains("status: published"));
+        assert!(rendered.contains("storage_path:"));
+        assert!(rendered.contains("site.css"));
+        assert!(rendered.contains("app.js"));
     }
 
     #[test]

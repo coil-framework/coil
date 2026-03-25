@@ -1,0 +1,45 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Collections'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Collections</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main collections-page">
+      <section class="collections-page__intro">
+        <p class="collections-page__eyebrow">Collections</p>
+        <h1>Browse by intention, not just by SKU.</h1>
+        <p>
+          Each collection is meant to act like a storefront landing page: a clear promise, a short
+          story, and a fast path into products.
+        </p>
+      </section>
+
+      <div dv:replace="~{commerce/collection-grid :: grid}"></div>
+
+      <section class="collections-page__editorial">
+        <article>
+          <h2>Seasonal edits</h2>
+          <p>
+            Rotate these pages around launches, events, and repeat-purchase campaigns so customers
+            always see a relevant entry point.
+          </p>
+        </article>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

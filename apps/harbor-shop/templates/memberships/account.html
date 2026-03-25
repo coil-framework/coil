@@ -1,0 +1,54 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Memberships'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Memberships</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main memberships-page">
+      <section class="memberships-page__intro">
+        <p class="memberships-page__eyebrow">Account access</p>
+        <h1>Memberships, renewals, and entitlement visibility in one place.</h1>
+        <p>
+          This page gives customers a direct answer to what they have, when it renews, and what
+          support or priority access comes with it.
+        </p>
+      </section>
+
+      <section class="memberships-page__summary" dv:if="${membershipSummary}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Current tier</p>
+          <h2 dv:text="${membershipSummary.tierName}">Harbor Circle</h2>
+          <p dv:text="${membershipSummary.status}">Active</p>
+          <p dv:text="${membershipSummary.renewalText}">
+            Renewing on 18 April with early-access reservations.
+          </p>
+        </article>
+      </section>
+
+      <section class="memberships-page__summary" dv:unless="${membershipSummary}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Current tier</p>
+          <h2>Membership not active yet</h2>
+          <p>Join to unlock early access, subscriber-only bundles, and concierge support.</p>
+        </article>
+      </section>
+
+      <div dv:replace="~{account/summary-panels :: panels}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

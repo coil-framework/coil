@@ -21,8 +21,8 @@
         <div class="account-page__intro">
           <h1>Your account</h1>
           <p>
-            Review your membership status, manage subscriptions, and return to
-            the storefront when you’re ready to browse again.
+            Review your membership status, recent orders, and the quickest
+            route back into the storefront when you are ready to browse again.
           </p>
         </div>
         <div class="account-page__cards">
@@ -34,9 +34,10 @@
           <article class="account-card">
             <h2>Storefront</h2>
             <p>Continue browsing the public catalog and landing content.</p>
-            <a class="button button--secondary" href="/">Back to home</a>
+            <a class="button button--secondary" href="/shop">Back to shop</a>
           </article>
         </div>
+        <div dv:replace="~{account/summary-panels :: panels}"></div>
       </section>
     </main>
     <footer class="site-footer">

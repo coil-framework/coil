@@ -1,0 +1,56 @@
+<section class="product-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
+  <header class="product-grid__header">
+    <p class="product-grid__eyebrow">Storefront</p>
+    <h2>Popular right now</h2>
+    <p>
+      A mix of pantry staples, travel pieces, and limited-run gifts that move quickly once the
+      weekend market opens.
+    </p>
+  </header>
+
+  <ul class="product-grid__list" dv:if="${productCards}">
+    <li class="product-grid__item" dv:each="product : ${productCards}">
+      <article class="product-card">
+        <a class="product-card__media" href="/products/harbor-tin" dv:href="${product.url}">
+          <img
+            src="/theme/assets/logo.svg"
+            dv:src="${product.imageUrl}"
+            alt="Featured product"
+            dv:attr="alt=${product.imageAlt}"
+          />
+        </a>
+        <div class="product-card__body">
+          <p class="product-card__eyebrow" dv:text="${product.collectionName}">Harbor pantry</p>
+          <h3>
+            <a href="/products/harbor-tin" dv:href="${product.url}" dv:text="${product.name}">
+              Harbor tin
+            </a>
+          </h3>
+          <p class="product-card__summary" dv:text="${product.summary}">
+            Compact, gift-ready, and easy to restock for repeat buyers.
+          </p>
+          <div class="product-card__meta">
+            <span class="product-card__price" dv:text="${product.price}">GBP 28</span>
+            <a class="button" href="/cart" dv:href="${product.addToCartUrl}">Add to cart</a>
+          </div>
+        </div>
+      </article>
+    </li>
+  </ul>
+
+  <div class="product-grid__fallback" dv:unless="${productCards}">
+    <article class="product-card">
+      <div class="product-card__body">
+        <p class="product-card__eyebrow">Harbor pantry</p>
+        <h3>Signature provisions set</h3>
+        <p class="product-card__summary">
+          A compact edit of pantry staples, customer favorites, and travel-ready extras.
+        </p>
+        <div class="product-card__meta">
+          <span class="product-card__price">GBP 28</span>
+          <a class="button" href="/cart">Add to cart</a>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>

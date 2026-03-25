@@ -1,0 +1,35 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Account'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Account</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main account-page">
+      <section class="account-page__intro">
+        <p class="account-page__eyebrow">Customer account</p>
+        <h1 dv:text="${customer.displayName}">Welcome back to Harbor Shop.</h1>
+        <p>
+          Use this account hub for orders, membership access, and repeat-purchase shortcuts that
+          point straight back into the storefront.
+        </p>
+      </section>
+
+      <div dv:replace="~{account/summary-panels :: panels}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

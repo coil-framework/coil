@@ -1,0 +1,88 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Checkout'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Checkout</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main checkout-page">
+      <section class="checkout-page__intro">
+        <p class="checkout-page__eyebrow">Checkout</p>
+        <h1>Confirm delivery, billing, and payment in one pass.</h1>
+        <p>
+          The page is structured for a short, trustworthy flow: contact first, delivery second,
+          then payment and final review.
+        </p>
+      </section>
+
+      <div class="checkout-page__grid">
+        <section class="checkout-card">
+          <h2>Contact</h2>
+          <p dv:if="${customer}" dv:text="${customer.email}">hello@example.com</p>
+          <p dv:unless="${customer}">Guests can continue with email confirmation and order tracking.</p>
+
+          <h2>Delivery</h2>
+          <ul class="checkout-list">
+            <li>Standard dispatch in 2-4 working days</li>
+            <li>Collection notes supported for market-day pickup</li>
+            <li>Gift messaging preserved on the order summary</li>
+          </ul>
+
+          <h2>Payment</h2>
+          <p>
+            Cards, gift credit, and subscription-linked renewals should all resolve through the
+            same order confirmation path.
+          </p>
+        </section>
+
+        <aside class="checkout-card">
+          <h2>Order summary</h2>
+          <ul class="checkout-summary" dv:if="${lineItems}">
+            <li dv:each="item : ${lineItems}">
+              <span dv:text="${item.title}">Harbor pantry set</span>
+              <span dv:text="${item.quantity}">1</span>
+              <strong dv:text="${item.total}">GBP 48</strong>
+            </li>
+          </ul>
+          <ul class="checkout-summary" dv:unless="${lineItems}">
+            <li>
+              <span>Harbor pantry set</span>
+              <span>1</span>
+              <strong>GBP 48</strong>
+            </li>
+            <li>
+              <span>Weekend market tote</span>
+              <span>1</span>
+              <strong>GBP 22</strong>
+            </li>
+          </ul>
+
+          <div class="checkout-totals">
+            <p><span>Subtotal</span><strong dv:text="${orderSummary.subtotal}">GBP 70</strong></p>
+            <p><span>Delivery</span><strong dv:text="${orderSummary.shipping}">GBP 6</strong></p>
+            <p><span>Total</span><strong dv:text="${orderSummary.total}">GBP 76</strong></p>
+          </div>
+
+          <div class="checkout-actions">
+            <a class="button" href="/cart">Return to cart</a>
+            <a class="button" href="/account">Use saved account details</a>
+          </div>
+        </aside>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

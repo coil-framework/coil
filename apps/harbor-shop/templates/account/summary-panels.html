@@ -1,0 +1,49 @@
+<section class="account-panels" xmlns:dv="https://davenda.dev" dv:fragment="panels">
+  <div class="account-panels__grid">
+    <article class="account-panel">
+      <p class="account-panel__eyebrow">Orders</p>
+      <h2>Recent purchases</h2>
+      <ul class="account-panel__list" dv:if="${recentOrders}">
+        <li dv:each="order : ${recentOrders}">
+          <strong dv:text="${order.reference}">HS-1048</strong>
+          <span dv:text="${order.status}">Packed</span>
+          <span dv:text="${order.total}">GBP 84</span>
+        </li>
+      </ul>
+      <p dv:unless="${recentOrders}">
+        Recent orders will appear here once the customer has completed checkout.
+      </p>
+    </article>
+
+    <article class="account-panel">
+      <p class="account-panel__eyebrow">Membership</p>
+      <h2>Access and renewals</h2>
+      <div dv:if="${membershipSummary}">
+        <p>
+          <strong dv:text="${membershipSummary.tierName}">Harbor Circle</strong>
+          <span dv:text="${membershipSummary.status}">Active</span>
+        </p>
+        <p dv:text="${membershipSummary.renewalText}">
+          Renewing on 18 April with market-day priority access.
+        </p>
+        <a class="button" href="/account/memberships">Manage membership</a>
+      </div>
+      <p dv:unless="${membershipSummary}">
+        No membership is attached yet. Join to unlock early-access drops and concierge support.
+      </p>
+    </article>
+
+    <article class="account-panel">
+      <p class="account-panel__eyebrow">Support</p>
+      <h2>Need help with a delivery?</h2>
+      <p>
+        Start with delivery status, billing details, or address changes before your next dispatch.
+      </p>
+      <ul class="account-panel__list">
+        <li><a href="/account">Update profile details</a></li>
+        <li><a href="/checkout">Retry checkout</a></li>
+        <li><a href="/account/memberships">View renewal options</a></li>
+      </ul>
+    </article>
+  </div>
+</section>

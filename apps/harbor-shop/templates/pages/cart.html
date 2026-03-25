@@ -1,0 +1,74 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Cart'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Cart</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main cart-page">
+      <section class="cart-page__intro">
+        <p class="cart-page__eyebrow">Cart</p>
+        <h1>Review the basket before moving to payment.</h1>
+      </section>
+
+      <div class="cart-page__grid">
+        <section class="cart-card">
+          <h2>Items</h2>
+          <ul class="cart-lines" dv:if="${cartItems}">
+            <li class="cart-line" dv:each="item : ${cartItems}">
+              <div>
+                <strong dv:text="${item.title}">Harbor pantry set</strong>
+                <p dv:text="${item.variant}">Seasonal assortment</p>
+              </div>
+              <span dv:text="${item.quantity}">1</span>
+              <strong dv:text="${item.total}">GBP 48</strong>
+            </li>
+          </ul>
+          <ul class="cart-lines" dv:unless="${cartItems}">
+            <li class="cart-line">
+              <div>
+                <strong>Harbor pantry set</strong>
+                <p>Seasonal assortment</p>
+              </div>
+              <span>1</span>
+              <strong>GBP 48</strong>
+            </li>
+            <li class="cart-line">
+              <div>
+                <strong>Weekend market tote</strong>
+                <p>Natural canvas</p>
+              </div>
+              <span>1</span>
+              <strong>GBP 22</strong>
+            </li>
+          </ul>
+        </section>
+
+        <aside class="cart-card">
+          <h2>Summary</h2>
+          <p><span>Subtotal</span><strong dv:text="${cartSummary.subtotal}">GBP 70</strong></p>
+          <p><span>Delivery</span><strong dv:text="${cartSummary.shipping}">GBP 6</strong></p>
+          <p><span>Total</span><strong dv:text="${cartSummary.total}">GBP 76</strong></p>
+          <div class="cart-page__actions">
+            <a class="button" href="/checkout">Checkout</a>
+            <a class="button" href="/shop">Continue shopping</a>
+          </div>
+        </aside>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

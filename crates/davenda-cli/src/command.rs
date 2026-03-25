@@ -221,6 +221,18 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
         )?
         .with_dry_run(),
         CommandDescriptor::new(
+            ["cache", "inspect"],
+            CommandOwner::Core,
+            "Inspect the resolved cache key and current lookup state for a specific route",
+        )?,
+        CommandDescriptor::new(
+            ["cache", "invalidate"],
+            CommandOwner::Core,
+            "Invalidate cache entries through explicit invalidation tags",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["jobs", "status"],
             CommandOwner::Core,
             "Inspect registered runtime jobs, queue topology, and current queue health",

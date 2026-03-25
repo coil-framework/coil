@@ -2,11 +2,11 @@ use crate::CliModelError;
 use crate::cli::args::{
     AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
     AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation,
-    AuthTestModelInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
-    JobsDeadLettersInvocation, JobsPromoteInvocation, JobsRetryInvocation, JobsStatusInvocation,
-    MigrateApplyInvocation, ModuleDisableInvocation, ModuleEnableInvocation,
-    ModuleInspectInvocation, ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation,
-    parse,
+    AuthTestModelInvocation, CacheInspectInvocation, CacheInvalidateInvocation,
+    CacheWarmInvocation, CliInput, DevServerInvocation, JobsDeadLettersInvocation,
+    JobsPromoteInvocation, JobsRetryInvocation, JobsStatusInvocation, MigrateApplyInvocation,
+    ModuleDisableInvocation, ModuleEnableInvocation, ModuleInspectInvocation,
+    ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -24,7 +24,7 @@ use davenda_auth::{
     AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity,
     Namespace, Relation, configured_auth_model_package,
 };
-use davenda_cache::CacheInstant;
+use davenda_cache::{CacheInstant, InvalidationSet, InvalidationTag};
 use davenda_commerce::EntitlementKey;
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_core::validate_module_capabilities;
@@ -323,6 +323,21 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_cache_warm(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::CacheInspect {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_cache_inspect(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::CacheInvalidate {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_cache_invalidate(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::JobsStatus {
             output_mode,
             invocation,
@@ -446,6 +461,8 @@ fn usage() -> String {
         "  platform release doctor [--config <path>] [--json]",
         "  platform release plan [--config <path>] [--json]",
         "  platform cache warm [--config <path>] --scope public --route <path> [--route <path> ...] [--dry-run] [--json]",
+        "  platform cache inspect [--config <path>] --route <path> [--json]",
+        "  platform cache invalidate [--config <path>] --tag <tag> [--tag <tag> ...] [--dry-run] --yes [--json]",
         "  platform jobs status [--config <path>] [--queue <name>] [--json]",
         "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
         "  platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes] [--json]",
@@ -481,6 +498,8 @@ fn usage() -> String {
         "  platform release doctor --config config/platform.toml",
         "  platform release plan --config config/platform.toml",
         "  platform cache warm --config config/platform.toml --scope public --route /en-GB/home",
+        "  platform cache inspect --config config/platform.toml --route /en-GB/home",
+        "  platform cache invalidate --config config/platform.toml --tag route:events.list --tag locale:en-GB --yes",
         "  platform jobs status --config config/platform.toml",
         "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
         "  platform jobs retry dead-letter:job-retry --config config/platform.toml --dry-run",
@@ -2214,6 +2233,24 @@ fn run_cache_warm(
     warm_cache_routes(&built, &invocation.routes, &invocation.scope, dry_run)
 }
 
+fn run_cache_inspect(invocation: &CacheInspectInvocation) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    inspect_cache_route(&built, &invocation.route)
+}
+
+fn run_cache_invalidate(
+    invocation: &CacheInvalidateInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    if !dry_run && !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`cache invalidate` requires `--yes` unless `--dry-run` is used",
+        ));
+    }
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    invalidate_cache_tags(&built, &invocation.tags, dry_run)
+}
+
 fn run_jobs_status(invocation: &JobsStatusInvocation) -> Result<CommandReport, CliRunError> {
     let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
     let queue_filter = invocation.queue.as_deref();
@@ -3194,6 +3231,374 @@ fn warm_cache_routes(
     )?;
 
     Ok(report)
+}
+
+fn inspect_cache_route(
+    built: &BuiltCustomerAppContext,
+    route: &str,
+) -> Result<CommandReport, CliRunError> {
+    let (execution, cache_key) = resolve_cache_route_execution(built, route)?;
+    let mut report = CommandReport::new(
+        ["cache", "inspect"],
+        format!("Cache inspection for `{}` route `{route}`", built.manifest.id),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "route",
+        "route_name",
+        "scope",
+        "cache",
+        "cache_key",
+        "lookup",
+        "entry",
+    ])
+    .map_err(report_build_error)?;
+
+    let application_plan = execution.cache_plan.plan.application();
+    if application_plan.is_none() {
+        report = report.with_status(ReportStatus::Warning);
+        report.push_row(
+            ReportRow::new()
+                .with_cell("route", route.to_string())
+                .map_err(report_build_error)?
+                .with_cell("route_name", execution.route.route_name.clone())
+                .map_err(report_build_error)?
+                .with_cell("scope", "n/a")
+                .map_err(report_build_error)?
+                .with_cell("cache", cache_disposition_label(execution.cache))
+                .map_err(report_build_error)?
+                .with_cell("cache_key", "none")
+                .map_err(report_build_error)?
+                .with_cell("lookup", "not_cacheable")
+                .map_err(report_build_error)?
+                .with_cell("entry", "absent")
+                .map_err(report_build_error)?,
+        );
+        return Ok(report);
+    }
+
+    let now = CacheInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to calculate cache inspection timestamp: {error}"
+                ))
+            })?
+            .as_secs(),
+    );
+    if let Some(error) = cache_backend_availability_error(built) {
+        report = report.with_status(ReportStatus::Warning);
+        report.push_row(
+            ReportRow::new()
+                .with_cell("route", route.to_string())
+                .map_err(report_build_error)?
+                .with_cell("route_name", execution.route.route_name.clone())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "scope",
+                    format!(
+                        "{:?}",
+                        application_plan.expect("checked above").scope().visibility()
+                    )
+                    .to_lowercase(),
+                )
+                .map_err(report_build_error)?
+                .with_cell("cache", cache_disposition_label(execution.cache))
+                .map_err(report_build_error)?
+                .with_cell("cache_key", cache_key.clone())
+                .map_err(report_build_error)?
+                .with_cell("lookup", "backend_unavailable")
+                .map_err(report_build_error)?
+                .with_cell("entry", "unknown")
+                .map_err(report_build_error)?,
+        );
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "cache.inspect.backend",
+            format!(
+                "cache backend is unavailable for live lookup, but the resolved cache key is still `{cache_key}`: {error}"
+            ),
+        )?;
+        return Ok(report);
+    }
+    let mut cache_host = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        built.runtime_plan.runtime.cache_host()
+    })) {
+        Ok(Ok(host)) => host,
+        Ok(Err(error)) => {
+            report = report.with_status(ReportStatus::Warning);
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("route", route.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("route_name", execution.route.route_name.clone())
+                    .map_err(report_build_error)?
+                    .with_cell(
+                        "scope",
+                        format!(
+                            "{:?}",
+                            application_plan.expect("checked above").scope().visibility()
+                        )
+                        .to_lowercase(),
+                    )
+                    .map_err(report_build_error)?
+                    .with_cell("cache", cache_disposition_label(execution.cache))
+                    .map_err(report_build_error)?
+                    .with_cell("cache_key", cache_key.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("lookup", "backend_unavailable")
+                    .map_err(report_build_error)?
+                    .with_cell("entry", "unknown")
+                    .map_err(report_build_error)?,
+            );
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Warning,
+                "cache.inspect.backend",
+                format!(
+                    "cache backend is unavailable for live lookup, but the resolved cache key is still `{cache_key}`: {error}"
+                ),
+            )?;
+            return Ok(report);
+        }
+        Err(_) => {
+            report = report.with_status(ReportStatus::Warning);
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("route", route.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("route_name", execution.route.route_name.clone())
+                    .map_err(report_build_error)?
+                    .with_cell(
+                        "scope",
+                        format!(
+                            "{:?}",
+                            application_plan.expect("checked above").scope().visibility()
+                        )
+                        .to_lowercase(),
+                    )
+                    .map_err(report_build_error)?
+                    .with_cell("cache", cache_disposition_label(execution.cache))
+                    .map_err(report_build_error)?
+                    .with_cell("cache_key", cache_key.clone())
+                    .map_err(report_build_error)?
+                    .with_cell("lookup", "backend_unavailable")
+                    .map_err(report_build_error)?
+                    .with_cell("entry", "unknown")
+                    .map_err(report_build_error)?,
+            );
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Warning,
+                "cache.inspect.backend",
+                format!(
+                    "cache backend panicked during initialization, but the resolved cache key is still `{cache_key}`"
+                ),
+            )?;
+            return Ok(report);
+        }
+    };
+    let lookup = cache_host
+        .lookup_execution(&execution, now)
+        .ok_or_else(|| {
+            CliRunError::execution(format!(
+                "cache inspect route `{route}` does not produce an application cache plan"
+            ))
+        })?;
+    let lookup_label = format!("{:?}", lookup.state).to_lowercase();
+    let entry_label = if lookup.entry.is_some() {
+        "present"
+    } else {
+        "absent"
+    };
+    if lookup.entry.is_none() {
+        report = report.with_status(ReportStatus::Warning);
+    }
+    report.push_row(
+        ReportRow::new()
+            .with_cell("route", route.to_string())
+            .map_err(report_build_error)?
+            .with_cell("route_name", execution.route.route_name.clone())
+            .map_err(report_build_error)?
+            .with_cell(
+                "scope",
+                format!(
+                    "{:?}",
+                    application_plan.expect("checked above").scope().visibility()
+                )
+                .to_lowercase(),
+            )
+            .map_err(report_build_error)?
+            .with_cell("cache", cache_disposition_label(execution.cache))
+            .map_err(report_build_error)?
+            .with_cell("cache_key", cache_key.clone())
+            .map_err(report_build_error)?
+            .with_cell("lookup", lookup_label.clone())
+            .map_err(report_build_error)?
+            .with_cell("entry", entry_label)
+            .map_err(report_build_error)?,
+    );
+    if let Some(entry) = lookup.entry {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "cache.inspect.entry",
+            format!(
+                "ttl={}s tags={} stale_while_revalidate={}s needs_revalidation={}",
+                entry.freshness.ttl_seconds(),
+                entry.tags.header_value().unwrap_or_else(|| "none".to_string()),
+                entry.freshness.stale_while_revalidate_seconds().unwrap_or_default(),
+                lookup.needs_revalidation
+            ),
+        )?;
+    } else {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "cache.inspect.miss",
+            format!("no cache entry is currently stored for `{cache_key}`"),
+        )?;
+    }
+
+    Ok(report)
+}
+
+fn invalidate_cache_tags(
+    built: &BuiltCustomerAppContext,
+    tags: &[String],
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    let invalidation_tags = tags
+        .iter()
+        .cloned()
+        .map(InvalidationTag::new)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| CliRunError::usage(format!("invalid cache tag: {error}")))?;
+    let invalidation = InvalidationSet::from_tags(invalidation_tags.clone());
+    let mut report = CommandReport::new(
+        ["cache", "invalidate"],
+        if dry_run {
+            format!(
+                "Planned cache invalidation for `{}` across {} tag(s)",
+                built.manifest.id,
+                tags.len()
+            )
+        } else {
+            format!(
+                "Invalidated cache for `{}` across {} tag(s)",
+                built.manifest.id,
+                tags.len()
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns(["tag", "status"])
+    .map_err(report_build_error)?;
+
+    for tag in tags {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("tag", tag.clone())
+                .map_err(report_build_error)?
+                .with_cell("status", if dry_run { "planned" } else { "invalidated" })
+                .map_err(report_build_error)?,
+        );
+    }
+
+    let invalidated = if dry_run {
+        Vec::new()
+    } else {
+        if let Some(error) = cache_backend_availability_error(built) {
+            return Err(CliRunError::execution(error));
+        }
+        let mut cache_host = built.runtime_plan.runtime.cache_host().map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build cache host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+        cache_host.invalidate(&invalidation)
+    };
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cache.invalidate.tags",
+        format!("cache invalidation tags: {}", tags.join(", ")),
+    )?;
+    push_report_diagnostic(
+        &mut report,
+        if dry_run || !invalidated.is_empty() {
+            DiagnosticSeverity::Info
+        } else {
+            DiagnosticSeverity::Warning
+        },
+        "cache.invalidate.keys",
+        if dry_run {
+            "dry-run only; no cache entries were removed".to_string()
+        } else if invalidated.is_empty() {
+            "no matching cache entries were present for the requested tags".to_string()
+        } else {
+            format!(
+                "invalidated {} cache key(s): {}",
+                invalidated.len(),
+                invalidated
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        },
+    )?;
+
+    Ok(report)
+}
+
+fn resolve_cache_route_execution(
+    built: &BuiltCustomerAppContext,
+    route: &str,
+) -> Result<(davenda_runtime::RequestExecution, String), CliRunError> {
+    let host = built.runtime_plan.runtime.config.seo.canonical_host.clone();
+    let request = RequestInput::new(HttpMethod::Get, host.as_str(), route).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to prepare cache route request `{route}`: {error}"
+        ))
+    })?;
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let execution = built
+        .runtime_plan
+        .runtime
+        .execute_request(request, cookie_secret, csrf_secret)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve cache route `{route}` for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let cache_key = execution
+        .cache_plan
+        .plan
+        .application()
+        .map(|plan| plan.key().to_string())
+        .unwrap_or_else(|| "none".to_string());
+    Ok((execution, cache_key))
+}
+
+fn cache_backend_availability_error(built: &BuiltCustomerAppContext) -> Option<String> {
+    match built.runtime_plan.runtime.config.cache.l2 {
+        Some(davenda_config::DistributedCache::Redis) if std::env::var("REDIS_URL").is_err() => {
+            Some("redis cache backend requires REDIS_URL to be set".to_string())
+        }
+        Some(davenda_config::DistributedCache::Valkey)
+            if std::env::var("VALKEY_URL").is_err() && std::env::var("REDIS_URL").is_err() =>
+        {
+            Some("valkey cache backend requires VALKEY_URL or REDIS_URL to be set".to_string())
+        }
+        _ => None,
+    }
 }
 
 fn render_cache_warm_value(
@@ -10107,6 +10512,48 @@ expect = true
         assert!(rendered.contains("cache warm"));
         assert!(rendered.contains("status: planned"));
         assert!(rendered.contains("/en-GB/pages/home"));
+    }
+
+    #[test]
+    fn run_from_args_renders_cache_inspect_for_sample_customer_app_routes() {
+        let rendered = run_from_args([
+            "cache".to_string(),
+            "inspect".to_string(),
+            "--config".to_string(),
+            harbor_shop_platform_config().display().to_string(),
+            "--route".to_string(),
+            "/en-GB/pages/home".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("cache"));
+        assert!(rendered.contains("inspect"));
+        assert!(rendered.contains("/en-GB/pages/home"));
+        assert!(
+            rendered.contains("lookup: miss")
+                || rendered.contains("lookup: fresh")
+                || rendered.contains("lookup: backend_unavailable")
+        );
+    }
+
+    #[test]
+    fn run_from_args_plans_cache_invalidation_for_explicit_tags() {
+        let rendered = run_from_args([
+            "cache".to_string(),
+            "invalidate".to_string(),
+            "--config".to_string(),
+            harbor_shop_platform_config().display().to_string(),
+            "--tag".to_string(),
+            "route:pages.home".to_string(),
+            "--tag".to_string(),
+            "locale:en-GB".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("cache invalidation"));
+        assert!(rendered.contains("status: planned"));
+        assert!(rendered.contains("route:pages.home"));
     }
 
     #[test]

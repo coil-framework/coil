@@ -107,6 +107,19 @@ pub(crate) struct CacheWarmInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CacheInspectInvocation {
+    pub config_path: PathBuf,
+    pub route: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CacheInvalidateInvocation {
+    pub config_path: PathBuf,
+    pub tags: Vec<String>,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JobsStatusInvocation {
     pub config_path: PathBuf,
     pub queue: Option<String>,
@@ -228,6 +241,15 @@ pub(crate) enum CliInput {
         dry_run: bool,
         invocation: CacheWarmInvocation,
     },
+    CacheInspect {
+        output_mode: OutputMode,
+        invocation: CacheInspectInvocation,
+    },
+    CacheInvalidate {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: CacheInvalidateInvocation,
+    },
     JobsStatus {
         output_mode: OutputMode,
         invocation: JobsStatusInvocation,
@@ -300,6 +322,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut verify_policy = false;
     let mut cache_scope: Option<String> = None;
     let mut cache_routes = Vec::new();
+    let mut cache_tags = Vec::new();
     let mut jobs_queue: Option<String> = None;
     let mut jobs_limit: Option<usize> = None;
     let mut tls_certificate_id: Option<String> = None;
@@ -344,6 +367,9 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             }
             "--route" => {
                 cache_routes.push(next_value(&mut iter, "--route")?);
+            }
+            "--tag" => {
+                cache_tags.push(next_value(&mut iter, "--tag")?);
             }
             "--queue" => {
                 jobs_queue = Some(next_value(&mut iter, "--queue")?);
@@ -786,6 +812,52 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     config_path,
                     scope,
                     routes: cache_routes,
+                },
+            })
+        }
+        [command, subcommand] if command == "cache" && subcommand == "inspect" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`cache inspect` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+            let [route] = cache_routes.as_slice() else {
+                return Err(CliRunError::usage(
+                    "`cache inspect` requires exactly one `--route <path>`",
+                ));
+            };
+
+            Ok(CliInput::CacheInspect {
+                output_mode,
+                invocation: CacheInspectInvocation {
+                    config_path,
+                    route: route.clone(),
+                },
+            })
+        }
+        [command, subcommand] if command == "cache" && subcommand == "invalidate" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`cache invalidate` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+            if cache_tags.is_empty() {
+                return Err(CliRunError::usage(
+                    "`cache invalidate` requires at least one `--tag <tag>`",
+                ));
+            }
+
+            Ok(CliInput::CacheInvalidate {
+                output_mode,
+                dry_run,
+                invocation: CacheInvalidateInvocation {
+                    config_path,
+                    tags: cache_tags,
+                    confirmed,
                 },
             })
         }
@@ -1676,6 +1748,70 @@ mod tests {
             invocation.routes,
             vec!["/en-GB/home".to_string(), "/en-GB/events".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_cache_inspect_accepts_exactly_one_route() {
+        let input = parse([
+            "cache".to_string(),
+            "inspect".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--route".to_string(),
+            "/en-GB/home".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::CacheInspect {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected cache inspect input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+        assert_eq!(invocation.route, "/en-GB/home");
+    }
+
+    #[test]
+    fn parse_cache_invalidate_accepts_tags_and_confirmation_flags() {
+        let input = parse([
+            "cache".to_string(),
+            "invalidate".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--tag".to_string(),
+            "route:events.list".to_string(),
+            "--tag".to_string(),
+            "locale:en-GB".to_string(),
+            "--yes".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::CacheInvalidate {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected cache invalidate input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Human);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+        assert_eq!(
+            invocation.tags,
+            vec![
+                "route:events.list".to_string(),
+                "locale:en-GB".to_string()
+            ]
+        );
+        assert!(invocation.confirmed);
     }
 
     #[test]

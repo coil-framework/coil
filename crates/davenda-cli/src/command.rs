@@ -1,5 +1,5 @@
-use crate::validation::{require_non_empty, validate_token};
 use crate::CliModelError;
+use crate::validation::{require_non_empty, validate_token};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -135,6 +135,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             ["auth", "bindings", "inspect"],
             CommandOwner::Core,
             "Inspect the active auth package capability bindings and their resolved relations",
+        )?,
+        CommandDescriptor::new(
+            ["auth", "test-model"],
+            CommandOwner::Core,
+            "Run a batch of auth-model capability checks from a checked-in spec file",
         )?,
         CommandDescriptor::new(
             ["auth", "list"],

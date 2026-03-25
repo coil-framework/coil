@@ -29,6 +29,12 @@ pub struct AuthBindingsInspectInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthTestModelInvocation {
+    pub config_path: PathBuf,
+    pub spec_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthListInvocation {
     pub config_path: PathBuf,
     pub subject: DefaultSubject,
@@ -121,6 +127,10 @@ pub(crate) enum CliInput {
     AuthBindingsInspect {
         output_mode: OutputMode,
         invocation: AuthBindingsInspectInvocation,
+    },
+    AuthTestModel {
+        output_mode: OutputMode,
+        invocation: AuthTestModelInvocation,
     },
     AuthList {
         output_mode: OutputMode,
@@ -430,6 +440,23 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: AuthBindingsInspectInvocation {
                     config_path,
                     capability,
+                },
+            })
+        }
+        [command, subcommand, spec_path] if command == "auth" && subcommand == "test-model" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`auth test-model` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::AuthTestModel {
+                output_mode,
+                invocation: AuthTestModelInvocation {
+                    config_path,
+                    spec_path: PathBuf::from(spec_path),
                 },
             })
         }
@@ -774,7 +801,7 @@ fn discover_default_config_path() -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-fn parse_subject(input: &str) -> Result<DefaultSubject, CliRunError> {
+pub(crate) fn parse_subject(input: &str) -> Result<DefaultSubject, CliRunError> {
     let (left, relation) = match input.split_once('#') {
         Some((left, relation)) => (left, Some(relation)),
         None => (input, None),
@@ -790,7 +817,7 @@ fn parse_subject(input: &str) -> Result<DefaultSubject, CliRunError> {
     }
 }
 
-fn parse_entity(input: &str) -> Result<Entity, CliRunError> {
+pub(crate) fn parse_entity(input: &str) -> Result<Entity, CliRunError> {
     let (namespace, id) = input.split_once(':').ok_or_else(|| {
         CliRunError::usage(format!("invalid entity `{input}`; expected namespace:id"))
     })?;
@@ -845,7 +872,7 @@ fn parse_namespace(input: &str) -> Result<Namespace, CliRunError> {
         .ok_or_else(|| CliRunError::usage(format!("unknown namespace `{input}`")))
 }
 
-fn parse_capability(input: &str) -> Result<Capability, CliRunError> {
+pub(crate) fn parse_capability(input: &str) -> Result<Capability, CliRunError> {
     let capability = match input {
         "system.module.manage" => Capability::SystemModuleManage,
         "system.config.read" => Capability::SystemConfigRead,
@@ -1000,6 +1027,34 @@ mod tests {
         );
         assert_eq!(invocation.relation, Relation::View);
         assert_eq!(invocation.namespace, Namespace::Page);
+    }
+
+    #[test]
+    fn parse_auth_test_model_uses_explicit_config_and_spec_path() {
+        let input = parse([
+            "auth".to_string(),
+            "test-model".to_string(),
+            "fixtures/auth-model.toml".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::AuthTestModel {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected auth test-model input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(
+            invocation.spec_path,
+            PathBuf::from("fixtures/auth-model.toml")
+        );
     }
 
     #[test]

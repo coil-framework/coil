@@ -1,8 +1,10 @@
+use crate::CliModelError;
 use crate::cli::args::{
-    parse, AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
-    AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation, CacheWarmInvocation,
-    CliInput, DevServerInvocation, JobsDeadLettersInvocation, JobsStatusInvocation,
-    MigrateApplyInvocation, ModuleInspectInvocation, TlsRenewInvocation,
+    AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
+    AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation,
+    AuthTestModelInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
+    JobsDeadLettersInvocation, JobsStatusInvocation, MigrateApplyInvocation,
+    ModuleInspectInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -11,13 +13,12 @@ use crate::cli::error::CliRunError;
 use crate::cli::import::{ImportCutoverInvocation, ImportRunInvocation};
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
-use crate::CliModelError;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
 use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::{
-    configured_auth_model_package, AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple,
-    DefaultTupleUpdate, Entity, Namespace, Relation,
+    AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity,
+    Namespace, Relation, configured_auth_model_package,
 };
 use davenda_cache::CacheInstant;
 use davenda_commerce::EntitlementKey;
@@ -43,9 +44,10 @@ use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
 use davenda_tls::{CertificateId, TlsInstant};
+use reqwest::Url;
 use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::redirect::Policy as RedirectPolicy;
-use reqwest::Url;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -183,6 +185,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             invocation,
         } => {
             let report = run_auth_bindings_inspect(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::AuthTestModel {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_auth_test_model(&invocation)?;
             render_command_report(&report, output_mode)
         }
         CliInput::AuthList {
@@ -383,6 +392,7 @@ fn usage() -> String {
         "  platform config validate [--config <path>] [--json]",
         "  platform auth check [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform auth bindings inspect [--config <path>] [--capability <capability>] [--json]",
+        "  platform auth test-model <spec-path> [--config <path>] [--json]",
         "  platform auth list [--config <path>] --subject <subject> --relation <relation> --namespace <namespace> [--json]",
         "  platform auth lookup [--config <path>] --resource <namespace:id> --relation <relation> --subject-namespace <namespace> [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
@@ -410,6 +420,7 @@ fn usage() -> String {
         "  platform config validate --config config/platform.toml",
         "  platform auth check --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform auth bindings inspect --config config/platform.toml --capability cms.page.publish",
+        "  platform auth test-model config/auth-model.toml --config config/platform.toml",
         "  platform auth list --config config/platform.toml --subject user:alice --relation view --namespace page",
         "  platform auth lookup --config config/platform.toml --resource page:homepage --relation view --subject-namespace user",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
@@ -459,6 +470,21 @@ struct LiveImportAuthContext {
     auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
     site_id: Option<String>,
     storefront_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthModelTestDocument {
+    #[serde(rename = "case", default)]
+    cases: Vec<AuthModelTestCaseDocument>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthModelTestCaseDocument {
+    name: String,
+    subject: String,
+    capability: String,
+    resource: String,
+    expect: bool,
 }
 
 fn build_live_auth_backend(
@@ -647,6 +673,95 @@ fn run_auth_bindings_inspect(
             package.manifest().name,
             binding_count,
             package.manifest().capability_binding_version
+        ),
+    )?;
+    Ok(report)
+}
+
+fn run_auth_test_model(invocation: &AuthTestModelInvocation) -> Result<CommandReport, CliRunError> {
+    let document = load_auth_model_test_document(&invocation.spec_path)?;
+    let (config, auth, runtime) =
+        build_live_auth_backend(&invocation.config_path, "auth test-model")?;
+    let package = configured_auth_model_package(config.auth.package.clone());
+    let mut report = CommandReport::new(
+        ["auth", "test-model"],
+        format!(
+            "Ran auth model test cases from `{}`",
+            invocation.spec_path.display()
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "case",
+        "subject",
+        "capability",
+        "resource",
+        "expected",
+        "actual",
+        "result",
+    ])
+    .map_err(report_build_error)?;
+    let mut failed_cases = Vec::new();
+
+    for case in document.cases {
+        let subject = parse_auth_subject_spec(&case.subject, "subject")?;
+        let capability = parse_auth_capability_spec(&case.capability, "capability")?;
+        let resource = parse_auth_entity_spec(&case.resource, "resource")?;
+        let actual = runtime
+            .block_on(async {
+                auth.check_capability(&package, &subject, capability, &resource)
+                    .await
+            })
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to execute auth test case `{}`: {error}",
+                    case.name
+                ))
+            })?;
+        let passed = actual == case.expect;
+        if !passed {
+            failed_cases.push(case.name.clone());
+        }
+        report.push_row(
+            ReportRow::new()
+                .with_cell("case", case.name.clone())
+                .map_err(report_build_error)?
+                .with_cell("subject", render_subject(&subject))
+                .map_err(report_build_error)?
+                .with_cell("capability", capability.to_string())
+                .map_err(report_build_error)?
+                .with_cell("resource", render_entity(&resource))
+                .map_err(report_build_error)?
+                .with_cell("expected", if case.expect { "allowed" } else { "denied" })
+                .map_err(report_build_error)?
+                .with_cell("actual", if actual { "allowed" } else { "denied" })
+                .map_err(report_build_error)?
+                .with_cell("result", if passed { "pass" } else { "fail" })
+                .map_err(report_build_error)?,
+        );
+    }
+
+    if failed_cases.is_empty() {
+        report = report.with_status(ReportStatus::Ok);
+    } else {
+        report = report.with_status(ReportStatus::Unsafe);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Error,
+            "auth.test_model.failed",
+            format!("failing test cases: {}", failed_cases.join(", ")),
+        )?;
+    }
+    let case_count = report.rows.len();
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.test_model.summary",
+        format!(
+            "package={} cases={} failures={}",
+            package.manifest().name,
+            case_count,
+            failed_cases.len()
         ),
     )?;
     Ok(report)
@@ -3500,11 +3615,13 @@ fn cutover_preflight_ready(plan: &CutoverPlan) -> bool {
 fn cutover_steps(
     cutover: &davenda_import::ImportCutover,
 ) -> Result<Vec<CutoverStepRecord>, CliRunError> {
-    let mut steps = vec![CutoverStepRecord::new(
-        "final.import",
-        "Final publish-validated import executed against the target runtime",
-    )
-    .map_err(import_model_error)?];
+    let mut steps = vec![
+        CutoverStepRecord::new(
+            "final.import",
+            "Final publish-validated import executed against the target runtime",
+        )
+        .map_err(import_model_error)?,
+    ];
     if cutover.requires_storage_validation {
         steps.push(
             CutoverStepRecord::new(
@@ -5684,27 +5801,21 @@ fn optional_normalized_u64(
 ) -> Result<Option<u64>, ImportModelError> {
     match record.get(field) {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(value)) => {
-            value
-                .as_u64()
-                .map(Some)
-                .ok_or_else(|| ImportModelError::ManifestParse {
-                    message: format!(
+        Some(Value::Number(value)) => value.as_u64().map(Some).ok_or_else(|| {
+            ImportModelError::ManifestParse {
+                message: format!(
                     "staged import record field `normalized.{field}` must be an unsigned integer"
                 ),
-                })
-        }
+            }
+        }),
         Some(Value::String(value)) if value.is_empty() => Ok(None),
-        Some(Value::String(value)) => {
-            value
-                .parse::<u64>()
-                .map(Some)
-                .map_err(|_| ImportModelError::ManifestParse {
-                    message: format!(
+        Some(Value::String(value)) => value.parse::<u64>().map(Some).map_err(|_| {
+            ImportModelError::ManifestParse {
+                message: format!(
                     "staged import record field `normalized.{field}` must be an unsigned integer"
                 ),
-                })
-        }
+            }
+        }),
         Some(_) => Err(ImportModelError::ManifestParse {
             message: format!(
                 "staged import record field `normalized.{field}` must be an unsigned integer"
@@ -5869,6 +5980,106 @@ fn render_storage_delivery(delivery: &StorageDeliveryLocation) -> Value {
     }
 }
 
+fn load_auth_model_test_document(spec_path: &Path) -> Result<AuthModelTestDocument, CliRunError> {
+    let input = fs::read_to_string(spec_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to read auth model test spec `{}`: {error}",
+            spec_path.display()
+        ))
+    })?;
+    let document: AuthModelTestDocument = toml::from_str(&input).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to parse auth model test spec `{}`: {error}",
+            spec_path.display()
+        ))
+    })?;
+    if document.cases.is_empty() {
+        return Err(CliRunError::execution(format!(
+            "auth model test spec `{}` does not define any `[[case]]` entries",
+            spec_path.display()
+        )));
+    }
+    Ok(document)
+}
+
+fn parse_auth_subject_spec(input: &str, field: &str) -> Result<DefaultSubject, CliRunError> {
+    let (left, relation) = match input.split_once('#') {
+        Some((left, relation)) => (left, Some(relation)),
+        None => (input, None),
+    };
+    let entity = parse_auth_entity_spec(left, field)?;
+
+    match relation {
+        Some(relation) => {
+            let relation = Relation::from_str(relation).ok_or_else(|| {
+                CliRunError::execution(format!(
+                    "auth model test {field} `{input}` uses unknown relation `{relation}`"
+                ))
+            })?;
+            Ok(DefaultSubject::userset(entity, relation))
+        }
+        None => Ok(DefaultSubject::entity(entity)),
+    }
+}
+
+fn parse_auth_entity_spec(input: &str, field: &str) -> Result<Entity, CliRunError> {
+    let (namespace, id) = input.split_once(':').ok_or_else(|| {
+        CliRunError::execution(format!(
+            "auth model test {field} `{input}` must use namespace:id syntax"
+        ))
+    })?;
+    if id.trim().is_empty() {
+        return Err(CliRunError::execution(format!(
+            "auth model test {field} `{input}` must use a non-empty identifier"
+        )));
+    }
+
+    let entity = match namespace {
+        "tenant" => Entity::tenant(id),
+        "site" => Entity::site(id),
+        "brand" => Entity::brand(id),
+        "storefront" => Entity::storefront(id),
+        "user" => Entity::user(id),
+        "group" => Entity::group(id),
+        "team" => Entity::team(id),
+        "service_account" => Entity::service_account(id),
+        "page" => Entity::page(id),
+        "navigation" => Entity::navigation(id),
+        "product" => Entity::product(id),
+        "collection" => Entity::collection(id),
+        "order" => Entity::order(id),
+        "subscription" => Entity::subscription(id),
+        "membership_tier" => Entity::membership_tier(id),
+        "event" => Entity::event(id),
+        "event_slot" => Entity::event_slot(id),
+        "booking" => Entity::booking(id),
+        "media" => Entity::media(id),
+        "media_library" => Entity::media_library(id),
+        "asset" => Entity::asset(id),
+        "asset_folder" => Entity::asset_folder(id),
+        "theme_asset_bundle" => Entity::theme_asset_bundle(id),
+        "admin_module" => Entity::admin_module(id),
+        other => {
+            return Err(CliRunError::execution(format!(
+                "auth model test {field} `{input}` uses unknown namespace `{other}`"
+            )));
+        }
+    };
+
+    Ok(entity)
+}
+
+fn parse_auth_capability_spec(
+    input: &str,
+    field: &str,
+) -> Result<davenda_auth::Capability, CliRunError> {
+    davenda_auth::Capability::from_str(input).ok_or_else(|| {
+        CliRunError::execution(format!(
+            "auth model test {field} `{input}` uses unknown capability `{input}`"
+        ))
+    })
+}
+
 fn render_entity(entity: &Entity) -> String {
     format!("{}:{}", entity.namespace().as_str(), entity.id())
 }
@@ -5949,19 +6160,21 @@ mod tests {
             let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
             let stop_thread = Arc::clone(&stop);
             let store_thread = Arc::clone(&store);
-            let handle = thread::spawn(move || loop {
-                if stop_thread.load(Ordering::SeqCst) {
-                    break;
-                }
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let store = Arc::clone(&store_thread);
-                        handle_object_store_request(stream, &store);
+            let handle = thread::spawn(move || {
+                loop {
+                    if stop_thread.load(Ordering::SeqCst) {
+                        break;
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            let store = Arc::clone(&store_thread);
+                            handle_object_store_request(stream, &store);
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("object-store test server failed: {error}"),
                     }
-                    Err(error) => panic!("object-store test server failed: {error}"),
                 }
             });
 
@@ -6057,22 +6270,24 @@ mod tests {
             let routes = Arc::new(routes);
             let stop_thread = Arc::clone(&stop);
             let routes_thread = Arc::clone(&routes);
-            let handle = thread::spawn(move || loop {
-                if stop_thread.load(Ordering::SeqCst) {
-                    break;
-                }
-                match listener.accept() {
-                    Ok((stream, _)) => handle_live_probe_request(
-                        stream,
-                        health_status,
-                        readiness_status,
-                        maintenance_enabled,
-                        &routes_thread,
-                    ),
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
+            let handle = thread::spawn(move || {
+                loop {
+                    if stop_thread.load(Ordering::SeqCst) {
+                        break;
                     }
-                    Err(error) => panic!("live probe test server failed: {error}"),
+                    match listener.accept() {
+                        Ok((stream, _)) => handle_live_probe_request(
+                            stream,
+                            health_status,
+                            readiness_status,
+                            maintenance_enabled,
+                            &routes_thread,
+                        ),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("live probe test server failed: {error}"),
+                    }
                 }
             });
 
@@ -6783,6 +6998,7 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("platform config validate [--config <path>]"));
         assert!(rendered.contains("platform auth check [--config <path>]"));
         assert!(rendered.contains("platform auth bindings inspect [--config <path>]"));
+        assert!(rendered.contains("platform auth test-model <spec-path> [--config <path>]"));
         assert!(rendered.contains("platform auth list [--config <path>]"));
         assert!(rendered.contains("platform auth lookup [--config <path>]"));
         assert!(rendered.contains("platform auth explain [--config <path>]"));
@@ -6791,8 +7007,10 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
         assert!(rendered.contains("platform migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform release doctor [--config <path>]"));
-        assert!(rendered
-            .contains("platform cache warm [--config <path>] --scope public --route <path>"));
+        assert!(
+            rendered
+                .contains("platform cache warm [--config <path>] --scope public --route <path>")
+        );
         assert!(rendered.contains("platform jobs status [--config <path>] [--queue <name>]"));
         assert!(rendered.contains(
             "platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>]"
@@ -6887,6 +7105,56 @@ source_path = "fixtures/media.json"
                 .contains("failed to initialize the live auth lookup backend"),
             "{}",
             error
+        );
+    }
+
+    #[test]
+    fn run_from_args_reports_live_auth_test_model_backend_initialization_failures() {
+        let config_path = PathBuf::from("/tmp/davenda-cli-auth-test-model.toml");
+        let spec_path = PathBuf::from("/tmp/davenda-cli-auth-test-model-spec.toml");
+        fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
+        fs::write(
+            &spec_path,
+            r#"
+[[case]]
+name = "page read"
+subject = "user:alice"
+capability = "cms.page.read"
+resource = "page:homepage"
+expect = true
+"#,
+        )
+        .unwrap();
+
+        let error = run_from_args([
+            "auth".to_string(),
+            "test-model".to_string(),
+            spec_path.display().to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("failed to initialize the live auth test-model backend"),
+            "{}",
+            error
+        );
+    }
+
+    #[test]
+    fn load_auth_model_test_document_rejects_empty_specs() {
+        let spec_path = PathBuf::from("/tmp/davenda-cli-auth-empty-spec.toml");
+        fs::write(&spec_path, "").unwrap();
+
+        let error = load_auth_model_test_document(&spec_path).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("does not define any `[[case]]` entries")
         );
     }
 
@@ -7778,9 +8046,11 @@ source_path = "fixtures/media.json"
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 2);
-        assert!(error
-            .to_string()
-            .contains("`migrate apply` requires `--yes` unless `--dry-run` is used"));
+        assert!(
+            error
+                .to_string()
+                .contains("`migrate apply` requires `--yes` unless `--dry-run` is used")
+        );
     }
 
     #[test]
@@ -7913,9 +8183,11 @@ source_path = "fixtures/media.json"
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 2);
-        assert!(error
-            .to_string()
-            .contains("`tls renew` requires `--yes` unless `--dry-run` is used"));
+        assert!(
+            error
+                .to_string()
+                .contains("`tls renew` requires `--yes` unless `--dry-run` is used")
+        );
     }
 
     #[test]
@@ -7976,9 +8248,11 @@ source_path = "fixtures/media.json"
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 2);
-        assert!(error
-            .to_string()
-            .contains("`assets publish` requires `--yes` unless `--dry-run` is used"));
+        assert!(
+            error
+                .to_string()
+                .contains("`assets publish` requires `--yes` unless `--dry-run` is used")
+        );
     }
 
     #[test]
@@ -8074,12 +8348,16 @@ source_path = "fixtures/media.json"
 
         assert!(compiled.sql.contains("\"cms_pages\""));
         assert!(compiled.sql.contains("ON CONFLICT (\"page_id\")"));
-        assert!(compiled
-            .bind_values
-            .contains(&DataValue::String("en-GB".to_string())));
-        assert!(compiled
-            .bind_values
-            .contains(&DataValue::String("/en-GB/home".to_string())));
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("en-GB".to_string()))
+        );
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("/en-GB/home".to_string()))
+        );
         assert_eq!(persisted["table"], "cms_pages");
         assert_eq!(persisted["live_path"], "/en-GB/home");
     }
@@ -8124,9 +8402,11 @@ source_path = "fixtures/media.json"
 
         assert!(compiled.sql.contains("\"events_catalog\""));
         assert!(compiled.sql.contains("ON CONFLICT (\"id\")"));
-        assert!(compiled
-            .bind_values
-            .contains(&DataValue::String("Festival".to_string())));
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("Festival".to_string()))
+        );
         assert_eq!(persisted["table"], "events_catalog");
         assert_eq!(persisted["event_id"], "event:festival");
     }
@@ -8169,9 +8449,11 @@ source_path = "fixtures/media.json"
 
         assert!(compiled.sql.contains("\"membership_tiers\""));
         assert!(compiled.sql.contains("ON CONFLICT (\"id\")"));
-        assert!(compiled
-            .bind_values
-            .contains(&DataValue::String("Gold".to_string())));
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("Gold".to_string()))
+        );
         assert_eq!(persisted["table"], "membership_tiers");
         assert_eq!(persisted["tier_id"], "tier-gold");
     }
@@ -8200,12 +8482,16 @@ source_path = "fixtures/media.json"
         assert_eq!(mutations.len(), 2);
         let compiled_subscription = mutations[0].compile(1).unwrap();
         let compiled_entitlement = mutations[1].compile(1).unwrap();
-        assert!(compiled_subscription
-            .sql
-            .contains("\"membership_subscriptions\""));
-        assert!(compiled_entitlement
-            .sql
-            .contains("\"membership_entitlements\""));
+        assert!(
+            compiled_subscription
+                .sql
+                .contains("\"membership_subscriptions\"")
+        );
+        assert!(
+            compiled_entitlement
+                .sql
+                .contains("\"membership_entitlements\"")
+        );
         assert_eq!(updates.len(), 2);
         assert!(
             updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(

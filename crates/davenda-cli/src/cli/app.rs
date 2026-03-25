@@ -14,11 +14,17 @@ use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::configured_auth_model_package;
 use davenda_config::{PlatformConfig, StorageClass};
-use davenda_data::{MigrationPlan, MigrationRegistry};
-use davenda_import::{CutoverCheck, CutoverPlan, ImportManifest, ImportModelError, RollbackTrigger};
-use std::collections::BTreeSet;
+use davenda_data::{
+    DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient,
+};
+use davenda_import::{
+    CutoverCheck, CutoverPlan, ImportManifest, ImportModelError, PublicationMode,
+    RollbackTrigger,
+};
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder, StorageHost};
 use davenda_storage::{StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride};
 use serde_json::Value;
@@ -280,17 +286,51 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 let journal_path = import_journal_path(&invocation.manifest_path, &manifest.run_id);
                 let execution = if let Some(runtime) = import_runtime.as_ref() {
                     let storage_host = runtime.storage_host.clone();
+                    let default_locale = runtime.built.manifest.default_locale.to_string();
+                    let publish_validated =
+                        plan.publication_mode == PublicationMode::PublishValidated;
+                    let data_runtime = runtime.built.runtime_plan.runtime.data.clone();
+                    let mut data_client = None;
+                    let tokio_runtime = if publish_validated {
+                        Some(
+                            tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .map_err(|error| {
+                                    CliRunError::execution(format!(
+                                        "failed to start runtime for live import materialization: {error}"
+                                    ))
+                                })?,
+                        )
+                    } else {
+                        None
+                    };
                     plan.execute_with_handler(
                         manifest_root,
                         &journal_path,
                         |importer, _, manifest_root, staged_record| {
-                            if importer.resource_kind == "asset" {
-                                materialize_asset_record(
-                                    &storage_host,
-                                    manifest.asset_storage_default,
-                                    manifest_root,
-                                    staged_record,
-                                )?;
+                            match importer.resource_kind.as_str() {
+                                "asset" => {
+                                    materialize_asset_record(
+                                        &storage_host,
+                                        manifest.asset_storage_default,
+                                        manifest_root,
+                                        staged_record,
+                                    )?;
+                                }
+                                "page" if publish_validated => {
+                                    let client =
+                                        ensure_import_data_client(&data_runtime, &mut data_client)?;
+                                    materialize_page_record(
+                                        tokio_runtime
+                                            .as_ref()
+                                            .expect("publish-validated imports build a runtime"),
+                                        &client,
+                                        &default_locale,
+                                        staged_record,
+                                    )?;
+                                }
+                                _ => {}
                             }
                             Ok(())
                         },
@@ -312,6 +352,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 })?;
                 if let Some(runtime) = import_runtime.as_ref() {
                     materialize_import_assets(&mut report, manifest_root, runtime, &execution)?;
+                    materialize_import_pages(&mut report, manifest_root, runtime, &execution)?;
                 }
                 report
             };
@@ -1521,6 +1562,66 @@ fn materialize_import_assets(
     Ok(())
 }
 
+fn materialize_import_pages(
+    report: &mut CommandReport,
+    manifest_root: &Path,
+    runtime: &BuiltImportRuntimeContext,
+    execution: &davenda_import::ImportExecution,
+) -> Result<(), CliRunError> {
+    let mut page_counts = HashMap::<String, usize>::new();
+
+    for record in &execution.importer_records {
+        if record.resource_kind != "page" {
+            continue;
+        }
+        let Some(staged_path) = record.staged_path.as_ref() else {
+            continue;
+        };
+        let staged_path = PathBuf::from(staged_path);
+        let input = fs::read_to_string(&staged_path).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read staged page import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+        let records: Vec<Value> = serde_json::from_str(&input).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse staged page import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+
+        for table in records.iter().filter_map(|record| {
+            record
+                .get("normalized")
+                .and_then(Value::as_object)
+                .and_then(|normalized| normalized.get("persisted"))
+                .and_then(Value::as_object)
+                .and_then(|persisted| persisted.get("table"))
+                .and_then(Value::as_str)
+        }) {
+            *page_counts.entry(table.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    for (table, count) in page_counts {
+        report.push_diagnostic(
+            DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.page.persisted",
+                format!(
+                    "persisted {count} imported pages into `{table}` for `{}` from `{}`",
+                    runtime.built.manifest.id,
+                    manifest_root.display()
+                ),
+            )
+            .map_err(report_build_error)?,
+        );
+    }
+
+    Ok(())
+}
+
 fn materialize_asset_record(
     storage_host: &StorageHost,
     asset_storage_default: davenda_import::AssetStorageDefault,
@@ -1611,6 +1712,176 @@ fn materialize_asset_record(
         }),
     );
     Ok(())
+}
+
+fn ensure_import_data_client(
+    data_runtime: &davenda_data::DataRuntime,
+    client: &mut Option<PostgresDataClient>,
+) -> Result<PostgresDataClient, ImportModelError> {
+    if let Some(client) = client.as_ref() {
+        return Ok(client.clone());
+    }
+
+    let connected = data_runtime
+        .connect_lazy_postgres()
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to connect live import data client: {error}"),
+        })?;
+    *client = Some(connected.clone());
+    Ok(connected)
+}
+
+fn materialize_page_record(
+    tokio_runtime: &tokio::runtime::Runtime,
+    data_client: &PostgresDataClient,
+    default_locale: &str,
+    staged_record: &mut Value,
+) -> Result<(), ImportModelError> {
+    let (mutation, persisted) = page_import_mutation(staged_record, default_locale)?;
+    let statement = mutation.compile(1).map_err(import_data_model_error)?;
+    tokio_runtime
+        .block_on(async { data_client.execute_statement(&statement).await })
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to persist imported page: {error}"),
+        })?;
+
+    let normalized = staged_record
+        .get_mut("normalized")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged page record is missing `normalized` object data".to_string(),
+        })?;
+    normalized.insert("persisted".to_string(), persisted);
+    Ok(())
+}
+
+fn page_import_mutation(
+    staged_record: &Value,
+    default_locale: &str,
+) -> Result<(MutationSpec, Value), ImportModelError> {
+    let source_system = required_staged_string(staged_record, "source_system")?;
+    let source_key = required_staged_string(staged_record, "source_key")?;
+    let target_id = required_staged_string(staged_record, "target_id")?;
+    let batch_id = required_staged_string(staged_record, "checksum")?;
+    let fingerprint = required_staged_string(staged_record, "checksum")?;
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged page record is missing `normalized` object data".to_string(),
+        })?;
+    let locale = normalized
+        .get("locale")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_locale)
+        .to_string();
+    let title = required_normalized_string(normalized, "title")?;
+    let slug = required_normalized_string(normalized, "slug")?;
+    let template = required_normalized_string(normalized, "template")?;
+    let body_html = required_normalized_string(normalized, "body_html")?;
+    let workflow_status = required_normalized_string(normalized, "publication_state")?;
+    let seo = normalized
+        .get("seo")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged page record is missing `normalized.seo` object data".to_string(),
+        })?;
+    let seo_title = optional_object_string(seo, "title")?.unwrap_or_default();
+    let seo_description = optional_object_string(seo, "description")?.unwrap_or_default();
+    let canonical_path = optional_object_string(seo, "canonical_path")?.unwrap_or_default();
+    let media_references = normalized
+        .get("media_references")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let live_path = format!("/{locale}/{slug}");
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to calculate page update timestamp: {error}"),
+        })?
+        .as_secs();
+
+    let mutation = MutationSpec::new("cms_pages", MutationAction::Upsert)
+        .and_then(|mutation| mutation.with_assignment("page_id", target_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("locale", locale.clone()))
+        .and_then(|mutation| mutation.with_assignment("title", title))
+        .and_then(|mutation| mutation.with_assignment("slug", slug))
+        .and_then(|mutation| mutation.with_assignment("template", template))
+        .and_then(|mutation| mutation.with_assignment("body_html", body_html))
+        .and_then(|mutation| mutation.with_assignment("live_path", live_path.clone()))
+        .and_then(|mutation| mutation.with_assignment("workflow_status", workflow_status))
+        .and_then(|mutation| mutation.with_assignment("seo_title", seo_title))
+        .and_then(|mutation| mutation.with_assignment("seo_description", seo_description))
+        .and_then(|mutation| mutation.with_assignment("canonical_path", canonical_path))
+        .and_then(|mutation| {
+            mutation.with_assignment("media_references", media_references.to_string())
+        })
+        .and_then(|mutation| mutation.with_assignment("source_system", source_system))
+        .and_then(|mutation| mutation.with_assignment("source_key", source_key))
+        .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id))
+        .and_then(|mutation| mutation.with_assignment("fingerprint", fingerprint))
+        .and_then(|mutation| mutation.with_assignment("updated_at", DataValue::UInt(updated_at)))
+        .and_then(|mutation| mutation.on_conflict_field("page_id"))
+        .map_err(import_data_model_error)?;
+
+    Ok((
+        mutation,
+        serde_json::json!({
+            "table": "cms_pages",
+            "page_id": target_id,
+            "live_path": live_path,
+            "locale": locale,
+            "updated_at": updated_at,
+        }),
+    ))
+}
+
+fn required_staged_string(record: &Value, field: &str) -> Result<String, ImportModelError> {
+    record
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: format!("staged import record is missing `{field}`"),
+        })
+}
+
+fn required_normalized_string(
+    record: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<String, ImportModelError> {
+    record
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: format!("staged import record is missing `normalized.{field}`"),
+        })
+}
+
+fn optional_object_string(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, ImportModelError> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if value.is_empty() => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(ImportModelError::ManifestParse {
+            message: format!(
+                "staged import record field `normalized.seo.{field}` must be a string"
+            ),
+        }),
+    }
+}
+
+fn import_data_model_error(error: davenda_data::DataModelError) -> ImportModelError {
+    ImportModelError::ManifestParse {
+        message: error.to_string(),
+    }
 }
 
 fn storage_override_for_import_default(
@@ -2734,5 +3005,64 @@ dependencies = ["users", "media"]
 
         assert!(rendered.contains("module list"));
         assert!(rendered.contains("ops"));
+    }
+
+    #[test]
+    fn page_import_mutation_uses_default_locale_and_targets_live_cms_table() {
+        let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:post:home",
+            "target_id": "page:home",
+            "checksum": "page-home-v1",
+            "normalized": {
+                "title": "Home",
+                "slug": "home",
+                "template": "pages/home",
+                "body_html": "<p>Home</p>",
+                "publication_state": "published",
+                "seo": {
+                    "title": "Home",
+                    "description": "Landing page",
+                    "canonical_path": "/home"
+                },
+                "media_references": ["asset:hero"]
+            }
+        });
+
+        let (mutation, persisted) = page_import_mutation(&staged, "en-GB").unwrap();
+        let compiled = mutation.compile(1).unwrap();
+
+        assert!(compiled.sql.contains("\"cms_pages\""));
+        assert!(compiled.sql.contains("ON CONFLICT (\"page_id\")"));
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("en-GB".to_string()))
+        );
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("/en-GB/home".to_string()))
+        );
+        assert_eq!(persisted["table"], "cms_pages");
+        assert_eq!(persisted["live_path"], "/en-GB/home");
+    }
+
+    #[test]
+    fn page_import_mutation_rejects_missing_normalized_page_fields() {
+        let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:post:home",
+            "target_id": "page:home",
+            "checksum": "page-home-v1",
+            "normalized": {
+                "slug": "home",
+                "publication_state": "published",
+                "seo": {}
+            }
+        });
+
+        let error = page_import_mutation(&staged, "en-GB").unwrap_err();
+        assert!(error.to_string().contains("normalized.title"));
     }
 }

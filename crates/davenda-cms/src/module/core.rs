@@ -131,30 +131,53 @@ impl CmsModule {
     pub fn migration_plan(&self) -> Result<MigrationPlan, CmsModelError> {
         let owner = MigrationOwner::Module(self.name.clone());
         let mut plan = MigrationPlan::new();
-        plan.insert(MigrationStep::new(
-            MigrationId::new("001_pages_revisions")?,
-            owner.clone(),
-            10,
-            "create cms pages, localized revisions, and seo metadata tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("002_navigation")?,
-            owner.clone(),
-            20,
-            "create navigation trees and navigation item adjacency tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("003_redirects")?,
-            owner.clone(),
-            30,
-            "create redirect rules and route handoff tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("004_publication_queue")?,
-            owner,
-            40,
-            "create scheduled publication queue and preview token tables",
-        )?)?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("001_pages_revisions")?,
+                owner.clone(),
+                10,
+                "create cms pages, localized revisions, and seo metadata tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS cms_pages (page_id TEXT PRIMARY KEY, locale TEXT NOT NULL, title TEXT NOT NULL, slug TEXT NOT NULL, template TEXT NOT NULL, body_html TEXT NOT NULL, live_path TEXT NOT NULL, workflow_status TEXT NOT NULL, seo_title TEXT, seo_description TEXT, canonical_path TEXT, media_references TEXT NOT NULL DEFAULT '[]', source_system TEXT, source_key TEXT UNIQUE, import_batch_id TEXT, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("002_navigation")?,
+                owner.clone(),
+                20,
+                "create navigation trees and navigation item adjacency tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS cms_navigation (navigation_id TEXT PRIMARY KEY, locale TEXT, payload TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("003_redirects")?,
+                owner.clone(),
+                30,
+                "create redirect rules and route handoff tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS cms_redirects (redirect_from TEXT PRIMARY KEY, redirect_to TEXT NOT NULL, locale TEXT, permanent BOOLEAN NOT NULL)",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("004_publication_queue")?,
+                owner,
+                40,
+                "create scheduled publication queue and preview token tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS cms_publication_queue (page_id TEXT PRIMARY KEY, publish_at BIGINT NOT NULL)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS cms_preview_tokens (token TEXT PRIMARY KEY, page_id TEXT NOT NULL, expires_at BIGINT NOT NULL)",
+            )?,
+        )?;
         Ok(plan)
     }
 }

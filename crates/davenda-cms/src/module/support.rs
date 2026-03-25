@@ -4,7 +4,7 @@ pub(super) fn cms_live_pages_repository() -> DataRepositoryContribution {
     DataRepositoryContribution::new(
         RepositorySpec::new(
             "cms.pages.live",
-            TableName::new("davenda.cms_pages").expect("constant cms table is valid"),
+            TableName::new("cms_pages").expect("constant cms table is valid"),
             vec![
                 QueryField::new("page_id").expect("constant cms field is valid"),
                 QueryField::new("title").expect("constant cms field is valid"),

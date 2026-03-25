@@ -318,4 +318,16 @@ fn cms_module_exposes_queries_migrations_and_transaction_plans() {
         migrations.ordered_steps()[0].owner,
         MigrationOwner::Module("cms".to_string())
     );
+    assert!(
+        migrations.ordered_steps()[0]
+            .statements
+            .iter()
+            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS cms_pages"))
+    );
+    assert!(
+        migrations.ordered_steps()[3]
+            .statements
+            .iter()
+            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS cms_preview_tokens"))
+    );
 }

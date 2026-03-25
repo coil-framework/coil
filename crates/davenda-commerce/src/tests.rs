@@ -1,6 +1,9 @@
 use super::*;
 use davenda_auth::Capability;
-use davenda_core::{CoreServiceDependency, ExtensionSlotKind, PlatformModule, ServiceRegistry};
+use davenda_core::{
+    CoreServiceDependency, ExtensionSlotKind, HttpResponseContract, HttpSurfaceArea,
+    PlatformModule, RouteSurfaceKind, ServiceRegistry,
+};
 use davenda_data::{MigrationOwner, PublicationVisibility, QueryCacheScope, TransactionIsolation};
 
 fn gbp(value: i64) -> Money {
@@ -74,8 +77,8 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             .contains(&Capability::AssetRead)
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 4);
-    assert_eq!(manifest.http_surfaces.len(), 4);
+    assert_eq!(manifest.route_surfaces.len(), 8);
+    assert_eq!(manifest.http_surfaces.len(), 8);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 2);
@@ -104,6 +107,166 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             .any(|service| service.id == "module.commerce.membership_bridge")
     );
     assert_eq!(module.admin_resources().len(), 4);
+}
+
+#[test]
+fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_completion_surfaces() {
+    let module = CommerceModule::new();
+    let manifest = module.manifest();
+
+    let catalog = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.catalog")
+        .expect("catalog surface should exist");
+    assert_eq!(catalog.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(catalog.path, "/shop");
+    assert!(catalog.localized);
+    assert_eq!(catalog.capability, None);
+
+    let collection_detail = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.collection-detail")
+        .expect("collection detail surface should exist");
+    assert_eq!(collection_detail.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(collection_detail.path, "/shop/collections/{collection_slug}");
+    assert!(collection_detail.localized);
+    assert_eq!(collection_detail.capability, None);
+
+    let product_detail = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.product-detail")
+        .expect("product detail surface should exist");
+    assert_eq!(product_detail.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(product_detail.path, "/shop/products/{product_slug}");
+    assert!(product_detail.localized);
+    assert_eq!(product_detail.capability, None);
+
+    let cart = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.cart")
+        .expect("cart surface should exist");
+    assert_eq!(cart.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(cart.path, "/cart");
+    assert_eq!(cart.capability, Some(Capability::CheckoutSessionCreate));
+
+    let checkout = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.checkout")
+        .expect("checkout surface should exist");
+    assert_eq!(checkout.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(checkout.path, "/checkout");
+    assert_eq!(checkout.capability, Some(Capability::CheckoutSessionCreate));
+
+    let checkout_confirmation = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.checkout-confirmation")
+        .expect("checkout confirmation surface should exist");
+    assert_eq!(checkout_confirmation.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(checkout_confirmation.path, "/checkout/confirmation");
+    assert_eq!(
+        checkout_confirmation.capability,
+        Some(Capability::CheckoutSessionCreate)
+    );
+}
+
+#[test]
+fn commerce_module_http_surfaces_match_storefront_route_contracts() {
+    let module = CommerceModule::new();
+    let manifest = module.manifest();
+
+    let collection_detail = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.collection-detail")
+        .expect("collection detail http surface should exist");
+    assert_eq!(collection_detail.area, HttpSurfaceArea::Public);
+    assert_eq!(collection_detail.path, "/shop/collections/{collection_slug}");
+    assert!(collection_detail.localized);
+    assert_eq!(collection_detail.capability, None);
+    assert_eq!(
+        collection_detail.response,
+        HttpResponseContract::Page {
+            template: "commerce/collection-detail".to_string(),
+            status: 200,
+        }
+    );
+
+    let product_detail = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.product-detail")
+        .expect("product detail http surface should exist");
+    assert_eq!(product_detail.area, HttpSurfaceArea::Public);
+    assert_eq!(product_detail.path, "/shop/products/{product_slug}");
+    assert!(product_detail.localized);
+    assert_eq!(product_detail.capability, None);
+    assert_eq!(
+        product_detail.response,
+        HttpResponseContract::Page {
+            template: "commerce/product-detail".to_string(),
+            status: 200,
+        }
+    );
+
+    let cart = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.cart")
+        .expect("cart http surface should exist");
+    assert_eq!(cart.area, HttpSurfaceArea::Public);
+    assert_eq!(cart.path, "/cart");
+    assert_eq!(cart.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(
+        cart.response,
+        HttpResponseContract::Page {
+            template: "commerce/cart".to_string(),
+            status: 200,
+        }
+    );
+
+    let checkout = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.checkout")
+        .expect("checkout http surface should exist");
+    assert_eq!(checkout.area, HttpSurfaceArea::Public);
+    assert_eq!(checkout.path, "/checkout");
+    assert_eq!(
+        checkout.capability,
+        Some(Capability::CheckoutSessionCreate)
+    );
+    assert_eq!(
+        checkout.response,
+        HttpResponseContract::Page {
+            template: "commerce/checkout".to_string(),
+            status: 200,
+        }
+    );
+
+    let checkout_confirmation = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.checkout-confirmation")
+        .expect("checkout confirmation http surface should exist");
+    assert_eq!(checkout_confirmation.area, HttpSurfaceArea::Public);
+    assert_eq!(checkout_confirmation.path, "/checkout/confirmation");
+    assert_eq!(
+        checkout_confirmation.capability,
+        Some(Capability::CheckoutSessionCreate)
+    );
+    assert_eq!(
+        checkout_confirmation.response,
+        HttpResponseContract::Page {
+            template: "commerce/checkout-confirmation".to_string(),
+            status: 200,
+        }
+    );
 }
 
 #[test]

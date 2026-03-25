@@ -128,9 +128,29 @@ fn route_surfaces() -> Vec<RouteSurface> {
     vec![
         RouteSurface::new("commerce.catalog", RouteSurfaceKind::FrontendPage, "/shop").localized(),
         RouteSurface::new(
+            "commerce.collection-detail",
+            RouteSurfaceKind::FrontendPage,
+            "/shop/collections/{collection_slug}",
+        )
+        .localized(),
+        RouteSurface::new(
+            "commerce.product-detail",
+            RouteSurfaceKind::FrontendPage,
+            "/shop/products/{product_slug}",
+        )
+        .localized(),
+        RouteSurface::new("commerce.cart", RouteSurfaceKind::FrontendPage, "/cart")
+            .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new(
             "commerce.checkout",
-            RouteSurfaceKind::FrontendAction,
+            RouteSurfaceKind::FrontendPage,
             "/checkout",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new(
+            "commerce.checkout-confirmation",
+            RouteSurfaceKind::FrontendPage,
+            "/checkout/confirmation",
         )
         .gated_by(Capability::CheckoutSessionCreate),
         RouteSurface::new(
@@ -185,7 +205,7 @@ fn integration_points() -> Vec<IntegrationPoint> {
         IntegrationPoint::new(
             IntegrationKind::FrontendRendering,
             "storefront.catalog",
-            "Provides catalog, product, and checkout surfaces for customer storefronts",
+            "Provides collection listing/detail, product detail, cart, and checkout surfaces for customer storefronts",
         ),
         IntegrationPoint::new(
             IntegrationKind::SearchIndex,
@@ -322,10 +342,38 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
         )
         .localized(),
         HttpSurfaceContribution::page(
+            "commerce.collection-detail",
+            HttpSurfaceArea::Public,
+            "/shop/collections/{collection_slug}",
+            "commerce/collection-detail",
+        )
+        .localized(),
+        HttpSurfaceContribution::page(
+            "commerce.product-detail",
+            HttpSurfaceArea::Public,
+            "/shop/products/{product_slug}",
+            "commerce/product-detail",
+        )
+        .localized(),
+        HttpSurfaceContribution::page(
+            "commerce.cart",
+            HttpSurfaceArea::Public,
+            "/cart",
+            "commerce/cart",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        HttpSurfaceContribution::page(
             "commerce.checkout",
             HttpSurfaceArea::Public,
             "/checkout",
             "commerce/checkout",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        HttpSurfaceContribution::page(
+            "commerce.checkout-confirmation",
+            HttpSurfaceArea::Public,
+            "/checkout/confirmation",
+            "commerce/checkout-confirmation",
         )
         .gated_by(Capability::CheckoutSessionCreate),
         HttpSurfaceContribution::page(

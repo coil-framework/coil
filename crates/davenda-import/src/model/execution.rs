@@ -351,11 +351,27 @@ impl ImportExecution {
     }
 }
 
-pub(crate) fn execute_import_plan(
+pub(crate) fn execute_import_plan_with_handler<F>(
     plan: &ImportPlan,
     manifest_root: &Path,
     journal_path: &Path,
-) -> Result<ImportExecution, ImportModelError> {
+    handler: F,
+) -> Result<ImportExecution, ImportModelError>
+where
+    F: FnMut(&ImporterSpec, &ImportRecordReceipt, &Path, &mut Value) -> Result<(), ImportModelError>,
+{
+    execute_import_plan_internal(plan, manifest_root, journal_path, Some(handler))
+}
+
+fn execute_import_plan_internal<F>(
+    plan: &ImportPlan,
+    manifest_root: &Path,
+    journal_path: &Path,
+    mut handler: Option<F>,
+) -> Result<ImportExecution, ImportModelError>
+where
+    F: FnMut(&ImporterSpec, &ImportRecordReceipt, &Path, &mut Value) -> Result<(), ImportModelError>,
+{
     let mut journal = ImportJournal::load(journal_path, &plan.run_id, &plan.customer_app_id)?;
     let run_root = import_run_root(journal_path);
     fs::create_dir_all(run_root.join("staged")).map_err(|error| ImportModelError::ArtifactWrite {
@@ -399,7 +415,16 @@ pub(crate) fn execute_import_plan(
         for (index, raw_record) in raw_records.into_iter().enumerate() {
             let record_ref = record_identifier(&raw_record, index + 1);
             match process_record(plan, importer, &journal, &raw_record) {
-                Ok((receipt, Some(staged_record))) => {
+                Ok((receipt, Some(mut staged_record))) => {
+                    if let Some(handler) = handler.as_mut() {
+                        handler(importer, &receipt, manifest_root, &mut staged_record).map_err(|error| {
+                            ImportModelError::ExecutionHook {
+                                importer_id: importer.id.to_string(),
+                                record: receipt.source_key.to_string(),
+                                message: error.to_string(),
+                            }
+                        })?;
+                    }
                     update_counts(
                         receipt.status,
                         &mut imported_records,
@@ -741,8 +766,12 @@ fn transform_asset(
     let title = required_string(raw_record, "title")?;
     let source_url = optional_string(raw_record, "source_url")?;
     let source_object_key = optional_string(raw_record, "source_object_key")?;
-    if source_url.is_none() && source_object_key.is_none() {
-        return Err("asset record must define `source_url` or `source_object_key`".to_string());
+    let source_file = optional_string(raw_record, "source_file")?;
+    if source_url.is_none() && source_object_key.is_none() && source_file.is_none() {
+        return Err(
+            "asset record must define `source_url`, `source_object_key`, or `source_file`"
+                .to_string(),
+        );
     }
     let target_id = optional_string(raw_record, "target_id")?
         .unwrap_or_else(|| format!("asset:{slug}"));
@@ -760,6 +789,7 @@ fn transform_asset(
             "content_type": required_string(raw_record, "content_type")?,
             "source_url": source_url,
             "source_object_key": source_object_key,
+            "source_file": source_file,
             "source_etag": optional_string(raw_record, "source_etag")?,
             "alt_text": optional_string(raw_record, "alt_text")?,
             "caption": optional_string(raw_record, "caption")?,

@@ -548,7 +548,28 @@ impl ImportPlan {
         manifest_root: impl AsRef<Path>,
         journal_path: impl AsRef<Path>,
     ) -> Result<ImportExecution, ImportModelError> {
-        super::execute_import_plan(self, manifest_root.as_ref(), journal_path.as_ref())
+        self.execute_with_handler(
+            manifest_root,
+            journal_path,
+            |_, _, _, _| Ok(()),
+        )
+    }
+
+    pub fn execute_with_handler<F>(
+        &self,
+        manifest_root: impl AsRef<Path>,
+        journal_path: impl AsRef<Path>,
+        handler: F,
+    ) -> Result<ImportExecution, ImportModelError>
+    where
+        F: FnMut(&ImporterSpec, &ImportRecordReceipt, &Path, &mut serde_json::Value) -> Result<(), ImportModelError>,
+    {
+        super::execute_import_plan_with_handler(
+            self,
+            manifest_root.as_ref(),
+            journal_path.as_ref(),
+            handler,
+        )
     }
 
     pub fn command_report(&self) -> Result<CommandReport, ImportModelError> {

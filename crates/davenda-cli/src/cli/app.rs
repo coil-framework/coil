@@ -10,15 +10,17 @@ use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
 use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
-use davenda_assets::AssetDeliveryTarget;
+use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::configured_auth_model_package;
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_data::{MigrationPlan, MigrationRegistry};
-use davenda_import::ImportManifest;
-use std::path::{Path, PathBuf};
+use davenda_import::{ImportManifest, ImportModelError};
 use std::collections::BTreeSet;
-use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder};
-use davenda_storage::StoragePlanRequest;
+use std::fs;
+use std::path::{Path, PathBuf};
+use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder, StorageHost};
+use davenda_storage::{StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliApplication {
@@ -254,6 +256,11 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                     invocation.manifest_path.display()
                 ))
             })?;
+            let manifest_root = invocation
+                .manifest_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+            let import_runtime = build_import_runtime_context(manifest_root, &manifest)?;
 
             let report = if dry_run {
                 plan.command_report().map_err(|error| {
@@ -264,22 +271,42 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 })?
             } else {
                 let journal_path = import_journal_path(&invocation.manifest_path, &manifest.run_id);
-                let manifest_root = invocation
-                    .manifest_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."));
-                let execution = plan.execute(manifest_root, &journal_path).map_err(|error| {
+                let execution = if let Some(runtime) = import_runtime.as_ref() {
+                    let storage_host = runtime.storage_host.clone();
+                    plan.execute_with_handler(
+                        manifest_root,
+                        &journal_path,
+                        |importer, _, manifest_root, staged_record| {
+                            if importer.resource_kind == "asset" {
+                                materialize_asset_record(
+                                    &storage_host,
+                                    manifest.asset_storage_default,
+                                    manifest_root,
+                                    staged_record,
+                                )?;
+                            }
+                            Ok(())
+                        },
+                    )
+                } else {
+                    plan.execute(manifest_root, &journal_path)
+                }
+                .map_err(|error| {
                     CliRunError::execution(format!(
                         "failed to execute import manifest `{}`: {error}",
                         invocation.manifest_path.display()
                     ))
                 })?;
-                execution.command_report().map_err(|error| {
+                let mut report = execution.command_report().map_err(|error| {
                     CliRunError::execution(format!(
                         "failed to render import execution `{}`: {error}",
                         invocation.manifest_path.display()
                     ))
-                })?
+                })?;
+                if let Some(runtime) = import_runtime.as_ref() {
+                    materialize_import_assets(&mut report, manifest_root, runtime, &execution)?;
+                }
+                report
             };
             render_command_report(&report, output_mode)
         }
@@ -340,6 +367,12 @@ struct BuiltCustomerAppContext {
     app_root: PathBuf,
     manifest: CustomerAppManifest,
     runtime_plan: CustomerAppRuntimePlan,
+}
+
+#[derive(Debug)]
+struct BuiltImportRuntimeContext {
+    built: BuiltCustomerAppContext,
+    storage_host: StorageHost,
 }
 
 fn run_migrate_apply(
@@ -1090,6 +1123,295 @@ fn import_journal_path(manifest_path: &Path, run_id: &impl std::fmt::Display) ->
         .join(format!("{run_id}.json"))
 }
 
+fn build_import_runtime_context(
+    manifest_root: &Path,
+    manifest: &ImportManifest,
+) -> Result<Option<BuiltImportRuntimeContext>, CliRunError> {
+    let Some(target) = manifest.target.as_ref() else {
+        return Ok(None);
+    };
+
+    let config_path = manifest_root.join(&target.platform_config);
+    let built = build_customer_app_runtime_context(&config_path, true)?;
+    if built.manifest.id.as_str() != manifest.customer_app_id {
+        return Err(CliRunError::execution(format!(
+            "import manifest targets customer app `{}`, but runtime config resolves `{}`",
+            manifest.customer_app_id, built.manifest.id
+        )));
+    }
+
+    let resolved_manifest = CustomerAppManifest::from_file(manifest_root.join(&target.app_manifest))
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to load import target app manifest `{}`: {error}",
+                manifest_root.join(&target.app_manifest).display()
+            ))
+        })?;
+    if resolved_manifest.id != built.manifest.id {
+        return Err(CliRunError::execution(format!(
+            "import target app manifest `{}` resolves `{}`, but runtime config resolves `{}`",
+            target.app_manifest, resolved_manifest.id, built.manifest.id
+        )));
+    }
+
+    let installed_modules = built
+        .manifest
+        .modules
+        .iter()
+        .map(|module| module.id.to_string())
+        .collect::<BTreeSet<_>>();
+    let missing_modules = manifest
+        .modules
+        .iter()
+        .filter(|module| !installed_modules.contains(module.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_modules.is_empty() {
+        return Err(CliRunError::execution(format!(
+            "import manifest requires modules not installed in `{}`: {}",
+            built.manifest.id,
+            missing_modules.join(", ")
+        )));
+    }
+    let missing_expected_modules = target
+        .expected_modules
+        .iter()
+        .filter(|module| !installed_modules.contains(module.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_expected_modules.is_empty() {
+        return Err(CliRunError::execution(format!(
+            "import target expects modules not installed in `{}`: {}",
+            built.manifest.id,
+            missing_expected_modules.join(", ")
+        )));
+    }
+
+    if let Some(locale) = manifest.locale.as_deref() {
+        let supported = built
+            .manifest
+            .supported_locales
+            .iter()
+            .any(|candidate| candidate.as_str() == locale);
+        if !supported {
+            return Err(CliRunError::execution(format!(
+                "import manifest locale `{locale}` is not supported by customer app `{}`",
+                built.manifest.id
+            )));
+        }
+    }
+
+    let object_store = built
+        .runtime_plan
+        .runtime
+        .object_store_client_config(&EnvironmentSecretResolver)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve storage backends for import target `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let storage_host = built
+        .runtime_plan
+        .runtime
+        .storage_host_with_object_store(object_store);
+
+    Ok(Some(BuiltImportRuntimeContext { built, storage_host }))
+}
+
+fn materialize_import_assets(
+    report: &mut CommandReport,
+    manifest_root: &Path,
+    runtime: &BuiltImportRuntimeContext,
+    execution: &davenda_import::ImportExecution,
+) -> Result<(), CliRunError> {
+    for record in &execution.importer_records {
+        if record.resource_kind != "asset" {
+            continue;
+        }
+        let Some(staged_path) = record.staged_path.as_ref() else {
+            continue;
+        };
+        let staged_path = PathBuf::from(staged_path);
+        let input = fs::read_to_string(&staged_path).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read staged asset import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+        let records: Vec<Value> = serde_json::from_str(&input).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse staged asset import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+        let materialized = records
+            .iter()
+            .filter(|record| {
+                record
+                    .get("normalized")
+                    .and_then(Value::as_object)
+                    .and_then(|normalized| normalized.get("materialized"))
+                    .is_some()
+            })
+            .count();
+        if materialized == 0 {
+            continue;
+        }
+        report.push_diagnostic(
+            DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                format!("import.{}.materialized", record.importer_id),
+                format!(
+                    "materialized {materialized} imported assets into runtime storage for `{}` from `{}`",
+                    runtime.built.manifest.id,
+                    manifest_root.display()
+                ),
+            )
+            .map_err(report_build_error)?,
+        );
+    }
+    Ok(())
+}
+
+fn materialize_asset_record(
+    storage_host: &StorageHost,
+    asset_storage_default: davenda_import::AssetStorageDefault,
+    manifest_root: &Path,
+    staged_record: &mut Value,
+) -> Result<(), ImportModelError> {
+    let checksum = staged_record
+        .get("checksum")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged asset record is missing `checksum`".to_string(),
+        })?
+        .to_string();
+    let target_id = staged_record
+        .get("target_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged asset record is missing `target_id`".to_string(),
+        })?
+        .to_string();
+    let normalized = staged_record
+        .get_mut("normalized")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged asset record is missing `normalized` object data".to_string(),
+        })?;
+    let source_file = normalized
+        .get("source_file")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged asset record is missing `normalized.source_file`".to_string(),
+        })?;
+    let source_path = manifest_root.join(source_file);
+    let bytes = fs::read(&source_path).map_err(|error| ImportModelError::SourceRead {
+        importer_id: "asset".to_string(),
+        path: source_path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let logical_path = normalized
+        .get("logical_path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged asset record is missing `logical_path`".to_string(),
+        })?;
+    let content_type = normalized
+        .get("content_type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged asset record is missing `content_type`".to_string(),
+        })?;
+
+    let override_policy = storage_override_for_import_default(asset_storage_default);
+    let revision = storage_host
+        .plan_managed_revision(
+            RevisionId::new(format!("rev-{target_id}")).map_err(|error| ImportModelError::ManifestParse {
+                message: error.to_string(),
+            })?,
+            logical_path,
+            override_policy,
+            content_type,
+            bytes.len() as u64,
+            ContentFingerprint::new(FingerprintAlgorithm::Sha256, checksum.clone()).map_err(|error| {
+                ImportModelError::ManifestParse {
+                    message: error.to_string(),
+                }
+            })?,
+        )
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: error.to_string(),
+        })?;
+    let write = storage_host
+        .execute_write(revision.storage_plan(), &bytes)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: error.to_string(),
+        })?;
+    let delivery = storage_host
+        .delivery_location(revision.storage_plan())
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: error.to_string(),
+        })?;
+
+    normalized.insert(
+        "materialized".to_string(),
+        serde_json::json!({
+            "bytes_written": write.bytes_written,
+            "path": write.path.display().to_string(),
+            "delivery": render_storage_delivery(&delivery),
+        }),
+    );
+    Ok(())
+}
+
+fn storage_override_for_import_default(
+    asset_storage_default: davenda_import::AssetStorageDefault,
+) -> Option<StoragePolicyOverride> {
+    let policy = StoragePolicy::from(match asset_storage_default {
+        davenda_import::AssetStorageDefault::PublicUpload => StorageClass::PublicUpload,
+        davenda_import::AssetStorageDefault::PrivateShared => StorageClass::PrivateShared,
+        davenda_import::AssetStorageDefault::LocalOnlySensitive => StorageClass::LocalOnlySensitive,
+    });
+    Some(StoragePolicyOverride {
+        delivery_mode: Some(policy.delivery_mode),
+        sync_mode: Some(policy.sync_mode),
+        sensitivity: Some(policy.sensitivity),
+    })
+}
+
+fn render_storage_delivery(delivery: &StorageDeliveryLocation) -> Value {
+    match delivery {
+        StorageDeliveryLocation::PublicCdn {
+            public_url,
+            object_key,
+        } => serde_json::json!({
+            "kind": "public_cdn",
+            "public_url": public_url,
+            "object_key": object_key,
+        }),
+        StorageDeliveryLocation::SignedObject {
+            object_key,
+            signed_url,
+            expires_at_unix_seconds,
+        } => serde_json::json!({
+            "kind": "signed_object",
+            "object_key": object_key,
+            "signed_url": signed_url,
+            "expires_at_unix_seconds": expires_at_unix_seconds,
+        }),
+        StorageDeliveryLocation::AppProxy { path } => serde_json::json!({
+            "kind": "app_proxy",
+            "path": path,
+        }),
+        StorageDeliveryLocation::LocalPath { path } => serde_json::json!({
+            "kind": "local_path",
+            "path": path.display().to_string(),
+        }),
+    }
+}
+
 fn environment_label(environment: davenda_config::Environment) -> &'static str {
     match environment {
         davenda_config::Environment::Development => "development",
@@ -1410,6 +1732,17 @@ enabled = ["cms"]
     struct ImportFixture {
         manifest_path: PathBuf,
         journal_path: PathBuf,
+        root: PathBuf,
+        _server: ObjectStoreTestServer,
+        object_store_env_var: String,
+    }
+
+    impl Drop for ImportFixture {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var(&self.object_store_env_var);
+            }
+        }
     }
 
     fn write_test_file(path: impl AsRef<Path>, content: &str) {
@@ -1426,11 +1759,76 @@ enabled = ["cms"]
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("davenda-cli-import-{suffix}"));
+        let config_dir = root.join("config");
+        let app_root = root.join("apps").join("showcase-events");
+        let templates_root = app_root.join("templates").join("pages");
+        let storage_root = root.join("storage");
+        let object_store_server = ObjectStoreTestServer::spawn();
+        let object_store_env_var = format!("DAVENDA_IMPORT_OBJECT_STORE_URL_{suffix}");
         let manifest_path = root.join("imports").join("wordpress-events.toml");
         let journal_path = import_journal_path(
             &manifest_path,
             &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
         );
+
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&templates_root).unwrap();
+        let config = DISABLED_EXPLAIN_CONFIG
+            .replace("environment = \"production\"", "environment = \"development\"")
+            .replace("enabled = [\"cms\"]", "enabled = [\"cms\", \"media\", \"events\"]")
+            .replace(
+                "[assets]\npublish_manifest = false",
+                "[assets]\npublish_manifest = false\ncdn_base_url = \"https://cdn.example.com/assets\"",
+            )
+            .replace(
+                "single_node_escape_hatch = \"explicit_single_node\"\nlocal_root = \"/tmp/davenda-cli\"",
+                &format!(
+                    "single_node_escape_hatch = \"explicit_single_node\"\nlocal_root = \"{}\"\nobject_store = \"s3\"\nobject_store_secret = {{ kind = \"env\", var = \"{}\" }}",
+                    storage_root.display(),
+                    object_store_env_var
+                ),
+            );
+        unsafe {
+            std::env::set_var(
+                &object_store_env_var,
+                format!(
+                    "bucket = \"runtime\"\nregion = \"us-east-1\"\nendpoint_url = \"{}\"\naccess_key_id = \"runtime-access\"\nsecret_access_key = \"runtime-secret\"\nallow_http = true",
+                    object_store_server.endpoint()
+                ),
+            );
+        }
+        fs::write(config_dir.join("platform.toml"), config).unwrap();
+        fs::write(
+            app_root.join("app.toml"),
+            r#"
+[app]
+name = "showcase-events"
+display_name = "Showcase Events"
+
+[domains]
+canonical = "example.com"
+
+[i18n]
+default_locale = "en"
+supported_locales = ["en"]
+
+[theme]
+active = "storefront"
+template_namespaces = ["pages", "layouts"]
+
+[auth]
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms", "media", "events"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            templates_root.join("home.html"),
+            "<html><body><main>Showcase Events</main></body></html>",
+        )
+        .unwrap();
 
         write_test_file(
             root.join("imports").join("fixtures").join("users.json"),
@@ -1452,9 +1850,18 @@ enabled = ["cms"]
     "title": "Hero",
     "slug": "hero",
     "content_type": "image/jpeg",
-    "source_url": "https://legacy.example.com/uploads/hero.jpg"
+    "source_url": "https://legacy.example.com/uploads/hero.jpg",
+    "source_file": "fixtures/source/uploads/hero.jpg"
   }
 ]"#,
+        );
+        write_test_file(
+            root.join("imports")
+                .join("fixtures")
+                .join("source")
+                .join("uploads")
+                .join("hero.jpg"),
+            "fake-jpeg-bytes",
         );
         write_test_file(
             root.join("imports").join("fixtures").join("pages.json"),
@@ -1488,8 +1895,13 @@ enabled = ["cms"]
 run_id = "wordpress-events"
 source_system = "wordpress"
 snapshot_at = "2026-03-19T00:00:00Z"
-customer_app_id = "harbor-shop"
+customer_app_id = "showcase-events"
 modules = ["cms", "events", "media"]
+
+[target]
+app_manifest = "../apps/showcase-events/app.toml"
+platform_config = "../config/platform.toml"
+expected_modules = ["cms", "media", "events"]
 
 [[importers]]
 id = "users"
@@ -1527,6 +1939,9 @@ dependencies = ["users", "media"]
         ImportFixture {
             manifest_path,
             journal_path,
+            root,
+            _server: object_store_server,
+            object_store_env_var,
         }
     }
 
@@ -1718,7 +2133,16 @@ dependencies = ["users", "media"]
         assert!(first.contains("Executed import run `wordpress-events`"));
         assert!(first.contains("executed"));
         assert!(first.contains("staged"));
+        assert!(first.contains("import.media.materialized"));
         assert!(fixture.journal_path.is_file());
+        let staged_media_path = fixture
+            .journal_path
+            .with_extension("")
+            .join("staged")
+            .join("media.json");
+        let staged_media = fs::read_to_string(&staged_media_path).unwrap();
+        assert!(staged_media.contains("\"materialized\""));
+        assert!(staged_media.contains("\"public_cdn\""));
 
         let second = run_from_args([
             "import".to_string(),
@@ -1728,6 +2152,66 @@ dependencies = ["users", "media"]
         .unwrap();
         assert!(second.contains("Resumed import run `wordpress-events`"));
         assert!(second.contains("skipped_completed"));
+    }
+
+    #[test]
+    fn run_from_args_rejects_import_targets_with_missing_modules() {
+        let fixture = import_fixture();
+        let invalid_manifest = fixture.root.join("imports").join("invalid-modules.toml");
+        let manifest = fs::read_to_string(&fixture.manifest_path).unwrap();
+        fs::write(
+            &invalid_manifest,
+            manifest.replace(
+                "expected_modules = [\"cms\", \"media\", \"events\"]",
+                "expected_modules = [\"cms\", \"media\", \"events\", \"memberships\"]",
+            ),
+        )
+        .unwrap();
+
+        let error = run_from_args([
+            "import".to_string(),
+            "run".to_string(),
+            invalid_manifest.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("import target expects modules not installed"),
+            "{}",
+            error
+        );
+    }
+
+    #[test]
+    fn run_from_args_rejects_import_targets_with_unsupported_locale() {
+        let fixture = import_fixture();
+        let invalid_manifest = fixture.root.join("imports").join("invalid-locale.toml");
+        let manifest = fs::read_to_string(&fixture.manifest_path).unwrap();
+        fs::write(
+            &invalid_manifest,
+            manifest.replace(
+                "customer_app_id = \"showcase-events\"",
+                "customer_app_id = \"showcase-events\"\nlocale = \"fr\"",
+            ),
+        )
+        .unwrap();
+
+        let error = run_from_args([
+            "import".to_string(),
+            "run".to_string(),
+            invalid_manifest.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("import manifest locale `fr` is not supported"),
+            "{}",
+            error
+        );
     }
 
     #[test]

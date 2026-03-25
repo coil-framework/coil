@@ -63,6 +63,12 @@ pub enum ImportModelError {
     },
     #[error("failed to persist import artifact `{path}`: {message}")]
     ArtifactWrite { path: String, message: String },
+    #[error("import execution hook failed for importer `{importer_id}` record `{record}`: {message}")]
+    ExecutionHook {
+        importer_id: String,
+        record: String,
+        message: String,
+    },
     #[error("failed to read import journal `{path}`: {message}")]
     JournalRead { path: String, message: String },
     #[error("failed to write import journal `{path}`: {message}")]

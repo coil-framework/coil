@@ -330,6 +330,17 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                                         staged_record,
                                     )?;
                                 }
+                                "event" if publish_validated => {
+                                    let client =
+                                        ensure_import_data_client(&data_runtime, &mut data_client)?;
+                                    materialize_event_record(
+                                        tokio_runtime
+                                            .as_ref()
+                                            .expect("publish-validated imports build a runtime"),
+                                        &client,
+                                        staged_record,
+                                    )?;
+                                }
                                 _ => {}
                             }
                             Ok(())
@@ -353,6 +364,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 if let Some(runtime) = import_runtime.as_ref() {
                     materialize_import_assets(&mut report, manifest_root, runtime, &execution)?;
                     materialize_import_pages(&mut report, manifest_root, runtime, &execution)?;
+                    materialize_import_events(&mut report, manifest_root, runtime, &execution)?;
                 }
                 report
             };
@@ -1622,6 +1634,66 @@ fn materialize_import_pages(
     Ok(())
 }
 
+fn materialize_import_events(
+    report: &mut CommandReport,
+    manifest_root: &Path,
+    runtime: &BuiltImportRuntimeContext,
+    execution: &davenda_import::ImportExecution,
+) -> Result<(), CliRunError> {
+    let mut event_counts = HashMap::<String, usize>::new();
+
+    for record in &execution.importer_records {
+        if record.resource_kind != "event" {
+            continue;
+        }
+        let Some(staged_path) = record.staged_path.as_ref() else {
+            continue;
+        };
+        let staged_path = PathBuf::from(staged_path);
+        let input = fs::read_to_string(&staged_path).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read staged event import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+        let records: Vec<Value> = serde_json::from_str(&input).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse staged event import artifact `{}`: {error}",
+                staged_path.display()
+            ))
+        })?;
+
+        for table in records.iter().filter_map(|record| {
+            record
+                .get("normalized")
+                .and_then(Value::as_object)
+                .and_then(|normalized| normalized.get("persisted"))
+                .and_then(Value::as_object)
+                .and_then(|persisted| persisted.get("table"))
+                .and_then(Value::as_str)
+        }) {
+            *event_counts.entry(table.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    for (table, count) in event_counts {
+        report.push_diagnostic(
+            DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.event.persisted",
+                format!(
+                    "persisted {count} imported events into `{table}` for `{}` from `{}`",
+                    runtime.built.manifest.id,
+                    manifest_root.display()
+                ),
+            )
+            .map_err(report_build_error)?,
+        );
+    }
+
+    Ok(())
+}
+
 fn materialize_asset_record(
     storage_host: &StorageHost,
     asset_storage_default: davenda_import::AssetStorageDefault,
@@ -1755,6 +1827,29 @@ fn materialize_page_record(
     Ok(())
 }
 
+fn materialize_event_record(
+    tokio_runtime: &tokio::runtime::Runtime,
+    data_client: &PostgresDataClient,
+    staged_record: &mut Value,
+) -> Result<(), ImportModelError> {
+    let (mutation, persisted) = event_import_mutation(staged_record)?;
+    let statement = mutation.compile(1).map_err(import_data_model_error)?;
+    tokio_runtime
+        .block_on(async { data_client.execute_statement(&statement).await })
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to persist imported event: {error}"),
+        })?;
+
+    let normalized = staged_record
+        .get_mut("normalized")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged event record is missing `normalized` object data".to_string(),
+        })?;
+    normalized.insert("persisted".to_string(), persisted);
+    Ok(())
+}
+
 fn page_import_mutation(
     staged_record: &Value,
     default_locale: &str,
@@ -1837,6 +1932,60 @@ fn page_import_mutation(
     ))
 }
 
+fn event_import_mutation(staged_record: &Value) -> Result<(MutationSpec, Value), ImportModelError> {
+    let source_system = required_staged_string(staged_record, "source_system")?;
+    let source_key = required_staged_string(staged_record, "source_key")?;
+    let target_id = required_staged_string(staged_record, "target_id")?;
+    let batch_id = required_staged_string(staged_record, "checksum")?;
+    let fingerprint = required_staged_string(staged_record, "checksum")?;
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged event record is missing `normalized` object data".to_string(),
+        })?;
+    let title = required_normalized_string(normalized, "title")?;
+    let slug = required_normalized_string(normalized, "slug")?;
+    let status = required_normalized_string(normalized, "publication_state")?;
+    let starts_at = required_normalized_string(normalized, "starts_at")?;
+    let ends_at = optional_normalized_string(normalized, "ends_at")?.unwrap_or_default();
+    let summary = optional_normalized_string(normalized, "summary")?.unwrap_or_default();
+    let hero_asset = optional_normalized_string(normalized, "hero_asset")?.unwrap_or_default();
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to calculate event update timestamp: {error}"),
+        })?
+        .as_secs();
+
+    let mutation = MutationSpec::new("events_catalog", MutationAction::Upsert)
+        .and_then(|mutation| mutation.with_assignment("id", target_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("slug", slug))
+        .and_then(|mutation| mutation.with_assignment("title", title))
+        .and_then(|mutation| mutation.with_assignment("status", status))
+        .and_then(|mutation| mutation.with_assignment("starts_at", starts_at))
+        .and_then(|mutation| mutation.with_assignment("ends_at", ends_at))
+        .and_then(|mutation| mutation.with_assignment("summary", summary))
+        .and_then(|mutation| mutation.with_assignment("hero_asset", hero_asset))
+        .and_then(|mutation| mutation.with_assignment("source_system", source_system))
+        .and_then(|mutation| mutation.with_assignment("source_key", source_key))
+        .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id))
+        .and_then(|mutation| mutation.with_assignment("fingerprint", fingerprint))
+        .and_then(|mutation| mutation.with_assignment("published_at", DataValue::UInt(updated_at)))
+        .and_then(|mutation| mutation.with_assignment("updated_at", DataValue::UInt(updated_at)))
+        .and_then(|mutation| mutation.on_conflict_field("id"))
+        .map_err(import_data_model_error)?;
+
+    Ok((
+        mutation,
+        serde_json::json!({
+            "table": "events_catalog",
+            "event_id": target_id,
+            "updated_at": updated_at,
+        }),
+    ))
+}
+
 fn required_staged_string(record: &Value, field: &str) -> Result<String, ImportModelError> {
     record
         .get(field)
@@ -1860,6 +2009,20 @@ fn required_normalized_string(
         .ok_or_else(|| ImportModelError::ManifestParse {
             message: format!("staged import record is missing `normalized.{field}`"),
         })
+}
+
+fn optional_normalized_string(
+    record: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, ImportModelError> {
+    match record.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if value.is_empty() => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(ImportModelError::ManifestParse {
+            message: format!("staged import record field `normalized.{field}` must be a string"),
+        }),
+    }
 }
 
 fn optional_object_string(
@@ -3063,6 +3226,54 @@ dependencies = ["users", "media"]
         });
 
         let error = page_import_mutation(&staged, "en-GB").unwrap_err();
+        assert!(error.to_string().contains("normalized.title"));
+    }
+
+    #[test]
+    fn event_import_mutation_targets_live_events_catalog_table() {
+        let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:event:festival",
+            "target_id": "event:festival",
+            "checksum": "event-festival-v1",
+            "normalized": {
+                "title": "Festival",
+                "slug": "festival",
+                "publication_state": "published",
+                "starts_at": "2026-06-01T10:00:00Z",
+                "summary": "Summer launch",
+                "hero_asset": "asset:hero"
+            }
+        });
+
+        let (mutation, persisted) = event_import_mutation(&staged).unwrap();
+        let compiled = mutation.compile(1).unwrap();
+
+        assert!(compiled.sql.contains("\"events_catalog\""));
+        assert!(compiled.sql.contains("ON CONFLICT (\"id\")"));
+        assert!(
+            compiled
+                .bind_values
+                .contains(&DataValue::String("Festival".to_string()))
+        );
+        assert_eq!(persisted["table"], "events_catalog");
+        assert_eq!(persisted["event_id"], "event:festival");
+    }
+
+    #[test]
+    fn event_import_mutation_rejects_missing_required_fields() {
+        let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:event:festival",
+            "target_id": "event:festival",
+            "checksum": "event-festival-v1",
+            "normalized": {
+                "slug": "festival",
+                "publication_state": "published"
+            }
+        });
+
+        let error = event_import_mutation(&staged).unwrap_err();
         assert!(error.to_string().contains("normalized.title"));
     }
 }

@@ -27,6 +27,7 @@ pub enum Capability {
     MembershipTierEdit,
     EventsEventPublish,
     EventsSlotManage,
+    EventsBookingManage,
     EventsBookingCreate,
     EventsBookingCheckIn,
     AssetRead,
@@ -60,6 +61,7 @@ impl Capability {
             Self::MembershipTierEdit => "membership.tier.edit",
             Self::EventsEventPublish => "events.event.publish",
             Self::EventsSlotManage => "events.slot.manage",
+            Self::EventsBookingManage => "events.booking.manage",
             Self::EventsBookingCreate => "events.booking.create",
             Self::EventsBookingCheckIn => "events.booking.check_in",
             Self::AssetRead => "asset.read",
@@ -69,6 +71,41 @@ impl Capability {
             Self::AssetManageStorage => "asset.manage_storage",
             Self::SeoMetadataEdit => "seo.metadata.edit",
             Self::I18nTranslationEdit => "i18n.translation.edit",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "system.module.manage" => Some(Self::SystemModuleManage),
+            "system.config.read" => Some(Self::SystemConfigRead),
+            "system.config.write" => Some(Self::SystemConfigWrite),
+            "admin.shell.access" => Some(Self::AdminShellAccess),
+            "admin.audit.read" => Some(Self::AdminAuditRead),
+            "cms.page.read" => Some(Self::CmsPageRead),
+            "cms.page.publish" => Some(Self::CmsPagePublish),
+            "cms.page.edit" => Some(Self::CmsPageEdit),
+            "cms.navigation.edit" => Some(Self::CmsNavigationEdit),
+            "catalog.product.read" => Some(Self::CatalogProductRead),
+            "catalog.product.edit" => Some(Self::CatalogProductEdit),
+            "catalog.collection.edit" => Some(Self::CatalogCollectionEdit),
+            "checkout.session.create" => Some(Self::CheckoutSessionCreate),
+            "order.read" => Some(Self::OrderRead),
+            "order.refund.issue" => Some(Self::OrderRefundIssue),
+            "membership.subscription.manage" => Some(Self::MembershipSubscriptionManage),
+            "membership.tier.edit" => Some(Self::MembershipTierEdit),
+            "events.event.publish" => Some(Self::EventsEventPublish),
+            "events.slot.manage" => Some(Self::EventsSlotManage),
+            "events.booking.manage" => Some(Self::EventsBookingManage),
+            "events.booking.create" => Some(Self::EventsBookingCreate),
+            "events.booking.check_in" => Some(Self::EventsBookingCheckIn),
+            "asset.read" => Some(Self::AssetRead),
+            "asset.read_public" => Some(Self::AssetReadPublic),
+            "asset.publish" => Some(Self::AssetPublish),
+            "asset.replace" => Some(Self::AssetReplace),
+            "asset.manage_storage" => Some(Self::AssetManageStorage),
+            "seo.metadata.edit" => Some(Self::SeoMetadataEdit),
+            "i18n.translation.edit" => Some(Self::I18nTranslationEdit),
+            _ => None,
         }
     }
 }

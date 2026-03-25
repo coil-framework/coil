@@ -23,7 +23,7 @@ fn events_catalog_step(owner: MigrationOwner) -> MigrationStep {
     )
     .expect("constant migration step is valid")
     .with_statement(
-        "CREATE TABLE IF NOT EXISTS events_catalog (id TEXT PRIMARY KEY, slug TEXT NOT NULL, status TEXT NOT NULL, published_at BIGINT)",
+        "CREATE TABLE IF NOT EXISTS events_catalog (id TEXT PRIMARY KEY, slug TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT, summary TEXT, hero_asset TEXT, source_system TEXT, source_key TEXT UNIQUE, import_batch_id TEXT, fingerprint TEXT NOT NULL, published_at BIGINT, updated_at BIGINT NOT NULL)",
     )
     .expect("constant migration statement is valid")
 }

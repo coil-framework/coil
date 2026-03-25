@@ -157,6 +157,24 @@ fn capability_registry_contains_expected_bindings() {
         vec![Namespace::EventSlot]
     );
     assert_eq!(booking_create.relation, Relation::Book);
+
+    let booking_manage = package
+        .binding_for(Capability::EventsBookingManage)
+        .unwrap();
+    assert_eq!(booking_manage.resource_namespaces, vec![Namespace::Booking]);
+    assert_eq!(booking_manage.relation, Relation::Manage);
+}
+
+#[test]
+fn capability_parser_accepts_checked_in_import_mapping_names() {
+    assert_eq!(
+        Capability::from_str("events.booking.manage"),
+        Some(Capability::EventsBookingManage)
+    );
+    assert_eq!(
+        Capability::from_str("cms.page.publish"),
+        Some(Capability::CmsPagePublish)
+    );
 }
 
 #[test]

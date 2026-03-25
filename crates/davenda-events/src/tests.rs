@@ -286,6 +286,15 @@ fn module_manifest_and_admin_resources_match_events_workloads() {
         3
     );
     assert!(
+        module
+            .install_migration_plan()
+            .expect("events migration plan")
+            .ordered_steps()[0]
+            .statements
+            .iter()
+            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS events_catalog"))
+    );
+    assert!(
         registry
             .services()
             .any(|service| service.id == "module.events.waitlists")

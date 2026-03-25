@@ -255,6 +255,11 @@ pub fn default_capability_bindings() -> HashMap<Capability, CapabilityBinding> {
             Relation::Manage,
         ),
         binding(
+            Capability::EventsBookingManage,
+            vec![Namespace::Booking],
+            Relation::Manage,
+        ),
+        binding(
             Capability::EventsBookingCreate,
             vec![Namespace::EventSlot],
             Relation::Book,

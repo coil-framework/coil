@@ -264,7 +264,11 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 })?
             } else {
                 let journal_path = import_journal_path(&invocation.manifest_path, &manifest.run_id);
-                let execution = plan.execute(&journal_path).map_err(|error| {
+                let manifest_root = invocation
+                    .manifest_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."));
+                let execution = plan.execute(manifest_root, &journal_path).map_err(|error| {
                     CliRunError::execution(format!(
                         "failed to execute import manifest `{}`: {error}",
                         invocation.manifest_path.display()
@@ -1108,7 +1112,7 @@ mod tests {
     use std::fs;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -1403,6 +1407,129 @@ enabled = ["cms"]
         config_dir.join("platform.toml")
     }
 
+    struct ImportFixture {
+        manifest_path: PathBuf,
+        journal_path: PathBuf,
+    }
+
+    fn write_test_file(path: impl AsRef<Path>, content: &str) {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, content).unwrap();
+    }
+
+    fn import_fixture() -> ImportFixture {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("davenda-cli-import-{suffix}"));
+        let manifest_path = root.join("imports").join("wordpress-events.toml");
+        let journal_path = import_journal_path(
+            &manifest_path,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+
+        write_test_file(
+            root.join("imports").join("fixtures").join("users.json"),
+            r#"[
+  {
+    "source_key": "wp:user:alice",
+    "checksum": "user-alice-v1",
+    "email": "alice@example.com",
+    "username": "alice"
+  }
+]"#,
+        );
+        write_test_file(
+            root.join("imports").join("fixtures").join("media.json"),
+            r#"[
+  {
+    "source_key": "wp:media:hero",
+    "checksum": "media-hero-v1",
+    "title": "Hero",
+    "slug": "hero",
+    "content_type": "image/jpeg",
+    "source_url": "https://legacy.example.com/uploads/hero.jpg"
+  }
+]"#,
+        );
+        write_test_file(
+            root.join("imports").join("fixtures").join("pages.json"),
+            r#"[
+  {
+    "source_key": "wp:post:home",
+    "checksum": "page-home-v1",
+    "title": "Home",
+    "slug": "home",
+    "body_html": "<p>Home</p>",
+    "media_references": ["wp:media:hero"]
+  }
+]"#,
+        );
+        write_test_file(
+            root.join("imports").join("fixtures").join("events.json"),
+            r#"[
+  {
+    "source_key": "wp:event:festival",
+    "checksum": "event-festival-v1",
+    "title": "Festival",
+    "slug": "festival",
+    "starts_at": "2026-06-01T10:00:00Z",
+    "hero_asset_source_key": "wp:media:hero"
+  }
+]"#,
+        );
+        write_test_file(
+            &manifest_path,
+            r#"
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "harbor-shop"
+modules = ["cms", "events", "media"]
+
+[[importers]]
+id = "users"
+phase = 10
+resource_kind = "user"
+description = "Import users"
+source_path = "fixtures/users.json"
+
+[[importers]]
+id = "media"
+phase = 20
+resource_kind = "asset"
+description = "Import media"
+source_path = "fixtures/media.json"
+
+[[importers]]
+id = "pages"
+phase = 30
+resource_kind = "page"
+description = "Import pages"
+source_path = "fixtures/pages.json"
+mapping = { template = "pages/home", page_type = "home" }
+dependencies = ["media"]
+
+[[importers]]
+id = "events"
+phase = 40
+resource_kind = "event"
+description = "Import events"
+source_path = "fixtures/events.json"
+dependencies = ["users", "media"]
+"#,
+        );
+
+        ImportFixture {
+            manifest_path,
+            journal_path,
+        }
+    }
+
     fn customer_app_fixture_with_assets(publish_manifest: bool) -> CustomerAppAssetFixture {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1562,36 +1689,12 @@ enabled = ["cms"]
 
     #[test]
     fn run_from_args_plans_import_runs_from_a_manifest() {
-        let manifest_path = PathBuf::from("/tmp/davenda-cli-import.toml");
-        fs::write(
-            &manifest_path,
-            r#"
-run_id = "wordpress-events"
-source_system = "wordpress"
-snapshot_at = "2026-03-19T00:00:00Z"
-customer_app_id = "harbor-shop"
-modules = ["cms", "events"]
-
-[[importers]]
-id = "users"
-phase = 10
-resource_kind = "user"
-description = "Import users"
-
-[[importers]]
-id = "events"
-phase = 20
-resource_kind = "event"
-description = "Import events"
-dependencies = ["users"]
-"#,
-        )
-        .unwrap();
+        let fixture = import_fixture();
 
         let rendered = run_from_args([
             "import".to_string(),
             "run".to_string(),
-            manifest_path.display().to_string(),
+            fixture.manifest_path.display().to_string(),
             "--dry-run".to_string(),
         ])
         .unwrap();
@@ -1599,56 +1702,31 @@ dependencies = ["users"]
         assert!(rendered.contains("Planned import run `wordpress-events`"));
         assert!(rendered.contains("users"));
         assert!(rendered.contains("events"));
+        assert!(rendered.contains("fixtures/pages.json"));
     }
 
     #[test]
     fn run_from_args_executes_and_resumes_import_runs_from_a_manifest() {
-        let manifest_path = PathBuf::from("/tmp/davenda-cli-import-execute.toml");
-        let journal_path = import_journal_path(
-            &manifest_path,
-            &davenda_import::ImportRunId::new("wordpress-execute").unwrap(),
-        );
-        if journal_path.exists() {
-            fs::remove_file(&journal_path).unwrap();
-        }
-        if let Some(parent) = journal_path.parent() {
-            let _ = fs::remove_dir_all(parent);
-        }
-
-        fs::write(
-            &manifest_path,
-            r#"
-run_id = "wordpress-execute"
-source_system = "wordpress"
-snapshot_at = "2026-03-19T00:00:00Z"
-customer_app_id = "harbor-shop"
-
-[[importers]]
-id = "pages"
-phase = 10
-resource_kind = "page"
-description = "Import pages"
-"#,
-        )
-        .unwrap();
+        let fixture = import_fixture();
 
         let first = run_from_args([
             "import".to_string(),
             "run".to_string(),
-            manifest_path.display().to_string(),
+            fixture.manifest_path.display().to_string(),
         ])
         .unwrap();
-        assert!(first.contains("Executed import run `wordpress-execute`"));
+        assert!(first.contains("Executed import run `wordpress-events`"));
         assert!(first.contains("executed"));
-        assert!(journal_path.is_file());
+        assert!(first.contains("staged"));
+        assert!(fixture.journal_path.is_file());
 
         let second = run_from_args([
             "import".to_string(),
             "run".to_string(),
-            manifest_path.display().to_string(),
+            fixture.manifest_path.display().to_string(),
         ])
         .unwrap();
-        assert!(second.contains("Resumed import run `wordpress-execute`"));
+        assert!(second.contains("Resumed import run `wordpress-events`"));
         assert!(second.contains("skipped_completed"));
     }
 

@@ -1,0 +1,10 @@
+[
+  {
+    "source_key": "wp:user:alice",
+    "checksum": "user-alice-v1",
+    "email": "alice@example.com",
+    "username": "alice",
+    "display_name": "Alice Harbor",
+    "capabilities": ["cms.page.publish", "events.booking.manage"]
+  }
+]

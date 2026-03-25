@@ -14,18 +14,22 @@ id = "users"
 phase = 10
 resource_kind = "user"
 description = "Import users and groups"
+source_path = "fixtures/wordpress-events/users.json"
 
 [[importers]]
 id = "media"
 phase = 20
 resource_kind = "asset"
 description = "Import media and attachments"
+source_path = "fixtures/wordpress-events/media.json"
 
 [[importers]]
 id = "pages"
 phase = 30
 resource_kind = "page"
 description = "Import pages and navigation"
+source_path = "fixtures/wordpress-events/pages.json"
+mapping = { template = "pages/home", page_type = "home" }
 dependencies = ["media"]
 
 [[importers]]
@@ -33,4 +37,5 @@ id = "events"
 phase = 40
 resource_kind = "event"
 description = "Import events and timeslots"
+source_path = "fixtures/wordpress-events/events.json"
 dependencies = ["users", "media"]

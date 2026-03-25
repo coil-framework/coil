@@ -1,0 +1,11 @@
+[
+  {
+    "source_key": "wp:post:home",
+    "checksum": "page-home-v1",
+    "title": "Harbor Shop Home",
+    "slug": "home",
+    "body_html": "<p>Welcome to Harbor Shop.</p>",
+    "canonical_path": "/en-GB/home",
+    "media_references": ["wp:media:hero"]
+  }
+]

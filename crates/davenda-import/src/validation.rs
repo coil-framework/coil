@@ -25,6 +25,44 @@ pub enum ImportModelError {
     ManifestRead { path: String, message: String },
     #[error("failed to parse import manifest: {message}")]
     ManifestParse { message: String },
+    #[error("importer `{importer_id}` is missing a source path")]
+    MissingImporterSourcePath { importer_id: String },
+    #[error("failed to read import source `{path}` for importer `{importer_id}`: {message}")]
+    SourceRead {
+        importer_id: String,
+        path: String,
+        message: String,
+    },
+    #[error("failed to parse import source `{path}` for importer `{importer_id}`: {message}")]
+    SourceParse {
+        importer_id: String,
+        path: String,
+        message: String,
+    },
+    #[error(
+        "import source `{path}` for importer `{importer_id}` must contain a JSON array or an object with a `records` array"
+    )]
+    SourceShape { importer_id: String, path: String },
+    #[error("importer `{importer_id}` has unsupported source format `{source_format}`")]
+    UnsupportedSourceFormat {
+        importer_id: String,
+        source_format: String,
+    },
+    #[error("importer `{importer_id}` has unsupported resource kind `{resource_kind}`")]
+    UnsupportedResourceKind {
+        importer_id: String,
+        resource_kind: String,
+    },
+    #[error(
+        "importer `{importer_id}` record `{record}` is invalid: {message}"
+    )]
+    InvalidSourceRecord {
+        importer_id: String,
+        record: String,
+        message: String,
+    },
+    #[error("failed to persist import artifact `{path}`: {message}")]
+    ArtifactWrite { path: String, message: String },
     #[error("failed to read import journal `{path}`: {message}")]
     JournalRead { path: String, message: String },
     #[error("failed to write import journal `{path}`: {message}")]

@@ -1,11 +1,12 @@
 use std::fs;
 use std::path::Path;
+use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
 use crate::{
-    AssetStorageDefault, ImportManifest, ImportModelError, ImportRunId, ImporterId, ImporterSpec,
-    PublicationMode, SourceSystemId, ValidationMode,
+    AssetStorageDefault, ImportManifest, ImportModelError, ImportRunId, ImportSourceFormat,
+    ImporterId, ImporterSpec, PublicationMode, SourceSystemId, ValidationMode,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -84,6 +85,12 @@ pub struct ImporterDocument {
     pub resource_kind: String,
     pub description: String,
     #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub source_format: DocumentImportSourceFormat,
+    #[serde(default)]
+    pub mapping: BTreeMap<String, String>,
+    #[serde(default)]
     pub dependencies: Vec<String>,
 }
 
@@ -96,6 +103,13 @@ impl ImporterDocument {
             self.description,
         )?;
 
+        if let Some(source_path) = self.source_path {
+            importer = importer.with_source_path(source_path)?;
+        }
+        importer = importer.with_source_format(self.source_format.into());
+        for (key, value) in self.mapping {
+            importer = importer.with_mapping(key, value)?;
+        }
         for dependency in self.dependencies {
             importer = importer.depending_on(ImporterId::new(dependency)?);
         }
@@ -157,6 +171,21 @@ impl From<DocumentAssetStorageDefault> for AssetStorageDefault {
             DocumentAssetStorageDefault::LocalOnlySensitive => {
                 AssetStorageDefault::LocalOnlySensitive
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentImportSourceFormat {
+    #[default]
+    Json,
+}
+
+impl From<DocumentImportSourceFormat> for ImportSourceFormat {
+    fn from(value: DocumentImportSourceFormat) -> Self {
+        match value {
+            DocumentImportSourceFormat::Json => ImportSourceFormat::Json,
         }
     }
 }

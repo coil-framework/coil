@@ -1,0 +1,12 @@
+[
+  {
+    "source_key": "wp:media:hero",
+    "checksum": "media-hero-v1",
+    "title": "Harbor Festival Hero",
+    "slug": "harbor-festival-hero",
+    "content_type": "image/jpeg",
+    "source_url": "https://legacy.example.com/uploads/harbor-festival-hero.jpg",
+    "alt_text": "Crowd gathered at the harbor festival",
+    "folder": "events"
+  }
+]

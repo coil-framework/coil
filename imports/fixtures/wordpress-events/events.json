@@ -1,0 +1,12 @@
+[
+  {
+    "source_key": "wp:event:festival",
+    "checksum": "event-festival-v1",
+    "title": "Harbor Festival",
+    "slug": "harbor-festival",
+    "starts_at": "2026-06-01T10:00:00Z",
+    "ends_at": "2026-06-01T18:00:00Z",
+    "summary": "A waterfront customer event migrated from WordPress.",
+    "hero_asset_source_key": "wp:media:hero"
+  }
+]

@@ -21,12 +21,28 @@ pub enum AssetStorageDefault {
     LocalOnlySensitive,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportSourceFormat {
+    Json,
+}
+
+impl ImportSourceFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Json => "json",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImporterSpec {
     pub id: ImporterId,
     pub phase: u16,
     pub resource_kind: String,
     pub description: String,
+    pub source_path: Option<String>,
+    pub source_format: ImportSourceFormat,
+    pub mapping: BTreeMap<String, String>,
     pub dependencies: Vec<ImporterId>,
 }
 
@@ -42,8 +58,35 @@ impl ImporterSpec {
             phase,
             resource_kind: require_non_empty("resource_kind", resource_kind.into())?,
             description: require_non_empty("importer_description", description.into())?,
+            source_path: None,
+            source_format: ImportSourceFormat::Json,
+            mapping: BTreeMap::new(),
             dependencies: Vec::new(),
         })
+    }
+
+    pub fn with_source_path(
+        mut self,
+        source_path: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        self.source_path = Some(require_non_empty("source_path", source_path.into())?);
+        Ok(self)
+    }
+
+    pub fn with_source_format(mut self, source_format: ImportSourceFormat) -> Self {
+        self.source_format = source_format;
+        self
+    }
+
+    pub fn with_mapping(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        let key = validate_token("mapping_key", key.into())?;
+        let value = require_non_empty("mapping_value", value.into())?;
+        self.mapping.insert(key, value);
+        Ok(self)
     }
 
     pub fn depending_on(mut self, dependency: ImporterId) -> Self {
@@ -221,7 +264,13 @@ impl ImportManifest {
 
         Ok(ImportPlan {
             run_id: self.run_id.clone(),
+            source_system: self.source_system.clone(),
             customer_app_id: self.customer_app_id.clone(),
+            locale: self.locale.clone(),
+            site: self.site.clone(),
+            validation_mode: self.validation_mode,
+            publication_mode: self.publication_mode,
+            asset_storage_default: self.asset_storage_default,
             ordered_importers: ordered,
         })
     }
@@ -230,41 +279,23 @@ impl ImportManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportPlan {
     pub run_id: ImportRunId,
+    pub source_system: SourceSystemId,
     pub customer_app_id: String,
+    pub locale: Option<String>,
+    pub site: Option<String>,
+    pub validation_mode: ValidationMode,
+    pub publication_mode: PublicationMode,
+    pub asset_storage_default: AssetStorageDefault,
     pub ordered_importers: Vec<ImporterSpec>,
 }
 
 impl ImportPlan {
-    pub fn execute(&self, journal_path: impl AsRef<Path>) -> Result<ImportExecution, ImportModelError> {
-        let journal_path = journal_path.as_ref();
-        let mut journal = ImportJournal::load(journal_path, &self.run_id, &self.customer_app_id)?;
-        let mut importer_records = Vec::with_capacity(self.ordered_importers.len());
-
-        for importer in &self.ordered_importers {
-            let status = if journal.contains(&importer.id) {
-                ImporterExecutionStatus::SkippedCompleted
-            } else {
-                journal.mark_completed(&importer.id);
-                journal.save(journal_path)?;
-                ImporterExecutionStatus::Executed
-            };
-
-            importer_records.push(ImporterExecutionRecord {
-                importer_id: importer.id.to_string(),
-                phase: importer.phase,
-                resource_kind: importer.resource_kind.clone(),
-                description: importer.description.clone(),
-                batch_id: format!("{}:{}", self.run_id, importer.id),
-                status,
-            });
-        }
-
-        Ok(ImportExecution {
-            run_id: self.run_id.clone(),
-            customer_app_id: self.customer_app_id.clone(),
-            journal_path: journal_path.display().to_string(),
-            importer_records,
-        })
+    pub fn execute(
+        &self,
+        manifest_root: impl AsRef<Path>,
+        journal_path: impl AsRef<Path>,
+    ) -> Result<ImportExecution, ImportModelError> {
+        super::execute_import_plan(self, manifest_root.as_ref(), journal_path.as_ref())
     }
 
     pub fn command_report(&self) -> Result<CommandReport, ImportModelError> {
@@ -279,6 +310,7 @@ impl ImportPlan {
             "phase",
             "importer",
             "resource_kind",
+            "source",
             "dependencies",
             "description",
         ])?;
@@ -289,6 +321,13 @@ impl ImportPlan {
                     .with_cell("phase", importer.phase.to_string())?
                     .with_cell("importer", importer.id.to_string())?
                     .with_cell("resource_kind", importer.resource_kind.clone())?
+                    .with_cell(
+                        "source",
+                        importer
+                            .source_path
+                            .clone()
+                            .unwrap_or_else(|| "missing".to_string()),
+                    )?
                     .with_cell(
                         "dependencies",
                         if importer.dependencies.is_empty() {

@@ -293,6 +293,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut observe_cutover = false;
     let mut rollback_cutover = false;
     let mut cutover_base_url: Option<String> = None;
+    let mut cutover_dns_zone_id: Option<String> = None;
+    let mut cutover_dns_target: Option<String> = None;
     let mut cutover_reason: Option<String> = None;
     let mut legacy_freeze_confirmed = false;
     let mut verify_policy = false;
@@ -325,6 +327,12 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--rollback" => rollback_cutover = true,
             "--base-url" => {
                 cutover_base_url = Some(next_value(&mut iter, "--base-url")?);
+            }
+            "--dns-zone-id" => {
+                cutover_dns_zone_id = Some(next_value(&mut iter, "--dns-zone-id")?);
+            }
+            "--dns-target" => {
+                cutover_dns_target = Some(next_value(&mut iter, "--dns-target")?);
             }
             "--reason" => {
                 cutover_reason = Some(next_value(&mut iter, "--reason")?);
@@ -957,6 +965,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     observe: observe_cutover,
                     rollback: rollback_cutover,
                     base_url: cutover_base_url,
+                    dns_zone_id: cutover_dns_zone_id,
+                    dns_target: cutover_dns_target,
                     reason: cutover_reason,
                     confirmed,
                     legacy_freeze_confirmed,
@@ -1505,6 +1515,8 @@ mod tests {
         assert!(!invocation.observe);
         assert!(!invocation.rollback);
         assert_eq!(invocation.base_url, None);
+        assert_eq!(invocation.dns_zone_id, None);
+        assert_eq!(invocation.dns_target, None);
         assert_eq!(invocation.reason, None);
     }
 
@@ -1542,12 +1554,57 @@ mod tests {
             invocation.base_url.as_deref(),
             Some("https://shop.example.com")
         );
+        assert_eq!(invocation.dns_zone_id, None);
+        assert_eq!(invocation.dns_target, None);
         assert_eq!(invocation.reason, None);
         assert!(invocation.confirmed);
     }
 
     #[test]
     fn parse_import_cutover_accepts_switch_and_rollback_inputs() {
+        let input = parse([
+            "import".to_string(),
+            "cutover".to_string(),
+            "imports/wordpress-events.toml".to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            "https://shop.example.com".to_string(),
+            "--dns-zone-id".to_string(),
+            "zone-123".to_string(),
+            "--dns-target".to_string(),
+            "davenda-origin.example.net".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ImportCutover {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected import cutover input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Human);
+        assert!(!invocation.apply);
+        assert!(invocation.switch);
+        assert!(!invocation.observe);
+        assert!(!invocation.rollback);
+        assert_eq!(
+            invocation.base_url.as_deref(),
+            Some("https://shop.example.com")
+        );
+        assert_eq!(invocation.dns_zone_id.as_deref(), Some("zone-123"));
+        assert_eq!(
+            invocation.dns_target.as_deref(),
+            Some("davenda-origin.example.net")
+        );
+        assert_eq!(invocation.reason, None);
+        assert!(invocation.confirmed);
+    }
+
+    #[test]
+    fn parse_import_cutover_accepts_rollback_inputs() {
         let input = parse([
             "import".to_string(),
             "cutover".to_string(),
@@ -1578,6 +1635,8 @@ mod tests {
             invocation.base_url.as_deref(),
             Some("https://shop.example.com")
         );
+        assert_eq!(invocation.dns_zone_id, None);
+        assert_eq!(invocation.dns_target, None);
         assert_eq!(invocation.reason.as_deref(), Some("auth failure"));
         assert!(invocation.confirmed);
     }

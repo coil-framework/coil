@@ -310,6 +310,79 @@ impl CutoverStepRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CutoverDnsRecordChange {
+    pub hostname: String,
+    pub zone_id: String,
+    pub record_id: String,
+    pub record_type: String,
+    pub previous_content: String,
+    #[serde(default)]
+    pub previous_proxied: Option<bool>,
+    pub current_content: String,
+    #[serde(default)]
+    pub current_proxied: Option<bool>,
+}
+
+impl CutoverDnsRecordChange {
+    pub fn new(
+        hostname: impl Into<String>,
+        zone_id: impl Into<String>,
+        record_id: impl Into<String>,
+        record_type: impl Into<String>,
+        previous_content: impl Into<String>,
+        current_content: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            hostname: require_non_empty("cutover_dns_hostname", hostname.into())?,
+            zone_id: require_non_empty("cutover_dns_zone_id", zone_id.into())?,
+            record_id: require_non_empty("cutover_dns_record_id", record_id.into())?,
+            record_type: require_non_empty("cutover_dns_record_type", record_type.into())?,
+            previous_content: require_non_empty(
+                "cutover_dns_previous_content",
+                previous_content.into(),
+            )?,
+            previous_proxied: None,
+            current_content: require_non_empty(
+                "cutover_dns_current_content",
+                current_content.into(),
+            )?,
+            current_proxied: None,
+        })
+    }
+
+    pub fn with_previous_proxied(mut self, proxied: Option<bool>) -> Self {
+        self.previous_proxied = proxied;
+        self
+    }
+
+    pub fn with_current_proxied(mut self, proxied: Option<bool>) -> Self {
+        self.current_proxied = proxied;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CutoverSwitchExecution {
+    pub method: String,
+    #[serde(default)]
+    pub dns_records: Vec<CutoverDnsRecordChange>,
+}
+
+impl CutoverSwitchExecution {
+    pub fn new(method: impl Into<String>) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            method: validate_token("cutover_switch_method", method.into())?,
+            dns_records: Vec::new(),
+        })
+    }
+
+    pub fn with_dns_record(mut self, record: CutoverDnsRecordChange) -> Self {
+        self.dns_records.push(record);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CutoverExecutionJournal {
     run_id: String,
     customer_app_id: String,
@@ -329,6 +402,8 @@ pub struct CutoverExecutionJournal {
     #[serde(default)]
     pub rollback_reason: Option<String>,
     #[serde(default)]
+    pub switch_execution: Option<CutoverSwitchExecution>,
+    #[serde(default)]
     pub steps: Vec<CutoverStepRecord>,
 }
 
@@ -345,6 +420,7 @@ impl CutoverExecutionJournal {
             last_probe_at_unix_seconds: None,
             last_probe_failures: Vec::new(),
             rollback_reason: None,
+            switch_execution: None,
             steps,
         }
     }
@@ -456,6 +532,10 @@ impl CutoverExecutionJournal {
 
     pub fn mark_prepared(&mut self) {
         self.state = CutoverExecutionState::Prepared;
+    }
+
+    pub fn record_switch_execution(&mut self, execution: CutoverSwitchExecution) {
+        self.switch_execution = Some(execution);
     }
 
     pub fn confirm_switch(&mut self, base_url: impl Into<String>, at_unix_seconds: u64) {

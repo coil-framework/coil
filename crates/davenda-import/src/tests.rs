@@ -1172,3 +1172,41 @@ fn cutover_execution_journal_records_rolled_back_state() {
         ReportStatus::Warning
     );
 }
+
+#[test]
+fn cutover_execution_journal_persists_switch_execution_metadata() {
+    let run_id = ImportRunId::new("wordpress-cutover").unwrap();
+    let mut journal = CutoverExecutionJournal::new(
+        &run_id,
+        "harbor-shop",
+        vec![CutoverStepRecord::new("switch.confirmed", "Switch").unwrap()],
+    );
+
+    journal.record_switch_execution(
+        CutoverSwitchExecution::new("dns")
+            .unwrap()
+            .with_dns_record(
+                CutoverDnsRecordChange::new(
+                    "shop.example.com",
+                    "zone-123",
+                    "record-123",
+                    "CNAME",
+                    "legacy-origin.example.net",
+                    "davenda-origin.example.net",
+                )
+                .unwrap()
+                .with_previous_proxied(Some(false))
+                .with_current_proxied(Some(true)),
+            ),
+    );
+
+    let stored = journal
+        .switch_execution
+        .as_ref()
+        .expect("switch execution is persisted");
+    assert_eq!(stored.method, "dns");
+    assert_eq!(stored.dns_records.len(), 1);
+    assert_eq!(stored.dns_records[0].hostname, "shop.example.com");
+    assert_eq!(stored.dns_records[0].previous_content, "legacy-origin.example.net");
+    assert_eq!(stored.dns_records[0].current_content, "davenda-origin.example.net");
+}

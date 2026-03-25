@@ -33,8 +33,9 @@ use davenda_data::{
     PostgresDataClient,
 };
 use davenda_import::{
-    CutoverCheck, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord, ImportManifest,
-    ImportModelError, PublicationMode, RollbackTrigger,
+    CutoverCheck, CutoverDnsRecordChange, CutoverExecutionJournal, CutoverPlan,
+    CutoverStepRecord, CutoverSwitchExecution, ImportManifest, ImportModelError,
+    PublicationMode, RollbackTrigger,
 };
 use davenda_jobs::JobInstant;
 use davenda_memberships::{
@@ -43,16 +44,17 @@ use davenda_memberships::{
 };
 use davenda_runtime::{
     CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod, RequestInput,
-    RuntimeBuilder, StorageHost,
+    RuntimeBuilder, SecretResolver, StorageHost,
 };
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
-use davenda_tls::{CertificateId, TlsInstant};
+use davenda_tls::{CertificateId, CertificateStatus, TlsInstant};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Url;
 use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::redirect::Policy as RedirectPolicy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -455,7 +457,7 @@ fn usage() -> String {
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
         "  platform import cutover <manifest-path> [--apply] [--yes] [--legacy-freeze-confirmed] [--json]",
-        "  platform import cutover <manifest-path> --switch --base-url <url> --yes [--json]",
+        "  platform import cutover <manifest-path> --switch --base-url <url> --dns-zone-id <zone> --dns-target <hostname> --yes [--json]",
         "  platform import cutover <manifest-path> --observe --base-url <url> --yes [--json]",
         "  platform import cutover <manifest-path> --rollback --base-url <url> --reason <text> --yes [--json]",
         "",
@@ -492,7 +494,7 @@ fn usage() -> String {
         "  platform import run imports/wordpress-events.toml --dry-run",
         "  platform import cutover imports/wordpress-events.toml",
         "  platform import cutover imports/wordpress-events.toml --apply --yes --legacy-freeze-confirmed",
-        "  platform import cutover imports/wordpress-events.toml --switch --base-url https://shop.example.com --yes",
+        "  platform import cutover imports/wordpress-events.toml --switch --base-url https://shop.example.com --dns-zone-id zone_123 --dns-target davenda-origin.example.net --yes",
         "  platform import cutover imports/wordpress-events.toml --observe --base-url https://shop.example.com --yes",
         "  platform import cutover imports/wordpress-events.toml --rollback --base-url https://shop.example.com --reason \"systemic auth failure\" --yes",
         "",
@@ -3759,6 +3761,66 @@ struct EvaluatedImportCutover {
     report: CommandReport,
 }
 
+const CLOUDFLARE_API_BASE_URL_ENV: &str = "DAVENDA_CLOUDFLARE_API_BASE_URL";
+const CUTOVER_CLOUDFLARE_SECRET_ENV: &str = "DAVENDA_CUTOVER_CLOUDFLARE_SECRET";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CloudflareDnsSwitchRequest {
+    zone_id: String,
+    target: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CloudflareSecretPayload {
+    cloudflare_api_token: Option<String>,
+    cloudflare_service_key: Option<String>,
+    cloudflare_email: Option<String>,
+    cloudflare_api_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CloudflareCredentials {
+    raw: String,
+    payload: CloudflareSecretPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct CloudflareError {
+    #[serde(default)]
+    code: Option<u64>,
+    message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CloudflareResponseEnvelope<T> {
+    success: bool,
+    #[serde(default)]
+    errors: Vec<CloudflareError>,
+    result: T,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct CloudflareDnsRecord {
+    id: String,
+    name: String,
+    #[serde(rename = "type")]
+    record_type: String,
+    content: String,
+    #[serde(default)]
+    proxied: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CloudflareDnsRecordUpdate<'a> {
+    #[serde(rename = "type")]
+    record_type: &'a str,
+    name: &'a str,
+    content: &'a str,
+    ttl: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxied: Option<bool>,
+}
+
 fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandReport, CliRunError> {
     let evaluated = evaluate_import_cutover(invocation)?;
     let actions = [
@@ -4027,14 +4089,17 @@ fn switch_import_cutover(
         }
     }
 
+    let switch_execution = execute_cutover_switch(invocation, evaluated)?;
+    let switch_detail = render_cutover_switch_detail(&switch_execution, base_url);
     let switched_at = unix_timestamp_now()?;
     run_cutover_step(
         &mut journal,
         &journal_path,
         &evaluated.manifest.run_id,
         "switch.confirmed",
-        || Ok(format!("operator confirmed live switch to `{base_url}`")),
+        || Ok(switch_detail.clone()),
     )?;
+    journal.record_switch_execution(switch_execution.clone());
     journal.confirm_switch(base_url.clone(), switched_at);
     save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
 
@@ -4045,14 +4110,14 @@ fn switch_import_cutover(
         ))
     })?;
     report.summary = format!(
-        "Cutover switch for import run `{}` is confirmed against `{}`",
+        "Cutover switch for import run `{}` executed against `{}`",
         evaluated.manifest.run_id, base_url
     );
     push_report_diagnostic(
         &mut report,
         DiagnosticSeverity::Info,
         "cutover.switch",
-        format!("live switch confirmed against `{base_url}`"),
+        render_cutover_switch_detail(&switch_execution, base_url),
     )?;
     push_report_diagnostic(
         &mut report,
@@ -4061,6 +4126,384 @@ fn switch_import_cutover(
         format!("cutover journal persisted at `{}`", journal_path.display()),
     )?;
     Ok(report)
+}
+
+fn execute_cutover_switch(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CutoverSwitchExecution, CliRunError> {
+    match evaluated.cutover.switch_method.as_deref() {
+        Some("dns") => execute_dns_cutover_switch(invocation, evaluated),
+        Some(other) => Err(CliRunError::execution(format!(
+            "cutover switch method `{other}` is declared but not yet executable; use `dns` for provider-managed switch execution"
+        ))),
+        None => Err(CliRunError::execution(
+            "cutover manifest does not declare a switch method".to_string(),
+        )),
+    }
+}
+
+fn execute_dns_cutover_switch(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CutoverSwitchExecution, CliRunError> {
+    validate_cutover_dns_hostnames(evaluated)?;
+    validate_cutover_tls_readiness(evaluated)?;
+    let request = resolve_dns_switch_request(invocation)?;
+    let credentials = resolve_cloudflare_credentials(&evaluated.runtime.built)?;
+    let client = build_cutover_provider_client("Cloudflare DNS switch")?;
+
+    let mut execution = CutoverSwitchExecution::new("dns").map_err(import_model_error)?;
+    for hostname in &evaluated.cutover.hostnames {
+        let record = fetch_cloudflare_cname_record(&client, &credentials, &request.zone_id, hostname)?;
+        let updated = update_cloudflare_cname_record(
+            &client,
+            &credentials,
+            &request.zone_id,
+            &record.id,
+            hostname,
+            &request.target,
+            record.proxied,
+        )?;
+        execution = execution.with_dns_record(
+            CutoverDnsRecordChange::new(
+                hostname.clone(),
+                request.zone_id.clone(),
+                record.id.clone(),
+                record.record_type,
+                record.content,
+                updated.content,
+            )
+            .map_err(import_model_error)?
+            .with_previous_proxied(record.proxied)
+            .with_current_proxied(updated.proxied),
+        );
+    }
+
+    Ok(execution)
+}
+
+fn render_cutover_switch_detail(execution: &CutoverSwitchExecution, base_url: &str) -> String {
+    match execution.method.as_str() {
+        "dns" => format!(
+            "live DNS switch executed for {} hostname(s) and observation will target `{base_url}`",
+            execution.dns_records.len()
+        ),
+        _ => format!("live switch executed against `{base_url}`"),
+    }
+}
+
+fn validate_cutover_dns_hostnames(evaluated: &EvaluatedImportCutover) -> Result<(), CliRunError> {
+    if evaluated.cutover.hostnames.is_empty() {
+        return Err(CliRunError::execution(
+            "cutover DNS switch requires at least one hostname".to_string(),
+        ));
+    }
+
+    let declared = evaluated
+        .runtime
+        .built
+        .manifest
+        .domains
+        .iter()
+        .map(|domain| domain.hostname.as_str())
+        .collect::<BTreeSet<_>>();
+    let undeclared = evaluated
+        .cutover
+        .hostnames
+        .iter()
+        .filter(|hostname| !declared.contains(hostname.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !undeclared.is_empty() {
+        return Err(CliRunError::execution(format!(
+            "cutover hostnames must belong to the target customer app domains; undeclared hostnames: {}",
+            undeclared.join(", ")
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_cutover_tls_readiness(evaluated: &EvaluatedImportCutover) -> Result<(), CliRunError> {
+    if evaluated.runtime.built.runtime_plan.runtime.config.tls.mode == davenda_config::TlsMode::External {
+        return Ok(());
+    }
+
+    let host = evaluated
+        .runtime
+        .built
+        .runtime_plan
+        .runtime
+        .tls_host()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to evaluate TLS readiness for cutover `{}`: {error}",
+                evaluated.manifest.run_id
+            ))
+        })?;
+    let snapshot = host.status();
+    let ready = snapshot
+        .inventory
+        .certificates()
+        .iter()
+        .filter(|record| record.status == CertificateStatus::Active)
+        .flat_map(|record| record.bindings.iter().map(|binding| binding.hostname.to_string()))
+        .collect::<BTreeSet<_>>();
+    let missing = evaluated
+        .cutover
+        .hostnames
+        .iter()
+        .filter(|hostname| !ready.contains(hostname.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(CliRunError::execution(format!(
+            "cutover hostnames do not have active managed TLS coverage yet: {}",
+            missing.join(", ")
+        )));
+    }
+
+    Ok(())
+}
+
+fn resolve_dns_switch_request(
+    invocation: &ImportCutoverInvocation,
+) -> Result<CloudflareDnsSwitchRequest, CliRunError> {
+    let zone_id = invocation.dns_zone_id.as_ref().ok_or_else(|| {
+        CliRunError::usage("`import cutover --switch` with `switch_method = \"dns\"` requires `--dns-zone-id <zone>`")
+    })?;
+    let target = invocation.dns_target.as_ref().ok_or_else(|| {
+        CliRunError::usage("`import cutover --switch` with `switch_method = \"dns\"` requires `--dns-target <hostname>`")
+    })?;
+    if target.contains("://") || target.contains('/') {
+        return Err(CliRunError::usage(
+            "`--dns-target` must be a hostname, not a URL or path",
+        ));
+    }
+
+    Ok(CloudflareDnsSwitchRequest {
+        zone_id: zone_id.trim().to_string(),
+        target: target.trim().trim_end_matches('.').to_string(),
+    })
+}
+
+impl CloudflareCredentials {
+    fn from_secret(secret: impl Into<String>) -> Self {
+        let raw = secret.into();
+        let payload = serde_json::from_str::<CloudflareSecretPayload>(&raw).unwrap_or_default();
+        Self { raw, payload }
+    }
+
+    fn headers(&self) -> Result<HeaderMap, CliRunError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        if let Some(token) = self
+            .payload
+            .cloudflare_api_token
+            .as_deref()
+            .or_else(|| {
+                (!self.raw.trim().is_empty()
+                    && !self.raw.trim_start().starts_with('{'))
+                .then_some(self.raw.as_str())
+            })
+        {
+            let auth = format!("Bearer {token}");
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&auth).map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to build Cloudflare authorization header: {error}"
+                    ))
+                })?,
+            );
+            return Ok(headers);
+        }
+
+        if let Some(service_key) = self.payload.cloudflare_service_key.as_deref() {
+            headers.insert(
+                HeaderName::from_static("x-auth-user-service-key"),
+                HeaderValue::from_str(service_key).map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to build Cloudflare service key header: {error}"
+                    ))
+                })?,
+            );
+            return Ok(headers);
+        }
+
+        if let (Some(email), Some(api_key)) = (
+            self.payload.cloudflare_email.as_deref(),
+            self.payload.cloudflare_api_key.as_deref(),
+        ) {
+            headers.insert(
+                HeaderName::from_static("x-auth-email"),
+                HeaderValue::from_str(email).map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to build Cloudflare email header: {error}"
+                    ))
+                })?,
+            );
+            headers.insert(
+                HeaderName::from_static("x-auth-key"),
+                HeaderValue::from_str(api_key).map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to build Cloudflare API key header: {error}"
+                    ))
+                })?,
+            );
+            return Ok(headers);
+        }
+
+        Err(CliRunError::execution(
+            "Cloudflare DNS switch requires API credentials from `tls.account_secret` or `DAVENDA_CUTOVER_CLOUDFLARE_SECRET`".to_string(),
+        ))
+    }
+}
+
+fn resolve_cloudflare_credentials(
+    built: &BuiltCustomerAppContext,
+) -> Result<CloudflareCredentials, CliRunError> {
+    if let Some(secret) = built.runtime_plan.runtime.config.tls.account_secret.as_ref() {
+        if let Ok(value) = EnvironmentSecretResolver.resolve(secret) {
+            return Ok(CloudflareCredentials::from_secret(value));
+        }
+    }
+
+    let fallback = std::env::var(CUTOVER_CLOUDFLARE_SECRET_ENV).map_err(|_| {
+        CliRunError::execution(format!(
+            "Cloudflare DNS switch requires `tls.account_secret` or `{CUTOVER_CLOUDFLARE_SECRET_ENV}`"
+        ))
+    })?;
+    Ok(CloudflareCredentials::from_secret(fallback))
+}
+
+fn build_cutover_provider_client(label: &str) -> Result<BlockingHttpClient, CliRunError> {
+    BlockingHttpClient::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build HTTP client for {label}: {error}"
+            ))
+        })
+}
+
+fn cloudflare_api_base_url() -> String {
+    std::env::var(CLOUDFLARE_API_BASE_URL_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "https://api.cloudflare.com/client/v4".to_string())
+}
+
+fn fetch_cloudflare_cname_record(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    hostname: &str,
+) -> Result<CloudflareDnsRecord, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/dns_records",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .get(url)
+        .headers(credentials.headers()?)
+        .query(&[("type", "CNAME"), ("name", hostname), ("per_page", "5")])
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to query Cloudflare DNS record for `{hostname}` in zone `{zone_id}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<Vec<CloudflareDnsRecord>>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare DNS lookup response for `{hostname}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare DNS lookup for `{hostname}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    let matches = envelope
+        .result
+        .into_iter()
+        .filter(|record| record.name == hostname)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [record] => Ok(record.clone()),
+        [] => Err(CliRunError::execution(format!(
+            "Cloudflare DNS switch requires an existing CNAME record for `{hostname}` in zone `{zone_id}`"
+        ))),
+        _ => Err(CliRunError::execution(format!(
+            "Cloudflare DNS switch found multiple CNAME records for `{hostname}` in zone `{zone_id}`"
+        ))),
+    }
+}
+
+fn update_cloudflare_cname_record(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    record_id: &str,
+    hostname: &str,
+    target: &str,
+    proxied: Option<bool>,
+) -> Result<CloudflareDnsRecord, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/dns_records/{record_id}",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .put(url)
+        .headers(credentials.headers()?)
+        .json(&CloudflareDnsRecordUpdate {
+            record_type: "CNAME",
+            name: hostname,
+            content: target,
+            ttl: 1,
+            proxied,
+        })
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to update Cloudflare DNS record `{record_id}` for `{hostname}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<CloudflareDnsRecord>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare DNS update response for `{hostname}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare DNS update for `{hostname}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    Ok(envelope.result)
+}
+
+fn render_cloudflare_errors(errors: &[CloudflareError]) -> String {
+    if errors.is_empty() {
+        "unknown Cloudflare error".to_string()
+    } else {
+        errors
+            .iter()
+            .map(|error| match error.code {
+                Some(code) => format!("{code}: {}", error.message),
+                None => error.message.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4311,17 +4754,14 @@ fn rollback_import_cutover(
         }
     }
 
+    let rollback_detail = restore_cutover_switch(&journal, &evaluated.runtime.built)?;
     let rolled_back_at = unix_timestamp_now()?;
     run_cutover_step(
         &mut journal,
         &journal_path,
         &evaluated.manifest.run_id,
         "rollback.executed",
-        || {
-            Ok(format!(
-                "operator rolled traffic back from `{base_url}`: {reason}"
-            ))
-        },
+        || Ok(format!("{rollback_detail}; rollback reason: {reason}")),
     )?;
     journal
         .mark_rolled_back(base_url.clone(), rolled_back_at, reason.clone())
@@ -4335,14 +4775,14 @@ fn rollback_import_cutover(
         ))
     })?;
     report.summary = format!(
-        "Cutover rollback for import run `{}` is recorded against `{}`",
+        "Cutover rollback for import run `{}` executed against `{}`",
         evaluated.manifest.run_id, base_url
     );
     push_report_diagnostic(
         &mut report,
         DiagnosticSeverity::Warning,
         "cutover.rollback",
-        format!("rollback confirmed for `{base_url}`: {reason}"),
+        format!("{rollback_detail}; rollback confirmed for `{base_url}`: {reason}"),
     )?;
     push_report_diagnostic(
         &mut report,
@@ -4351,6 +4791,41 @@ fn rollback_import_cutover(
         format!("cutover journal persisted at `{}`", journal_path.display()),
     )?;
     Ok(report)
+}
+
+fn restore_cutover_switch(
+    journal: &CutoverExecutionJournal,
+    built: &BuiltCustomerAppContext,
+) -> Result<String, CliRunError> {
+    let Some(execution) = journal.switch_execution.as_ref() else {
+        return Ok("no provider-managed switch state was recorded; rollback remained operator-owned"
+            .to_string());
+    };
+
+    match execution.method.as_str() {
+        "dns" => {
+            let credentials = resolve_cloudflare_credentials(built)?;
+            let client = build_cutover_provider_client("Cloudflare DNS rollback")?;
+            for record in &execution.dns_records {
+                update_cloudflare_cname_record(
+                    &client,
+                    &credentials,
+                    &record.zone_id,
+                    &record.record_id,
+                    &record.hostname,
+                    &record.previous_content,
+                    record.previous_proxied,
+                )?;
+            }
+            Ok(format!(
+                "restored {} DNS hostname(s) to their pre-cutover targets",
+                execution.dns_records.len()
+            ))
+        }
+        other => Err(CliRunError::execution(format!(
+            "cutover rollback does not yet know how to restore switch method `{other}`"
+        ))),
+    }
 }
 
 fn evaluate_import_cutover(
@@ -7331,6 +7806,128 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    struct CloudflareTestRecord {
+        id: String,
+        name: String,
+        #[serde(rename = "type")]
+        record_type: String,
+        content: String,
+        #[serde(default)]
+        proxied: Option<bool>,
+    }
+
+    impl CloudflareTestRecord {
+        fn cname(
+            id: impl Into<String>,
+            name: impl Into<String>,
+            content: impl Into<String>,
+        ) -> Self {
+            Self {
+                id: id.into(),
+                name: name.into(),
+                record_type: "CNAME".to_string(),
+                content: content.into(),
+                proxied: Some(false),
+            }
+        }
+    }
+
+    struct CloudflareTestServer {
+        base_url: String,
+        zone_id: String,
+        stop: Arc<AtomicBool>,
+        records: Arc<Mutex<BTreeMap<String, CloudflareTestRecord>>>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl CloudflareTestServer {
+        fn spawn(zone_id: impl Into<String>, records: Vec<CloudflareTestRecord>) -> Self {
+            let zone_id = zone_id.into();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let stop = Arc::new(AtomicBool::new(false));
+            let records = Arc::new(Mutex::new(
+                records
+                    .into_iter()
+                    .map(|record| (record.name.clone(), record))
+                    .collect::<BTreeMap<_, _>>(),
+            ));
+            let stop_thread = Arc::clone(&stop);
+            let records_thread = Arc::clone(&records);
+            let zone_id_thread = zone_id.clone();
+            let handle = thread::spawn(move || {
+                loop {
+                    if stop_thread.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    match listener.accept() {
+                        Ok((stream, _)) => handle_cloudflare_test_request(
+                            stream,
+                            &zone_id_thread,
+                            &records_thread,
+                        ),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("cloudflare test server failed: {error}"),
+                    }
+                }
+            });
+
+            Self {
+                base_url,
+                zone_id,
+                stop,
+                records,
+                handle: Some(handle),
+            }
+        }
+
+        fn base_url(&self) -> &str {
+            &self.base_url
+        }
+
+        fn zone_id(&self) -> &str {
+            &self.zone_id
+        }
+
+        fn record(&self, hostname: &str) -> CloudflareTestRecord {
+            self.records.lock().unwrap().get(hostname).cloned().unwrap()
+        }
+    }
+
+    impl Drop for CloudflareTestServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    struct DnsCutoverTestContext {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        server: CloudflareTestServer,
+        secret_env_var: String,
+        dns_target: String,
+    }
+
+    impl Drop for DnsCutoverTestContext {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var(CLOUDFLARE_API_BASE_URL_ENV);
+                std::env::remove_var(&self.secret_env_var);
+            }
+        }
+    }
+
+    fn cloudflare_test_lock() -> &'static Mutex<()> {
+        static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
     struct CustomerAppAssetFixture {
         config_path: PathBuf,
         _server: ObjectStoreTestServer,
@@ -7410,6 +8007,107 @@ mod tests {
         if !response_body.is_empty() {
             stream.write_all(&response_body).unwrap();
         }
+    }
+
+    fn handle_cloudflare_test_request(
+        mut stream: std::net::TcpStream,
+        expected_zone_id: &str,
+        records: &Arc<Mutex<BTreeMap<String, CloudflareTestRecord>>>,
+    ) {
+        stream.set_nonblocking(false).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or("");
+        let request_target = parts.next().unwrap_or("/");
+        let (path, query) = match request_target.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (request_target, None),
+        };
+
+        let mut content_length = 0usize;
+        loop {
+            let mut header = String::new();
+            reader.read_line(&mut header).unwrap();
+            let trimmed = header.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = trimmed.split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().unwrap_or(0);
+                }
+            }
+        }
+
+        let mut body = vec![0_u8; content_length];
+        if content_length > 0 {
+            reader.read_exact(&mut body).unwrap();
+        }
+
+        let response_body = match (method, path) {
+            ("GET", get_path) if get_path == format!("/zones/{expected_zone_id}/dns_records") => {
+                let hostname = query
+                    .and_then(|value| {
+                        value.split('&').find_map(|pair| {
+                            let (name, value) = pair.split_once('=')?;
+                            (name == "name").then_some(value)
+                        })
+                    })
+                    .unwrap_or_default();
+                let result = records
+                    .lock()
+                    .unwrap()
+                    .get(hostname)
+                    .cloned()
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "success": true,
+                    "errors": [],
+                    "result": result,
+                })
+                .to_string()
+                .into_bytes()
+            }
+            ("PUT", put_path)
+                if put_path.starts_with(&format!("/zones/{expected_zone_id}/dns_records/")) =>
+            {
+                let record_id = put_path
+                    .trim_start_matches(&format!("/zones/{expected_zone_id}/dns_records/"));
+                let update: Value = serde_json::from_slice(&body).unwrap();
+                let hostname = update["name"].as_str().unwrap();
+                let content = update["content"].as_str().unwrap();
+                let proxied = update.get("proxied").and_then(Value::as_bool);
+                let mut guard = records.lock().unwrap();
+                let record = guard.get_mut(hostname).unwrap();
+                assert_eq!(record.id, record_id);
+                record.content = content.to_string();
+                record.proxied = proxied;
+                serde_json::json!({
+                    "success": true,
+                    "errors": [],
+                    "result": record.clone(),
+                })
+                .to_string()
+                .into_bytes()
+            }
+            _ => serde_json::json!({
+                "success": false,
+                "errors": [{ "message": "unsupported request" }],
+                "result": Value::Null,
+            })
+            .to_string()
+            .into_bytes(),
+        };
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            response_body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+        stream.write_all(&response_body).unwrap();
     }
 
     fn handle_live_probe_request(
@@ -7670,6 +8368,41 @@ enabled = ["cms"]
         }
     }
 
+    fn configure_dns_cutover_for_import_fixture(
+        _fixture: &ImportFixture,
+    ) -> DnsCutoverTestContext {
+        let lock = cloudflare_test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dns_target = "davenda-origin.example.net".to_string();
+        let server = CloudflareTestServer::spawn(
+            format!("zone-{suffix}"),
+            vec![CloudflareTestRecord::cname(
+                format!("record-{suffix}"),
+                "shop.example.com",
+                "legacy-origin.example.net",
+            )],
+        );
+        unsafe {
+            std::env::set_var(
+                CUTOVER_CLOUDFLARE_SECRET_ENV,
+                r#"{"cloudflare_api_token":"test-cloudflare-token"}"#,
+            );
+            std::env::set_var(CLOUDFLARE_API_BASE_URL_ENV, server.base_url());
+        }
+
+        DnsCutoverTestContext {
+            _lock: lock,
+            server,
+            secret_env_var: CUTOVER_CLOUDFLARE_SECRET_ENV.to_string(),
+            dns_target,
+        }
+    }
+
     fn write_test_file(path: impl AsRef<Path>, content: &str) {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -7709,6 +8442,7 @@ enabled = ["cms"]
         fs::create_dir_all(&templates_root).unwrap();
         let config = DISABLED_EXPLAIN_CONFIG
             .replace("environment = \"production\"", "environment = \"development\"")
+            .replace("canonical_host = \"example.com\"", "canonical_host = \"shop.example.com\"")
             .replace("enabled = [\"cms\"]", "enabled = [\"cms\", \"media\", \"events\"]")
             .replace(
                 "[assets]\npublish_manifest = false",
@@ -7740,7 +8474,7 @@ name = "showcase-events"
 display_name = "Showcase Events"
 
 [domains]
-canonical = "example.com"
+canonical = "shop.example.com"
 
 [i18n]
 default_locale = "en"
@@ -7951,6 +8685,46 @@ source_path = "fixtures/media.json"
             ),
         );
         manifest_path
+    }
+
+    fn enable_admin_and_ops_for_import_fixture(fixture: &ImportFixture) {
+        let config_path = fixture.root.join("config").join("platform.toml");
+        let app_manifest_path = fixture
+            .root
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&config_path, config).unwrap();
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+    }
+
+    fn run_dns_cutover_switch(
+        manifest_path: &Path,
+        base_url: &str,
+        dns: &DnsCutoverTestContext,
+    ) -> String {
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            manifest_path.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            base_url.to_string(),
+            "--dns-zone-id".to_string(),
+            dns.server.zone_id().to_string(),
+            "--dns-target".to_string(),
+            dns.dns_target.clone(),
+            "--yes".to_string(),
+        ])
+        .unwrap()
     }
 
     fn customer_app_fixture_with_assets(publish_manifest: bool) -> CustomerAppAssetFixture {
@@ -8541,24 +9315,48 @@ expect = true
     }
 
     #[test]
+    fn run_from_args_executes_dns_cutover_switch_and_persists_rollback_state() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
+        let cutover_manifest =
+            write_cutover_observe_manifest(&fixture, "cutover-switch-dns.toml", 60);
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let switched = run_dns_cutover_switch(
+            &cutover_manifest,
+            "https://shop.example.com",
+            &dns,
+        );
+        assert!(switched.contains("Cutover switch"));
+        assert_eq!(
+            dns.server.record("shop.example.com").content,
+            dns.dns_target
+        );
+
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"switch_execution\""));
+        assert!(journal.contains("\"previous_content\": \"legacy-origin.example.net\""));
+        assert!(journal.contains(&format!("\"current_content\": \"{}\"", dns.dns_target)));
+    }
+
+    #[test]
     fn run_from_args_observes_a_prepared_cutover_until_it_passes() {
         let fixture = import_fixture();
-        let config_path = fixture.root.join("config").join("platform.toml");
-        let app_manifest_path = fixture
-            .root
-            .join("apps")
-            .join("showcase-events")
-            .join("app.toml");
-        let config = fs::read_to_string(&config_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&config_path, config).unwrap();
-        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&app_manifest_path, app_manifest).unwrap();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest =
             write_cutover_observe_manifest(&fixture, "cutover-observe-pass.toml", 0);
 
@@ -8577,16 +9375,8 @@ expect = true
             false,
             BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 200_u16)]),
         );
-        let switched = run_from_args([
-            "import".to_string(),
-            "cutover".to_string(),
-            cutover_manifest.display().to_string(),
-            "--switch".to_string(),
-            "--base-url".to_string(),
-            probe_server.base_url().to_string(),
-            "--yes".to_string(),
-        ])
-        .unwrap();
+        let switched =
+            run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
         assert!(switched.contains("Cutover switch"));
 
         let rendered = run_from_args([
@@ -8617,22 +9407,8 @@ expect = true
     #[test]
     fn run_from_args_marks_cutover_observation_failures_for_rollback_review() {
         let fixture = import_fixture();
-        let config_path = fixture.root.join("config").join("platform.toml");
-        let app_manifest_path = fixture
-            .root
-            .join("apps")
-            .join("showcase-events")
-            .join("app.toml");
-        let config = fs::read_to_string(&config_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&config_path, config).unwrap();
-        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&app_manifest_path, app_manifest).unwrap();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest =
             write_cutover_observe_manifest(&fixture, "cutover-observe-fail.toml", 0);
 
@@ -8651,16 +9427,7 @@ expect = true
             false,
             BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 500_u16)]),
         );
-        run_from_args([
-            "import".to_string(),
-            "cutover".to_string(),
-            cutover_manifest.display().to_string(),
-            "--switch".to_string(),
-            "--base-url".to_string(),
-            probe_server.base_url().to_string(),
-            "--yes".to_string(),
-        ])
-        .unwrap();
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
         let error = run_from_args([
             "import".to_string(),
             "cutover".to_string(),
@@ -8685,22 +9452,8 @@ expect = true
     #[test]
     fn run_from_args_observation_executes_canonical_and_media_checks() {
         let fixture = import_fixture();
-        let config_path = fixture.root.join("config").join("platform.toml");
-        let app_manifest_path = fixture
-            .root
-            .join("apps")
-            .join("showcase-events")
-            .join("app.toml");
-        let config = fs::read_to_string(&config_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&config_path, config).unwrap();
-        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&app_manifest_path, app_manifest).unwrap();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest = write_cutover_observe_manifest_with_checks(
             &fixture,
             "cutover-observe-verification.toml",
@@ -8751,16 +9504,7 @@ expect = true
                 ),
             ]),
         );
-        run_from_args([
-            "import".to_string(),
-            "cutover".to_string(),
-            cutover_manifest.display().to_string(),
-            "--switch".to_string(),
-            "--base-url".to_string(),
-            probe_server.base_url().to_string(),
-            "--yes".to_string(),
-        ])
-        .unwrap();
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
 
         let rendered = run_from_args([
             "import".to_string(),
@@ -8780,22 +9524,8 @@ expect = true
     #[test]
     fn run_from_args_marks_missing_canonical_or_media_as_rollback_required() {
         let fixture = import_fixture();
-        let config_path = fixture.root.join("config").join("platform.toml");
-        let app_manifest_path = fixture
-            .root
-            .join("apps")
-            .join("showcase-events")
-            .join("app.toml");
-        let config = fs::read_to_string(&config_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&config_path, config).unwrap();
-        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&app_manifest_path, app_manifest).unwrap();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest = write_cutover_observe_manifest_with_checks(
             &fixture,
             "cutover-observe-verification-fail.toml",
@@ -8846,16 +9576,7 @@ expect = true
                 ),
             ]),
         );
-        run_from_args([
-            "import".to_string(),
-            "cutover".to_string(),
-            cutover_manifest.display().to_string(),
-            "--switch".to_string(),
-            "--base-url".to_string(),
-            probe_server.base_url().to_string(),
-            "--yes".to_string(),
-        ])
-        .unwrap();
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
 
         let _error = run_from_args([
             "import".to_string(),
@@ -8879,22 +9600,8 @@ expect = true
     #[test]
     fn run_from_args_records_cutover_rollbacks_after_the_live_switch() {
         let fixture = import_fixture();
-        let config_path = fixture.root.join("config").join("platform.toml");
-        let app_manifest_path = fixture
-            .root
-            .join("apps")
-            .join("showcase-events")
-            .join("app.toml");
-        let config = fs::read_to_string(&config_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&config_path, config).unwrap();
-        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
-            "enabled = [\"cms\", \"media\", \"events\"]",
-            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
-        );
-        fs::write(&app_manifest_path, app_manifest).unwrap();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest =
             write_cutover_observe_manifest(&fixture, "cutover-rollback.toml", 60);
 
@@ -8906,16 +9613,8 @@ expect = true
             "--yes".to_string(),
         ])
         .unwrap();
-        let switched = run_from_args([
-            "import".to_string(),
-            "cutover".to_string(),
-            cutover_manifest.display().to_string(),
-            "--switch".to_string(),
-            "--base-url".to_string(),
-            "https://shop.example.com".to_string(),
-            "--yes".to_string(),
-        ])
-        .unwrap();
+        let switched =
+            run_dns_cutover_switch(&cutover_manifest, "https://shop.example.com", &dns);
         assert!(switched.contains("Cutover switch"));
 
         let rolled_back = run_from_args([
@@ -8942,6 +9641,10 @@ expect = true
         assert!(journal.contains("\"state\": \"rolled_back\""));
         assert!(journal.contains("\"rollback_confirmed_at_unix_seconds\""));
         assert!(journal.contains("systemic auth failure"));
+        assert_eq!(
+            dns.server.record("shop.example.com").content,
+            "legacy-origin.example.net"
+        );
     }
 
     #[test]

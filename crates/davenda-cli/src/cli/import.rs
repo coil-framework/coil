@@ -13,6 +13,8 @@ pub struct ImportCutoverInvocation {
     pub observe: bool,
     pub rollback: bool,
     pub base_url: Option<String>,
+    pub dns_zone_id: Option<String>,
+    pub dns_target: Option<String>,
     pub reason: Option<String>,
     pub confirmed: bool,
     pub legacy_freeze_confirmed: bool,

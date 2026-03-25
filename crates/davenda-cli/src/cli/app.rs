@@ -1,12 +1,13 @@
 use crate::CliModelError;
 use crate::cli::args::{
     AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
-    AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation,
-    AuthTestModelInvocation, CacheInspectInvocation, CacheInvalidateInvocation,
-    CacheWarmInvocation, CliInput, DevServerInvocation, JobsDeadLettersInvocation,
-    JobsPromoteInvocation, JobsRetryInvocation, JobsStatusInvocation, MigrateApplyInvocation,
-    ModuleDisableInvocation, ModuleEnableInvocation, ModuleInspectInvocation,
-    ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation, parse,
+    AuthListInvocation, AuthLookupInvocation, AuthPackageInspectInvocation,
+    AuthPackageValidateInvocation, AuthTestModelInvocation, CacheInspectInvocation,
+    CacheInvalidateInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
+    JobsDeadLettersInvocation, JobsPromoteInvocation, JobsRetryInvocation, JobsStatusInvocation,
+    MigrateApplyInvocation, ModuleDisableInvocation, ModuleEnableInvocation,
+    ModuleInspectInvocation, ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation,
+    parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -22,15 +23,15 @@ use davenda_app::{
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::{
     AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity,
-    Namespace, Relation, configured_auth_model_package,
+    Namespace, Relation, configured_auth_model_package, default_auth_model_package,
 };
 use davenda_cache::{CacheInstant, InvalidationSet, InvalidationTag};
 use davenda_commerce::EntitlementKey;
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_core::validate_module_capabilities;
 use davenda_data::{
-    DataRuntime, DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec,
-    PostgresDataClient,
+    CompiledStatement, DataRuntime, DataValue, MigrationPlan, MigrationRegistry, MutationAction,
+    MutationSpec, PostgresDataClient,
 };
 use davenda_import::{
     CutoverCheck, CutoverDnsRecordChange, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord,
@@ -222,6 +223,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             invocation,
         } => {
             let report = run_auth_package_validate(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::AuthPackageInspect {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_auth_package_inspect(&invocation)?;
             render_command_report(&report, output_mode)
         }
         CliInput::ModuleList {
@@ -455,6 +463,7 @@ fn usage() -> String {
         "  platform auth lookup [--config <path>] --resource <namespace:id> --relation <relation> --subject-namespace <namespace> [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform auth package validate [--config <path>] [--json]",
+        "  platform auth package inspect [--config <path>] [--json]",
         "  platform module list [--config <path>] [--json]",
         "  platform module inspect <module> [--config <path>] [--json]",
         "  platform module install <module> [--config <path>] [--dry-run] [--yes] [--json]",
@@ -492,6 +501,7 @@ fn usage() -> String {
         "  platform auth lookup --config config/platform.toml --resource page:homepage --relation view --subject-namespace user",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform auth package validate --config config/platform.toml",
+        "  platform auth package inspect --config config/platform.toml",
         "  platform module list --config config/platform.toml",
         "  platform module inspect cms --config config/platform.toml",
         "  platform module install media --config config/platform.toml --dry-run",
@@ -1078,31 +1088,112 @@ fn run_auth_package_validate(
     Ok(report)
 }
 
+fn run_auth_package_inspect(
+    invocation: &AuthPackageInspectInvocation,
+) -> Result<CommandReport, CliRunError> {
+    let context = load_customer_app_context(&invocation.config_path)?;
+    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let package_manifest = auth_package.manifest().clone();
+    let shipped_default = default_auth_model_package();
+    let shipped_manifest = shipped_default.manifest();
+    let imports = if package_manifest.imports.is_empty() {
+        "none".to_string()
+    } else {
+        package_manifest.imports.join(", ")
+    };
+
+    let mut report = CommandReport::new(
+        ["auth", "package", "inspect"],
+        format!(
+            "Inspected auth package `{}` for customer app `{}`",
+            package_manifest.name, context.manifest.id
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "package",
+        "version",
+        "mode",
+        "model_version",
+        "storage_schema_version",
+        "binding_version",
+        "bindings",
+        "imports",
+    ])
+    .map_err(report_build_error)?;
+
+    report.push_row(
+        ReportRow::new()
+            .with_cell("package", package_manifest.name.clone())
+            .map_err(report_build_error)?
+            .with_cell("version", package_manifest.version.to_string())
+            .map_err(report_build_error)?
+            .with_cell("mode", package_manifest.mode.to_string())
+            .map_err(report_build_error)?
+            .with_cell("model_version", package_manifest.model_version.to_string())
+            .map_err(report_build_error)?
+            .with_cell(
+                "storage_schema_version",
+                package_manifest.storage_schema_version.to_string(),
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "binding_version",
+                package_manifest.capability_binding_version.to_string(),
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "bindings",
+                auth_package.capability_bindings().len().to_string(),
+            )
+            .map_err(report_build_error)?
+            .with_cell("imports", imports)
+            .map_err(report_build_error)?,
+    );
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.package.customer_app",
+        format!(
+            "customer_app={} installed_modules={}",
+            context.manifest.id,
+            context.manifest.modules.len()
+        ),
+    )?;
+    push_report_diagnostic(
+        &mut report,
+        if package_manifest.name == shipped_manifest.name {
+            DiagnosticSeverity::Info
+        } else {
+            DiagnosticSeverity::Warning
+        },
+        "auth.package.runtime_shape",
+        format!(
+            "configured package identity `{}` currently reuses the shipped default schema and capability bindings from `{}` at runtime",
+            package_manifest.name, shipped_manifest.name
+        ),
+    )?;
+    Ok(report)
+}
+
 fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandReport, CliRunError> {
     let context = load_customer_app_context(&invocation.config_path)?;
     let auth_package = configured_auth_model_package(context.config.auth.package.clone());
-    let module_manifest = context
-        .module_manifests
-        .iter()
-        .find(|candidate| candidate.name == invocation.module)
-        .ok_or_else(|| {
-            CliRunError::execution(format!(
-                "customer app `{}` does not install module `{}`",
-                context.manifest.id, invocation.module
-            ))
-        })?;
+    validate_supported_official_module(&invocation.module)?;
     let installed_spec = context
         .manifest
         .modules
         .iter()
-        .find(|spec| spec.id.as_str() == module_manifest.name)
-        .ok_or_else(|| {
-            CliRunError::execution(format!(
-                "customer app `{}` is missing manifest metadata for module `{}`",
-                context.manifest.id, module_manifest.name
-            ))
-        })?;
-    let auth_validation = validate_module_capabilities(&auth_package, module_manifest);
+        .find(|spec| spec.id.as_str() == invocation.module);
+    let module_manifest = context
+        .module_manifests
+        .iter()
+        .find(|candidate| candidate.name == invocation.module)
+        .cloned()
+        .unwrap_or(supported_official_module_manifest(&invocation.module)?);
+    let installed = installed_spec.is_some();
+    let auth_validation = validate_module_capabilities(&auth_package, &module_manifest);
     let installed_modules = context
         .manifest
         .modules
@@ -1132,16 +1223,27 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
     .with_columns(["category", "item", "status", "detail"])
     .map_err(report_build_error)?;
 
-    if auth_validation.is_err() || !missing_required_dependencies.is_empty() {
+    if installed && (auth_validation.is_err() || !missing_required_dependencies.is_empty()) {
         report = report.with_status(ReportStatus::Unsafe);
-    } else if installed_spec.version_req.is_none() {
+    } else if auth_validation.is_err()
+        || !missing_required_dependencies.is_empty()
+        || !installed
+        || installed_spec
+            .and_then(|spec| spec.version_req.as_ref())
+            .is_none()
+    {
         report = report.with_status(ReportStatus::Warning);
     }
 
     let version = installed_spec
-        .version_req
-        .clone()
-        .unwrap_or_else(|| "unpinned".to_string());
+        .and_then(|spec| spec.version_req.clone())
+        .unwrap_or_else(|| {
+            if installed {
+                "unpinned".to_string()
+            } else {
+                "not_installed".to_string()
+            }
+        });
     let config_namespace = module_manifest
         .config_namespace
         .clone()
@@ -1153,7 +1255,7 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
             .map_err(report_build_error)?
             .with_cell("item", "module")
             .map_err(report_build_error)?
-            .with_cell("status", "installed")
+            .with_cell("status", if installed { "installed" } else { "available" })
             .map_err(report_build_error)?
             .with_cell(
                 "detail",
@@ -1483,8 +1585,9 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
         DiagnosticSeverity::Info,
         "module.inspect.summary",
         format!(
-            "module={} installed=true version={} required_capabilities={} optional_capabilities={} routes={} jobs={} subscriptions={} extension_slots={}",
+            "module={} installed={} version={} required_capabilities={} optional_capabilities={} routes={} jobs={} subscriptions={} extension_slots={}",
             module_manifest.name,
+            installed,
             version,
             module_manifest.required_capabilities.len(),
             module_manifest.optional_capabilities.len(),
@@ -1494,7 +1597,20 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
             module_manifest.extension_slots.len()
         ),
     )?;
-    if installed_spec.version_req.is_none() {
+    if !installed {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "module.installation.available",
+            format!(
+                "official module `{}` is available for customer app `{}` but is not currently installed",
+                module_manifest.name, context.manifest.id
+            ),
+        )?;
+    } else if installed_spec
+        .and_then(|spec| spec.version_req.as_ref())
+        .is_none()
+    {
         push_report_diagnostic(
             &mut report,
             DiagnosticSeverity::Warning,
@@ -1508,7 +1624,11 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
     if let Err(error) = auth_validation {
         push_report_diagnostic(
             &mut report,
-            DiagnosticSeverity::Error,
+            if installed {
+                DiagnosticSeverity::Error
+            } else {
+                DiagnosticSeverity::Warning
+            },
             "module.auth.invalid",
             error.to_string(),
         )?;
@@ -1516,7 +1636,11 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
     if !missing_required_dependencies.is_empty() {
         push_report_diagnostic(
             &mut report,
-            DiagnosticSeverity::Error,
+            if installed {
+                DiagnosticSeverity::Error
+            } else {
+                DiagnosticSeverity::Warning
+            },
             "module.dependencies.missing",
             format!(
                 "required module dependencies are missing: {}",
@@ -1831,6 +1955,26 @@ fn validate_supported_official_module(module: &str) -> Result<(), CliRunError> {
             SUPPORTED_OFFICIAL_MODULES.join(", ")
         )))
     }
+}
+
+fn supported_official_module_manifest(
+    module: &str,
+) -> Result<davenda_core::ModuleManifest, CliRunError> {
+    let module: Box<dyn davenda_core::PlatformModule> = match module {
+        "admin" => Box::new(davenda_admin::AdminModule::new()),
+        "cms" => Box::new(davenda_cms::CmsModule::new()),
+        "commerce" => Box::new(davenda_commerce::CommerceModule::new()),
+        "events" => Box::new(davenda_events::EventsModule::new()),
+        "media" => Box::new(davenda_media::MediaModule::new()),
+        "memberships" => Box::new(davenda_memberships::MembershipsModule::new()),
+        "ops" => Box::new(davenda_ops::OpsModule::new()),
+        other => {
+            return Err(CliRunError::execution(format!(
+                "unsupported official module `{other}`"
+            )));
+        }
+    };
+    Ok(module.manifest().clone())
 }
 
 fn parse_toml_document(path: &Path, input: &str) -> Result<toml::Value, CliRunError> {
@@ -5541,6 +5685,7 @@ struct CutoverObservationProbe {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct ObservationVerificationChecks {
     record_counts: bool,
+    cache_leaks: bool,
     route_resolution: bool,
     canonical_urls: bool,
     media_reachability: bool,
@@ -6396,6 +6541,7 @@ fn build_cutover_verification_checks(
     for required in &verification.required {
         match required.as_str() {
             "record_counts" => checks.record_counts = true,
+            "cache_leak" | "cache_leaks" => checks.cache_leaks = true,
             "route_resolution" => checks.route_resolution = true,
             "canonical_urls" => checks.canonical_urls = true,
             "media_reachability" => checks.media_reachability = true,
@@ -6464,7 +6610,8 @@ fn build_cutover_verification_checks(
 }
 
 fn cutover_observation_requires_sample_routes(checks: ObservationVerificationChecks) -> bool {
-    checks.route_resolution
+    checks.cache_leaks
+        || checks.route_resolution
         || checks.canonical_urls
         || checks.media_reachability
         || checks.transactional_journey_errors
@@ -6482,6 +6629,9 @@ fn render_supported_verification_checks(
             .any(|check| check == "record_counts")
     {
         rendered.push("record_counts(import-run)");
+    }
+    if checks.cache_leaks {
+        rendered.push("cache_leaks(observe)");
     }
     if checks.fragment_rendering {
         rendered.push("fragment_rendering(local)");
@@ -7271,15 +7421,12 @@ fn apply_webhook_observation_snapshot(
     let recent_events = snapshot
         .recent_events
         .iter()
-        .filter(|event| event.recorded_at_unix_seconds >= observation_started_at_unix_seconds as i64)
+        .filter(|event| {
+            event.recorded_at_unix_seconds >= observation_started_at_unix_seconds as i64
+        })
         .cloned()
         .collect::<Vec<_>>();
-    apply_webhook_observation_events(
-        verification,
-        recent_events.as_slice(),
-        routes,
-        failures,
-    );
+    apply_webhook_observation_events(verification, recent_events.as_slice(), routes, failures);
 }
 
 fn apply_webhook_observation_events(
@@ -11399,6 +11546,7 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("platform auth list [--config <path>]"));
         assert!(rendered.contains("platform auth lookup [--config <path>]"));
         assert!(rendered.contains("platform auth explain [--config <path>]"));
+        assert!(rendered.contains("platform auth package inspect [--config <path>]"));
         assert!(rendered.contains("platform module list [--config <path>]"));
         assert!(rendered.contains("platform module inspect <module> [--config <path>]"));
         assert!(
@@ -11592,6 +11740,43 @@ expect = true
         assert!(rendered.contains("platform-default-auth"));
         assert!(rendered.contains("cms.page.read"));
         assert!(rendered.contains("page"));
+    }
+
+    #[test]
+    fn run_from_args_renders_auth_package_inspect_for_the_configured_package() {
+        let config_path = customer_app_fixture();
+        let configured = fs::read_to_string(&config_path).unwrap().replace(
+            "package = \"platform-default-auth\"",
+            "package = \"platform-extended-auth\"",
+        );
+        fs::write(&config_path, configured).unwrap();
+        let app_manifest_path = config_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "package = \"platform-default-auth\"",
+            "package = \"platform-extended-auth\"",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+
+        let rendered = run_from_args([
+            "auth".to_string(),
+            "package".to_string(),
+            "inspect".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("auth package inspect"));
+        assert!(rendered.contains("platform-extended-auth"));
+        assert!(rendered.contains("runtime_shape"));
+        assert!(rendered.contains("reuses the shipped default schema and capability bindings"));
     }
 
     #[test]
@@ -11972,9 +12157,27 @@ expect = true
         assert!(checks.webhook_failures);
         assert_eq!(
             probes,
-            vec!["commerce.payment-provider/payment.authorized via commerce.webhooks:payment-authorized"]
+            vec![
+                "commerce.payment-provider/payment.authorized via commerce.webhooks:payment-authorized"
+            ]
         );
         assert!(rendered.contains("webhook_failures(local+observe)"));
+    }
+
+    #[test]
+    fn local_cache_leak_verification_is_reported_as_supported() {
+        let verification = davenda_import::ImportVerification::default()
+            .with_required("cache_leaks")
+            .unwrap()
+            .with_sample_route("/events")
+            .unwrap();
+        let support = CutoverVerificationSupport::default();
+
+        let checks = build_cutover_verification_checks(&verification, &support).unwrap();
+        let rendered = render_supported_verification_checks(&verification, checks);
+
+        assert!(checks.cache_leaks);
+        assert!(rendered.contains("cache_leaks(observe)"));
     }
 
     #[test]
@@ -12025,7 +12228,13 @@ expect = true
         let mut routes = Vec::new();
         let mut failures = Vec::new();
 
-        apply_webhook_observation_snapshot(&verification, &snapshot, 100, &mut routes, &mut failures);
+        apply_webhook_observation_snapshot(
+            &verification,
+            &snapshot,
+            100,
+            &mut routes,
+            &mut failures,
+        );
 
         assert_eq!(routes.len(), 1);
         assert!(routes[0].outcome.contains("verification_failures=1"));
@@ -13075,6 +13284,47 @@ expect = true
         assert!(rendered.contains("Inspected module `cms`"));
         assert!(rendered.contains("capability_contracts"));
         assert!(rendered.contains("module.version.unpinned"));
+    }
+
+    #[test]
+    fn run_from_args_renders_module_inspect_for_an_available_official_module() {
+        let config_path = customer_app_fixture_with_modules(&["cms"]);
+
+        let rendered = run_from_args([
+            "module".to_string(),
+            "inspect".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("module inspect"));
+        assert!(rendered.contains("Inspected module `media`"));
+        assert!(rendered.contains("status: warning"));
+        assert!(rendered.contains("status: available"));
+        assert!(rendered.contains("module=media installed=false"));
+        assert!(rendered.contains("module.installation.available"));
+        assert!(!rendered.contains("module.version.unpinned"));
+    }
+
+    #[test]
+    fn run_from_args_warns_when_available_module_has_missing_required_dependencies() {
+        let config_path = customer_app_fixture_with_modules(&["cms"]);
+
+        let rendered = run_from_args([
+            "module".to_string(),
+            "inspect".to_string(),
+            "memberships".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("Inspected module `memberships`"));
+        assert!(rendered.contains("module.dependencies.missing"));
+        assert!(rendered.contains("required module dependencies are missing: commerce"));
+        assert!(rendered.contains("status: warning"));
     }
 
     #[test]

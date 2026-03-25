@@ -62,6 +62,20 @@ pub(crate) struct ModuleInspectInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleEnableInvocation {
+    pub config_path: PathBuf,
+    pub module: String,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleDisableInvocation {
+    pub config_path: PathBuf,
+    pub module: String,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DevServerInvocation {
     pub config_path: PathBuf,
 }
@@ -156,6 +170,16 @@ pub(crate) enum CliInput {
     ModuleInspect {
         output_mode: OutputMode,
         invocation: ModuleInspectInvocation,
+    },
+    ModuleEnable {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: ModuleEnableInvocation,
+    },
+    ModuleDisable {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: ModuleDisableInvocation,
     },
     MigratePlan {
         output_mode: OutputMode,
@@ -572,6 +596,44 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: ModuleInspectInvocation {
                     config_path,
                     module: module.to_string(),
+                },
+            })
+        }
+        [command, subcommand, module] if command == "module" && subcommand == "enable" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`module enable` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ModuleEnable {
+                output_mode,
+                dry_run,
+                invocation: ModuleEnableInvocation {
+                    config_path,
+                    module: module.to_string(),
+                    confirmed,
+                },
+            })
+        }
+        [command, subcommand, module] if command == "module" && subcommand == "disable" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`module disable` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ModuleDisable {
+                output_mode,
+                dry_run,
+                invocation: ModuleDisableInvocation {
+                    config_path,
+                    module: module.to_string(),
+                    confirmed,
                 },
             })
         }
@@ -1177,6 +1239,65 @@ mod tests {
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.module, "cms");
+    }
+
+    #[test]
+    fn parse_module_enable_accepts_dry_run_and_confirmation_flags() {
+        let input = parse([
+            "module".to_string(),
+            "enable".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--dry-run".to_string(),
+            "--yes".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ModuleEnable {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected module enable input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.module, "media");
+        assert!(invocation.confirmed);
+    }
+
+    #[test]
+    fn parse_module_disable_accepts_confirmation_flag() {
+        let input = parse([
+            "module".to_string(),
+            "disable".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--yes".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ModuleDisable {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected module disable input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(!dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.module, "media");
+        assert!(invocation.confirmed);
     }
 
     #[test]

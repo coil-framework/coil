@@ -4,7 +4,8 @@ use crate::cli::args::{
     AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation,
     AuthTestModelInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
     JobsDeadLettersInvocation, JobsStatusInvocation, MigrateApplyInvocation,
-    ModuleInspectInvocation, StorageInspectInvocation, TlsRenewInvocation, parse,
+    ModuleDisableInvocation, ModuleEnableInvocation, ModuleInspectInvocation,
+    StorageInspectInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -247,6 +248,22 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_module_inspect(&invocation)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::ModuleEnable {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_module_enable(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::ModuleDisable {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_module_disable(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::MigratePlan {
             output_mode,
             config_path,
@@ -393,6 +410,8 @@ fn usage() -> String {
         "  platform auth package validate [--config <path>] [--json]",
         "  platform module list [--config <path>] [--json]",
         "  platform module inspect <module> [--config <path>] [--json]",
+        "  platform module enable <module> [--config <path>] [--dry-run] [--yes] [--json]",
+        "  platform module disable <module> [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform migrate plan [--config <path>] [--json]",
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
@@ -423,6 +442,8 @@ fn usage() -> String {
         "  platform auth package validate --config config/platform.toml",
         "  platform module list --config config/platform.toml",
         "  platform module inspect cms --config config/platform.toml",
+        "  platform module enable media --config config/platform.toml --dry-run",
+        "  platform module disable media --config config/platform.toml --dry-run",
         "  platform migrate plan --config config/platform.toml",
         "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
@@ -1446,6 +1467,343 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
     }
 
     Ok(report)
+}
+
+fn run_module_enable(
+    invocation: &ModuleEnableInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    run_module_state_change(
+        &invocation.config_path,
+        &invocation.module,
+        true,
+        dry_run,
+        invocation.confirmed,
+    )
+}
+
+fn run_module_disable(
+    invocation: &ModuleDisableInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    run_module_state_change(
+        &invocation.config_path,
+        &invocation.module,
+        false,
+        dry_run,
+        invocation.confirmed,
+    )
+}
+
+fn run_module_state_change(
+    config_path: &Path,
+    module: &str,
+    enable: bool,
+    dry_run: bool,
+    confirmed: bool,
+) -> Result<CommandReport, CliRunError> {
+    validate_supported_official_module(module)?;
+
+    let context = load_customer_app_context(config_path)?;
+    let action = if enable { "enable" } else { "disable" };
+    let past_tense = if enable { "enabled" } else { "disabled" };
+    let config_currently_enabled = context
+        .config
+        .modules
+        .enabled
+        .iter()
+        .any(|candidate| candidate == module);
+    let manifest_currently_enabled = context
+        .manifest
+        .modules
+        .iter()
+        .any(|candidate| candidate.id.as_str() == module);
+
+    if config_currently_enabled != manifest_currently_enabled {
+        return Err(CliRunError::execution(format!(
+            "customer app `{}` has drifted module state for `{module}` between `{}` and `{}`",
+            context.manifest.id,
+            config_path.display(),
+            context.app_root.join("app.toml").display()
+        )));
+    }
+
+    if config_currently_enabled == enable {
+        return build_module_state_change_noop_report(
+            &context.manifest.id.to_string(),
+            config_path,
+            &context.app_root.join("app.toml"),
+            module,
+            enable,
+        );
+    }
+
+    if !dry_run && !confirmed {
+        return Err(CliRunError::usage(format!(
+            "`module {action}` requires `--yes` unless `--dry-run` is used"
+        )));
+    }
+
+    let manifest_path = context.app_root.join("app.toml");
+    let config_input = fs::read_to_string(config_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to read platform config `{}`: {error}",
+            config_path.display()
+        ))
+    })?;
+    let manifest_input = fs::read_to_string(&manifest_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to read customer app manifest `{}`: {error}",
+            manifest_path.display()
+        ))
+    })?;
+
+    let mut config_document = parse_toml_document(config_path, &config_input)?;
+    let mut manifest_document = parse_toml_document(&manifest_path, &manifest_input)?;
+    update_enabled_modules_document(&mut config_document, module, enable).map_err(|message| {
+        CliRunError::execution(format!(
+            "failed to update modules.enabled in `{}`: {message}",
+            config_path.display()
+        ))
+    })?;
+    update_enabled_modules_document(&mut manifest_document, module, enable).map_err(|message| {
+        CliRunError::execution(format!(
+            "failed to update modules.enabled in `{}`: {message}",
+            manifest_path.display()
+        ))
+    })?;
+
+    let rendered_config = render_toml_document(config_path, &config_document)?;
+    let rendered_manifest = render_toml_document(&manifest_path, &manifest_document)?;
+    let updated_config = PlatformConfig::from_toml_str(&rendered_config).map_err(|error| {
+        CliRunError::execution(format!(
+            "updated platform config `{}` is invalid after module {action}: {error}",
+            config_path.display()
+        ))
+    })?;
+    let updated_manifest =
+        CustomerAppManifest::from_toml_str(&rendered_manifest).map_err(|error| {
+            CliRunError::execution(format!(
+                "updated customer app manifest `{}` is invalid after module {action}: {error}",
+                manifest_path.display()
+            ))
+        })?;
+    updated_manifest
+        .validate_runtime_config_alignment(&updated_config)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "module {action} would leave `{}` and `{}` out of alignment: {error}",
+                config_path.display(),
+                manifest_path.display()
+            ))
+        })?;
+    let updated_modules = load_official_modules(&updated_config)?;
+    let updated_module_manifests = updated_modules
+        .iter()
+        .map(|installed| installed.manifest().clone())
+        .collect::<Vec<_>>();
+    let auth_package = configured_auth_model_package(updated_config.auth.package.clone());
+    updated_manifest
+        .compose(&auth_package, &updated_module_manifests)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "module {action} would leave customer app `{}` with an invalid module composition: {error}",
+                updated_manifest.id
+            ))
+        })?;
+
+    if !dry_run {
+        fs::write(config_path, &rendered_config).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to write platform config `{}`: {error}",
+                config_path.display()
+            ))
+        })?;
+        fs::write(&manifest_path, &rendered_manifest).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to write customer app manifest `{}`: {error}",
+                manifest_path.display()
+            ))
+        })?;
+    }
+
+    let mut report = CommandReport::new(
+        ["module", action],
+        if dry_run {
+            format!(
+                "Planned module `{module}` to be {past_tense} for customer app `{}`",
+                updated_manifest.id
+            )
+        } else {
+            format!(
+                "Module `{module}` {past_tense} for customer app `{}`",
+                updated_manifest.id
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns(["target", "status", "detail"])
+    .map_err(report_build_error)?;
+
+    let change_status = if dry_run { "planned" } else { past_tense };
+    for (target, path) in [
+        ("platform_config", config_path),
+        ("customer_app_manifest", manifest_path.as_path()),
+    ] {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("target", target)
+                .map_err(report_build_error)?
+                .with_cell("status", change_status)
+                .map_err(report_build_error)?
+                .with_cell("detail", path.display().to_string())
+                .map_err(report_build_error)?,
+        );
+    }
+    report.push_row(
+        ReportRow::new()
+            .with_cell("target", "runtime_composition")
+            .map_err(report_build_error)?
+            .with_cell("status", "validated")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                format!(
+                    "enabled_modules={}",
+                    updated_config.modules.enabled.join(", ")
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "module.state_change",
+        format!(
+            "module `{module}` {past_tense}; app=`{}` dry_run={dry_run}",
+            updated_manifest.id
+        ),
+    )?;
+
+    Ok(report)
+}
+
+fn build_module_state_change_noop_report(
+    app_id: &str,
+    config_path: &Path,
+    manifest_path: &Path,
+    module: &str,
+    enabled: bool,
+) -> Result<CommandReport, CliRunError> {
+    let state = if enabled { "enabled" } else { "disabled" };
+    let mut report = CommandReport::new(
+        ["module", if enabled { "enable" } else { "disable" }],
+        format!("Module `{module}` is already {state} for customer app `{app_id}`"),
+    )
+    .map_err(report_build_error)?
+    .with_columns(["target", "status", "detail"])
+    .map_err(report_build_error)?
+    .with_status(ReportStatus::Warning);
+
+    for (target, path) in [
+        ("platform_config", config_path),
+        ("customer_app_manifest", manifest_path),
+    ] {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("target", target)
+                .map_err(report_build_error)?
+                .with_cell("status", "unchanged")
+                .map_err(report_build_error)?
+                .with_cell("detail", path.display().to_string())
+                .map_err(report_build_error)?,
+        );
+    }
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "module.state_change.noop",
+        format!("module `{module}` is already {state}"),
+    )?;
+
+    Ok(report)
+}
+
+fn validate_supported_official_module(module: &str) -> Result<(), CliRunError> {
+    const SUPPORTED_OFFICIAL_MODULES: &[&str] = &[
+        "admin",
+        "cms",
+        "commerce",
+        "events",
+        "media",
+        "memberships",
+        "ops",
+    ];
+
+    if SUPPORTED_OFFICIAL_MODULES.contains(&module) {
+        Ok(())
+    } else {
+        Err(CliRunError::execution(format!(
+            "unsupported official module `{module}`; expected one of: {}",
+            SUPPORTED_OFFICIAL_MODULES.join(", ")
+        )))
+    }
+}
+
+fn parse_toml_document(path: &Path, input: &str) -> Result<toml::Value, CliRunError> {
+    toml::from_str(input).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to parse TOML document `{}`: {error}",
+            path.display()
+        ))
+    })
+}
+
+fn render_toml_document(path: &Path, document: &toml::Value) -> Result<String, CliRunError> {
+    toml::to_string_pretty(document).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to render TOML document `{}`: {error}",
+            path.display()
+        ))
+    })
+}
+
+fn update_enabled_modules_document(
+    document: &mut toml::Value,
+    module: &str,
+    enable: bool,
+) -> Result<(), String> {
+    let table = document
+        .as_table_mut()
+        .ok_or_else(|| "document root must be a TOML table".to_string())?;
+    let modules_value = table
+        .entry("modules".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let modules_table = modules_value
+        .as_table_mut()
+        .ok_or_else(|| "`modules` must be a TOML table".to_string())?;
+    let enabled_value = modules_table
+        .entry("enabled".to_string())
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    let enabled_array = enabled_value
+        .as_array_mut()
+        .ok_or_else(|| "`modules.enabled` must be an array".to_string())?;
+
+    let mut modules = enabled_array
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "`modules.enabled` must contain only strings".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    modules.retain(|candidate| candidate != module);
+    if enable {
+        modules.push(module.to_string());
+    }
+    *enabled_array = modules.into_iter().map(toml::Value::String).collect();
+    Ok(())
 }
 
 fn run_release_doctor(config_path: &Path) -> Result<CommandReport, CliRunError> {
@@ -6882,6 +7240,10 @@ enabled = ["cms"]
 "#;
 
     fn customer_app_fixture() -> PathBuf {
+        customer_app_fixture_with_modules(&["cms"])
+    }
+
+    fn customer_app_fixture_with_modules(modules: &[&str]) -> PathBuf {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -6893,8 +7255,16 @@ enabled = ["cms"]
 
         fs::create_dir_all(&config_dir).unwrap();
         fs::create_dir_all(&templates_root).unwrap();
-        fs::write(config_dir.join("platform.toml"), DISABLED_EXPLAIN_CONFIG).unwrap();
-        fs::write(app_root.join("app.toml"), CUSTOMER_APP_MANIFEST).unwrap();
+        fs::write(
+            config_dir.join("platform.toml"),
+            render_fixture_modules(DISABLED_EXPLAIN_CONFIG, modules),
+        )
+        .unwrap();
+        fs::write(
+            app_root.join("app.toml"),
+            render_fixture_modules(CUSTOMER_APP_MANIFEST, modules),
+        )
+        .unwrap();
         fs::write(
             templates_root.join("home.html"),
             "<html><body><main>Showcase Events</main></body></html>",
@@ -6902,6 +7272,18 @@ enabled = ["cms"]
         .unwrap();
 
         config_dir.join("platform.toml")
+    }
+
+    fn render_fixture_modules(input: &str, modules: &[&str]) -> String {
+        let rendered = format!(
+            "enabled = [{}]",
+            modules
+                .iter()
+                .map(|module| format!("\"{module}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        input.replace("enabled = [\"cms\"]", &rendered)
     }
 
     struct ImportFixture {
@@ -7297,6 +7679,14 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("platform auth explain [--config <path>]"));
         assert!(rendered.contains("platform module list [--config <path>]"));
         assert!(rendered.contains("platform module inspect <module> [--config <path>]"));
+        assert!(
+            rendered
+                .contains("platform module enable <module> [--config <path>] [--dry-run] [--yes]")
+        );
+        assert!(
+            rendered
+                .contains("platform module disable <module> [--config <path>] [--dry-run] [--yes]")
+        );
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
         assert!(rendered.contains("platform migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform release doctor [--config <path>]"));
@@ -8291,6 +8681,143 @@ expect = true
         assert!(rendered.contains("Inspected module `cms`"));
         assert!(rendered.contains("capability_contracts"));
         assert!(rendered.contains("module.version.unpinned"));
+    }
+
+    #[test]
+    fn run_from_args_requires_confirmation_for_module_enable() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "module".to_string(),
+            "enable".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 2);
+        assert!(
+            error
+                .to_string()
+                .contains("`module enable` requires `--yes` unless `--dry-run` is used")
+        );
+    }
+
+    #[test]
+    fn run_from_args_renders_module_enable_dry_run_and_leaves_files_unchanged() {
+        let config_path = customer_app_fixture();
+        let app_manifest_path = config_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let original_config = fs::read_to_string(&config_path).unwrap();
+        let original_manifest = fs::read_to_string(&app_manifest_path).unwrap();
+
+        let rendered = run_from_args([
+            "module".to_string(),
+            "enable".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("module enable"));
+        assert!(rendered.contains("Planned module `media` to be enabled"));
+        assert!(rendered.contains("planned"));
+        assert_eq!(fs::read_to_string(&config_path).unwrap(), original_config);
+        assert_eq!(
+            fs::read_to_string(&app_manifest_path).unwrap(),
+            original_manifest
+        );
+    }
+
+    #[test]
+    fn run_from_args_enables_module_in_config_and_manifest() {
+        let config_path = customer_app_fixture();
+        let app_manifest_path = config_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+
+        let rendered = run_from_args([
+            "module".to_string(),
+            "enable".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("Module `media` enabled"));
+        let config_contents = fs::read_to_string(&config_path).unwrap();
+        let manifest_contents = fs::read_to_string(&app_manifest_path).unwrap();
+        assert!(config_contents.contains("\"media\""));
+        assert!(manifest_contents.contains("\"media\""));
+    }
+
+    #[test]
+    fn run_from_args_disables_module_in_config_and_manifest() {
+        let config_path = customer_app_fixture_with_modules(&["cms", "media"]);
+        let app_manifest_path = config_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+
+        let rendered = run_from_args([
+            "module".to_string(),
+            "disable".to_string(),
+            "media".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("Module `media` disabled"));
+        let config_contents = fs::read_to_string(&config_path).unwrap();
+        let manifest_contents = fs::read_to_string(&app_manifest_path).unwrap();
+        assert!(!config_contents.contains("\"media\""));
+        assert!(!manifest_contents.contains("\"media\""));
+        assert!(config_contents.contains("\"cms\""));
+        assert!(manifest_contents.contains("\"cms\""));
+    }
+
+    #[test]
+    fn run_from_args_rejects_module_disable_that_would_leave_no_modules_enabled() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "module".to_string(),
+            "disable".to_string(),
+            "cms".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("updated platform config"));
+        assert!(
+            error
+                .to_string()
+                .contains("at least one module must be enabled")
+        );
     }
 
     #[test]

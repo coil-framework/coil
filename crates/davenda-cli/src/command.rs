@@ -172,6 +172,20 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Inspect the installed module manifest, dependency contracts, and operator-relevant contributions",
         )?,
         CommandDescriptor::new(
+            ["module", "enable"],
+            CommandOwner::Core,
+            "Enable an official module and synchronize the platform config with the customer app manifest",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
+            ["module", "disable"],
+            CommandOwner::Core,
+            "Disable an installed module and synchronize the platform config with the customer app manifest",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["migrate", "plan"],
             CommandOwner::Core,
             "Plan core, module, auth, and customer-app migrations",
@@ -262,5 +276,23 @@ mod tests {
         assert!(commands.iter().any(|descriptor| {
             descriptor.path == vec!["jobs".to_string(), "dead-letters".to_string()]
         }));
+    }
+
+    #[test]
+    fn baseline_commands_include_module_enable_and_disable() {
+        let commands = baseline_commands("harbor-shop").unwrap();
+        let enable = commands
+            .iter()
+            .find(|descriptor| descriptor.path == vec!["module".to_string(), "enable".to_string()])
+            .expect("module enable descriptor should exist");
+        assert!(enable.supports_dry_run);
+        assert!(enable.requires_confirmation);
+
+        let disable = commands
+            .iter()
+            .find(|descriptor| descriptor.path == vec!["module".to_string(), "disable".to_string()])
+            .expect("module disable descriptor should exist");
+        assert!(disable.supports_dry_run);
+        assert!(disable.requires_confirmation);
     }
 }

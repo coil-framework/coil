@@ -21,6 +21,25 @@
         <p class="cart-page__eyebrow">Cart</p>
         <h1>Review the basket before moving to payment.</h1>
       </section>
+      <section class="storefront-flash" dv:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" dv:text="${message.level}">error</p>
+          <p dv:text="${message.text}">Your update could not be applied.</p>
+        </article>
+      </section>
+      <section class="storefront-errors" dv:if="${cartForm.hasErrors}">
+        <article class="storefront-errors__summary">
+          <h2>Cart updates need attention</h2>
+          <p dv:text="${cartForm.errorSummary}">
+            Fix the highlighted cart quantities and try again.
+          </p>
+          <ul class="storefront-errors__list">
+            <li dv:each="error : ${cartForm.errors}" dv:text="${error.message}">
+              Enter a whole-number quantity for this line.
+            </li>
+          </ul>
+        </article>
+      </section>
       <div class="cart-page__grid">
         <section class="cart-card">
           <h2>Items</h2>
@@ -42,6 +61,9 @@
                     dv:attr="name=${item.quantityField},value=${item.quantity}"
                   />
                 </label>
+                <p class="commerce-form__error" dv:if="${item.hasQuantityError}" dv:text="${item.quantityError}">
+                  Enter a whole-number quantity for this line.
+                </p>
                 <strong dv:text="${item.total}">GBP 29</strong>
               </li>
             </ul>

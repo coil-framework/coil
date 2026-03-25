@@ -4,7 +4,7 @@
     Browse the current storefront collections, then carry the basket through to
     checkout and account follow-up.
   </p>
-  <div class="collection-grid__list" dv:if="${catalogSections}">
+  <div class="collection-grid__list" dv:if="${hasCatalogSections}">
     <article class="catalog-section collection-grid__item" dv:each="section : ${catalogSections}">
       <p class="catalog-section__eyebrow" dv:text="${section.label}">Featured edit</p>
       <h3 dv:text="${section.title}">Featured</h3>
@@ -16,7 +16,7 @@
       </a>
     </article>
   </div>
-  <div class="collection-grid__list" dv:unless="${catalogSections}">
+  <div class="collection-grid__list" dv:unless="${hasCatalogSections}">
     <article class="catalog-section collection-grid__item">
       <p class="catalog-section__eyebrow">Featured edit</p>
       <h3>Featured</h3>

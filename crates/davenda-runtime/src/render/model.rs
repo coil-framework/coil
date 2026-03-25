@@ -1,6 +1,6 @@
 use super::*;
 use crate::storefront::{
-    StorefrontCartLine, StorefrontOrderSnapshot, StorefrontPaymentSnapshot,
+    StorefrontCartLine, StorefrontFormState, StorefrontOrderSnapshot, StorefrontPaymentSnapshot,
     StorefrontStateSnapshot, StorefrontStateStore,
 };
 use davenda_commerce::{
@@ -37,6 +37,10 @@ impl RuntimePlan {
         template_name: &str,
         fragment_id: Option<&str>,
     ) -> Result<RenderModel, TemplateModelError> {
+        let storefront_feedback = storefront_page_feedback(
+            execution.route.route_name.as_str(),
+            &execution.flash_messages,
+        );
         let mut model = RenderModel::new()
             .with_value(
                 "customer_app",
@@ -99,6 +103,14 @@ impl RuntimePlan {
             .with_object("route_params", route_params_model(&execution.route.params))?
             .with_object("links", links_model(&execution.locale)?)?
             .with_object("navigation", navigation_model())?
+            .with_bool(
+                "hasFlashMessages",
+                !storefront_feedback.visible_flash_messages.is_empty(),
+            )?
+            .with_list(
+                "flashMessages",
+                flash_messages_model(&storefront_feedback.visible_flash_messages)?,
+            )?
             .with_object(
                 "page",
                 page_model_for_route(execution, template_name, fragment_id),
@@ -114,6 +126,7 @@ impl RuntimePlan {
             execution.route.route_name.as_str(),
             execution.locale.as_str(),
             &execution.route.params,
+            storefront_feedback.form_state.as_ref(),
             Some(&execution.session),
             Some(&execution.principal),
         )
@@ -158,6 +171,10 @@ fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
         .with_value("home", RenderValue::text("/"))?
         .with_value("catalog", RenderValue::text(localized_shop_path(locale)))?
         .with_value(
+            "collections",
+            RenderValue::text(localized_collections_path(locale)),
+        )?
+        .with_value(
             "featuredCollection",
             RenderValue::text(localized_collection_path(locale, "featured")),
         )?
@@ -172,6 +189,7 @@ fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
         .with_value("cart", RenderValue::text("/cart"))?
         .with_value("checkout", RenderValue::text("/checkout"))?
         .with_value("account", RenderValue::text("/account"))?
+        .with_value("orders", RenderValue::text("/account/orders"))?
         .with_value("memberships", RenderValue::text("/account/memberships"))
 }
 
@@ -251,6 +269,7 @@ fn apply_route_specific_bindings(
     route_name: &str,
     locale: &str,
     params: &BTreeMap<String, String>,
+    form_state: Option<&StorefrontFormState>,
     session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
 ) -> Result<RenderModel, TemplateModelError> {
@@ -293,31 +312,34 @@ fn apply_route_specific_bindings(
                 model = model
                     .with_list(
                         "cartItems",
-                        cart_items_from_storefront(&snapshot.cart.lines)?,
+                        cart_items_from_storefront(&snapshot.cart.lines, form_state)?,
                     )?
-                    .with_object("cartSummary", cart_summary_from_storefront(&snapshot)?)?;
+                    .with_object("cartSummary", cart_summary_from_storefront(&snapshot)?)?
+                    .with_object("cartForm", cart_form_model(form_state)?)?;
             } else {
                 model = model
                     .with_list("cartItems", fixture.cart_items.clone())?
-                    .with_object("cartSummary", fixture.cart_summary.clone())?;
+                    .with_object("cartSummary", fixture.cart_summary.clone())?
+                    .with_object("cartForm", cart_form_model(form_state)?)?;
             }
         }
         "commerce.checkout" => {
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
-                let line_items = cart_items_from_storefront(&snapshot.cart.lines)?;
+                let line_items = cart_items_from_storefront(&snapshot.cart.lines, form_state)?;
                 model = model
                     .with_object("customer", checkout_customer(principal)?)?
                     .with_object(
                         "checkout",
-                        checkout_form_from_storefront(&snapshot.payment, principal)?,
+                        checkout_form_from_storefront(&snapshot.payment, principal, form_state)?,
                     )?
                     .with_bool("hasLineItems", !line_items.is_empty())?
                     .with_list("lineItems", line_items)?
                     .with_object("orderSummary", cart_summary_from_storefront(&snapshot)?)?;
             } else {
+                let checkout = merge_checkout_form_feedback(fixture.checkout.clone(), form_state)?;
                 model = model
                     .with_object("customer", fixture.customer.clone())?
-                    .with_object("checkout", fixture.checkout.clone())?
+                    .with_object("checkout", checkout)?
                     .with_bool("hasLineItems", !fixture.cart_items.is_empty())?
                     .with_list("lineItems", fixture.cart_items.clone())?
                     .with_object("orderSummary", fixture.cart_summary.clone())?;
@@ -409,10 +431,11 @@ fn live_storefront_latest_order(
 
 fn cart_items_from_storefront(
     lines: &[StorefrontCartLine],
+    form_state: Option<&StorefrontFormState>,
 ) -> Result<Vec<RenderModel>, TemplateModelError> {
     lines
         .iter()
-        .map(cart_item_from_storefront)
+        .map(|line| cart_item_from_storefront(line, form_state))
         .collect::<Result<Vec<_>, _>>()
 }
 
@@ -435,7 +458,10 @@ fn confirmation_from_storefront(
         .lines
         .iter()
         .any(|line| line.product_kind == "membership");
-    let next_step = if includes_membership {
+    let payment_is_final = matches!(order.status.as_str(), "paid" | "fulfilled");
+    let next_step = if !payment_is_final {
+        "Payment confirmation is pending. The order will move forward after the provider callback arrives."
+    } else if includes_membership {
         "A confirmation email and membership activation will follow shortly."
     } else {
         "A confirmation email and fulfillment summary are on the way."
@@ -521,17 +547,30 @@ fn account_order_from_storefront(
         })
 }
 
-fn cart_item_from_storefront(line: &StorefrontCartLine) -> Result<RenderModel, TemplateModelError> {
+fn cart_item_from_storefront(
+    line: &StorefrontCartLine,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let quantity_field = format!("quantity_{}", line.sku);
+    let quantity_value = form_state
+        .and_then(|state| state.fields.get(&quantity_field))
+        .cloned()
+        .unwrap_or_else(|| line.quantity.to_string());
+    let quantity_error = form_state.and_then(|state| state.field_errors.get(&quantity_field));
     cart_item(
         &line.title,
         &line.variant_title,
-        &line.quantity.to_string(),
+        &quantity_value,
         &line.total,
     )?
-    .with_value(
-        "quantityField",
-        RenderValue::text(format!("quantity_{}", line.sku)),
-    )
+    .with_value("quantityField", RenderValue::text(quantity_field))
+    .and_then(|model| model.with_bool("hasQuantityError", quantity_error.is_some()))
+    .and_then(|model| {
+        model.with_value(
+            "quantityError",
+            RenderValue::text(quantity_error.cloned().unwrap_or_default()),
+        )
+    })
 }
 
 fn checkout_customer(
@@ -553,28 +592,53 @@ fn checkout_customer(
 fn checkout_form_from_storefront(
     payment: &StorefrontPaymentSnapshot,
     principal: Option<&PrincipalContext>,
+    form_state: Option<&StorefrontFormState>,
 ) -> Result<RenderModel, TemplateModelError> {
-    let payment_method = payment.method.clone().unwrap_or_else(|| "card".to_string());
-    let checkout_email = payment
-        .checkout_email
-        .clone()
+    let payment_method = form_state
+        .and_then(|state| state.fields.get("payment_method"))
+        .cloned()
+        .filter(|value| !value.is_empty())
+        .or_else(|| payment.method.clone())
+        .unwrap_or_else(|| "card".to_string());
+    let checkout_email = form_state
+        .and_then(|state| state.fields.get("checkout_email"))
+        .cloned()
         .or_else(|| {
-            principal
-                .and_then(|principal| principal.principal_id.clone())
-                .filter(|candidate| looks_like_email(candidate))
+            payment.checkout_email.clone().or_else(|| {
+                principal
+                    .and_then(|principal| principal.principal_id.clone())
+                    .filter(|candidate| looks_like_email(candidate))
+            })
         })
         .unwrap_or_default();
+    let payment_reference = payment
+        .reference
+        .clone()
+        .unwrap_or_else(|| "PAYMENT-PENDING".to_string());
+    let checkout_intent = form_state
+        .and_then(|state| state.fields.get("checkout_intent"))
+        .cloned()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| payment_reference.clone());
+    let payment_last4 = form_state
+        .and_then(|state| state.fields.get("payment_last4"))
+        .cloned()
+        .or_else(|| payment.last4.clone())
+        .unwrap_or_default();
+    let delivery_name = form_state
+        .and_then(|state| state.fields.get("delivery_name"))
+        .cloned()
+        .unwrap_or_default();
+    let delivery_note = form_state
+        .and_then(|state| state.fields.get("delivery_note"))
+        .cloned()
+        .unwrap_or_default();
+    let terms_accepted = form_state
+        .and_then(|state| state.fields.get("terms_accepted"))
+        .is_some();
     let has_checkout_email = !checkout_email.is_empty();
-    RenderModel::new()
-        .with_value(
-            "paymentReference",
-            RenderValue::text(
-                payment
-                    .reference
-                    .clone()
-                    .unwrap_or_else(|| "PAYMENT-PENDING".to_string()),
-            ),
-        )?
+    let model = RenderModel::new()
+        .with_value("paymentReference", RenderValue::text(payment_reference))?
         .with_value(
             "paymentMethod",
             RenderValue::text(payment_method.clone()),
@@ -586,8 +650,15 @@ fn checkout_form_from_storefront(
         .with_bool("hasCheckoutEmail", has_checkout_email)?
         .with_value(
             "paymentLast4",
-            RenderValue::text(payment.last4.clone().unwrap_or_default()),
+            RenderValue::text(payment_last4),
         )?
+        .with_value(
+            "checkoutIntent",
+            RenderValue::text(checkout_intent),
+        )?
+        .with_value("deliveryName", RenderValue::text(delivery_name))?
+        .with_value("deliveryNote", RenderValue::text(delivery_note))?
+        .with_bool("termsAccepted", terms_accepted)?
         .with_value(
             "paymentMethodLabel",
             RenderValue::text(payment_method_label(Some(payment_method.as_str()))),
@@ -616,7 +687,8 @@ fn checkout_form_from_storefront(
             RenderValue::text("Place order".to_string()),
         )?
         .with_bool("hasPaymentReference", payment.reference.is_some())?
-        .with_bool("hasPaymentLast4", payment.last4.is_some())
+        .with_bool("hasPaymentLast4", payment.last4.is_some())?;
+    merge_checkout_form_feedback(model, form_state)
 }
 
 fn payment_provider_label() -> &'static str {
@@ -637,6 +709,7 @@ fn payment_status_label(status: &str) -> String {
     match status {
         "not_started" => "Not started".to_string(),
         "ready_for_payment" => "Ready for payment".to_string(),
+        "provider_pending" => "Awaiting provider confirmation".to_string(),
         "captured" => "Captured".to_string(),
         "authorized" => "Authorized".to_string(),
         other => display_status_label(other),
@@ -698,6 +771,10 @@ fn localized_shop_path(locale: &str) -> String {
     format!("/{}/shop", locale.trim_matches('/'))
 }
 
+fn localized_collections_path(locale: &str) -> String {
+    format!("/{}/shop/collections", locale.trim_matches('/'))
+}
+
 fn localized_collection_path(locale: &str, slug: &str) -> String {
     format!(
         "/{}/shop/collections/{}",
@@ -722,6 +799,20 @@ struct AccountSurfaceBindings {
     membership_summary: RenderModel,
 }
 
+fn flash_messages_model(messages: &[FlashMessage]) -> Result<Vec<RenderModel>, TemplateModelError> {
+    messages
+        .iter()
+        .map(|message| {
+            RenderModel::new()
+                .with_value(
+                    "level",
+                    RenderValue::text(format!("{:?}", message.level).to_ascii_lowercase()),
+                )?
+                .with_value("text", RenderValue::text(message.text.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()
+}
+
 fn account_surface_bindings(
     plan: Option<&RuntimePlan>,
     fixture: &StorefrontFixture,
@@ -732,11 +823,7 @@ fn account_surface_bindings(
     let Some(session) = session else {
         return fixture_account_surface_bindings(fixture, locale);
     };
-    let Some(principal) = principal else {
-        return fixture_account_surface_bindings(fixture, locale);
-    };
-
-    if session.session_id.is_none() && principal.principal_id.is_none() {
+    if session.session_id.is_none() {
         return fixture_account_surface_bindings(fixture, locale);
     }
 
@@ -810,10 +897,10 @@ fn live_account_surface_bindings(
     plan: Option<&RuntimePlan>,
     locale: &str,
     session: &SessionContext,
-    principal: &PrincipalContext,
+    principal: Option<&PrincipalContext>,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
-    let snapshot = live_storefront_state(plan, Some(session), Some(principal))?;
-    let principal_id = principal.principal_id.as_deref();
+    let snapshot = live_storefront_state(plan, Some(session), principal)?;
+    let principal_id = principal.and_then(|principal| principal.principal_id.as_deref());
     let recent_orders = recent_orders_from_storefront(snapshot.as_ref())?;
     let has_recent_orders = !recent_orders.is_empty();
     let latest_order = snapshot
@@ -830,12 +917,14 @@ fn live_account_surface_bindings(
         .unwrap_or_default();
     let display_name = principal_id
         .map(display_name_from_principal_id)
-        .unwrap_or_else(|| "Signed-in Customer".to_string());
-    let state_summary = if principal_id.is_some() {
-        "Using the live storefront session identity for this account view. Order history and membership state will render here when the storefront state path supplies them."
-    } else {
-        "Using a resolved storefront session for this account view. Order history and membership state will render here when the storefront state path supplies them."
-    };
+        .or_else(|| {
+            if email.is_empty() {
+                None
+            } else {
+                Some(display_name_from_principal_id(&email))
+            }
+        })
+        .unwrap_or_else(|| "Current Browser Session".to_string());
     let membership_summary = membership_summary_from_storefront(snapshot.as_ref())?;
     let latest_order_reference = latest_order
         .as_ref()
@@ -845,7 +934,14 @@ fn live_account_surface_bindings(
         .as_ref()
         .map(|order| display_status_label(&order.status))
         .unwrap_or_default();
-    let state_summary = account_state_summary(state_summary, latest_order.as_ref());
+    let state_summary = account_state_summary(
+        if principal_id.is_some() {
+            "Using the live storefront session identity for this account view. Order history and membership state render from the current signed-in browser session."
+        } else {
+            "This account area is using the current browser session. Formal sign-in is not installed yet, so completed checkouts from this browser become the account history shown here."
+        },
+        latest_order.as_ref(),
+    );
     let orders_cta_url = if has_recent_orders {
         "/account/orders".to_string()
     } else {
@@ -870,13 +966,21 @@ fn live_account_surface_bindings(
             .with_value(
                 "ordersEmptyText",
                 RenderValue::text(
-                    "No order history is attached to this signed-in account yet. Completed storefront purchases will appear here once live account history is available.",
+                    if principal_id.is_some() {
+                        "No order history is attached to this signed-in account yet. Completed storefront purchases will appear here once live account history is available."
+                    } else {
+                        "This browser session has not completed checkout yet. Orders placed from this browser will appear here automatically."
+                    },
                 ),
             )?
             .with_value(
                 "membershipEmptyText",
                 RenderValue::text(
-                    "No active membership is attached to this signed-in account yet. Join from the storefront to unlock early access and renewal visibility.",
+                    if principal_id.is_some() {
+                        "No active membership is attached to this signed-in account yet. Join from the storefront to unlock early access and renewal visibility."
+                    } else {
+                        "No active membership is attached to this browser session yet. Membership purchases completed here will appear after checkout."
+                    },
                 ),
             )?
             .with_value("ordersCtaUrl", RenderValue::text(orders_cta_url))?
@@ -920,6 +1024,9 @@ fn membership_summary_from_storefront(
     };
 
     let Some((order, line)) = snapshot.recent_orders.iter().find_map(|order| {
+        if !matches!(order.status.as_str(), "paid" | "fulfilled") {
+            return None;
+        }
         order.lines.iter().find_map(|line| {
             if line.product_kind == "membership" {
                 Some((order, line))
@@ -1553,6 +1660,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             None,
+            None,
         )
         .unwrap()
     }
@@ -1572,6 +1680,7 @@ mod tests {
             "memberships.account",
             "en-GB",
             &BTreeMap::new(),
+            None,
             Some(&session),
             Some(&principal),
         )
@@ -1767,4 +1876,118 @@ mod tests {
         assert!(!html.contains("Gold Membership"));
         assert!(html.contains("Membership unavailable"));
     }
+}
+#[derive(Clone)]
+struct StorefrontPageFeedback {
+    visible_flash_messages: Vec<FlashMessage>,
+    form_state: Option<StorefrontFormState>,
+}
+
+fn storefront_page_feedback(route_name: &str, messages: &[FlashMessage]) -> StorefrontPageFeedback {
+    let mut visible_flash_messages = Vec::new();
+    let mut form_state = None;
+    for message in messages {
+        if let Some(decoded) = StorefrontFormState::decode(&message.text) {
+            if decoded.route_name == route_name && form_state.is_none() {
+                form_state = Some(decoded);
+            }
+            continue;
+        }
+        visible_flash_messages.push(message.clone());
+    }
+    StorefrontPageFeedback {
+        visible_flash_messages,
+        form_state,
+    }
+}
+
+fn cart_form_model(
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    let has_errors = !errors.is_empty();
+    RenderModel::new()
+        .with_bool("hasErrors", has_errors)?
+        .with_value(
+            "errorSummary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| "Fix the highlighted cart lines and try again.".to_string()),
+            ),
+        )?
+        .with_list("errors", errors)
+}
+
+fn merge_checkout_form_feedback(
+    model: RenderModel,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    let has_errors = !errors.is_empty();
+    let checkout_email_error = storefront_field_error(form_state, "checkout_email");
+    let payment_method_error = storefront_field_error(form_state, "payment_method");
+    let payment_last4_error = storefront_field_error(form_state, "payment_last4");
+    let checkout_intent_error = storefront_field_error(form_state, "checkout_intent");
+    let terms_accepted_error = storefront_field_error(form_state, "terms_accepted");
+    model
+        .with_bool("hasErrors", has_errors)?
+        .with_value(
+            "errorSummary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| {
+                        "Review the highlighted checkout fields and try again.".to_string()
+                    }),
+            ),
+        )?
+        .with_list("errors", errors)?
+        .with_bool("hasCheckoutEmailError", checkout_email_error.is_some())?
+        .with_value(
+            "checkoutEmailError",
+            RenderValue::text(checkout_email_error.unwrap_or_default()),
+        )?
+        .with_bool("hasPaymentMethodError", payment_method_error.is_some())?
+        .with_value(
+            "paymentMethodError",
+            RenderValue::text(payment_method_error.unwrap_or_default()),
+        )?
+        .with_bool("hasPaymentLast4Error", payment_last4_error.is_some())?
+        .with_value(
+            "paymentLast4Error",
+            RenderValue::text(payment_last4_error.unwrap_or_default()),
+        )?
+        .with_bool("hasCheckoutIntentError", checkout_intent_error.is_some())?
+        .with_value(
+            "checkoutIntentError",
+            RenderValue::text(checkout_intent_error.unwrap_or_default()),
+        )?
+        .with_bool("hasTermsAcceptedError", terms_accepted_error.is_some())?
+        .with_value(
+            "termsAcceptedError",
+            RenderValue::text(terms_accepted_error.unwrap_or_default()),
+        )
+}
+
+fn storefront_field_error(form_state: Option<&StorefrontFormState>, field: &str) -> Option<String> {
+    form_state.and_then(|state| state.field_errors.get(field).cloned())
+}
+
+fn form_errors_model(
+    form_state: Option<&StorefrontFormState>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    form_state
+        .map(|state| {
+            state
+                .field_errors
+                .iter()
+                .map(|(field, message)| {
+                    RenderModel::new()
+                        .with_value("field", RenderValue::text(field.clone()))?
+                        .with_value("message", RenderValue::text(message.clone()))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_else(|| Ok(Vec::new()))
 }

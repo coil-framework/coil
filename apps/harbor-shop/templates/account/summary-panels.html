@@ -8,6 +8,10 @@
           <strong dv:text="${order.reference}">HS-1048</strong>
           <span dv:text="${order.status}">Packed</span>
           <span dv:text="${order.total}">GBP 84</span>
+          <span dv:text="${order.lineCount}">1</span>
+          <p dv:if="${order.hasPaymentSummary}" dv:text="${order.paymentSummary}">
+            Card ending 4242, reference PAY-50001
+          </p>
         </li>
       </ul>
       <p dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
@@ -36,33 +40,50 @@
         </p>
         <a class="button" href="/account/memberships">Manage membership</a>
       </div>
-      <p dv:unless="${account.hasMembership}" dv:text="${account.membershipEmptyText}">
-        No membership is attached yet. Join to unlock early-access drops and concierge support.
-      </p>
-      <a
-        class="button"
-        href="/en-GB/shop/collections/memberships"
-        dv:unless="${account.hasMembership}"
-        dv:attr="href=${account.membershipCtaUrl}"
-      >
-        Explore memberships
-      </a>
+      <div dv:unless="${account.hasMembership}">
+        <p dv:if="${account.hasLatestOrder}">
+          <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+          <span dv:text="${account.latestOrderStatus}">Pending Payment</span>
+        </p>
+        <p dv:if="${account.hasLatestOrder}">
+          Membership activation will appear here once the storefront order is captured and the
+          membership sync completes.
+        </p>
+        <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
+          No membership is attached yet. Join to unlock early-access drops and concierge support.
+        </p>
+        <a class="button button--secondary" href="/account/orders" dv:if="${account.hasLatestOrder}">
+          View order history
+        </a>
+        <a
+          class="button"
+          href="/en-GB/shop/collections/memberships"
+          dv:unless="${account.hasLatestOrder}"
+          dv:attr="href=${account.membershipCtaUrl}"
+        >
+          Explore memberships
+        </a>
+      </div>
     </article>
 
     <article class="account-panel">
       <p class="account-panel__eyebrow">Support</p>
-      <h2>Need help with a delivery?</h2>
+      <h2>Continue your account journey</h2>
       <p dv:if="${account.hasCustomerEmail}">
-        Start with delivery status, billing details, or address changes for
+        Review orders, retry checkout, or check membership activation for
         <strong dv:text="${customer.email}">member@example.com</strong>.
       </p>
-      <p dv:unless="${account.hasCustomerEmail}">
-        Start with delivery status, billing details, or address changes before your next dispatch.
+      <p dv:if="${account.hasPrincipal}">
+        Signed-in customer state will continue to expand here as more account tools ship.
+      </p>
+      <p dv:unless="${account.hasPrincipal}">
+        Formal sign-in is not installed yet, so this account area follows the current browser
+        session instead.
       </p>
       <ul class="account-panel__list">
-        <li><a href="/account">Update profile details</a></li>
+        <li><a href="/account/orders">Review order history</a></li>
         <li><a href="/checkout">Retry checkout</a></li>
-        <li><a href="/account/memberships">View renewal options</a></li>
+        <li><a href="/account/memberships">Check membership status</a></li>
       </ul>
     </article>
   </div>

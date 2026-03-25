@@ -25,6 +25,25 @@
           then payment and final review.
         </p>
       </section>
+      <section class="storefront-flash" dv:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" dv:text="${message.level}">error</p>
+          <p dv:text="${message.text}">The checkout submission needs another look.</p>
+        </article>
+      </section>
+      <section class="storefront-errors" dv:if="${checkout.hasErrors}">
+        <article class="storefront-errors__summary">
+          <h2>Checkout details need attention</h2>
+          <p dv:text="${checkout.errorSummary}">
+            Review the highlighted checkout fields and try again.
+          </p>
+          <ul class="storefront-errors__list">
+            <li dv:each="error : ${checkout.errors}" dv:text="${error.message}">
+              Update the highlighted field and try again.
+            </li>
+          </ul>
+        </article>
+      </section>
 
       <div class="checkout-page__grid">
         <section class="checkout-card">
@@ -101,22 +120,17 @@
                     value="hello@example.com"
                     dv:attr="value=${checkout.checkoutEmail}"
                   />
+                  <small class="commerce-form__error" dv:if="${checkout.hasCheckoutEmailError}" dv:text="${checkout.checkoutEmailError}">
+                    Enter the email address for order confirmation.
+                  </small>
                 </label>
                 <label class="commerce-form__field">
-                  <span>Delivery name</span>
+                  <span>Customer</span>
                   <input
                     type="text"
-                    name="delivery_name"
                     value="Harbor Customer"
+                    readonly="readonly"
                     dv:attr="value=${customer.displayName}"
-                  />
-                </label>
-                <label class="commerce-form__field checkout-form__field--wide">
-                  <span>Delivery note</span>
-                  <input
-                    type="text"
-                    name="delivery_note"
-                    value="Leave with the front desk if nobody is in."
                   />
                 </label>
                 <label class="commerce-form__field checkout-form__field--wide">
@@ -128,6 +142,9 @@
                     readonly="readonly"
                     dv:attr="value=${checkout.paymentMethod}"
                   />
+                  <small class="commerce-form__error" dv:if="${checkout.hasPaymentMethodError}" dv:text="${checkout.paymentMethodError}">
+                    Choose or confirm a payment method before placing the order.
+                  </small>
                 </label>
                 <label class="commerce-form__field checkout-form__field--wide">
                   <span>Card last four</span>
@@ -140,22 +157,43 @@
                     value="4242"
                     dv:attr="value=${checkout.paymentLast4}"
                   />
+                  <small class="commerce-form__error" dv:if="${checkout.hasPaymentLast4Error}" dv:text="${checkout.paymentLast4Error}">
+                    Enter the final 4 digits for the payment card.
+                  </small>
                 </label>
                 <label class="commerce-form__field checkout-form__field--wide">
-                  <span>Checkout intent</span>
+                  <span>Payment reference</span>
                   <input
                     type="text"
-                    name="checkout_intent"
                     value="PAYMENT-PENDING"
                     readonly="readonly"
                     dv:attr="value=${checkout.paymentReference}"
                   />
                 </label>
+                <input
+                  type="hidden"
+                  name="checkout_intent"
+                  value="PAYMENT-PENDING"
+                  dv:attr="value=${checkout.checkoutIntent}"
+                />
               </div>
-              <label class="checkout-form__consent">
+              <p class="commerce-form__error" dv:if="${checkout.hasCheckoutIntentError}" dv:text="${checkout.checkoutIntentError}">
+                Refresh checkout and try again before placing the order.
+              </p>
+              <label class="commerce-form__checkbox" dv:if="${checkout.termsAccepted}">
                 <input type="checkbox" name="terms_accepted" value="yes" checked="checked" />
-                <span>I have reviewed the basket, delivery details, and final total.</span>
+                <span>I have reviewed the basket, delivery notes, and final total.</span>
               </label>
+              <label class="commerce-form__checkbox" dv:unless="${checkout.termsAccepted}">
+                <input type="checkbox" name="terms_accepted" value="yes" />
+                <span>I have reviewed the basket, delivery notes, and final total.</span>
+              </label>
+              <p class="commerce-form__error" dv:if="${checkout.hasTermsAcceptedError}" dv:text="${checkout.termsAcceptedError}">
+                Review the basket and confirm the final total before placing the order.
+              </p>
+              <p class="checkout-form__consent">
+                Review the basket total, payment route, and receipt email before placing the order.
+              </p>
               <button class="button" type="submit" dv:text="${checkout.submitLabel}">Place order</button>
             </form>
           </div>

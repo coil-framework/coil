@@ -77,8 +77,8 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             .contains(&Capability::AssetRead)
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 12);
-    assert_eq!(manifest.http_surfaces.len(), 12);
+    assert_eq!(manifest.route_surfaces.len(), 14);
+    assert_eq!(manifest.http_surfaces.len(), 14);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 2);
@@ -123,6 +123,16 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
     assert_eq!(catalog.path, "/shop");
     assert!(catalog.localized);
     assert_eq!(catalog.capability, None);
+
+    let collections = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.collections")
+        .expect("collections surface should exist");
+    assert_eq!(collections.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(collections.path, "/shop/collections");
+    assert!(collections.localized);
+    assert_eq!(collections.capability, None);
 
     let collection_detail = manifest
         .route_surfaces
@@ -209,6 +219,15 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
     assert_eq!(checkout_confirmation.kind, RouteSurfaceKind::FrontendPage);
     assert_eq!(checkout_confirmation.path, "/checkout/confirmation");
     assert_eq!(checkout_confirmation.capability, None);
+
+    let account_orders = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.account.orders")
+        .expect("account orders surface should exist");
+    assert_eq!(account_orders.kind, RouteSurfaceKind::FrontendPage);
+    assert_eq!(account_orders.path, "/account/orders");
+    assert_eq!(account_orders.capability, None);
 }
 
 #[test]
@@ -232,6 +251,23 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         collection_detail.response,
         HttpResponseContract::Page {
             template: "commerce/collection-detail".to_string(),
+            status: 200,
+        }
+    );
+
+    let collections = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.collections")
+        .expect("collections http surface should exist");
+    assert_eq!(collections.area, HttpSurfaceArea::Public);
+    assert_eq!(collections.path, "/shop/collections");
+    assert!(collections.localized);
+    assert_eq!(collections.capability, None);
+    assert_eq!(
+        collections.response,
+        HttpResponseContract::Page {
+            template: "commerce/collections".to_string(),
             status: 200,
         }
     );
@@ -365,6 +401,22 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         checkout_confirmation.response,
         HttpResponseContract::Page {
             template: "commerce/checkout-confirmation".to_string(),
+            status: 200,
+        }
+    );
+
+    let account_orders = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.account.orders")
+        .expect("account orders http surface should exist");
+    assert_eq!(account_orders.area, HttpSurfaceArea::Account);
+    assert_eq!(account_orders.path, "/account/orders");
+    assert_eq!(account_orders.capability, None);
+    assert_eq!(
+        account_orders.response,
+        HttpResponseContract::Page {
+            template: "account/orders".to_string(),
             status: 200,
         }
     );

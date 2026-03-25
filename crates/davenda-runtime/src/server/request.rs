@@ -198,7 +198,17 @@ pub(super) async fn execute_live_request(
     };
 
     let mut storefront_mutation_cookies = Vec::new();
-    apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)?;
+    if let Some(location) =
+        apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)?
+    {
+        execution
+            .response_cookies
+            .extend(storefront_mutation_cookies);
+        return Ok(storefront_redirect_response(
+            &location,
+            &execution.response_cookies,
+        ));
+    }
     execution
         .response_cookies
         .extend(storefront_mutation_cookies);
@@ -224,6 +234,8 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
             | StorefrontStateError::MissingPaymentMethod
             | StorefrontStateError::MissingCheckoutEmail
             | StorefrontStateError::InvalidPaymentLast4
+            | StorefrontStateError::MissingPaymentIntent
+            | StorefrontStateError::PaymentIntentMismatch { .. }
             | StorefrontStateError::CheckoutNotReady { .. }
             | StorefrontStateError::EmptyCart { .. },
         ) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
@@ -387,6 +399,8 @@ fn prepare_native_storefront_request(
         && matched.route.area != RouteArea::Admin
         && matched.route.area != RouteArea::Api
         && matched.route.area != RouteArea::Fragment;
+    let is_account_page =
+        request.method == HttpMethod::Get && matched.route.area == RouteArea::Account;
     let is_native_capability_route = STOREFRONT_NATIVE_CAPABILITY_ROUTES.contains(&route_name);
     let is_native_mutation_route = matches!(
         route_name,
@@ -395,7 +409,7 @@ fn prepare_native_storefront_request(
             | "commerce.checkout-start"
             | "commerce.checkout-complete"
     );
-    if !is_storefront_page && !is_native_mutation_route {
+    if !is_storefront_page && !is_account_page && !is_native_mutation_route {
         return Ok(());
     }
 
@@ -453,6 +467,43 @@ fn push_storefront_flash(
     Ok(())
 }
 
+fn push_storefront_form_state(
+    state: &RuntimeServerState,
+    response_cookies: &mut Vec<String>,
+    form_state: &StorefrontFormState,
+) -> Result<(), RuntimeServerError> {
+    let message = FlashMessage::new(FlashLevel::Error, form_state.encode()?)
+        .map_err(RequestExecutionError::from_browser_error)?;
+    let cookie = {
+        let browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        browser
+            .issue_flash_cookie(&state.cookie_secret, &[message])
+            .map_err(RequestExecutionError::from_browser_error)?
+    };
+    response_cookies.push(cookie);
+    Ok(())
+}
+
+fn storefront_redirect_response(location: &str, response_cookies: &[String]) -> Response<Body> {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = StatusCode::SEE_OTHER;
+    response.headers_mut().insert(
+        HeaderName::from_static("location"),
+        HeaderValue::from_str(location).expect("redirect location is a valid header value"),
+    );
+    for cookie in response_cookies {
+        if let Ok(value) = HeaderValue::from_str(cookie) {
+            response
+                .headers_mut()
+                .append(HeaderName::from_static("set-cookie"), value);
+        }
+    }
+    response
+}
+
 fn parse_quantity_field(value: Option<&str>) -> Option<u32> {
     value.and_then(|raw| raw.trim().parse::<u32>().ok())
 }
@@ -461,9 +512,208 @@ fn storefront_quantity_from_execution(execution: &RequestExecution) -> u32 {
     parse_quantity_field(execution_form_field(execution, "quantity")).unwrap_or(1)
 }
 
+fn storefront_form_field_value(execution: &RequestExecution, name: &str) -> String {
+    execution_form_field(execution, name)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn storefront_checkout_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.checkout", summary.into());
+    for field in [
+        "checkout_email",
+        "delivery_name",
+        "delivery_note",
+        "payment_method",
+        "payment_last4",
+        "checkout_intent",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    if execution_form_field(execution, "terms_accepted").is_some() {
+        state = state.with_field_value("terms_accepted", "yes");
+    }
+    state
+}
+
+fn storefront_cart_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.cart", summary.into());
+    for (name, values) in &execution.form_fields {
+        if name.starts_with("quantity_") {
+            if let Some(value) = values.first() {
+                state = state.with_field_value(name.clone(), value.clone());
+            }
+        }
+    }
+    state
+}
+
+fn validated_cart_quantities_from_execution(
+    execution: &RequestExecution,
+) -> Result<BTreeMap<String, u32>, StorefrontFormState> {
+    let mut quantities = BTreeMap::new();
+    let mut form_state = storefront_cart_form_state_from_execution(
+        execution,
+        "Fix the highlighted cart quantities and try again.",
+    );
+    let mut has_errors = false;
+    for (name, values) in &execution.form_fields {
+        let Some(product_slug) = name.strip_prefix("quantity_") else {
+            continue;
+        };
+        let raw = values.first().cloned().unwrap_or_default();
+        match raw.trim().parse::<u32>() {
+            Ok(quantity) => {
+                quantities.insert(product_slug.to_string(), quantity);
+            }
+            Err(_) => {
+                has_errors = true;
+                form_state = form_state
+                    .with_field_error(name.clone(), "Enter a whole-number quantity for this line.");
+            }
+        }
+    }
+    if has_errors {
+        Err(form_state)
+    } else {
+        Ok(quantities)
+    }
+}
+
+fn validated_storefront_payment_input_from_execution(
+    execution: &RequestExecution,
+) -> Result<StorefrontPaymentInput, StorefrontFormState> {
+    let checkout_email = execution_form_field(execution, "checkout_email")
+        .or_else(|| execution_form_field(execution, "checkoutEmail"))
+        .or_else(|| execution_form_field(execution, "email"))
+        .or_else(|| execution_form_field(execution, "billing_email"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let last4 = execution_form_field(execution, "payment_last4")
+        .or_else(|| execution_form_field(execution, "paymentLast4"))
+        .or_else(|| execution_form_field(execution, "card_last4"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let method = execution_form_field(execution, "payment_method")
+        .or_else(|| execution_form_field(execution, "paymentMethod"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| (!last4.is_empty()).then(|| "card".to_string()))
+        .unwrap_or_default();
+    let mut form_state = storefront_checkout_form_state_from_execution(
+        execution,
+        "There is a problem with your checkout details.",
+    );
+    let mut has_errors = false;
+    if checkout_email.is_empty() {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "checkout_email",
+            "Enter the email address for order confirmation.",
+        );
+    }
+    if method.is_empty() {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "payment_method",
+            "Choose or confirm a payment method before placing the order.",
+        );
+    }
+    if method == "card"
+        && (last4.len() != 4 || !last4.chars().all(|character| character.is_ascii_digit()))
+    {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "payment_last4",
+            "Enter the final 4 digits for the payment card.",
+        );
+    }
+    if execution_form_field(execution, "checkout_intent")
+        .or_else(|| execution_form_field(execution, "payment_intent"))
+        .or_else(|| execution_form_field(execution, "payment_reference"))
+        .or_else(|| execution_form_field(execution, "paymentReference"))
+        .is_none()
+    {
+        has_errors = true;
+        form_state = form_state
+        .with_summary("Refresh checkout before placing the order.")
+        .with_field_error(
+            "checkout_intent",
+            "Refresh checkout and try again before placing the order.",
+        );
+    }
+    if execution_form_field(execution, "terms_accepted").is_none() {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "terms_accepted",
+            "Review the basket and confirm the final total before placing the order.",
+        );
+    }
+    if has_errors {
+        return Err(form_state);
+    }
+    let intent_reference = execution_form_field(execution, "checkout_intent")
+        .or_else(|| execution_form_field(execution, "payment_intent"))
+        .or_else(|| execution_form_field(execution, "payment_reference"))
+        .or_else(|| execution_form_field(execution, "paymentReference"))
+        .unwrap_or_default();
+    StorefrontPaymentInput::new(
+        method,
+        checkout_email,
+        (!last4.is_empty()).then_some(last4),
+        intent_reference,
+    )
+    .map_err(|error| {
+        let mut form_state = storefront_checkout_form_state_from_execution(
+            execution,
+            "There is a problem with your checkout details.",
+        );
+        let (field, message) = match error {
+            StorefrontStateError::MissingPaymentMethod => (
+                "payment_method",
+                "Choose or confirm a payment method before placing the order.",
+            ),
+            StorefrontStateError::MissingCheckoutEmail => (
+                "checkout_email",
+                "Enter the email address for order confirmation.",
+            ),
+            StorefrontStateError::InvalidPaymentLast4 => (
+                "payment_last4",
+                "Enter the final 4 digits for the payment card.",
+            ),
+            StorefrontStateError::MissingPaymentIntent => (
+                "checkout_intent",
+                "Refresh checkout and try again before placing the order.",
+            ),
+            _ => (
+                "checkout_email",
+                "Update the checkout details and try again.",
+            ),
+        };
+        form_state = form_state.with_field_error(field, message);
+        form_state
+    })
+}
+
 fn storefront_payment_input_from_execution(
     execution: &RequestExecution,
 ) -> Result<StorefrontPaymentInput, RuntimeServerError> {
+    let intent_reference = execution_form_field(execution, "checkout_intent")
+        .or_else(|| execution_form_field(execution, "payment_intent"))
+        .or_else(|| execution_form_field(execution, "payment_reference"))
+        .or_else(|| execution_form_field(execution, "paymentReference"));
     let last4 = execution_form_field(execution, "payment_last4")
         .or_else(|| execution_form_field(execution, "paymentLast4"))
         .or_else(|| execution_form_field(execution, "card_last4"))
@@ -480,6 +730,7 @@ fn storefront_payment_input_from_execution(
         method.unwrap_or_default(),
         checkout_email.unwrap_or_default(),
         last4,
+        intent_reference.unwrap_or_default(),
     )
     .map_err(RuntimeServerError::Storefront)
 }
@@ -489,9 +740,9 @@ fn apply_native_storefront_mutations(
     execution: &RequestExecution,
     now: BrowserInstant,
     response_cookies: &mut Vec<String>,
-) -> Result<(), RuntimeServerError> {
+) -> Result<Option<String>, RuntimeServerError> {
     let Some(session_id) = execution.session.session_id.as_deref() else {
-        return Ok(());
+        return Ok(None);
     };
     match execution.route.route_name.as_str() {
         "commerce.add-to-cart" => {
@@ -512,7 +763,13 @@ fn apply_native_storefront_mutations(
             )?;
         }
         "commerce.cart-update" => {
-            let quantities = cart_quantities_from_execution(execution);
+            let quantities = match validated_cart_quantities_from_execution(execution) {
+                Ok(quantities) => quantities,
+                Err(form_state) => {
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/cart".to_string()));
+                }
+            };
             let mut snapshot = state
                 .storefront
                 .snapshot(session_id, execution.principal.principal_id.as_deref())?;
@@ -543,24 +800,85 @@ fn apply_native_storefront_mutations(
                     now.as_unix_seconds(),
                 )?;
             }
-            let _ = state.storefront.checkout_start(
+            match state.storefront.checkout_start(
                 session_id,
                 execution.principal.principal_id.as_deref(),
                 now.as_unix_seconds(),
-            )?;
+            ) {
+                Ok(_) => {}
+                Err(StorefrontStateError::EmptyCart { .. }) => {
+                    let form_state = StorefrontFormState::new(
+                        "commerce.cart",
+                        "Add at least one item to the cart before starting checkout.",
+                    );
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/cart".to_string()));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
         }
         "commerce.checkout-complete" => {
-            let payment = storefront_payment_input_from_execution(execution)?;
-            let snapshot = state.storefront.checkout_complete(
+            let payment = match validated_storefront_payment_input_from_execution(execution) {
+                Ok(payment) => payment,
+                Err(form_state) => {
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/checkout".to_string()));
+                }
+            };
+            let snapshot = match state.storefront.checkout_complete(
                 session_id,
                 execution.principal.principal_id.as_deref(),
                 &payment,
                 now.as_unix_seconds(),
-            )?;
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(
+                    error @ (StorefrontStateError::CheckoutNotReady { .. }
+                    | StorefrontStateError::EmptyCart { .. }
+                    | StorefrontStateError::MissingPaymentIntent
+                    | StorefrontStateError::PaymentIntentMismatch { .. }),
+                ) => {
+                    let summary = match &error {
+                        StorefrontStateError::CheckoutNotReady { .. } => {
+                            "Refresh checkout and review the basket before placing the order."
+                        }
+                        StorefrontStateError::EmptyCart { .. } => {
+                            "Add at least one item to the cart before placing the order."
+                        }
+                        StorefrontStateError::MissingPaymentIntent => {
+                            "Refresh checkout before placing the order."
+                        }
+                        StorefrontStateError::PaymentIntentMismatch { .. } => {
+                            "Refresh checkout before placing the order."
+                        }
+                        _ => "There is a problem with your checkout details.",
+                    };
+                    let mut form_state =
+                        storefront_checkout_form_state_from_execution(execution, summary);
+                    if matches!(
+                        error,
+                        StorefrontStateError::MissingPaymentIntent
+                            | StorefrontStateError::PaymentIntentMismatch { .. }
+                    ) {
+                        form_state = form_state.with_field_error(
+                            "checkout_intent",
+                            "Refresh checkout and try again before placing the order.",
+                        );
+                    }
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/checkout".to_string()));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            };
             let message = snapshot
                 .latest_order
                 .as_ref()
-                .map(|order| format!("Order {} is confirmed.", order.order_id))
+                .map(|order| {
+                    format!(
+                        "Order {} is awaiting provider confirmation.",
+                        order.order_id
+                    )
+                })
                 .unwrap_or_else(|| {
                     "Checkout could not complete because the cart is empty.".to_string()
                 });
@@ -568,7 +886,7 @@ fn apply_native_storefront_mutations(
         }
         _ => {}
     }
-    Ok(())
+    Ok(None)
 }
 
 fn execution_form_field<'a>(execution: &'a RequestExecution, name: &str) -> Option<&'a str> {

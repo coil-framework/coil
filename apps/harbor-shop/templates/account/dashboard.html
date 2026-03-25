@@ -19,10 +19,17 @@
     <main class="site-main">
       <section class="account-page">
         <div class="account-page__intro">
-          <h1 dv:text="${customer.displayName}">Your account</h1>
+          <p class="account-page__eyebrow">Customer account</p>
+          <h1>Your account</h1>
           <p dv:text="${account.stateSummary}">
             Review your membership status, recent orders, and the quickest route back into the
             storefront when you are ready to browse again.
+          </p>
+          <p dv:if="${account.hasPrincipal}">
+            Signed in as <strong dv:text="${customer.displayName}">Member Live</strong>.
+          </p>
+          <p dv:unless="${account.hasPrincipal}">
+            Continue from this browser session while the formal sign-in flow is still being wired.
           </p>
           <p dv:if="${account.hasLatestOrder}">
             Latest order
@@ -30,10 +37,16 @@
             is
             <span dv:text="${account.latestOrderStatus}">Paid</span>.
           </p>
-          <p dv:if="${account.hasCustomerEmail}">
-            Account email: <strong dv:text="${customer.email}">member@example.com</strong>
-          </p>
+          <div dv:if="${account.hasCustomerEmail}">
+            <p dv:if="${account.hasPrincipal}">
+              Account email: <strong dv:text="${customer.email}">member@example.com</strong>
+            </p>
+            <p dv:unless="${account.hasPrincipal}">
+              Latest receipt email: <strong dv:text="${customer.email}">member@example.com</strong>
+            </p>
+          </div>
         </div>
+        <nav class="account-page__nav" dv:replace="~{account/nav :: nav}"></nav>
         <div class="account-page__cards">
           <article class="account-card">
             <h2>Memberships</h2>
@@ -41,7 +54,8 @@
               Check your active tiers, renewals, and entitlement status.
             </p>
             <p dv:unless="${account.hasMembership}">
-              No active membership is attached yet. Start from the storefront collection to join.
+              No active membership is attached yet. Review the membership area or continue through
+              the storefront collection to join.
             </p>
             <a class="button" href="/account/memberships">View memberships</a>
           </article>
@@ -53,6 +67,9 @@
             <p dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
               Continue browsing the public catalog and landing content.
             </p>
+            <a class="button" href="/account/orders" dv:if="${account.hasRecentOrders}">
+              View order history
+            </a>
             <a
               class="button button--secondary"
               href="/en-GB/shop"

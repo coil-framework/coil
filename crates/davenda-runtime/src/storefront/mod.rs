@@ -2,14 +2,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde::Serialize;
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::*;
 
 const DEFAULT_CURRENCY: &str = "GBP";
 const INITIAL_ORDER_SEQUENCE: i64 = 10_042;
+const STOREFRONT_FORM_STATE_PREFIX: &str = "__davenda_storefront_form_state__:";
 
 #[derive(Debug, Error)]
 pub enum StorefrontStateError {
@@ -25,6 +26,12 @@ pub enum StorefrontStateError {
     MissingCheckoutEmail,
     #[error("card payments require a 4-digit last4 value")]
     InvalidPaymentLast4,
+    #[error("checkout completion requires a payment intent reference")]
+    MissingPaymentIntent,
+    #[error(
+        "checkout intent `{received}` does not match the reserved payment intent `{expected}`"
+    )]
+    PaymentIntentMismatch { expected: String, received: String },
     #[error("checkout for session `{session_id}` is not ready for payment")]
     CheckoutNotReady { session_id: String },
     #[error("cart for session `{session_id}` is empty")]
@@ -57,6 +64,7 @@ pub struct StorefrontPaymentInput {
     pub method: String,
     pub last4: Option<String>,
     pub checkout_email: String,
+    pub intent_reference: String,
 }
 
 impl StorefrontPaymentInput {
@@ -64,6 +72,7 @@ impl StorefrontPaymentInput {
         method: impl Into<String>,
         checkout_email: impl Into<String>,
         last4: Option<String>,
+        intent_reference: impl Into<String>,
     ) -> Result<Self, StorefrontStateError> {
         let method = method.into().trim().to_ascii_lowercase();
         if method.is_empty() {
@@ -83,18 +92,24 @@ impl StorefrontPaymentInput {
         if method == "card" && !has_valid_last4 {
             return Err(StorefrontStateError::InvalidPaymentLast4);
         }
+        let intent_reference = intent_reference.into().trim().to_string();
+        if intent_reference.is_empty() {
+            return Err(StorefrontStateError::MissingPaymentIntent);
+        }
         Ok(Self {
             method,
             last4,
             checkout_email,
+            intent_reference,
         })
     }
 
     pub fn card(
         checkout_email: impl Into<String>,
         last4: impl Into<String>,
+        intent_reference: impl Into<String>,
     ) -> Result<Self, StorefrontStateError> {
-        Self::new("card", checkout_email, Some(last4.into()))
+        Self::new("card", checkout_email, Some(last4.into()), intent_reference)
     }
 }
 
@@ -175,6 +190,57 @@ pub struct StorefrontOrderHistoryResponse {
 pub struct StorefrontResponseAugmentation {
     pub html_fragment: Option<String>,
     pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorefrontFormState {
+    pub route_name: String,
+    pub summary: String,
+    pub field_errors: BTreeMap<String, String>,
+    pub fields: BTreeMap<String, String>,
+}
+
+impl StorefrontFormState {
+    pub fn new(route_name: impl Into<String>, summary: impl Into<String>) -> Self {
+        Self {
+            route_name: route_name.into(),
+            summary: summary.into(),
+            field_errors: BTreeMap::new(),
+            fields: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_field_error(
+        mut self,
+        field: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        self.field_errors.insert(field.into(), message.into());
+        self
+    }
+
+    pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
+        self.summary = summary.into();
+        self
+    }
+
+    pub fn with_field_value(mut self, field: impl Into<String>, value: impl Into<String>) -> Self {
+        self.fields.insert(field.into(), value.into());
+        self
+    }
+
+    pub fn encode(&self) -> Result<String, StorefrontStateError> {
+        let payload =
+            serde_json::to_string(self).map_err(|error| StorefrontStateError::Serialization {
+                reason: error.to_string(),
+            })?;
+        Ok(format!("{STOREFRONT_FORM_STATE_PREFIX}{payload}"))
+    }
+
+    pub fn decode(payload: &str) -> Option<Self> {
+        let encoded = payload.strip_prefix(STOREFRONT_FORM_STATE_PREFIX)?;
+        serde_json::from_str(encoded).ok()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,7 +435,7 @@ impl StorefrontStateStore {
         )
         .map_err(|error| query_error(format!("failed to add storefront cart line: {error}")))?;
         self.touch_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
-        self.update_cart_payment(&tx, session_id, "not_started", None, None)?;
+        self.update_cart_payment(&tx, session_id, "not_started", None, None, None, None)?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
             query_error(format!("failed to commit add-to-cart transaction: {error}"))
@@ -432,7 +498,7 @@ impl StorefrontStateStore {
             })?;
         }
         self.touch_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
-        self.update_cart_payment(&tx, session_id, "not_started", None, None)?;
+        self.update_cart_payment(&tx, session_id, "not_started", None, None, None, None)?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
             query_error(format!("failed to commit cart update transaction: {error}"))
@@ -458,8 +524,20 @@ impl StorefrontStateStore {
                 session_id: session_id.to_string(),
             });
         }
+        let payment_reference = self
+            .load_cart_payment(&tx, session_id)?
+            .reference
+            .unwrap_or(next_payment_reference(&tx)?);
         self.touch_cart(&tx, session_id, principal_id, "checkout", now_unix_seconds)?;
-        self.update_cart_payment(&tx, session_id, "ready_for_payment", None, None)?;
+        self.update_cart_payment(
+            &tx,
+            session_id,
+            "ready_for_payment",
+            None,
+            None,
+            None,
+            Some(payment_reference.as_str()),
+        )?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
             query_error(format!(
@@ -499,7 +577,16 @@ impl StorefrontStateStore {
         let subtotal_minor = lines.iter().map(|line| line.total_minor).sum::<i64>();
         let line_count = lines.iter().map(|line| line.quantity).sum::<u32>();
         let order_id = next_order_id(&tx)?;
-        let payment_reference = next_payment_reference(&tx)?;
+        let reserved_payment = self.load_cart_payment(&tx, session_id)?;
+        let payment_reference = reserved_payment
+            .reference
+            .ok_or(StorefrontStateError::MissingPaymentIntent)?;
+        if payment.intent_reference != payment_reference {
+            return Err(StorefrontStateError::PaymentIntentMismatch {
+                expected: payment_reference,
+                received: payment.intent_reference.clone(),
+            });
+        }
         tx.execute(
             r#"
             INSERT INTO orders (
@@ -512,10 +599,10 @@ impl StorefrontStateStore {
                 order_id,
                 session_id,
                 principal_id,
-                "paid",
-                "captured",
+                "pending_payment",
+                "provider_pending",
                 payment.method.as_str(),
-                payment_reference.as_str(),
+                payment.intent_reference.as_str(),
                 payment.last4.as_deref(),
                 payment.checkout_email.as_str(),
                 DEFAULT_CURRENCY,
@@ -559,9 +646,11 @@ impl StorefrontStateStore {
         self.update_cart_payment(
             &tx,
             session_id,
-            "captured",
-            Some(payment),
-            Some(payment_reference.as_str()),
+            "provider_pending",
+            Some(payment.method.as_str()),
+            payment.last4.as_deref(),
+            Some(payment.checkout_email.as_str()),
+            Some(payment.intent_reference.as_str()),
         )?;
         let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
         tx.commit().map_err(|error| {
@@ -760,7 +849,9 @@ impl StorefrontStateStore {
         tx: &Transaction<'_>,
         session_id: &str,
         payment_status: &str,
-        payment: Option<&StorefrontPaymentInput>,
+        payment_method: Option<&str>,
+        payment_last4: Option<&str>,
+        checkout_email: Option<&str>,
         payment_reference: Option<&str>,
     ) -> Result<(), StorefrontStateError> {
         tx.execute(
@@ -776,10 +867,10 @@ impl StorefrontStateStore {
             params![
                 session_id,
                 payment_status,
-                payment.as_ref().map(|value| value.method.as_str()),
+                payment_method,
                 payment_reference,
-                payment.as_ref().and_then(|value| value.last4.as_deref()),
-                payment.as_ref().map(|value| value.checkout_email.as_str()),
+                payment_last4,
+                checkout_email,
             ],
         )
         .map_err(|error| {
@@ -1328,6 +1419,14 @@ fn catalog_item(sku: &str) -> Result<CatalogItem, StorefrontStateError> {
             sku: "harbor-tote",
             title: "Harbor Tote",
             variant_title: "Standard",
+            product_kind: "physical",
+            entitlement_key: None,
+            unit_price_minor: 4_500,
+        }),
+        "tasting-pass" => Ok(CatalogItem {
+            sku: "tasting-pass",
+            title: "Spring Tasting Pass",
+            variant_title: "Single pass",
             product_kind: "physical",
             entitlement_key: None,
             unit_price_minor: 4_500,

@@ -128,6 +128,12 @@ fn route_surfaces() -> Vec<RouteSurface> {
     vec![
         RouteSurface::new("commerce.catalog", RouteSurfaceKind::FrontendPage, "/shop").localized(),
         RouteSurface::new(
+            "commerce.collections",
+            RouteSurfaceKind::FrontendPage,
+            "/shop/collections",
+        )
+        .localized(),
+        RouteSurface::new(
             "commerce.collection-detail",
             RouteSurfaceKind::FrontendPage,
             "/shop/collections/{collection_slug}",
@@ -169,6 +175,11 @@ fn route_surfaces() -> Vec<RouteSurface> {
             "commerce.checkout-confirmation",
             RouteSurfaceKind::FrontendPage,
             "/checkout/confirmation",
+        ),
+        RouteSurface::new(
+            "commerce.account.orders",
+            RouteSurfaceKind::FrontendPage,
+            "/account/orders",
         ),
         RouteSurface::new(
             "commerce.orders",
@@ -359,6 +370,13 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
         )
         .localized(),
         HttpSurfaceContribution::page(
+            "commerce.collections",
+            HttpSurfaceArea::Public,
+            "/shop/collections",
+            "commerce/collections",
+        )
+        .localized(),
+        HttpSurfaceContribution::page(
             "commerce.collection-detail",
             HttpSurfaceArea::Public,
             "/shop/collections/{collection_slug}",
@@ -421,6 +439,12 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             HttpSurfaceArea::Public,
             "/checkout/confirmation",
             "commerce/checkout-confirmation",
+        ),
+        HttpSurfaceContribution::page(
+            "commerce.account.orders",
+            HttpSurfaceArea::Account,
+            "/account/orders",
+            "account/orders",
         ),
         HttpSurfaceContribution::page(
             "commerce.orders",

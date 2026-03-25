@@ -19,10 +19,17 @@
     <main class="site-main memberships-page">
       <section class="memberships-page__intro">
         <p class="memberships-page__eyebrow">Account access</p>
-        <h1 dv:text="${customer.displayName}">Memberships, renewals, and entitlement visibility in one place.</h1>
+        <h1>Memberships</h1>
         <p dv:text="${account.stateSummary}">
           This page gives customers a direct answer to what they have, when it renews, and what
           support or priority access comes with it.
+        </p>
+        <p dv:if="${account.hasPrincipal}">
+          Signed in as <strong dv:text="${customer.displayName}">Member Live</strong>.
+        </p>
+        <p dv:unless="${account.hasPrincipal}">
+          This membership view is following the current browser session until formal sign-in is
+          installed.
         </p>
         <p dv:if="${account.hasLatestOrder}">
           Latest qualifying order
@@ -30,10 +37,17 @@
           is
           <span dv:text="${account.latestOrderStatus}">Paid</span>.
         </p>
-        <p dv:if="${account.hasCustomerEmail}">
-          Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
-        </p>
+        <div dv:if="${account.hasCustomerEmail}">
+          <p dv:if="${account.hasPrincipal}">
+            Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
+          </p>
+          <p dv:unless="${account.hasPrincipal}">
+            Receipt email on this browser session:
+            <strong dv:text="${customer.email}">member@example.com</strong>.
+          </p>
+        </div>
       </section>
+      <nav class="account-page__nav" dv:replace="~{account/nav :: nav}"></nav>
 
       <section class="memberships-page__summary" dv:if="${account.hasMembership}">
         <article class="membership-card">
@@ -43,23 +57,50 @@
           <p dv:text="${membershipSummary.renewalText}">
             Renewing on 18 April with early-access reservations.
           </p>
+          <a class="button" href="/account/orders">View order history</a>
         </article>
       </section>
 
       <section class="memberships-page__summary" dv:unless="${account.hasMembership}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
-          <h2>Membership not active yet</h2>
-          <p dv:text="${account.membershipEmptyText}">
+          <h2 dv:if="${account.hasLatestOrder}">Membership purchase pending</h2>
+          <h2 dv:unless="${account.hasLatestOrder}">Membership not active yet</h2>
+          <p dv:if="${account.hasLatestOrder}">
+            Your latest order
+            <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+            is
+            <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
+            Membership activation will appear here once payment capture and sync complete.
+          </p>
+          <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
             Join to unlock early access, subscriber-only bundles, and concierge support.
           </p>
+          <a class="button button--secondary" href="/account/orders" dv:if="${account.hasLatestOrder}">
+            View order history
+          </a>
           <a
             class="button"
             href="/en-GB/shop/collections/memberships"
+            dv:unless="${account.hasLatestOrder}"
             dv:attr="href=${account.membershipCtaUrl}"
           >
             Explore memberships
           </a>
+        </article>
+      </section>
+
+      <section class="memberships-page__summary" dv:if="${account.hasLatestOrder}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Latest order</p>
+          <h2 dv:text="${account.latestOrderReference}">ORD-10042</h2>
+          <p>
+            Status
+            <strong dv:text="${account.latestOrderStatus}">Paid</strong>
+          </p>
+          <p dv:text="${account.stateSummary}">
+            Order and membership state are drawn from the live storefront session.
+          </p>
         </article>
       </section>
 

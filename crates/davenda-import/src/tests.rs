@@ -94,6 +94,141 @@ fn manifest_plans_importers_in_dependency_order() {
 }
 
 #[test]
+fn manifest_validate_at_rejects_missing_referenced_paths_and_cutover_contracts() {
+    let root = unique_dir("manifest-validate-at");
+    write_text(root.join("app.toml"), "[app]\nname = \"harbor-shop\"\n");
+    write_text(root.join("platform.toml"), "[app]\nname = \"harbor-shop\"\n");
+    write_text(root.join("pages.json"), "[]");
+    write_text(root.join("capability-map.md"), "capability map");
+    write_text(root.join("auth-mapping.md"), "auth mapping");
+    write_text(root.join("redirect-plan.csv"), "from,to");
+    write_text(root.join("extraction-spec.md"), "extract");
+    write_text(root.join("cutover-runbook.md"), "runbook");
+
+    let manifest = ImportManifest::new(
+        ImportRunId::new("wordpress-cutover").unwrap(),
+        SourceSystemId::new("wordpress").unwrap(),
+        "2026-03-19T00:00:00Z",
+        "harbor-shop",
+    )
+    .unwrap()
+    .with_target(ImportTarget::new("app.toml", "platform.toml").unwrap())
+    .with_source(
+        ImportSource::new("wordpress")
+            .unwrap()
+            .with_input(ImportSourceInput::new("wp-db", "mysql_dump", "missing.sql.gz").unwrap()),
+    )
+    .with_migration_artifacts(
+        ImportMigrationArtifacts::new(
+            "capability-map.md",
+            "auth-mapping.md",
+            "redirect-plan.csv",
+            "extraction-spec.md",
+            "cutover-runbook.md",
+        )
+        .unwrap(),
+    )
+    .with_verification(ImportVerification::default())
+    .with_cutover(ImportCutover::default())
+    .with_importer(
+        ImporterSpec::new(
+            ImporterId::new("pages").unwrap(),
+            10,
+            "page",
+            "Import pages",
+        )
+        .unwrap()
+        .with_source_path("pages.json")
+        .unwrap(),
+    );
+
+    assert_eq!(
+        manifest.validate_at(&root).unwrap_err(),
+        ImportModelError::ManifestReferenceMissing {
+            field: "source.inputs.path",
+            path: root.join("missing.sql.gz").display().to_string(),
+        }
+    );
+}
+
+#[test]
+fn manifest_plan_preserves_target_source_and_cutover_metadata_in_reports() {
+    let manifest = ImportManifest::from_toml_str(
+        r#"
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "harbor-shop"
+modules = ["cms", "events"]
+
+[target]
+app_manifest = "../apps/harbor-shop/app.toml"
+platform_config = "../apps/harbor-shop/platform.toml"
+expected_modules = ["cms", "events"]
+
+[source]
+kind = "wordpress"
+snapshot_id = "snapshot-1"
+
+[[source.inputs]]
+id = "wp-db"
+kind = "mysql_dump"
+path = "fixtures/db.sql.gz"
+
+[migration_artifacts]
+capability_map = "docs/capability-map.md"
+auth_mapping = "docs/auth-mapping.md"
+redirect_plan = "docs/redirect-plan.csv"
+extraction_spec = "docs/extraction-spec.md"
+cutover_runbook = "docs/cutover-runbook.md"
+
+[verification]
+required = ["record_counts"]
+
+[cutover]
+freeze_legacy_writes = true
+switch_method = "dns"
+hostnames = ["shop.example.com"]
+requires_cache_warm = true
+observation_window_minutes = 60
+
+[[cutover.rollback_triggers]]
+id = "auth-failure"
+description = "Auth failure"
+
+[[importers]]
+id = "pages"
+phase = 10
+resource_kind = "page"
+description = "Import pages"
+source_path = "fixtures/pages.json"
+"#,
+    )
+    .unwrap();
+
+    let plan = manifest.plan().unwrap();
+    assert!(plan.target.is_some());
+    assert!(plan.source.is_some());
+    assert!(plan.migration_artifacts.is_some());
+    assert!(plan.verification.is_some());
+    assert!(plan.cutover.is_some());
+
+    let report = plan.command_report().unwrap();
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "import.target"));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "import.verification"));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "import.cutover"));
+}
+
+#[test]
 fn manifest_rejects_cycles_and_unknown_dependencies() {
     let unknown = ImportManifest::new(
         ImportRunId::new("bad-import").unwrap(),

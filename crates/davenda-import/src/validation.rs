@@ -25,6 +25,15 @@ pub enum ImportModelError {
     ManifestRead { path: String, message: String },
     #[error("failed to parse import manifest: {message}")]
     ManifestParse { message: String },
+    #[error("import manifest references missing `{field}` path `{path}`")]
+    ManifestReferenceMissing { field: &'static str, path: String },
+    #[error("import manifest field `{field}` is invalid: {message}")]
+    InvalidManifestContract {
+        field: &'static str,
+        message: String,
+    },
+    #[error("import manifest declares duplicate source input `{input_id}`")]
+    DuplicateSourceInput { input_id: String },
     #[error("importer `{importer_id}` is missing a source path")]
     MissingImporterSourcePath { importer_id: String },
     #[error("failed to read import source `{path}` for importer `{importer_id}`: {message}")]

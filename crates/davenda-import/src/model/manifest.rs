@@ -446,6 +446,111 @@ impl ImportManifest {
         Ok(())
     }
 
+    pub fn validate_at(&self, manifest_root: impl AsRef<Path>) -> Result<(), ImportModelError> {
+        self.validate()?;
+        let manifest_root = manifest_root.as_ref();
+
+        if let Some(target) = &self.target {
+            ensure_manifest_path_exists(manifest_root, "target.app_manifest", &target.app_manifest)?;
+            ensure_manifest_path_exists(
+                manifest_root,
+                "target.platform_config",
+                &target.platform_config,
+            )?;
+        }
+
+        if let Some(source) = &self.source {
+            let mut input_ids = BTreeSet::new();
+            for input in &source.inputs {
+                if !input_ids.insert(input.id.clone()) {
+                    return Err(ImportModelError::DuplicateSourceInput {
+                        input_id: input.id.clone(),
+                    });
+                }
+                ensure_manifest_path_exists(
+                    manifest_root,
+                    "source.inputs.path",
+                    &input.path,
+                )?;
+            }
+        }
+
+        if let Some(artifacts) = &self.migration_artifacts {
+            ensure_manifest_path_exists(
+                manifest_root,
+                "migration_artifacts.capability_map",
+                &artifacts.capability_map,
+            )?;
+            ensure_manifest_path_exists(
+                manifest_root,
+                "migration_artifacts.auth_mapping",
+                &artifacts.auth_mapping,
+            )?;
+            ensure_manifest_path_exists(
+                manifest_root,
+                "migration_artifacts.redirect_plan",
+                &artifacts.redirect_plan,
+            )?;
+            ensure_manifest_path_exists(
+                manifest_root,
+                "migration_artifacts.extraction_spec",
+                &artifacts.extraction_spec,
+            )?;
+            ensure_manifest_path_exists(
+                manifest_root,
+                "migration_artifacts.cutover_runbook",
+                &artifacts.cutover_runbook,
+            )?;
+        }
+
+        if let Some(verification) = &self.verification {
+            if verification.required.is_empty() {
+                return Err(ImportModelError::InvalidManifestContract {
+                    field: "verification.required",
+                    message: "at least one verification check is required".to_string(),
+                });
+            }
+        }
+
+        if let Some(cutover) = &self.cutover {
+            if cutover.switch_method.is_none() {
+                return Err(ImportModelError::InvalidManifestContract {
+                    field: "cutover.switch_method",
+                    message: "a cutover switch method is required".to_string(),
+                });
+            }
+            if cutover.hostnames.is_empty() {
+                return Err(ImportModelError::InvalidManifestContract {
+                    field: "cutover.hostnames",
+                    message: "at least one hostname is required".to_string(),
+                });
+            }
+            if cutover.rollback_triggers.is_empty() {
+                return Err(ImportModelError::InvalidManifestContract {
+                    field: "cutover.rollback_triggers",
+                    message: "at least one rollback trigger is required".to_string(),
+                });
+            }
+            if cutover.observation_window_minutes.is_none() {
+                return Err(ImportModelError::InvalidManifestContract {
+                    field: "cutover.observation_window_minutes",
+                    message: "a time-boxed observation window is required".to_string(),
+                });
+            }
+        }
+
+        for importer in &self.importers {
+            let source_path = importer.source_path.as_ref().ok_or_else(|| {
+                ImportModelError::MissingImporterSourcePath {
+                    importer_id: importer.id.to_string(),
+                }
+            })?;
+            ensure_manifest_path_exists(manifest_root, "importer.source_path", source_path)?;
+        }
+
+        Ok(())
+    }
+
     pub fn plan(&self) -> Result<ImportPlan, ImportModelError> {
         self.validate()?;
 
@@ -524,6 +629,11 @@ impl ImportManifest {
             validation_mode: self.validation_mode,
             publication_mode: self.publication_mode,
             asset_storage_default: self.asset_storage_default,
+            target: self.target.clone(),
+            source: self.source.clone(),
+            migration_artifacts: self.migration_artifacts.clone(),
+            verification: self.verification.clone(),
+            cutover: self.cutover.clone(),
             ordered_importers: ordered,
         })
     }
@@ -539,6 +649,11 @@ pub struct ImportPlan {
     pub validation_mode: ValidationMode,
     pub publication_mode: PublicationMode,
     pub asset_storage_default: AssetStorageDefault,
+    pub target: Option<ImportTarget>,
+    pub source: Option<ImportSource>,
+    pub migration_artifacts: Option<ImportMigrationArtifacts>,
+    pub verification: Option<ImportVerification>,
+    pub cutover: Option<ImportCutover>,
     pub ordered_importers: Vec<ImporterSpec>,
 }
 
@@ -619,6 +734,121 @@ impl ImportPlan {
             );
         }
 
+        if let Some(target) = &self.target {
+            report.push_diagnostic(DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.target",
+                format!(
+                    "target app manifest `{}` with platform config `{}`",
+                    target.app_manifest, target.platform_config
+                ),
+            )?);
+            if !target.expected_modules.is_empty() {
+                report.push_diagnostic(DiagnosticRecord::new(
+                    DiagnosticSeverity::Info,
+                    "import.target.modules",
+                    format!(
+                        "target expects modules: {}",
+                        target.expected_modules.join(", ")
+                    ),
+                )?);
+            }
+        }
+
+        if let Some(source) = &self.source {
+            report.push_diagnostic(DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.source",
+                format!(
+                    "source `{}` snapshot `{}` with {} declared inputs",
+                    source.kind,
+                    source.snapshot_id.as_deref().unwrap_or("unknown"),
+                    source.inputs.len()
+                ),
+            )?);
+        }
+
+        if let Some(artifacts) = &self.migration_artifacts {
+            report.push_diagnostic(DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.artifacts",
+                format!(
+                    "migration artifacts: capability map `{}`, auth mapping `{}`, redirect plan `{}`, extraction spec `{}`, cutover runbook `{}`",
+                    artifacts.capability_map,
+                    artifacts.auth_mapping,
+                    artifacts.redirect_plan,
+                    artifacts.extraction_spec,
+                    artifacts.cutover_runbook
+                ),
+            )?);
+        }
+
+        if let Some(verification) = &self.verification {
+            report.push_diagnostic(DiagnosticRecord::new(
+                DiagnosticSeverity::Info,
+                "import.verification",
+                format!(
+                    "required verification checks: {}",
+                    verification.required.join(", ")
+                ),
+            )?);
+        }
+
+        if let Some(cutover) = &self.cutover {
+            let mut requirements = Vec::new();
+            if cutover.freeze_legacy_writes {
+                requirements.push("freeze legacy writes".to_string());
+            }
+            if cutover.requires_migrate_apply {
+                requirements.push("migrate apply".to_string());
+            }
+            if cutover.requires_assets_publish {
+                requirements.push("assets publish".to_string());
+            }
+            if cutover.requires_storage_validation {
+                requirements.push("storage verify".to_string());
+            }
+            if cutover.requires_cache_warm {
+                requirements.push("cache warm".to_string());
+            }
+            report.push_diagnostic(DiagnosticRecord::new(
+                DiagnosticSeverity::Warning,
+                "import.cutover",
+                format!(
+                    "cutover via `{}` for hostnames [{}] with observation window {} minutes and requirements [{}]",
+                    cutover.switch_method.as_deref().unwrap_or("unknown"),
+                    cutover.hostnames.join(", "),
+                    cutover.observation_window_minutes.unwrap_or_default(),
+                    if requirements.is_empty() {
+                        "none".to_string()
+                    } else {
+                        requirements.join(", ")
+                    }
+                ),
+            )?);
+        }
+
         Ok(report)
+    }
+}
+
+fn ensure_manifest_path_exists(
+    manifest_root: &Path,
+    field: &'static str,
+    value: &str,
+) -> Result<(), ImportModelError> {
+    let path = Path::new(value);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        manifest_root.join(path)
+    };
+    if resolved.exists() {
+        Ok(())
+    } else {
+        Err(ImportModelError::ManifestReferenceMissing {
+            field,
+            path: resolved.display().to_string(),
+        })
     }
 }

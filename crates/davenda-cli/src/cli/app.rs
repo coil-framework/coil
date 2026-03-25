@@ -250,16 +250,22 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                         invocation.manifest_path.display()
                     ))
                 })?;
+            let manifest_root = invocation
+                .manifest_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+            manifest.validate_at(manifest_root).map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to validate import manifest `{}`: {error}",
+                    invocation.manifest_path.display()
+                ))
+            })?;
             let plan = manifest.plan().map_err(|error| {
                 CliRunError::execution(format!(
                     "failed to plan import manifest `{}`: {error}",
                     invocation.manifest_path.display()
                 ))
             })?;
-            let manifest_root = invocation
-                .manifest_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
             let import_runtime = build_import_runtime_context(manifest_root, &manifest)?;
 
             let report = if dry_run {
@@ -2209,6 +2215,43 @@ dependencies = ["users", "media"]
 
         assert!(
             error.to_string().contains("import manifest locale `fr` is not supported"),
+            "{}",
+            error
+        );
+    }
+
+    #[test]
+    fn run_from_args_rejects_import_manifests_with_missing_referenced_artifacts() {
+        let fixture = import_fixture();
+        let invalid_manifest = fixture.root.join("imports").join("invalid-artifacts.toml");
+        let manifest = fs::read_to_string(&fixture.manifest_path).unwrap();
+        fs::write(
+            &invalid_manifest,
+            format!(
+                "{manifest}\n[migration_artifacts]\ncapability_map = \"missing/capability-map.md\"\nauth_mapping = \"missing/auth-mapping.md\"\nredirect_plan = \"missing/redirect-plan.csv\"\nextraction_spec = \"missing/extraction-spec.md\"\ncutover_runbook = \"missing/cutover-runbook.md\"\n"
+            ),
+        )
+        .unwrap();
+
+        let error = run_from_args([
+            "import".to_string(),
+            "run".to_string(),
+            invalid_manifest.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("failed to validate import manifest"),
+            "{}",
+            error
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("migration_artifacts.capability_map"),
             "{}",
             error
         );

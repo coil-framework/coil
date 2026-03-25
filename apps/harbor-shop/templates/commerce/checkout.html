@@ -29,8 +29,8 @@
       <div class="checkout-page__grid">
         <section class="checkout-card">
           <h2>Contact</h2>
-          <p dv:if="${customer}" dv:text="${customer.email}">hello@example.com</p>
-          <p dv:unless="${customer}">Guests can continue with email confirmation and order tracking.</p>
+          <p dv:if="${checkout.hasCheckoutEmail}" dv:text="${checkout.checkoutEmail}">hello@example.com</p>
+          <p dv:unless="${checkout.hasCheckoutEmail}">Guests can continue with email confirmation and order tracking.</p>
 
           <h2>Delivery</h2>
           <ul class="checkout-list">
@@ -44,18 +44,33 @@
             Cards, gift credit, and subscription-linked renewals should all resolve through the
             same order confirmation path.
           </p>
+          <div class="checkout-provider">
+            <p>
+              <strong dv:text="${checkout.providerLabel}">Platform fallback payment path</strong>
+            </p>
+            <p dv:text="${checkout.providerSummary}">
+              This checkout is using the platform fallback payment path until a provider-backed
+              handoff is installed.
+            </p>
+            <p>
+              Intent
+              <strong dv:text="${checkout.paymentReference}">PAYMENT-PENDING</strong>
+              is
+              <span dv:text="${checkout.paymentStatusLabel}">Ready for payment</span>.
+            </p>
+          </div>
         </section>
 
         <aside class="checkout-card">
           <h2>Order summary</h2>
-          <ul class="checkout-summary" dv:if="${lineItems}">
+          <ul class="checkout-summary" dv:if="${hasLineItems}">
             <li dv:each="item : ${lineItems}">
               <span dv:text="${item.title}">Harbor pantry set</span>
               <span dv:text="${item.quantity}">1</span>
               <strong dv:text="${item.total}">GBP 48</strong>
             </li>
           </ul>
-          <ul class="checkout-summary" dv:unless="${lineItems}">
+          <ul class="checkout-summary" dv:unless="${hasLineItems}">
             <li>
               <span>Harbor pantry set</span>
               <span>1</span>
@@ -82,9 +97,9 @@
                   <span>Reference email</span>
                   <input
                     type="email"
-                    name="email"
+                    name="checkout_email"
                     value="hello@example.com"
-                    dv:attr="value=${customer.email}"
+                    dv:attr="value=${checkout.checkoutEmail}"
                   />
                 </label>
                 <label class="commerce-form__field">
@@ -105,11 +120,34 @@
                   />
                 </label>
                 <label class="commerce-form__field checkout-form__field--wide">
-                  <span>Payment reference</span>
+                  <span>Payment method</span>
                   <input
                     type="text"
-                    name="payment_reference"
-                    value="card-on-file"
+                    name="payment_method"
+                    value="card"
+                    readonly="readonly"
+                    dv:attr="value=${checkout.paymentMethod}"
+                  />
+                </label>
+                <label class="commerce-form__field checkout-form__field--wide">
+                  <span>Card last four</span>
+                  <input
+                    type="text"
+                    name="payment_last4"
+                    inputmode="numeric"
+                    maxlength="4"
+                    pattern="[0-9]{4}"
+                    value="4242"
+                    dv:attr="value=${checkout.paymentLast4}"
+                  />
+                </label>
+                <label class="commerce-form__field checkout-form__field--wide">
+                  <span>Checkout intent</span>
+                  <input
+                    type="text"
+                    name="checkout_intent"
+                    value="PAYMENT-PENDING"
+                    readonly="readonly"
                     dv:attr="value=${checkout.paymentReference}"
                   />
                 </label>
@@ -118,7 +156,7 @@
                 <input type="checkbox" name="terms_accepted" value="yes" checked="checked" />
                 <span>I have reviewed the basket, delivery details, and final total.</span>
               </label>
-              <button class="button" type="submit">Place order</button>
+              <button class="button" type="submit" dv:text="${checkout.submitLabel}">Place order</button>
             </form>
           </div>
         </aside>

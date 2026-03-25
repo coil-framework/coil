@@ -8,7 +8,7 @@
     </p>
   </header>
 
-  <ul class="product-grid__list" dv:if="${productCards}">
+  <ul class="product-grid__list" dv:if="${hasProductCards}">
     <li class="product-grid__item" dv:each="product : ${productCards}">
       <article class="product-card">
         <a class="product-card__media" href="/shop/products/harbor-cap" dv:href="${product.url}">
@@ -57,7 +57,7 @@
     </li>
   </ul>
 
-  <div class="product-grid__fallback" dv:unless="${productCards}">
+  <div class="product-grid__fallback" dv:unless="${hasProductCards}">
     <article class="product-card">
       <div class="product-card__body">
         <p class="product-card__eyebrow">Harbor pantry</p>
@@ -68,12 +68,12 @@
         <div class="product-card__meta">
           <span class="product-card__price">GBP 28</span>
           <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
-            <input type="hidden" name="product_slug" value="signature-provisions-set" />
+            <input type="hidden" name="product_slug" value="harbor-cap" />
             <input type="hidden" name="quantity" value="1" />
             <button class="button" type="submit">Add to cart</button>
           </form>
           <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
-            <input type="hidden" name="product_slug" value="signature-provisions-set" />
+            <input type="hidden" name="product_slug" value="harbor-cap" />
             <input type="hidden" name="quantity" value="1" />
             <button class="button button--secondary" type="submit">Buy now</button>
           </form>

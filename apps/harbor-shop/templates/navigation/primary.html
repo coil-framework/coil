@@ -1,8 +1,20 @@
 <nav class="primary-nav" xmlns:dv="https://davenda.dev" dv:fragment="primary">
-  <a class="primary-nav__link" href="/">Home</a>
-  <a class="primary-nav__link" href="/shop">Shop</a>
-  <a class="primary-nav__link" href="/shop/collections/featured">Collections</a>
-  <a class="primary-nav__link" href="/cart">Cart</a>
-  <a class="primary-nav__link" href="/account">Account</a>
-  <a class="primary-nav__link" href="/account/memberships">Memberships</a>
+  <a class="primary-nav__link" href="/" dv:attr="href=${links.home}">Home</a>
+  <a class="primary-nav__link" href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+  <a
+    class="primary-nav__link"
+    href="/en-GB/shop/collections/featured"
+    dv:attr="href=${links.featuredCollection}"
+  >
+    Collections
+  </a>
+  <a class="primary-nav__link" href="/cart" dv:attr="href=${links.cart}">Cart</a>
+  <a class="primary-nav__link" href="/account" dv:attr="href=${links.account}">Account</a>
+  <a
+    class="primary-nav__link"
+    href="/account/memberships"
+    dv:attr="href=${links.memberships}"
+  >
+    Memberships
+  </a>
 </nav>

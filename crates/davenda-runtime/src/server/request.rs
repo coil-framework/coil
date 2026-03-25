@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
-const STOREFRONT_ORDER_HISTORY_PATH: &str = "/account/orders";
+const STOREFRONT_ORDER_HISTORY_JSON_PATH: &str = "/account/orders.json";
 const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.cart",
     "commerce.add-to-cart",
@@ -167,7 +167,7 @@ pub(super) async fn execute_live_request(
 
         native_response_cookies.extend(resolved.response_cookies.clone());
         prepare_native_storefront_request(state, &mut request, now, &mut native_response_cookies)?;
-        if request.path == STOREFRONT_ORDER_HISTORY_PATH && request.method == HttpMethod::Get {
+        if request.path == STOREFRONT_ORDER_HISTORY_JSON_PATH && request.method == HttpMethod::Get {
             return storefront_order_history_response(state, &request, native_response_cookies);
         }
         authorize_live_request(state, &mut request).await?;
@@ -185,7 +185,7 @@ pub(super) async fn execute_live_request(
         execution
     } else {
         prepare_native_storefront_request(state, &mut request, now, &mut native_response_cookies)?;
-        if request.path == STOREFRONT_ORDER_HISTORY_PATH && request.method == HttpMethod::Get {
+        if request.path == STOREFRONT_ORDER_HISTORY_JSON_PATH && request.method == HttpMethod::Get {
             return storefront_order_history_response(state, &request, native_response_cookies);
         }
         authorize_live_request(state, &mut request).await?;
@@ -457,17 +457,25 @@ fn parse_quantity_field(value: Option<&str>) -> Option<u32> {
     value.and_then(|raw| raw.trim().parse::<u32>().ok())
 }
 
+fn storefront_quantity_from_execution(execution: &RequestExecution) -> u32 {
+    parse_quantity_field(execution_form_field(execution, "quantity")).unwrap_or(1)
+}
+
 fn storefront_payment_input_from_execution(
     execution: &RequestExecution,
 ) -> Result<StorefrontPaymentInput, RuntimeServerError> {
-    let method = execution_form_field(execution, "payment_method")
-        .or_else(|| execution_form_field(execution, "paymentMethod"));
-    let checkout_email = execution_form_field(execution, "checkout_email")
-        .or_else(|| execution_form_field(execution, "checkoutEmail"))
-        .or_else(|| execution_form_field(execution, "email"));
     let last4 = execution_form_field(execution, "payment_last4")
         .or_else(|| execution_form_field(execution, "paymentLast4"))
+        .or_else(|| execution_form_field(execution, "card_last4"))
         .map(str::to_string);
+    let method = execution_form_field(execution, "payment_method")
+        .or_else(|| execution_form_field(execution, "paymentMethod"))
+        .map(str::to_string)
+        .or_else(|| last4.as_ref().map(|_| "card".to_string()));
+    let checkout_email = execution_form_field(execution, "checkout_email")
+        .or_else(|| execution_form_field(execution, "checkoutEmail"))
+        .or_else(|| execution_form_field(execution, "email"))
+        .or_else(|| execution_form_field(execution, "billing_email"));
     StorefrontPaymentInput::new(
         method.unwrap_or_default(),
         checkout_email.unwrap_or_default(),
@@ -487,8 +495,7 @@ fn apply_native_storefront_mutations(
     };
     match execution.route.route_name.as_str() {
         "commerce.add-to-cart" => {
-            let quantity =
-                parse_quantity_field(execution_form_field(execution, "quantity")).unwrap_or(1);
+            let quantity = storefront_quantity_from_execution(execution);
             let sku = storefront_sku_from_execution(execution)?;
             let snapshot = state.storefront.add_to_cart(
                 session_id,
@@ -526,6 +533,16 @@ fn apply_native_storefront_mutations(
             push_storefront_flash(state, response_cookies, FlashLevel::Info, message)?;
         }
         "commerce.checkout-start" => {
+            if let Ok(sku) = storefront_sku_from_execution(execution) {
+                let quantity = storefront_quantity_from_execution(execution);
+                let _ = state.storefront.add_to_cart(
+                    session_id,
+                    execution.principal.principal_id.as_deref(),
+                    sku.as_ref(),
+                    quantity,
+                    now.as_unix_seconds(),
+                )?;
+            }
             let _ = state.storefront.checkout_start(
                 session_id,
                 execution.principal.principal_id.as_deref(),

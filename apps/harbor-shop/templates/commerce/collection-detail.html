@@ -20,17 +20,24 @@
       <section class="collections-page__intro">
         <p class="collections-page__eyebrow">Collection</p>
         <p>
-          <a href="/shop">Shop</a>
+          <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
           <span>/</span>
-          <a href="/collections">Collections</a>
+          <a
+            href="/en-GB/shop/collections/featured"
+            dv:attr="href=${links.featuredCollection}"
+          >
+            Collections
+          </a>
         </p>
         <h1 dv:text="${collection.title}">Featured</h1>
         <p dv:text="${collection.summary}">
           Curated storefront grouping with a direct path into product detail and checkout.
         </p>
         <div class="checkout-actions">
-          <a class="button" href="/cart">Review cart</a>
-          <a class="button button--secondary" href="/shop">Browse full catalog</a>
+          <a class="button" href="/cart" dv:attr="href=${links.cart}">Review cart</a>
+          <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+            Browse full catalog
+          </a>
         </div>
       </section>
 

@@ -28,7 +28,7 @@
         </div>
       </section>
 
-      <section class="catalog-sections" dv:if="${catalogSections}">
+      <section class="catalog-sections" dv:if="${hasCatalogSections}">
         <article class="catalog-section" dv:each="section : ${catalogSections}">
           <header>
             <p class="catalog-section__eyebrow" dv:text="${section.label}">Featured edit</p>
@@ -43,7 +43,7 @@
         </article>
       </section>
 
-      <section class="catalog-sections" dv:unless="${catalogSections}">
+      <section class="catalog-sections" dv:unless="${hasCatalogSections}">
         <article class="catalog-section">
           <header>
             <p class="catalog-section__eyebrow">Featured edit</p>
@@ -52,7 +52,7 @@
               Everyday staples and repeat-purchase products grouped for quick replenishment.
             </p>
           </header>
-          <a class="button" href="/shop/collections/featured">Browse collections</a>
+          <a class="button" href="/shop/collections">Browse collections</a>
         </article>
       </section>
 
@@ -68,8 +68,16 @@
             into product detail, and repeat customers can head straight to cart or account.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/shop/collections/featured">Open featured collection</a>
-            <a class="button button--secondary" href="/cart">Review cart</a>
+            <a
+              class="button"
+              href="/en-GB/shop/collections/featured"
+              dv:attr="href=${links.featuredCollection}"
+            >
+              Browse all collections
+            </a>
+            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+              Review cart
+            </a>
           </div>
         </article>
       </section>

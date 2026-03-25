@@ -15,11 +15,11 @@
       </p>
       <a
         class="button button--secondary"
-        href="/shop"
-        dv:unless="${account.hasRecentOrders}"
+        href="/account/orders"
         dv:attr="href=${account.ordersCtaUrl}"
+        dv:text="${account.ordersCtaLabel}"
       >
-        Browse storefront
+        View order history
       </a>
     </article>
 
@@ -41,7 +41,7 @@
       </p>
       <a
         class="button"
-        href="/shop/collections/memberships"
+        href="/en-GB/shop/collections/memberships"
         dv:unless="${account.hasMembership}"
         dv:attr="href=${account.membershipCtaUrl}"
       >

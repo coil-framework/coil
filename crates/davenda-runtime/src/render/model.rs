@@ -1,6 +1,7 @@
 use super::*;
 use crate::storefront::{
-    StorefrontCartLine, StorefrontOrderSnapshot, StorefrontStateSnapshot, StorefrontStateStore,
+    StorefrontCartLine, StorefrontOrderSnapshot, StorefrontPaymentSnapshot,
+    StorefrontStateSnapshot, StorefrontStateStore,
 };
 use davenda_commerce::{
     CheckoutId, CheckoutLine, CheckoutSession, CurrencyCode, EntitlementKey, Money, Order, OrderId,
@@ -96,6 +97,7 @@ impl RuntimePlan {
                 ),
             )?
             .with_object("route_params", route_params_model(&execution.route.params))?
+            .with_object("links", links_model(&execution.locale)?)?
             .with_object("navigation", navigation_model())?
             .with_object(
                 "page",
@@ -110,6 +112,7 @@ impl RuntimePlan {
             Some(self),
             model,
             execution.route.route_name.as_str(),
+            execution.locale.as_str(),
             &execution.route.params,
             Some(&execution.session),
             Some(&execution.principal),
@@ -134,7 +137,7 @@ fn navigation_model() -> RenderModel {
             vec![
                 nav_item("Home", "/"),
                 nav_item("Shop", "/shop"),
-                nav_item("Collections", "/shop/collections/featured"),
+                nav_item("Collections", "/shop/collections"),
                 nav_item("Events", "/events"),
                 nav_item("Cart", "/cart"),
                 nav_item("Account", "/account"),
@@ -150,6 +153,28 @@ fn nav_item(label: &str, href: &str) -> RenderModel {
         .expect("navigation item keys are valid")
 }
 
+fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("home", RenderValue::text("/"))?
+        .with_value("catalog", RenderValue::text(localized_shop_path(locale)))?
+        .with_value(
+            "featuredCollection",
+            RenderValue::text(localized_collection_path(locale, "featured")),
+        )?
+        .with_value(
+            "membershipsCollection",
+            RenderValue::text(localized_collection_path(locale, "memberships")),
+        )?
+        .with_value(
+            "eventsCollection",
+            RenderValue::text(localized_collection_path(locale, "events")),
+        )?
+        .with_value("cart", RenderValue::text("/cart"))?
+        .with_value("checkout", RenderValue::text("/checkout"))?
+        .with_value("account", RenderValue::text("/account"))?
+        .with_value("memberships", RenderValue::text("/account/memberships"))
+}
+
 fn page_model_for_route(
     execution: &RequestExecution,
     template_name: &str,
@@ -158,6 +183,7 @@ fn page_model_for_route(
     let title = match execution.route.route_name.as_str() {
         "home" => "Harbor Shop".to_string(),
         "commerce.catalog" => "Shop Harbor".to_string(),
+        "commerce.collections" => "Shop Collections".to_string(),
         "commerce.collection-detail" => execution
             .route
             .params
@@ -173,6 +199,7 @@ fn page_model_for_route(
         "commerce.cart" => "Cart".to_string(),
         "commerce.checkout" => "Checkout".to_string(),
         "commerce.checkout-confirmation" => "Order Confirmed".to_string(),
+        "commerce.account.orders" => "Order History".to_string(),
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             "Your Account".to_string()
         }
@@ -182,6 +209,9 @@ fn page_model_for_route(
     let summary = match execution.route.route_name.as_str() {
         "commerce.catalog" => {
             "Browse the current assortment across apparel, memberships, and event-linked offers."
+        }
+        "commerce.collections" => {
+            "Browse curated collection landings before moving into product detail and checkout."
         }
         "commerce.collection-detail" => {
             "A merchandising collection page with clear paths into products and checkout."
@@ -195,6 +225,9 @@ fn page_model_for_route(
         }
         "commerce.checkout-confirmation" => {
             "The customer-facing confirmation step after successful checkout."
+        }
+        "commerce.account.orders" => {
+            "Review completed purchases, payment details, and membership-linked order history."
         }
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             "Membership state, recent orders, and next actions for the signed-in customer."
@@ -216,15 +249,20 @@ fn apply_route_specific_bindings(
     plan: Option<&RuntimePlan>,
     mut model: RenderModel,
     route_name: &str,
+    locale: &str,
     params: &BTreeMap<String, String>,
     session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
 ) -> Result<RenderModel, TemplateModelError> {
-    let fixture = storefront_fixture()?;
+    let fixture = storefront_fixture(locale)?;
 
     match route_name {
-        "home" | "commerce.catalog" => {
+        "home" | "commerce.catalog" | "commerce.collections" => {
+            let has_catalog_sections = !fixture.catalog_sections.is_empty();
+            let has_product_cards = !fixture.product_cards.is_empty();
             model = model
+                .with_bool("hasCatalogSections", has_catalog_sections)?
+                .with_bool("hasProductCards", has_product_cards)?
                 .with_list("catalogSections", fixture.catalog_sections.clone())?
                 .with_list("productCards", fixture.product_cards.clone())?;
         }
@@ -233,16 +271,22 @@ fn apply_route_specific_bindings(
                 .get("collection_slug")
                 .map(String::as_str)
                 .unwrap_or("featured");
+            let product_cards = fixture.product_cards_for_collection(slug);
             model = model
                 .with_object("collection", fixture.collection_for(slug))?
-                .with_list("productCards", fixture.product_cards_for_collection(slug))?;
+                .with_bool("hasProductCards", !product_cards.is_empty())?
+                .with_list("productCards", product_cards)?;
         }
         "commerce.product-detail" => {
             let slug = params
                 .get("product_slug")
                 .map(String::as_str)
                 .unwrap_or("harbor-cap");
-            model = model.with_object("product", fixture.product_for(slug))?;
+            let product_cards = fixture.related_product_cards_for_product(slug);
+            model = model
+                .with_object("product", fixture.product_for(slug))?
+                .with_bool("hasProductCards", !product_cards.is_empty())?
+                .with_list("productCards", product_cards)?;
         }
         "commerce.cart" => {
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
@@ -260,16 +304,21 @@ fn apply_route_specific_bindings(
         }
         "commerce.checkout" => {
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
+                let line_items = cart_items_from_storefront(&snapshot.cart.lines)?;
                 model = model
                     .with_object("customer", checkout_customer(principal)?)?
-                    .with_list(
-                        "lineItems",
-                        cart_items_from_storefront(&snapshot.cart.lines)?,
+                    .with_object(
+                        "checkout",
+                        checkout_form_from_storefront(&snapshot.payment, principal)?,
                     )?
+                    .with_bool("hasLineItems", !line_items.is_empty())?
+                    .with_list("lineItems", line_items)?
                     .with_object("orderSummary", cart_summary_from_storefront(&snapshot)?)?;
             } else {
                 model = model
                     .with_object("customer", fixture.customer.clone())?
+                    .with_object("checkout", fixture.checkout.clone())?
+                    .with_bool("hasLineItems", !fixture.cart_items.is_empty())?
                     .with_list("lineItems", fixture.cart_items.clone())?
                     .with_object("orderSummary", fixture.cart_summary.clone())?;
             }
@@ -308,8 +357,11 @@ fn apply_route_specific_bindings(
                     .with_object("membershipSummary", fixture.membership_summary.clone())?;
             }
         }
-        "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
-            let account = account_surface_bindings(plan, &fixture, session, principal)?;
+        "commerce.account.orders"
+        | "memberships.account"
+        | "memberships.account.dashboard"
+        | "account.dashboard" => {
+            let account = account_surface_bindings(plan, &fixture, locale, session, principal)?;
             model = model
                 .with_object("account", account.account)?
                 .with_object("customer", account.customer)?
@@ -379,28 +431,94 @@ fn cart_summary_from_storefront(
 fn confirmation_from_storefront(
     order: &StorefrontOrderSnapshot,
 ) -> Result<RenderModel, TemplateModelError> {
-    let next_step = if order.lines.iter().any(|line| line.product_kind == "membership") {
+    let includes_membership = order
+        .lines
+        .iter()
+        .any(|line| line.product_kind == "membership");
+    let next_step = if includes_membership {
         "A confirmation email and membership activation will follow shortly."
     } else {
         "A confirmation email and fulfillment summary are on the way."
     };
+    let payment_method = payment_method_label(order.payment.method.as_deref());
+    let payment_status = payment_status_label(&order.payment.status);
+    let payment_summary = payment_summary(
+        order.payment.method.as_deref(),
+        order.payment.last4.as_deref(),
+        order.payment.reference.as_deref(),
+    );
     RenderModel::new()
         .with_value("orderNumber", RenderValue::text(order.order_id.clone()))?
         .with_value(
             "email",
             RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
         )?
+        .with_bool("hasEmail", order.payment.checkout_email.is_some())?
         .with_value("nextStep", RenderValue::text(next_step))?
+        .with_value(
+            "status",
+            RenderValue::text(display_status_label(&order.status)),
+        )?
+        .with_value("subtotal", RenderValue::text(order.subtotal.clone()))?
+        .with_value("total", RenderValue::text(order.total.clone()))?
+        .with_value("paymentStatus", RenderValue::text(payment_status))?
+        .with_value("paymentMethod", RenderValue::text(payment_method))?
+        .with_value(
+            "paymentReference",
+            RenderValue::text(order.payment.reference.clone().unwrap_or_default()),
+        )?
+        .with_value(
+            "paymentLast4",
+            RenderValue::text(order.payment.last4.clone().unwrap_or_default()),
+        )?
+        .with_value("paymentSummary", RenderValue::text(payment_summary))?
+        .with_value(
+            "providerLabel",
+            RenderValue::text(payment_provider_label().to_string()),
+        )?
+        .with_bool("hasPaymentLast4", order.payment.last4.is_some())?
+        .with_bool("hasPaymentReference", order.payment.reference.is_some())?
+        .with_bool("hasMembershipItems", includes_membership)?
+        .with_bool("hasLineItems", !order.lines.is_empty())?
         .with_list("lineItems", confirmation_line_items_from_storefront(order)?)
 }
 
 fn account_order_from_storefront(
     order: &StorefrontOrderSnapshot,
 ) -> Result<RenderModel, TemplateModelError> {
+    let payment_summary = payment_summary(
+        order.payment.method.as_deref(),
+        order.payment.last4.as_deref(),
+        order.payment.reference.as_deref(),
+    );
     RenderModel::new()
         .with_value("reference", RenderValue::text(order.order_id.clone()))?
         .with_value("total", RenderValue::text(order.total.clone()))?
-        .with_value("status", RenderValue::text(display_status_label(&order.status)))
+        .with_value(
+            "status",
+            RenderValue::text(display_status_label(&order.status)),
+        )
+        .and_then(|model| {
+            model.with_value("lineCount", RenderValue::text(order.line_count.to_string()))
+        })
+        .and_then(|model| {
+            model.with_value(
+                "checkoutEmail",
+                RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
+            )
+        })
+        .and_then(|model| model.with_value("paymentSummary", RenderValue::text(payment_summary)))
+        .and_then(|model| {
+            model.with_bool("hasCheckoutEmail", order.payment.checkout_email.is_some())
+        })
+        .and_then(|model| {
+            model.with_bool(
+                "hasPaymentSummary",
+                order.payment.method.is_some()
+                    || order.payment.reference.is_some()
+                    || order.payment.last4.is_some(),
+            )
+        })
 }
 
 fn cart_item_from_storefront(line: &StorefrontCartLine) -> Result<RenderModel, TemplateModelError> {
@@ -430,6 +548,109 @@ fn checkout_customer(
     RenderModel::new()
         .with_value("displayName", RenderValue::text(display_name))?
         .with_value("email", RenderValue::text(email))
+}
+
+fn checkout_form_from_storefront(
+    payment: &StorefrontPaymentSnapshot,
+    principal: Option<&PrincipalContext>,
+) -> Result<RenderModel, TemplateModelError> {
+    let payment_method = payment.method.clone().unwrap_or_else(|| "card".to_string());
+    let checkout_email = payment
+        .checkout_email
+        .clone()
+        .or_else(|| {
+            principal
+                .and_then(|principal| principal.principal_id.clone())
+                .filter(|candidate| looks_like_email(candidate))
+        })
+        .unwrap_or_default();
+    let has_checkout_email = !checkout_email.is_empty();
+    RenderModel::new()
+        .with_value(
+            "paymentReference",
+            RenderValue::text(
+                payment
+                    .reference
+                    .clone()
+                    .unwrap_or_else(|| "PAYMENT-PENDING".to_string()),
+            ),
+        )?
+        .with_value(
+            "paymentMethod",
+            RenderValue::text(payment_method.clone()),
+        )?
+        .with_value(
+            "checkoutEmail",
+            RenderValue::text(checkout_email),
+        )?
+        .with_bool("hasCheckoutEmail", has_checkout_email)?
+        .with_value(
+            "paymentLast4",
+            RenderValue::text(payment.last4.clone().unwrap_or_default()),
+        )?
+        .with_value(
+            "paymentMethodLabel",
+            RenderValue::text(payment_method_label(Some(payment_method.as_str()))),
+        )?
+        .with_value("paymentStatus", RenderValue::text(payment.status.clone()))?
+        .with_value(
+            "paymentStatusLabel",
+            RenderValue::text(payment_status_label(&payment.status)),
+        )?
+        .with_value(
+            "providerCode",
+            RenderValue::text("platform_fallback".to_string()),
+        )?
+        .with_value(
+            "providerLabel",
+            RenderValue::text(payment_provider_label().to_string()),
+        )?
+        .with_value(
+            "providerSummary",
+            RenderValue::text(
+                "This checkout is using the platform fallback payment path until a provider-backed handoff is installed.",
+            ),
+        )?
+        .with_value(
+            "submitLabel",
+            RenderValue::text("Place order".to_string()),
+        )?
+        .with_bool("hasPaymentReference", payment.reference.is_some())?
+        .with_bool("hasPaymentLast4", payment.last4.is_some())
+}
+
+fn payment_provider_label() -> &'static str {
+    "Platform fallback payment path"
+}
+
+fn payment_method_label(method: Option<&str>) -> String {
+    match method.unwrap_or_default() {
+        "card" => "Card".to_string(),
+        "gift_credit" => "Gift credit".to_string(),
+        "manual" => "Manual capture".to_string(),
+        "" => "Payment method pending".to_string(),
+        other => display_status_label(other),
+    }
+}
+
+fn payment_status_label(status: &str) -> String {
+    match status {
+        "not_started" => "Not started".to_string(),
+        "ready_for_payment" => "Ready for payment".to_string(),
+        "captured" => "Captured".to_string(),
+        "authorized" => "Authorized".to_string(),
+        other => display_status_label(other),
+    }
+}
+
+fn payment_summary(method: Option<&str>, last4: Option<&str>, reference: Option<&str>) -> String {
+    let method = payment_method_label(method);
+    match (last4, reference) {
+        (Some(last4), Some(reference)) => format!("{method} ending {last4}, reference {reference}"),
+        (Some(last4), None) => format!("{method} ending {last4}"),
+        (None, Some(reference)) => format!("{method}, reference {reference}"),
+        (None, None) => method,
+    }
 }
 
 fn template_store_error(error: crate::storefront::StorefrontStateError) -> TemplateModelError {
@@ -473,6 +694,26 @@ fn title_case_handle(handle: &str) -> String {
         .join(" ")
 }
 
+fn localized_shop_path(locale: &str) -> String {
+    format!("/{}/shop", locale.trim_matches('/'))
+}
+
+fn localized_collection_path(locale: &str, slug: &str) -> String {
+    format!(
+        "/{}/shop/collections/{}",
+        locale.trim_matches('/'),
+        slug.trim_matches('/')
+    )
+}
+
+fn localized_product_path(locale: &str, slug: &str) -> String {
+    format!(
+        "/{}/shop/products/{}",
+        locale.trim_matches('/'),
+        slug.trim_matches('/')
+    )
+}
+
 #[derive(Clone)]
 struct AccountSurfaceBindings {
     account: RenderModel,
@@ -484,33 +725,46 @@ struct AccountSurfaceBindings {
 fn account_surface_bindings(
     plan: Option<&RuntimePlan>,
     fixture: &StorefrontFixture,
+    locale: &str,
     session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
     let Some(session) = session else {
-        return fixture_account_surface_bindings(fixture);
+        return fixture_account_surface_bindings(fixture, locale);
     };
     let Some(principal) = principal else {
-        return fixture_account_surface_bindings(fixture);
+        return fixture_account_surface_bindings(fixture, locale);
     };
 
     if session.session_id.is_none() && principal.principal_id.is_none() {
-        return fixture_account_surface_bindings(fixture);
+        return fixture_account_surface_bindings(fixture, locale);
     }
 
-    live_account_surface_bindings(plan, session, principal)
+    live_account_surface_bindings(plan, locale, session, principal)
 }
 
 fn fixture_account_surface_bindings(
     fixture: &StorefrontFixture,
+    locale: &str,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
     let latest_preview_order = sample_completed_order();
+    let has_recent_orders = !fixture.recent_orders.is_empty();
+    let orders_cta_url = if has_recent_orders {
+        "/account/orders".to_string()
+    } else {
+        localized_shop_path(locale)
+    };
+    let orders_cta_label = if has_recent_orders {
+        "View order history"
+    } else {
+        "Browse storefront"
+    };
     Ok(AccountSurfaceBindings {
         account: RenderModel::new()
             .with_bool("hasLiveSession", false)?
             .with_bool("hasPrincipal", false)?
             .with_bool("hasCustomerEmail", true)?
-            .with_bool("hasRecentOrders", !fixture.recent_orders.is_empty())?
+            .with_bool("hasRecentOrders", has_recent_orders)?
             .with_bool("hasMembership", true)?
             .with_bool("hasLatestOrder", true)?
             .with_value("stateSource", RenderValue::text("fixture-preview"))?
@@ -532,10 +786,11 @@ fn fixture_account_surface_bindings(
                     "No membership is attached yet. Join to unlock early-access drops and concierge support.",
                 ),
             )?
-            .with_value("ordersCtaUrl", RenderValue::text("/shop"))?
+            .with_value("ordersCtaUrl", RenderValue::text(orders_cta_url))?
+            .with_value("ordersCtaLabel", RenderValue::text(orders_cta_label))?
             .with_value(
                 "membershipCtaUrl",
-                RenderValue::text("/shop/collections/memberships"),
+                RenderValue::text(localized_collection_path(locale, "memberships")),
             )?
             .with_value(
                 "latestOrderReference",
@@ -553,12 +808,14 @@ fn fixture_account_surface_bindings(
 
 fn live_account_surface_bindings(
     plan: Option<&RuntimePlan>,
+    locale: &str,
     session: &SessionContext,
     principal: &PrincipalContext,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
     let snapshot = live_storefront_state(plan, Some(session), Some(principal))?;
     let principal_id = principal.principal_id.as_deref();
     let recent_orders = recent_orders_from_storefront(snapshot.as_ref())?;
+    let has_recent_orders = !recent_orders.is_empty();
     let latest_order = snapshot
         .as_ref()
         .and_then(|snapshot| snapshot.recent_orders.first().cloned());
@@ -589,13 +846,23 @@ fn live_account_surface_bindings(
         .map(|order| display_status_label(&order.status))
         .unwrap_or_default();
     let state_summary = account_state_summary(state_summary, latest_order.as_ref());
+    let orders_cta_url = if has_recent_orders {
+        "/account/orders".to_string()
+    } else {
+        localized_shop_path(locale)
+    };
+    let orders_cta_label = if has_recent_orders {
+        "View order history"
+    } else {
+        "Browse storefront"
+    };
 
     Ok(AccountSurfaceBindings {
         account: RenderModel::new()
             .with_bool("hasLiveSession", session.session_id.is_some())?
             .with_bool("hasPrincipal", principal_id.is_some())?
             .with_bool("hasCustomerEmail", !email.is_empty())?
-            .with_bool("hasRecentOrders", !recent_orders.is_empty())?
+            .with_bool("hasRecentOrders", has_recent_orders)?
             .with_bool("hasMembership", membership_summary.is_some())?
             .with_bool("hasLatestOrder", latest_order.is_some())?
             .with_value("stateSource", RenderValue::text("storefront-session"))?
@@ -612,10 +879,11 @@ fn live_account_surface_bindings(
                     "No active membership is attached to this signed-in account yet. Join from the storefront to unlock early access and renewal visibility.",
                 ),
             )?
-            .with_value("ordersCtaUrl", RenderValue::text("/shop"))?
+            .with_value("ordersCtaUrl", RenderValue::text(orders_cta_url))?
+            .with_value("ordersCtaLabel", RenderValue::text(orders_cta_label))?
             .with_value(
                 "membershipCtaUrl",
-                RenderValue::text("/shop/collections/memberships"),
+                RenderValue::text(localized_collection_path(locale, "memberships")),
             )?
             .with_value(
                 "latestOrderReference",
@@ -732,8 +1000,10 @@ struct StorefrontFixture {
     catalog_sections: Vec<RenderModel>,
     product_cards: Vec<RenderModel>,
     product_cards_by_collection: BTreeMap<String, Vec<RenderModel>>,
+    product_collection_handles: BTreeMap<String, String>,
     cart_items: Vec<RenderModel>,
     cart_summary: RenderModel,
+    checkout: RenderModel,
     confirmation: RenderModel,
     customer: RenderModel,
     recent_orders: Vec<RenderModel>,
@@ -767,9 +1037,19 @@ impl StorefrontFixture {
             .cloned()
             .unwrap_or_default()
     }
+
+    fn related_product_cards_for_product(&self, handle: &str) -> Vec<RenderModel> {
+        let collection_handle = self
+            .product_collection_handles
+            .get(handle)
+            .map(String::as_str)
+            .unwrap_or("featured");
+        self.product_cards_for_collection(collection_handle)
+    }
 }
 
 fn product_cards_by_collection(
+    locale: &str,
     products: &[ProductFixture<'_>],
 ) -> Result<BTreeMap<String, Vec<RenderModel>>, TemplateModelError> {
     let mut grouped: BTreeMap<String, Vec<RenderModel>> = BTreeMap::new();
@@ -777,12 +1057,12 @@ fn product_cards_by_collection(
         grouped
             .entry(product.collection_handle.to_string())
             .or_default()
-            .push(product_model(product)?);
+            .push(product_model_for_locale(locale, product)?);
     }
     Ok(grouped)
 }
 
-fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
+fn storefront_fixture(locale: &str) -> Result<StorefrontFixture, TemplateModelError> {
     let products_data = vec![
         ProductFixture {
             handle: "harbor-cap",
@@ -811,9 +1091,18 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
     ];
     let product_cards = products_data
         .iter()
-        .map(product_model)
+        .map(|product| product_model_for_locale(locale, product))
         .collect::<Result<Vec<_>, _>>()?;
-    let product_cards_by_collection = product_cards_by_collection(&products_data)?;
+    let product_cards_by_collection = product_cards_by_collection(locale, &products_data)?;
+    let product_collection_handles = products_data
+        .iter()
+        .map(|product| {
+            (
+                product.handle.to_string(),
+                product.collection_handle.to_string(),
+            )
+        })
+        .collect();
 
     let collections_data = [
         CollectionFixture {
@@ -834,17 +1123,18 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
             handle: "events",
             title: "Events",
             href: "/shop/collections/events",
-            summary: "Bookable offers and event-linked passes surfaced alongside editorial content.",
+            summary:
+                "Bookable offers and event-linked passes surfaced alongside editorial content.",
             label: "Event-led offer",
         },
     ];
     let catalog_sections = collections_data
         .iter()
-        .map(collection_section_model)
+        .map(|collection| collection_section_model(locale, collection))
         .collect::<Result<Vec<_>, _>>()?;
     let collections = collections_data
         .iter()
-        .map(|collection| collection_detail_model(collection, &products_data))
+        .map(|collection| collection_detail_model(locale, collection, &products_data))
         .collect::<Result<Vec<_>, _>>()?;
 
     let current_order = sample_completed_order();
@@ -865,6 +1155,29 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
             "total",
             RenderValue::text(money_display(&current_order.totals.total)),
         )?;
+    let checkout = RenderModel::new()
+        .with_value("paymentReference", RenderValue::text("card-on-file"))?
+        .with_value("paymentMethod", RenderValue::text("card"))?
+        .with_value("paymentMethodLabel", RenderValue::text("Card"))?
+        .with_value("paymentStatus", RenderValue::text("ready_for_payment"))?
+        .with_value("paymentStatusLabel", RenderValue::text("Ready for payment"))?
+        .with_value("providerCode", RenderValue::text("platform_fallback"))?
+        .with_value(
+            "providerLabel",
+            RenderValue::text(payment_provider_label().to_string()),
+        )?
+        .with_value(
+            "providerSummary",
+            RenderValue::text(
+                "This checkout is using the platform fallback payment path until a provider-backed handoff is installed.",
+            ),
+        )?
+        .with_value("submitLabel", RenderValue::text("Place order"))?
+        .with_value("checkoutEmail", RenderValue::text("member@example.com"))?
+        .with_bool("hasCheckoutEmail", true)?
+        .with_value("paymentLast4", RenderValue::text("4242"))?
+        .with_bool("hasPaymentReference", true)?
+        .with_bool("hasPaymentLast4", true)?;
 
     let confirmation = confirmation_model(&current_order)?;
 
@@ -882,8 +1195,10 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
         catalog_sections,
         product_cards: product_cards.clone(),
         product_cards_by_collection,
+        product_collection_handles,
         cart_items,
         cart_summary,
+        checkout,
         confirmation,
         customer,
         recent_orders,
@@ -927,16 +1242,21 @@ struct ProductFixture<'a> {
 }
 
 fn collection_section_model(
+    locale: &str,
     collection: &CollectionFixture<'_>,
 ) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
         .with_value("label", RenderValue::text(collection.label))?
         .with_value("title", RenderValue::text(collection.title))?
         .with_value("summary", RenderValue::text(collection.summary))?
-        .with_value("url", RenderValue::text(collection.href))
+        .with_value(
+            "url",
+            RenderValue::text(localized_collection_path(locale, collection.handle)),
+        )
 }
 
 fn collection_detail_model(
+    locale: &str,
     collection: &CollectionFixture<'_>,
     products: &[ProductFixture<'_>],
 ) -> Result<RenderModel, TemplateModelError> {
@@ -945,7 +1265,7 @@ fn collection_detail_model(
         .filter(|product| {
             product.collection_handle == collection.handle || collection.handle == "featured"
         })
-        .map(product_model)
+        .map(|product| product_model_for_locale(locale, product))
         .collect::<Vec<_>>();
     let filtered_products = filtered_products
         .into_iter()
@@ -954,23 +1274,43 @@ fn collection_detail_model(
     RenderModel::new()
         .with_value("title", RenderValue::text(collection.title))?
         .with_value("summary", RenderValue::text(collection.summary))?
-        .with_value("url", RenderValue::text(collection.href))?
+        .with_value(
+            "url",
+            RenderValue::text(localized_collection_path(locale, collection.handle)),
+        )?
         .with_list("products", filtered_products)
 }
 
 fn product_model(product: &ProductFixture<'_>) -> Result<RenderModel, TemplateModelError> {
+    product_model_for_locale("en-GB", product)
+}
+
+fn product_model_for_locale(
+    locale: &str,
+    product: &ProductFixture<'_>,
+) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
         .with_value("handle", RenderValue::text(product.handle))?
+        .with_value("slug", RenderValue::text(product.handle))?
+        .with_value("sku", RenderValue::text(product.handle))?
         .with_value("name", RenderValue::text(product.title))?
         .with_value("summary", RenderValue::text(product.summary))?
         .with_value("price", RenderValue::text(product.price))?
         .with_value(
             "url",
-            RenderValue::text(format!("/shop/products/{}", product.handle)),
+            RenderValue::text(localized_product_path(locale, product.handle)),
         )?
         .with_value("addToCartUrl", RenderValue::text("/cart/items"))?
         .with_value("imageUrl", RenderValue::text("/theme/assets/logo.svg"))?
         .with_value("imageAlt", RenderValue::text(product.title))?
+        .with_value(
+            "collectionHandle",
+            RenderValue::text(product.collection_handle.to_string()),
+        )?
+        .with_value(
+            "collectionUrl",
+            RenderValue::text(localized_collection_path(locale, product.collection_handle)),
+        )?
         .with_value(
             "collectionName",
             RenderValue::text(product.collection_name.to_string()),
@@ -1021,7 +1361,71 @@ fn confirmation_model(order: &Order) -> Result<RenderModel, TemplateModelError> 
     RenderModel::new()
         .with_value("orderNumber", RenderValue::text(order.id.to_string()))?
         .with_value("email", RenderValue::text("member@example.com"))?
+        .with_bool("hasEmail", true)?
         .with_value("nextStep", RenderValue::text(order.confirmation_message()))
+        .and_then(|model| {
+            model.with_value("status", RenderValue::text(order.history_status_label()))
+        })
+        .and_then(|model| {
+            model.with_value(
+                "subtotal",
+                RenderValue::text(money_display(&order.totals.subtotal)),
+            )
+        })
+        .and_then(|model| model.with_value("total", RenderValue::text(order.display_total())))
+        .and_then(|model| model.with_value("paymentStatus", RenderValue::text("Captured")))
+        .and_then(|model| model.with_value("paymentMethod", RenderValue::text("Card")))
+        .and_then(|model| model.with_value("paymentReference", RenderValue::text("PAY-50001")))
+        .and_then(|model| model.with_value("paymentLast4", RenderValue::text("4242")))
+        .and_then(|model| {
+            model.with_value(
+                "paymentSummary",
+                RenderValue::text("Card ending 4242, reference PAY-50001"),
+            )
+        })
+        .and_then(|model| {
+            model.with_value(
+                "providerLabel",
+                RenderValue::text(payment_provider_label().to_string()),
+            )
+        })
+        .and_then(|model| model.with_bool("hasPaymentLast4", true))
+        .and_then(|model| model.with_bool("hasPaymentReference", true))
+        .and_then(|model| {
+            model.with_bool(
+                "hasMembershipItems",
+                order.outcomes().iter().any(|outcome| {
+                    matches!(
+                        outcome,
+                        davenda_commerce::OrderOutcome::GrantMembership {
+                            entitlement_key: _,
+                            quantity: _
+                        }
+                    )
+                }),
+            )
+        })
+        .and_then(|model| model.with_bool("hasLineItems", !order.lines.is_empty()))
+        .and_then(|model| {
+            model.with_list(
+                "lineItems",
+                order
+                    .lines
+                    .iter()
+                    .map(|line| {
+                        RenderModel::new()
+                            .with_value("title", RenderValue::text(line.product_title.clone()))?
+                            .with_value("quantity", RenderValue::text(line.quantity.to_string()))?
+                            .with_value(
+                                "total",
+                                RenderValue::text(money_display(
+                                    &line.subtotal().expect("fixture confirmation subtotal"),
+                                )),
+                            )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        })
 }
 
 fn account_order_from_order(order: &Order) -> Result<RenderModel, TemplateModelError> {
@@ -1145,6 +1549,7 @@ mod tests {
             None,
             RenderModel::new(),
             route_name,
+            "en-GB",
             &BTreeMap::new(),
             None,
             None,
@@ -1165,6 +1570,7 @@ mod tests {
             None,
             RenderModel::new(),
             "memberships.account",
+            "en-GB",
             &BTreeMap::new(),
             Some(&session),
             Some(&principal),
@@ -1214,6 +1620,50 @@ mod tests {
     }
 
     #[test]
+    fn route_specific_model_populates_checkout_intent_fields() {
+        let html = render_fixture(
+            "commerce.checkout",
+            r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <p class="provider" dv:text="${checkout.providerLabel}">Provider</p>
+    <p class="status" dv:text="${checkout.paymentStatusLabel}">Ready</p>
+    <p class="reference" dv:text="${checkout.paymentReference}">PAYMENT-PENDING</p>
+    <p class="summary" dv:text="${checkout.providerSummary}">Summary</p>
+    <input type="hidden" name="payment_method" dv:attr="value=${checkout.paymentMethod}" />
+  </body>
+</html>"#,
+        );
+
+        assert!(html.contains("Platform fallback payment path"));
+        assert!(html.contains("Ready for payment"));
+        assert!(html.contains("card-on-file"));
+        assert!(html.contains("provider-backed handoff"));
+        assert!(html.contains("value=\"card\""));
+    }
+
+    #[test]
+    fn route_specific_model_populates_checkout_confirmation_payment_fields() {
+        let html = render_fixture(
+            "commerce.checkout-confirmation",
+            r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <p class="status" dv:text="${confirmation.status}">Paid</p>
+    <p class="total" dv:text="${confirmation.total}">£0.00</p>
+    <p class="payment-summary" dv:text="${confirmation.paymentSummary}">Summary</p>
+    <p class="provider" dv:text="${confirmation.providerLabel}">Provider</p>
+  </body>
+</html>"#,
+        );
+
+        assert!(html.contains("Paid"));
+        assert!(html.contains("£118.00"));
+        assert!(html.contains("Card ending 4242, reference PAY-50001"));
+        assert!(html.contains("Platform fallback payment path"));
+    }
+
+    #[test]
     fn route_specific_model_populates_account_surface() {
         let html = render_fixture(
             "memberships.account",
@@ -1228,6 +1678,42 @@ mod tests {
 
         assert!(html.contains("Alex Mariner"));
         assert!(html.contains("Harbor Circle"));
+    }
+
+    #[test]
+    fn route_specific_model_populates_checkout_surface() {
+        let html = render_fixture(
+            "commerce.checkout",
+            r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <input type="text" dv:attr="value=${checkout.paymentReference}" value="fallback" />
+    <strong dv:text="${customer.email}">Fallback</strong>
+  </body>
+</html>"#,
+        );
+
+        assert!(html.contains("card-on-file"));
+        assert!(html.contains("member@example.com"));
+    }
+
+    #[test]
+    fn route_specific_model_populates_product_slug_and_related_cards() {
+        let html = render_fixture(
+            "commerce.product-detail",
+            r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <input type="hidden" dv:attr="value=${product.slug}" value="fallback" />
+    <ul>
+      <li dv:each="product : ${productCards}" dv:text="${product.slug}">fallback</li>
+    </ul>
+  </body>
+</html>"#,
+        );
+
+        assert!(html.contains("value=\"harbor-cap\""), "{html}");
+        assert!(html.contains("gold-membership"), "{html}");
     }
 
     #[test]

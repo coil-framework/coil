@@ -23,10 +23,25 @@
         <p class="checkout-confirmation__order">
           Reference <strong dv:text="${confirmation.orderNumber}">HS-10482</strong>
         </p>
+        <p>
+          Status <strong dv:text="${confirmation.status}">Paid</strong>
+          with total <strong dv:text="${confirmation.total}">£0.00</strong>.
+        </p>
+        <p dv:if="${confirmation.hasEmail}">
+          Receipt email <strong dv:text="${confirmation.email}">member@example.com</strong>.
+        </p>
         <p dv:text="${confirmation.nextStep}">
           A confirmation email and membership activation will follow shortly.
         </p>
-        <ul class="checkout-summary checkout-summary--stacked" dv:if="${confirmation.lineItems}">
+        <div class="checkout-confirmation__payment">
+          <p>
+            <strong dv:text="${confirmation.providerLabel}">Platform fallback payment path</strong>
+          </p>
+          <p dv:text="${confirmation.paymentSummary}">
+            Card ending 4242, reference PAY-50001
+          </p>
+        </div>
+        <ul class="checkout-summary checkout-summary--stacked" dv:if="${confirmation.hasLineItems}">
           <li dv:each="item : ${confirmation.lineItems}">
             <span dv:text="${item.title}">Harbor pantry set</span>
             <span dv:text="${item.quantity}">1</span>
@@ -35,7 +50,13 @@
         </ul>
         <div class="checkout-actions">
           <a class="button" href="/account">View account</a>
-          <a class="button button--secondary" href="/shop">Continue shopping</a>
+          <a
+            class="button button--secondary"
+            href="/en-GB/shop"
+            dv:attr="href=${links.catalog}"
+          >
+            Continue shopping
+          </a>
         </div>
       </section>
       <div dv:replace="~{account/summary-panels :: panels}"></div>

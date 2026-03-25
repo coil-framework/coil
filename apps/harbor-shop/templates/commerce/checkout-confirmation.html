@@ -20,9 +20,23 @@
       <section class="account-page__intro">
         <p class="account-page__eyebrow">Confirmation</p>
         <h1>Order received</h1>
+        <p class="checkout-confirmation__order">
+          Reference <strong dv:text="${confirmation.orderNumber}">HS-10482</strong>
+        </p>
         <p dv:text="${confirmation.nextStep}">
           A confirmation email and membership activation will follow shortly.
         </p>
+        <ul class="checkout-summary checkout-summary--stacked" dv:if="${confirmation.lineItems}">
+          <li dv:each="item : ${confirmation.lineItems}">
+            <span dv:text="${item.title}">Harbor pantry set</span>
+            <span dv:text="${item.quantity}">1</span>
+            <strong dv:text="${item.total}">GBP 48</strong>
+          </li>
+        </ul>
+        <div class="checkout-actions">
+          <a class="button" href="/account">View account</a>
+          <a class="button button--secondary" href="/shop">Continue shopping</a>
+        </div>
       </section>
       <div dv:replace="~{account/summary-panels :: panels}"></div>
     </main>

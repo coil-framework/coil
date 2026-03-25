@@ -75,8 +75,51 @@
           </div>
 
           <div class="checkout-actions">
-            <a class="button" href="/cart">Return to cart</a>
-            <a class="button" href="/account">Use saved account details</a>
+            <a class="button button--secondary" href="/cart">Return to cart</a>
+            <form class="commerce-form checkout-form" action="/checkout/complete" method="post">
+              <div class="checkout-form__grid">
+                <label class="commerce-form__field">
+                  <span>Reference email</span>
+                  <input
+                    type="email"
+                    name="email"
+                    value="hello@example.com"
+                    dv:attr="value=${customer.email}"
+                  />
+                </label>
+                <label class="commerce-form__field">
+                  <span>Delivery name</span>
+                  <input
+                    type="text"
+                    name="delivery_name"
+                    value="Harbor Customer"
+                    dv:attr="value=${customer.displayName}"
+                  />
+                </label>
+                <label class="commerce-form__field checkout-form__field--wide">
+                  <span>Delivery note</span>
+                  <input
+                    type="text"
+                    name="delivery_note"
+                    value="Leave with the front desk if nobody is in."
+                  />
+                </label>
+                <label class="commerce-form__field checkout-form__field--wide">
+                  <span>Payment reference</span>
+                  <input
+                    type="text"
+                    name="payment_reference"
+                    value="card-on-file"
+                    dv:attr="value=${checkout.paymentReference}"
+                  />
+                </label>
+              </div>
+              <label class="checkout-form__consent">
+                <input type="checkbox" name="terms_accepted" value="yes" checked="checked" />
+                <span>I have reviewed the basket, delivery details, and final total.</span>
+              </label>
+              <button class="button" type="submit">Place order</button>
+            </form>
           </div>
         </aside>
       </div>

@@ -34,8 +34,35 @@
             Built for gift baskets, repeat baskets, and easy replenishment after the first order.
           </p>
           <div class="product-page__actions">
-            <a class="button" href="/cart" dv:href="${product.addToCartUrl}">Add to cart</a>
-            <a class="button" href="/checkout">Buy now</a>
+            <form class="commerce-form product-purchase-form" action="/cart/items" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="signature-provisions-set"
+                dv:attr="value=${product.slug}"
+              />
+              <input
+                type="hidden"
+                name="product_name"
+                value="Signature provisions set"
+                dv:attr="value=${product.name}"
+              />
+              <label class="commerce-form__field">
+                <span>Quantity</span>
+                <input type="number" name="quantity" min="1" value="1" />
+              </label>
+              <button class="button" type="submit">Add to cart</button>
+            </form>
+            <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="signature-provisions-set"
+                dv:attr="value=${product.slug}"
+              />
+              <input type="hidden" name="quantity" value="1" />
+              <button class="button button--secondary" type="submit">Buy now</button>
+            </form>
           </div>
         </div>
       </section>

@@ -4,12 +4,12 @@ use crate::pricing::default_retry_policy;
 use davenda_auth::Capability;
 use davenda_core::{
     CapabilityContract, CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor,
-    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint,
-    JobContract, JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency,
-    ModuleManifest, ReportDefinition, ReportDeliveryMode, ReportFormat, ReportSensitivity,
-    RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution, SearchFieldRole,
-    SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
-    SearchRebuildStrategy, SearchVisibility,
+    ExtensionSlotKind, HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod,
+    IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
+    ModuleBehavior, ModuleDependency, ModuleManifest, ReportDefinition, ReportDeliveryMode,
+    ReportFormat, ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind,
+    SearchFieldContribution, SearchFieldRole, SearchIndexContribution,
+    SearchInvalidationRule, SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility,
 };
 
 pub(super) fn build_manifest(module: &CommerceModule) -> ModuleManifest {
@@ -142,9 +142,33 @@ fn route_surfaces() -> Vec<RouteSurface> {
         RouteSurface::new("commerce.cart", RouteSurfaceKind::FrontendPage, "/cart")
             .gated_by(Capability::CheckoutSessionCreate),
         RouteSurface::new(
+            "commerce.add-to-cart",
+            RouteSurfaceKind::FrontendAction,
+            "/cart/items",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new(
+            "commerce.cart-update",
+            RouteSurfaceKind::FrontendAction,
+            "/cart",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new(
             "commerce.checkout",
             RouteSurfaceKind::FrontendPage,
             "/checkout",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new(
+            "commerce.checkout-start",
+            RouteSurfaceKind::FrontendAction,
+            "/checkout/start",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new(
+            "commerce.checkout-complete",
+            RouteSurfaceKind::FrontendAction,
+            "/checkout/complete",
         )
         .gated_by(Capability::CheckoutSessionCreate),
         RouteSurface::new(
@@ -205,7 +229,7 @@ fn integration_points() -> Vec<IntegrationPoint> {
         IntegrationPoint::new(
             IntegrationKind::FrontendRendering,
             "storefront.catalog",
-            "Provides collection listing/detail, product detail, cart, and checkout surfaces for customer storefronts",
+            "Provides collection listing/detail, product detail, add-to-cart, cart update, checkout start, and order confirmation surfaces for customer storefronts",
         ),
         IntegrationPoint::new(
             IntegrationKind::SearchIndex,
@@ -362,11 +386,47 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "commerce/cart",
         )
         .gated_by(Capability::CheckoutSessionCreate),
+        HttpSurfaceContribution::redirect(
+            "commerce.add-to-cart",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Public,
+            "/cart/items",
+            "/cart",
+            303,
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        HttpSurfaceContribution::redirect(
+            "commerce.cart-update",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Public,
+            "/cart",
+            "/cart",
+            303,
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
         HttpSurfaceContribution::page(
             "commerce.checkout",
             HttpSurfaceArea::Public,
             "/checkout",
             "commerce/checkout",
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        HttpSurfaceContribution::redirect(
+            "commerce.checkout-start",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Public,
+            "/checkout/start",
+            "/checkout",
+            303,
+        )
+        .gated_by(Capability::CheckoutSessionCreate),
+        HttpSurfaceContribution::redirect(
+            "commerce.checkout-complete",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Public,
+            "/checkout/complete",
+            "/checkout/confirmation",
+            303,
         )
         .gated_by(Capability::CheckoutSessionCreate),
         HttpSurfaceContribution::page(

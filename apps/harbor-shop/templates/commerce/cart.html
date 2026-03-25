@@ -24,16 +24,31 @@
       <div class="cart-page__grid">
         <section class="cart-card">
           <h2>Items</h2>
-          <ul class="cart-lines">
-            <li class="cart-line" dv:each="item : ${cartItems}">
-              <div>
-                <strong dv:text="${item.title}">Harbor Cap</strong>
-                <p dv:text="${item.variant}">Canvas cap</p>
-              </div>
-              <span dv:text="${item.quantity}">1</span>
-              <strong dv:text="${item.total}">GBP 29</strong>
-            </li>
-          </ul>
+          <form class="commerce-form cart-update-form" action="/cart" method="post">
+            <input type="hidden" name="cart_action" value="update" />
+            <ul class="cart-lines">
+              <li class="cart-line" dv:each="item : ${cartItems}">
+                <div>
+                  <strong dv:text="${item.title}">Harbor Cap</strong>
+                  <p dv:text="${item.variant}">Canvas cap</p>
+                </div>
+                <label class="commerce-form__field commerce-form__field--compact">
+                  <span>Qty</span>
+                  <input
+                    type="number"
+                    name="quantity"
+                    min="0"
+                    value="1"
+                    dv:attr="name=${item.quantityField},value=${item.quantity}"
+                  />
+                </label>
+                <strong dv:text="${item.total}">GBP 29</strong>
+              </li>
+            </ul>
+            <div class="cart-page__actions">
+              <button class="button button--secondary" type="submit">Update cart</button>
+            </div>
+          </form>
         </section>
         <aside class="cart-card">
           <h2>Summary</h2>
@@ -41,7 +56,10 @@
           <p><span>Delivery</span><strong dv:text="${cartSummary.shipping}">GBP 0</strong></p>
           <p><span>Total</span><strong dv:text="${cartSummary.total}">GBP 118</strong></p>
           <div class="cart-page__actions">
-            <a class="button" href="/checkout">Checkout</a>
+            <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
+              <input type="hidden" name="cart_intent" value="reviewed" />
+              <button class="button" type="submit">Checkout</button>
+            </form>
             <a class="button" href="/shop">Continue shopping</a>
           </div>
         </aside>

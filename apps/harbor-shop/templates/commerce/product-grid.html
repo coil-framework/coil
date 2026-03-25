@@ -31,7 +31,26 @@
           </p>
           <div class="product-card__meta">
             <span class="product-card__price" dv:text="${product.price}">GBP 28</span>
-            <a class="button" href="/cart" dv:href="${product.addToCartUrl}">Add to cart</a>
+            <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="harbor-cap"
+                dv:attr="value=${product.slug}"
+              />
+              <input type="hidden" name="quantity" value="1" />
+              <button class="button" type="submit">Add to cart</button>
+            </form>
+            <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="harbor-cap"
+                dv:attr="value=${product.slug}"
+              />
+              <input type="hidden" name="quantity" value="1" />
+              <button class="button button--secondary" type="submit">Buy now</button>
+            </form>
           </div>
         </div>
       </article>
@@ -48,7 +67,16 @@
         </p>
         <div class="product-card__meta">
           <span class="product-card__price">GBP 28</span>
-          <a class="button" href="/cart">Add to cart</a>
+          <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
+            <input type="hidden" name="product_slug" value="signature-provisions-set" />
+            <input type="hidden" name="quantity" value="1" />
+            <button class="button" type="submit">Add to cart</button>
+          </form>
+          <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
+            <input type="hidden" name="product_slug" value="signature-provisions-set" />
+            <input type="hidden" name="quantity" value="1" />
+            <button class="button button--secondary" type="submit">Buy now</button>
+          </form>
         </div>
       </div>
     </article>

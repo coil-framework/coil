@@ -1,4 +1,7 @@
 use super::*;
+use crate::storefront::{
+    StorefrontCartLine, StorefrontOrderSnapshot, StorefrontStateSnapshot, StorefrontStateStore,
+};
 use davenda_commerce::{
     CheckoutId, CheckoutLine, CheckoutSession, CurrencyCode, EntitlementKey, Money, Order, OrderId,
     PricingPolicy, ProductId, ProductKind, Sku,
@@ -104,6 +107,7 @@ impl RuntimePlan {
         }
 
         apply_route_specific_bindings(
+            Some(self),
             model,
             execution.route.route_name.as_str(),
             &execution.route.params,
@@ -209,6 +213,7 @@ fn page_model_for_route(
 }
 
 fn apply_route_specific_bindings(
+    plan: Option<&RuntimePlan>,
     mut model: RenderModel,
     route_name: &str,
     params: &BTreeMap<String, String>,
@@ -240,25 +245,52 @@ fn apply_route_specific_bindings(
             model = model.with_object("product", fixture.product_for(slug))?;
         }
         "commerce.cart" => {
-            model = model
-                .with_list("cartItems", fixture.cart_items.clone())?
-                .with_object("cartSummary", fixture.cart_summary.clone())?;
+            if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
+                model = model
+                    .with_list(
+                        "cartItems",
+                        cart_items_from_storefront(&snapshot.cart.lines)?,
+                    )?
+                    .with_object("cartSummary", cart_summary_from_storefront(&snapshot)?)?;
+            } else {
+                model = model
+                    .with_list("cartItems", fixture.cart_items.clone())?
+                    .with_object("cartSummary", fixture.cart_summary.clone())?;
+            }
         }
         "commerce.checkout" => {
-            model = model
-                .with_object("customer", fixture.customer.clone())?
-                .with_list("lineItems", fixture.cart_items.clone())?
-                .with_object("orderSummary", fixture.cart_summary.clone())?;
+            if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
+                model = model
+                    .with_object("customer", checkout_customer(principal)?)?
+                    .with_list(
+                        "lineItems",
+                        cart_items_from_storefront(&snapshot.cart.lines)?,
+                    )?
+                    .with_object("orderSummary", cart_summary_from_storefront(&snapshot)?)?;
+            } else {
+                model = model
+                    .with_object("customer", fixture.customer.clone())?
+                    .with_list("lineItems", fixture.cart_items.clone())?
+                    .with_object("orderSummary", fixture.cart_summary.clone())?;
+            }
         }
         "commerce.checkout-confirmation" => {
-            model = model
-                .with_object("confirmation", fixture.confirmation.clone())?
-                .with_object("customer", fixture.customer.clone())?
-                .with_list("recentOrders", fixture.recent_orders.clone())?
-                .with_object("membershipSummary", fixture.membership_summary.clone())?;
+            if let Some(order) = live_storefront_latest_order(plan, session, principal)? {
+                model = model
+                    .with_object("confirmation", confirmation_from_storefront(&order)?)?
+                    .with_object("customer", checkout_customer(principal)?)?
+                    .with_list("recentOrders", vec![account_order_from_storefront(&order)?])?
+                    .with_object("membershipSummary", empty_membership_summary()?)?;
+            } else {
+                model = model
+                    .with_object("confirmation", fixture.confirmation.clone())?
+                    .with_object("customer", fixture.customer.clone())?
+                    .with_list("recentOrders", fixture.recent_orders.clone())?
+                    .with_object("membershipSummary", fixture.membership_summary.clone())?;
+            }
         }
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
-            let account = account_surface_bindings(&fixture, session, principal)?;
+            let account = account_surface_bindings(plan, &fixture, session, principal)?;
             model = model
                 .with_object("account", account.account)?
                 .with_object("customer", account.customer)?
@@ -269,6 +301,132 @@ fn apply_route_specific_bindings(
     }
 
     Ok(model)
+}
+
+fn live_storefront_state(
+    plan: Option<&RuntimePlan>,
+    session: Option<&SessionContext>,
+    principal: Option<&PrincipalContext>,
+) -> Result<Option<StorefrontStateSnapshot>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(None);
+    };
+    let Some(session_id) = session.and_then(|session| session.session_id.as_deref()) else {
+        return Ok(None);
+    };
+    let store = StorefrontStateStore::open_for_plan(plan).map_err(template_store_error)?;
+    let snapshot = store
+        .snapshot(
+            session_id,
+            principal.and_then(|ctx| ctx.principal_id.as_deref()),
+        )
+        .map_err(template_store_error)?;
+    if snapshot.cart.lines.is_empty() && snapshot.latest_order.is_none() {
+        Ok(None)
+    } else {
+        Ok(Some(snapshot))
+    }
+}
+
+fn live_storefront_latest_order(
+    plan: Option<&RuntimePlan>,
+    session: Option<&SessionContext>,
+    principal: Option<&PrincipalContext>,
+) -> Result<Option<StorefrontOrderSnapshot>, TemplateModelError> {
+    Ok(live_storefront_state(plan, session, principal)?.and_then(|snapshot| snapshot.latest_order))
+}
+
+fn cart_items_from_storefront(
+    lines: &[StorefrontCartLine],
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    lines
+        .iter()
+        .map(cart_item_from_storefront)
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn cart_summary_from_storefront(
+    snapshot: &StorefrontStateSnapshot,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value(
+            "subtotal",
+            RenderValue::text(snapshot.cart.subtotal.clone()),
+        )?
+        .with_value("shipping", RenderValue::text("£0.00"))?
+        .with_value("total", RenderValue::text(snapshot.cart.subtotal.clone()))
+}
+
+fn confirmation_from_storefront(
+    order: &StorefrontOrderSnapshot,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("orderNumber", RenderValue::text(order.order_id.clone()))?
+        .with_value(
+            "nextStep",
+            RenderValue::text("A confirmation email and fulfillment summary are on the way."),
+        )?
+        .with_list("lineItems", confirmation_line_items_from_storefront(order)?)
+}
+
+fn account_order_from_storefront(
+    order: &StorefrontOrderSnapshot,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("reference", RenderValue::text(order.order_id.clone()))?
+        .with_value("total", RenderValue::text(order.total.clone()))?
+        .with_value("status", RenderValue::text(order.status.clone()))
+}
+
+fn cart_item_from_storefront(line: &StorefrontCartLine) -> Result<RenderModel, TemplateModelError> {
+    cart_item(
+        &line.title,
+        &line.variant_title,
+        &line.quantity.to_string(),
+        &line.total,
+    )?
+    .with_value(
+        "quantityField",
+        RenderValue::text(format!("quantity_{}", line.sku)),
+    )
+}
+
+fn checkout_customer(
+    principal: Option<&PrincipalContext>,
+) -> Result<RenderModel, TemplateModelError> {
+    let email = principal
+        .and_then(|principal| principal.principal_id.clone())
+        .filter(|candidate| looks_like_email(candidate))
+        .unwrap_or_default();
+    let display_name = principal
+        .and_then(|principal| principal.principal_id.as_deref())
+        .map(display_name_from_principal_id)
+        .unwrap_or_else(|| "Guest Checkout".to_string());
+    RenderModel::new()
+        .with_value("displayName", RenderValue::text(display_name))?
+        .with_value("email", RenderValue::text(email))
+}
+
+fn template_store_error(error: crate::storefront::StorefrontStateError) -> TemplateModelError {
+    TemplateModelError::TemplateRead {
+        path: "storefront-state".to_string(),
+        message: error.to_string(),
+    }
+}
+
+fn confirmation_line_items_from_storefront(
+    order: &StorefrontOrderSnapshot,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    order
+        .lines
+        .iter()
+        .map(|line| {
+            RenderModel::new()
+                .with_value("title", RenderValue::text(line.title.clone()))?
+                .with_value("quantity", RenderValue::text(line.quantity.to_string()))?
+                .with_value("total", RenderValue::text(line.total.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()
 }
 
 fn title_case_handle(handle: &str) -> String {
@@ -299,6 +457,7 @@ struct AccountSurfaceBindings {
 }
 
 fn account_surface_bindings(
+    plan: Option<&RuntimePlan>,
     fixture: &StorefrontFixture,
     session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
@@ -314,12 +473,13 @@ fn account_surface_bindings(
         return fixture_account_surface_bindings(fixture);
     }
 
-    live_account_surface_bindings(fixture, session, principal)
+    live_account_surface_bindings(plan, session, principal)
 }
 
 fn fixture_account_surface_bindings(
     fixture: &StorefrontFixture,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
+    let latest_preview_order = sample_completed_order();
     Ok(AccountSurfaceBindings {
         account: RenderModel::new()
             .with_bool("hasLiveSession", false)?
@@ -327,6 +487,7 @@ fn fixture_account_surface_bindings(
             .with_bool("hasCustomerEmail", true)?
             .with_bool("hasRecentOrders", !fixture.recent_orders.is_empty())?
             .with_bool("hasMembership", true)?
+            .with_bool("hasLatestOrder", true)?
             .with_value("stateSource", RenderValue::text("fixture-preview"))?
             .with_value(
                 "stateSummary",
@@ -350,6 +511,14 @@ fn fixture_account_surface_bindings(
             .with_value(
                 "membershipCtaUrl",
                 RenderValue::text("/shop/collections/memberships"),
+            )?
+            .with_value(
+                "latestOrderReference",
+                RenderValue::text(latest_preview_order.id.to_string()),
+            )?
+            .with_value(
+                "latestOrderStatus",
+                RenderValue::text(latest_preview_order.history_status_label()),
             )?,
         customer: fixture.customer.clone(),
         recent_orders: fixture.recent_orders.clone(),
@@ -358,10 +527,11 @@ fn fixture_account_surface_bindings(
 }
 
 fn live_account_surface_bindings(
-    fixture: &StorefrontFixture,
+    plan: Option<&RuntimePlan>,
     session: &SessionContext,
     principal: &PrincipalContext,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
+    let snapshot = live_storefront_state(plan, Some(session), Some(principal))?;
     let principal_id = principal.principal_id.as_deref();
     let email = principal_id
         .filter(|candidate| looks_like_email(candidate))
@@ -375,14 +545,29 @@ fn live_account_surface_bindings(
     } else {
         "Using a resolved storefront session for this account view. Order history and membership state will render here when the storefront state path supplies them."
     };
+    let recent_orders = recent_orders_from_storefront(snapshot.as_ref())?;
+    let latest_order = snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.recent_orders.first().cloned());
+    let membership_summary = membership_summary_from_storefront(snapshot.as_ref())?;
+    let latest_order_reference = latest_order
+        .as_ref()
+        .map(|order| order.order_id.clone())
+        .unwrap_or_default();
+    let latest_order_status = latest_order
+        .as_ref()
+        .map(|order| order.status.clone())
+        .unwrap_or_default();
+    let state_summary = account_state_summary(state_summary, latest_order.as_ref());
 
     Ok(AccountSurfaceBindings {
         account: RenderModel::new()
             .with_bool("hasLiveSession", session.session_id.is_some())?
             .with_bool("hasPrincipal", principal_id.is_some())?
             .with_bool("hasCustomerEmail", !email.is_empty())?
-            .with_bool("hasRecentOrders", !fixture.recent_orders.is_empty())?
-            .with_bool("hasMembership", true)?
+            .with_bool("hasRecentOrders", !recent_orders.is_empty())?
+            .with_bool("hasMembership", membership_summary.is_some())?
+            .with_bool("hasLatestOrder", latest_order.is_some())?
             .with_value("stateSource", RenderValue::text("storefront-session"))?
             .with_value("stateSummary", RenderValue::text(state_summary))?
             .with_value(
@@ -401,13 +586,72 @@ fn live_account_surface_bindings(
             .with_value(
                 "membershipCtaUrl",
                 RenderValue::text("/shop/collections/memberships"),
-            )?,
+            )?
+            .with_value(
+                "latestOrderReference",
+                RenderValue::text(latest_order_reference),
+            )?
+            .with_value("latestOrderStatus", RenderValue::text(latest_order_status))?,
         customer: RenderModel::new()
             .with_value("displayName", RenderValue::text(display_name))?
             .with_value("email", RenderValue::text(email))?,
-        recent_orders: fixture.recent_orders.clone(),
-        membership_summary: fixture.membership_summary.clone(),
+        recent_orders,
+        membership_summary: membership_summary.unwrap_or(empty_membership_summary()?),
     })
+}
+
+fn recent_orders_from_storefront(
+    snapshot: Option<&StorefrontStateSnapshot>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(snapshot) = snapshot else {
+        return Ok(Vec::new());
+    };
+
+    snapshot
+        .recent_orders
+        .iter()
+        .map(account_order_from_storefront)
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn membership_summary_from_storefront(
+    snapshot: Option<&StorefrontStateSnapshot>,
+) -> Result<Option<RenderModel>, TemplateModelError> {
+    let Some(snapshot) = snapshot else {
+        return Ok(None);
+    };
+
+    let Some((order, line)) = snapshot.recent_orders.iter().find_map(|order| {
+        order.lines.iter().find_map(|line| {
+            if line.product_kind == "membership" {
+                Some((order, line))
+            } else {
+                None
+            }
+        })
+    }) else {
+        return Ok(None);
+    };
+
+    membership_summary(
+        &line.title,
+        "Purchased",
+        &format!(
+            "Included with order {}. Renewal timing and entitlement status will appear here once membership state sync completes.",
+            order.order_id
+        ),
+    )
+    .map(Some)
+}
+
+fn account_state_summary(base: &str, latest_order: Option<&StorefrontOrderSnapshot>) -> String {
+    match latest_order {
+        Some(order) => format!(
+            "{base} Latest order {} is currently {}.",
+            order.order_id, order.status
+        ),
+        None => base.to_string(),
+    }
 }
 
 fn looks_like_email(candidate: &str) -> bool {
@@ -550,8 +794,7 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
             handle: "events",
             title: "Events",
             href: "/shop/collections/events",
-            summary:
-                "Bookable offers and event-linked passes surfaced alongside editorial content.",
+            summary: "Bookable offers and event-linked passes surfaced alongside editorial content.",
             label: "Event-led offer",
         },
     ];
@@ -685,7 +928,7 @@ fn product_model(product: &ProductFixture<'_>) -> Result<RenderModel, TemplateMo
             "url",
             RenderValue::text(format!("/shop/products/{}", product.handle)),
         )?
-        .with_value("addToCartUrl", RenderValue::text("/cart"))?
+        .with_value("addToCartUrl", RenderValue::text("/cart/items"))?
         .with_value("imageUrl", RenderValue::text("/theme/assets/logo.svg"))?
         .with_value("imageAlt", RenderValue::text(product.title))?
         .with_value(
@@ -704,6 +947,13 @@ fn cart_item(
         .with_value("title", RenderValue::text(title))?
         .with_value("variant", RenderValue::text(variant))?
         .with_value("quantity", RenderValue::text(quantity))?
+        .with_value(
+            "quantityField",
+            RenderValue::text(format!(
+                "quantity_{}",
+                title.to_lowercase().replace(' ', "-")
+            )),
+        )?
         .with_value("total", RenderValue::text(total))
 }
 
@@ -851,8 +1101,15 @@ mod tests {
     use std::collections::HashSet;
 
     fn fixture_model(route_name: &str) -> RenderModel {
-        apply_route_specific_bindings(RenderModel::new(), route_name, &BTreeMap::new(), None, None)
-            .unwrap()
+        apply_route_specific_bindings(
+            None,
+            RenderModel::new(),
+            route_name,
+            &BTreeMap::new(),
+            None,
+            None,
+        )
+        .unwrap()
     }
 
     fn live_account_model(principal_id: &str) -> RenderModel {
@@ -865,6 +1122,7 @@ mod tests {
             granted_capabilities: HashSet::new(),
         };
         apply_route_specific_bindings(
+            None,
             RenderModel::new(),
             "memberships.account",
             &BTreeMap::new(),
@@ -945,6 +1203,10 @@ mod tests {
     <h1 dv:text="${customer.displayName}">Fallback</h1>
     <p class="summary" dv:text="${account.stateSummary}">State</p>
     <p class="email" dv:if="${account.hasCustomerEmail}" dv:text="${customer.email}">Email</p>
+    <p class="latest-order" dv:if="${account.hasLatestOrder}">
+      <strong dv:text="${account.latestOrderReference}">Order</strong>
+      <span dv:text="${account.latestOrderStatus}">Status</span>
+    </p>
     <ul class="orders">
       <li dv:each="order : ${recentOrders}">
         <strong dv:text="${order.reference}">Order</strong>
@@ -974,8 +1236,9 @@ mod tests {
         assert!(html.contains("Sea Member"));
         assert!(html.contains("sea.member@example.com"));
         assert!(html.contains("live storefront session identity"));
-        assert!(html.contains("ORD-10042"));
-        assert!(html.contains("Paid"));
-        assert!(html.contains("Harbor Circle"));
+        assert!(!html.contains("ORD-10042"));
+        assert!(!html.contains("Paid"));
+        assert!(!html.contains("Gold Membership"));
+        assert!(html.contains("Membership unavailable"));
     }
 }

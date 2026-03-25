@@ -1397,7 +1397,12 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
     assert_eq!(snapshot.cart.status, "checkout");
 
     let snapshot = store
-        .checkout_complete("session-live-1", Some("member-live-1"), 103)
+        .checkout_complete(
+            "session-live-1",
+            Some("member-live-1"),
+            &StorefrontPaymentInput::card("member-live-1@example.com", "4242").unwrap(),
+            103,
+        )
         .unwrap();
     assert_eq!(snapshot.cart.item_count, 0);
     assert_eq!(snapshot.cart.status, "completed");
@@ -1431,6 +1436,122 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
     assert_eq!(snapshot.cart.status, "completed");
 
     fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let app_name = format!("showcase-account-surface-{unique}");
+    let config = config_with_app_name(&app_name);
+    let template_root = unique_temp_template_root("account-live-orders");
+    write_template_file(
+        &template_root,
+        "templates/account/dashboard.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="account-dashboard">
+      <h1 dv:text="${customer.displayName}">Account</h1>
+      <p class="email" dv:text="${customer.email}">member@example.com</p>
+      <p class="summary" dv:text="${account.stateSummary}">Summary</p>
+      <p class="latest-order" dv:if="${account.hasLatestOrder}">
+        <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+        <span dv:text="${account.latestOrderStatus}">Paid</span>
+      </p>
+      <ul class="orders">
+        <li dv:each="order : ${recentOrders}">
+          <strong dv:text="${order.reference}">ORD-10042</strong>
+          <span dv:text="${order.status}">Paid</span>
+          <span dv:text="${order.total}">£118.00</span>
+        </li>
+      </ul>
+      <div class="membership" dv:if="${account.hasMembership}">
+        <strong dv:text="${membershipSummary.tierName}">Gold Membership</strong>
+        <span dv:text="${membershipSummary.status}">Purchased</span>
+        <p dv:text="${membershipSummary.renewalText}">Renewal timing pending</p>
+      </div>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_template_root(&template_root)
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session()
+                .from_module("memberships"),
+        )
+        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .build()
+        .unwrap();
+
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            "session-account-live",
+            Some("member-live@example.com"),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .add_to_cart(
+            "session-account-live",
+            Some("member-live@example.com"),
+            "membership-gold",
+            1,
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_start("session-account-live", Some("member-live@example.com"), 102)
+        .unwrap();
+    store
+        .checkout_complete(
+            "session-account-live",
+            Some("member-live@example.com"),
+            &StorefrontPaymentInput::card("member-live@example.com", "4242").unwrap(),
+            103,
+        )
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/account")
+                .unwrap()
+                .with_session_id("session-account-live")
+                .with_principal("member-live@example.com"),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let page = match &execution.response {
+        HandlerResponse::Page(page) => page,
+        _ => panic!("expected page response"),
+    };
+    let html = plan.render_page_response(&execution, page, None).unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert!(html.contains("Member Live"), "{html}");
+    assert!(html.contains("member-live@example.com"), "{html}");
+    assert!(html.contains("ORD-10042"), "{html}");
+    assert!(html.contains("Paid"), "{html}");
+    assert!(html.contains("Gold Membership"), "{html}");
+    assert!(html.contains("Purchased"), "{html}");
+    assert!(
+        html.contains("Latest order ORD-10042 is currently Paid."),
+        "{html}"
+    );
+    assert!(!html.contains("Alex Mariner"), "{html}");
+    assert!(!html.contains("Harbor Circle"), "{html}");
 }
 
 #[test]

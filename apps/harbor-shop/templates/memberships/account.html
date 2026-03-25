@@ -24,6 +24,12 @@
           This page gives customers a direct answer to what they have, when it renews, and what
           support or priority access comes with it.
         </p>
+        <p dv:if="${account.hasLatestOrder}">
+          Latest qualifying order
+          <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+          is
+          <span dv:text="${account.latestOrderStatus}">Paid</span>.
+        </p>
         <p dv:if="${account.hasCustomerEmail}">
           Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
         </p>

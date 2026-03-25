@@ -24,6 +24,12 @@
           Use this account hub for orders, membership access, and repeat-purchase shortcuts that
           point straight back into the storefront.
         </p>
+        <p dv:if="${account.hasLatestOrder}">
+          Latest order
+          <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+          is
+          <span dv:text="${account.latestOrderStatus}">Paid</span>.
+        </p>
         <p dv:if="${account.hasCustomerEmail}">
           Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
         </p>

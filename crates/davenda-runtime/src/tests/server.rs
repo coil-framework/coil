@@ -1446,7 +1446,8 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
     assert!(account_body.contains("ORD-10042"), "{account_body}");
     assert!(account_body.contains("Paid"), "{account_body}");
     assert!(account_body.contains("£118.00"), "{account_body}");
-    assert!(account_body.contains("Harbor Circle"), "{account_body}");
+    assert!(account_body.contains("Gold Membership"), "{account_body}");
+    assert!(account_body.contains("Purchased"), "{account_body}");
 }
 
 #[tokio::test]

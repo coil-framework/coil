@@ -24,6 +24,12 @@
             Review your membership status, recent orders, and the quickest route back into the
             storefront when you are ready to browse again.
           </p>
+          <p dv:if="${account.hasLatestOrder}">
+            Latest order
+            <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+            is
+            <span dv:text="${account.latestOrderStatus}">Paid</span>.
+          </p>
           <p dv:if="${account.hasCustomerEmail}">
             Account email: <strong dv:text="${customer.email}">member@example.com</strong>
           </p>

@@ -5,8 +5,10 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use crate::{
-    AssetStorageDefault, ImportManifest, ImportModelError, ImportRunId, ImportSourceFormat,
-    ImporterId, ImporterSpec, PublicationMode, SourceSystemId, ValidationMode,
+    AssetStorageDefault, ImportCutover, ImportCutoverTrigger, ImportManifest,
+    ImportMigrationArtifacts, ImportModelError, ImportRunId, ImportSource, ImportSourceFormat,
+    ImportSourceInput, ImportTarget, ImportVerification, ImporterId, ImporterSpec,
+    PublicationMode, RollbackTriggerId, SourceSystemId, ValidationMode,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -27,6 +29,16 @@ pub struct ImportManifestDocument {
     pub publication_mode: DocumentPublicationMode,
     #[serde(default)]
     pub asset_storage_default: DocumentAssetStorageDefault,
+    #[serde(default)]
+    pub target: Option<ImportTargetDocument>,
+    #[serde(default)]
+    pub source: Option<ImportSourceDocument>,
+    #[serde(default)]
+    pub migration_artifacts: Option<ImportMigrationArtifactsDocument>,
+    #[serde(default)]
+    pub verification: Option<ImportVerificationDocument>,
+    #[serde(default)]
+    pub cutover: Option<ImportCutoverDocument>,
     #[serde(default)]
     pub importers: Vec<ImporterDocument>,
 }
@@ -57,6 +69,21 @@ impl ImportManifestDocument {
         manifest.validation_mode = self.validation_mode.into();
         manifest.publication_mode = self.publication_mode.into();
         manifest.asset_storage_default = self.asset_storage_default.into();
+        if let Some(target) = self.target {
+            manifest = manifest.with_target(target.into_model()?);
+        }
+        if let Some(source) = self.source {
+            manifest = manifest.with_source(source.into_model()?);
+        }
+        if let Some(artifacts) = self.migration_artifacts {
+            manifest = manifest.with_migration_artifacts(artifacts.into_model()?);
+        }
+        if let Some(verification) = self.verification {
+            manifest = manifest.with_verification(verification.into_model()?);
+        }
+        if let Some(cutover) = self.cutover {
+            manifest = manifest.with_cutover(cutover.into_model()?);
+        }
 
         for module in self.modules {
             manifest = manifest.with_module(module)?;
@@ -92,6 +119,182 @@ pub struct ImporterDocument {
     pub mapping: BTreeMap<String, String>,
     #[serde(default)]
     pub dependencies: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ImportTargetDocument {
+    pub app_manifest: String,
+    pub platform_config: String,
+    #[serde(default)]
+    pub expected_modules: Vec<String>,
+}
+
+impl ImportTargetDocument {
+    fn into_model(self) -> Result<ImportTarget, ImportModelError> {
+        let mut target = ImportTarget::new(self.app_manifest, self.platform_config)?;
+        for module in self.expected_modules {
+            target = target.with_expected_module(module)?;
+        }
+        Ok(target)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ImportSourceInputDocument {
+    pub id: String,
+    pub kind: String,
+    pub path: String,
+    #[serde(default)]
+    pub checksum: Option<String>,
+}
+
+impl ImportSourceInputDocument {
+    fn into_model(self) -> Result<ImportSourceInput, ImportModelError> {
+        let mut input = ImportSourceInput::new(self.id, self.kind, self.path)?;
+        if let Some(checksum) = self.checksum {
+            input = input.with_checksum(checksum)?;
+        }
+        Ok(input)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ImportSourceDocument {
+    pub kind: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub snapshot_id: Option<String>,
+    #[serde(default)]
+    pub inputs: Vec<ImportSourceInputDocument>,
+}
+
+impl ImportSourceDocument {
+    fn into_model(self) -> Result<ImportSource, ImportModelError> {
+        let mut source = ImportSource::new(self.kind)?;
+        if let Some(base_url) = self.base_url {
+            source = source.with_base_url(base_url)?;
+        }
+        if let Some(timezone) = self.timezone {
+            source = source.with_timezone(timezone)?;
+        }
+        if let Some(snapshot_id) = self.snapshot_id {
+            source = source.with_snapshot_id(snapshot_id)?;
+        }
+        for input in self.inputs {
+            source = source.with_input(input.into_model()?);
+        }
+        Ok(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ImportMigrationArtifactsDocument {
+    pub capability_map: String,
+    pub auth_mapping: String,
+    pub redirect_plan: String,
+    pub extraction_spec: String,
+    pub cutover_runbook: String,
+}
+
+impl ImportMigrationArtifactsDocument {
+    fn into_model(self) -> Result<ImportMigrationArtifacts, ImportModelError> {
+        ImportMigrationArtifacts::new(
+            self.capability_map,
+            self.auth_mapping,
+            self.redirect_plan,
+            self.extraction_spec,
+            self.cutover_runbook,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+pub struct ImportVerificationDocument {
+    #[serde(default)]
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub sample_routes: Vec<String>,
+    #[serde(default)]
+    pub sample_users: Vec<String>,
+}
+
+impl ImportVerificationDocument {
+    fn into_model(self) -> Result<ImportVerification, ImportModelError> {
+        let mut verification = ImportVerification::default();
+        for required in self.required {
+            verification = verification.with_required(required)?;
+        }
+        for route in self.sample_routes {
+            verification = verification.with_sample_route(route)?;
+        }
+        for user in self.sample_users {
+            verification = verification.with_sample_user(user)?;
+        }
+        Ok(verification)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ImportCutoverTriggerDocument {
+    pub id: String,
+    pub description: String,
+}
+
+impl ImportCutoverTriggerDocument {
+    fn into_model(self) -> Result<ImportCutoverTrigger, ImportModelError> {
+        ImportCutoverTrigger::new(RollbackTriggerId::new(self.id)?, self.description)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+pub struct ImportCutoverDocument {
+    #[serde(default)]
+    pub freeze_legacy_writes: bool,
+    #[serde(default)]
+    pub switch_method: Option<String>,
+    #[serde(default)]
+    pub hostnames: Vec<String>,
+    #[serde(default)]
+    pub requires_assets_publish: bool,
+    #[serde(default)]
+    pub requires_migrate_apply: bool,
+    #[serde(default)]
+    pub requires_storage_validation: bool,
+    #[serde(default)]
+    pub requires_cache_warm: bool,
+    #[serde(default)]
+    pub observation_window_minutes: Option<u32>,
+    #[serde(default)]
+    pub rollback_triggers: Vec<ImportCutoverTriggerDocument>,
+}
+
+impl ImportCutoverDocument {
+    fn into_model(self) -> Result<ImportCutover, ImportModelError> {
+        let mut cutover = ImportCutover {
+            freeze_legacy_writes: self.freeze_legacy_writes,
+            requires_assets_publish: self.requires_assets_publish,
+            requires_migrate_apply: self.requires_migrate_apply,
+            requires_storage_validation: self.requires_storage_validation,
+            requires_cache_warm: self.requires_cache_warm,
+            ..ImportCutover::default()
+        };
+        if let Some(method) = self.switch_method {
+            cutover = cutover.with_switch_method(method)?;
+        }
+        if let Some(minutes) = self.observation_window_minutes {
+            cutover = cutover.with_observation_window(minutes);
+        }
+        for hostname in self.hostnames {
+            cutover = cutover.with_hostname(hostname)?;
+        }
+        for trigger in self.rollback_triggers {
+            cutover = cutover.with_trigger(trigger.into_model()?);
+        }
+        Ok(cutover)
+    }
 }
 
 impl ImporterDocument {

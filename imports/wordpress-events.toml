@@ -9,6 +9,58 @@ validation_mode = "strict"
 publication_mode = "stage_validated"
 asset_storage_default = "public_upload"
 
+[target]
+app_manifest = "../apps/harbor-shop/app.toml"
+platform_config = "../apps/harbor-shop/platform.toml"
+expected_modules = ["cms", "media", "events", "admin", "ops"]
+
+[source]
+kind = "wordpress"
+base_url = "https://legacy.example.com"
+timezone = "Europe/London"
+snapshot_id = "wp-prod-2026-03-24-full"
+
+[[source.inputs]]
+id = "wp-db"
+kind = "mysql_dump"
+path = "fixtures/wordpress-events/source/db.sql.gz"
+checksum = "sha256:wordpress-db-fixture"
+
+[[source.inputs]]
+id = "wp-uploads"
+kind = "filesystem"
+path = "fixtures/wordpress-events/source/uploads"
+
+[migration_artifacts]
+capability_map = "docs/capability-map.md"
+auth_mapping = "docs/auth-mapping.md"
+redirect_plan = "docs/redirect-plan.csv"
+extraction_spec = "docs/extraction-spec.md"
+cutover_runbook = "docs/cutover-runbook.md"
+
+[verification]
+required = ["record_counts", "route_resolution", "canonical_urls", "media_reachability"]
+sample_routes = ["/en-GB/home", "/en-GB/events/harbor-festival"]
+sample_users = ["alice@example.com"]
+
+[cutover]
+freeze_legacy_writes = true
+switch_method = "dns"
+hostnames = ["shop.example.com", "www.example.com"]
+requires_assets_publish = true
+requires_migrate_apply = true
+requires_storage_validation = true
+requires_cache_warm = true
+observation_window_minutes = 60
+
+[[cutover.rollback_triggers]]
+id = "auth-failure"
+description = "Systemic admin or customer login failure"
+
+[[cutover.rollback_triggers]]
+id = "media-miss"
+description = "Core media delivery failures on customer journeys"
+
 [[importers]]
 id = "users"
 phase = 10

@@ -35,6 +35,224 @@ impl ImportSourceFormat {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportTarget {
+    pub app_manifest: String,
+    pub platform_config: String,
+    pub expected_modules: Vec<String>,
+}
+
+impl ImportTarget {
+    pub fn new(
+        app_manifest: impl Into<String>,
+        platform_config: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            app_manifest: require_non_empty("target_app_manifest", app_manifest.into())?,
+            platform_config: require_non_empty("target_platform_config", platform_config.into())?,
+            expected_modules: Vec::new(),
+        })
+    }
+
+    pub fn with_expected_module(
+        mut self,
+        module: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        self.expected_modules
+            .push(validate_token("expected_module", module.into())?);
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportSourceInput {
+    pub id: String,
+    pub kind: String,
+    pub path: String,
+    pub checksum: Option<String>,
+}
+
+impl ImportSourceInput {
+    pub fn new(
+        id: impl Into<String>,
+        kind: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            id: validate_token("source_input_id", id.into())?,
+            kind: validate_token("source_input_kind", kind.into())?,
+            path: require_non_empty("source_input_path", path.into())?,
+            checksum: None,
+        })
+    }
+
+    pub fn with_checksum(mut self, checksum: impl Into<String>) -> Result<Self, ImportModelError> {
+        self.checksum = Some(require_non_empty("source_input_checksum", checksum.into())?);
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportSource {
+    pub kind: String,
+    pub base_url: Option<String>,
+    pub timezone: Option<String>,
+    pub snapshot_id: Option<String>,
+    pub inputs: Vec<ImportSourceInput>,
+}
+
+impl ImportSource {
+    pub fn new(kind: impl Into<String>) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            kind: validate_token("source_kind", kind.into())?,
+            base_url: None,
+            timezone: None,
+            snapshot_id: None,
+            inputs: Vec::new(),
+        })
+    }
+
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Result<Self, ImportModelError> {
+        self.base_url = Some(require_non_empty("source_base_url", base_url.into())?);
+        Ok(self)
+    }
+
+    pub fn with_timezone(mut self, timezone: impl Into<String>) -> Result<Self, ImportModelError> {
+        self.timezone = Some(require_non_empty("source_timezone", timezone.into())?);
+        Ok(self)
+    }
+
+    pub fn with_snapshot_id(
+        mut self,
+        snapshot_id: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        self.snapshot_id = Some(require_non_empty("source_snapshot_id", snapshot_id.into())?);
+        Ok(self)
+    }
+
+    pub fn with_input(mut self, input: ImportSourceInput) -> Self {
+        self.inputs.push(input);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportMigrationArtifacts {
+    pub capability_map: String,
+    pub auth_mapping: String,
+    pub redirect_plan: String,
+    pub extraction_spec: String,
+    pub cutover_runbook: String,
+}
+
+impl ImportMigrationArtifacts {
+    pub fn new(
+        capability_map: impl Into<String>,
+        auth_mapping: impl Into<String>,
+        redirect_plan: impl Into<String>,
+        extraction_spec: impl Into<String>,
+        cutover_runbook: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            capability_map: require_non_empty("capability_map", capability_map.into())?,
+            auth_mapping: require_non_empty("auth_mapping", auth_mapping.into())?,
+            redirect_plan: require_non_empty("redirect_plan", redirect_plan.into())?,
+            extraction_spec: require_non_empty("extraction_spec", extraction_spec.into())?,
+            cutover_runbook: require_non_empty("cutover_runbook", cutover_runbook.into())?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImportVerification {
+    pub required: Vec<String>,
+    pub sample_routes: Vec<String>,
+    pub sample_users: Vec<String>,
+}
+
+impl ImportVerification {
+    pub fn with_required(mut self, check: impl Into<String>) -> Result<Self, ImportModelError> {
+        self.required
+            .push(validate_token("verification_check", check.into())?);
+        Ok(self)
+    }
+
+    pub fn with_sample_route(
+        mut self,
+        route: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        self.sample_routes
+            .push(require_non_empty("verification_sample_route", route.into())?);
+        Ok(self)
+    }
+
+    pub fn with_sample_user(
+        mut self,
+        user: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        self.sample_users
+            .push(require_non_empty("verification_sample_user", user.into())?);
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportCutoverTrigger {
+    pub id: RollbackTriggerId,
+    pub description: String,
+}
+
+impl ImportCutoverTrigger {
+    pub fn new(
+        id: RollbackTriggerId,
+        description: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            id,
+            description: require_non_empty("cutover_trigger_description", description.into())?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImportCutover {
+    pub freeze_legacy_writes: bool,
+    pub switch_method: Option<String>,
+    pub hostnames: Vec<String>,
+    pub requires_assets_publish: bool,
+    pub requires_migrate_apply: bool,
+    pub requires_storage_validation: bool,
+    pub requires_cache_warm: bool,
+    pub observation_window_minutes: Option<u32>,
+    pub rollback_triggers: Vec<ImportCutoverTrigger>,
+}
+
+impl ImportCutover {
+    pub fn with_switch_method(
+        mut self,
+        switch_method: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        self.switch_method = Some(validate_token("cutover_switch_method", switch_method.into())?);
+        Ok(self)
+    }
+
+    pub fn with_hostname(mut self, hostname: impl Into<String>) -> Result<Self, ImportModelError> {
+        self.hostnames
+            .push(require_non_empty("cutover_hostname", hostname.into())?);
+        Ok(self)
+    }
+
+    pub fn with_observation_window(mut self, minutes: u32) -> Self {
+        self.observation_window_minutes = Some(minutes);
+        self
+    }
+
+    pub fn with_trigger(mut self, trigger: ImportCutoverTrigger) -> Self {
+        self.rollback_triggers.push(trigger);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImporterSpec {
     pub id: ImporterId,
     pub phase: u16,
@@ -107,6 +325,11 @@ pub struct ImportManifest {
     pub validation_mode: ValidationMode,
     pub publication_mode: PublicationMode,
     pub asset_storage_default: AssetStorageDefault,
+    pub target: Option<ImportTarget>,
+    pub source: Option<ImportSource>,
+    pub migration_artifacts: Option<ImportMigrationArtifacts>,
+    pub verification: Option<ImportVerification>,
+    pub cutover: Option<ImportCutover>,
     pub importers: Vec<ImporterSpec>,
 }
 
@@ -128,6 +351,11 @@ impl ImportManifest {
             validation_mode: ValidationMode::Strict,
             publication_mode: PublicationMode::StageValidated,
             asset_storage_default: AssetStorageDefault::PublicUpload,
+            target: None,
+            source: None,
+            migration_artifacts: None,
+            verification: None,
+            cutover: None,
             importers: Vec::new(),
         })
     }
@@ -150,6 +378,31 @@ impl ImportManifest {
 
     pub fn with_importer(mut self, importer: ImporterSpec) -> Self {
         self.importers.push(importer);
+        self
+    }
+
+    pub fn with_target(mut self, target: ImportTarget) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    pub fn with_source(mut self, source: ImportSource) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    pub fn with_migration_artifacts(mut self, artifacts: ImportMigrationArtifacts) -> Self {
+        self.migration_artifacts = Some(artifacts);
+        self
+    }
+
+    pub fn with_verification(mut self, verification: ImportVerification) -> Self {
+        self.verification = Some(verification);
+        self
+    }
+
+    pub fn with_cutover(mut self, cutover: ImportCutover) -> Self {
+        self.cutover = Some(cutover);
         self
     }
 

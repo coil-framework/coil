@@ -551,6 +551,11 @@ fn checked_in_wordpress_fixture_manifest_executes_end_to_end() {
         .unwrap();
 
     assert_eq!(execution.importer_records.len(), 4);
+    assert!(manifest.target.is_some());
+    assert!(manifest.source.is_some());
+    assert!(manifest.migration_artifacts.is_some());
+    assert!(manifest.verification.is_some());
+    assert!(manifest.cutover.is_some());
     assert!(execution
         .importer_records
         .iter()
@@ -575,6 +580,48 @@ site = "main"
 validation_mode = "strict"
 publication_mode = "stage_validated"
 asset_storage_default = "public_upload"
+
+[target]
+app_manifest = "../apps/harbor-shop/app.toml"
+platform_config = "../apps/harbor-shop/platform.toml"
+expected_modules = ["cms", "events"]
+
+[source]
+kind = "wordpress"
+base_url = "https://legacy.example.com"
+timezone = "Europe/London"
+snapshot_id = "snapshot-1"
+
+[[source.inputs]]
+id = "wp-db"
+kind = "mysql_dump"
+path = "fixtures/db.sql.gz"
+
+[migration_artifacts]
+capability_map = "docs/capability-map.md"
+auth_mapping = "docs/auth-mapping.md"
+redirect_plan = "docs/redirect-plan.csv"
+extraction_spec = "docs/extraction-spec.md"
+cutover_runbook = "docs/cutover-runbook.md"
+
+[verification]
+required = ["record_counts", "route_resolution"]
+sample_routes = ["/en/home"]
+sample_users = ["editor@example.com"]
+
+[cutover]
+freeze_legacy_writes = true
+switch_method = "dns"
+hostnames = ["shop.example.com"]
+requires_assets_publish = true
+requires_migrate_apply = true
+requires_storage_validation = true
+requires_cache_warm = true
+observation_window_minutes = 60
+
+[[cutover.rollback_triggers]]
+id = "auth-failure"
+description = "Auth failure"
 
 [[importers]]
 id = "pages"
@@ -606,6 +653,27 @@ dependencies = ["pages"]
     assert_eq!(manifest.locale.as_deref(), Some("en"));
     assert_eq!(manifest.site.as_deref(), Some("main"));
     assert_eq!(manifest.importers.len(), 2);
+    assert_eq!(
+        manifest.target.as_ref().unwrap().app_manifest,
+        "../apps/harbor-shop/app.toml".to_string()
+    );
+    assert_eq!(manifest.source.as_ref().unwrap().inputs.len(), 1);
+    assert_eq!(
+        manifest
+            .migration_artifacts
+            .as_ref()
+            .unwrap()
+            .redirect_plan,
+        "docs/redirect-plan.csv".to_string()
+    );
+    assert_eq!(
+        manifest.verification.as_ref().unwrap().required,
+        vec!["record_counts".to_string(), "route_resolution".to_string()]
+    );
+    assert_eq!(
+        manifest.cutover.as_ref().unwrap().rollback_triggers.len(),
+        1
+    );
     assert_eq!(
         manifest.importers[0].source_path.as_deref(),
         Some("fixtures/pages.json")

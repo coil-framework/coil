@@ -141,6 +141,14 @@ impl davenda_jobs::JobsCoordinationRuntime for SharedJobsRuntimeHarness {
         self.runtime.enqueue(spec, now)
     }
 
+    fn retry_dead_letter(
+        &self,
+        dead_letter_id: &davenda_jobs::DeadLetterId,
+        now: davenda_jobs::JobInstant,
+    ) -> Result<davenda_jobs::QueuedJobRecord, davenda_jobs::JobsModelError> {
+        self.runtime.retry_dead_letter(dead_letter_id, now)
+    }
+
     fn acquire_scheduler_leadership(
         &self,
         node_id: String,

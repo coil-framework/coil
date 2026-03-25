@@ -2238,6 +2238,57 @@ fn runtime_builder_materializes_jobs_domain_for_module_subscriptions() {
 }
 
 #[test]
+fn runtime_builder_materializes_memberships_account_surfaces_as_session_gated_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_module(MembershipsModule::new())
+        .build()
+        .unwrap();
+
+    let dashboard = plan
+        .http
+        .routes
+        .iter()
+        .find(|route| route.name == "memberships.account.dashboard")
+        .expect("memberships account dashboard route should be materialized");
+    assert_eq!(dashboard.path, "/account");
+    assert_eq!(dashboard.area, RouteArea::Account);
+    assert_eq!(dashboard.auth, RouteAuthGate::Session);
+
+    let memberships = plan
+        .http
+        .routes
+        .iter()
+        .find(|route| route.name == "memberships.account")
+        .expect("memberships account route should be materialized");
+    assert_eq!(memberships.path, "/account/memberships");
+    assert_eq!(memberships.area, RouteArea::Account);
+    assert_eq!(memberships.auth, RouteAuthGate::Session);
+
+    assert_eq!(
+        plan.handlers
+            .get("memberships.account.dashboard")
+            .expect("memberships account dashboard handler should exist")
+            .response,
+        HandlerResponse::Redirect(RedirectResponse {
+            location: "/account/memberships".to_string(),
+            status: 302,
+        })
+    );
+    assert_eq!(
+        plan.handlers
+            .get("memberships.account")
+            .expect("memberships account handler should exist")
+            .response,
+        HandlerResponse::Page(PageResponse {
+            template: "memberships/account".to_string(),
+            status: 200,
+        })
+    );
+}
+
+#[test]
 fn runtime_backend_materializer_uses_shared_jobs_backends_even_when_not_flagged_shared() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())

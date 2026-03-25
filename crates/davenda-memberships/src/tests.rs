@@ -1,7 +1,9 @@
 use super::*;
 use davenda_auth::Capability;
 use davenda_commerce::{EntitlementKey, OrderId, OrderOutcome};
-use davenda_core::{CoreServiceDependency, PlatformModule, ServiceRegistry};
+use davenda_core::{
+    CoreServiceDependency, HttpResponseContract, HttpSurfaceArea, PlatformModule, ServiceRegistry,
+};
 
 fn instant(days: u64) -> MembershipInstant {
     MembershipInstant::from_days(days)
@@ -260,13 +262,53 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
             .contains(&CoreServiceDependency::Jobs)
     );
     assert_eq!(manifest.migrations.len(), 4);
-    assert_eq!(manifest.route_surfaces.len(), 3);
-    assert_eq!(manifest.http_surfaces.len(), 3);
+    assert_eq!(manifest.route_surfaces.len(), 4);
+    assert_eq!(manifest.http_surfaces.len(), 4);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.admin_resources.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 1);
     assert_eq!(manifest.report_definitions.len(), 1);
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "memberships.account.dashboard"
+                && surface.path == "/account"
+                && surface.capability.is_none())
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "memberships.account"
+                && surface.path == "/account/memberships"
+                && surface.capability.is_none())
+    );
+    assert!(manifest.http_surfaces.iter().any(|surface| surface.name
+        == "memberships.account.dashboard"
+        && surface.area == HttpSurfaceArea::Account
+        && surface.path == "/account"
+        && matches!(
+            &surface.response,
+            HttpResponseContract::Redirect { location, status }
+                if location == "/account/memberships" && *status == 302
+        )
+        && surface.capability.is_none()));
+    assert!(
+        manifest
+            .http_surfaces
+            .iter()
+            .any(|surface| surface.name == "memberships.account"
+                && surface.area == HttpSurfaceArea::Account
+                && surface.path == "/account/memberships"
+                && matches!(
+                    &surface.response,
+                    HttpResponseContract::Page { template, status }
+                        if template == "memberships/account" && *status == 200
+                )
+                && surface.capability.is_none())
+    );
     assert_eq!(
         module
             .install_migration_plan()

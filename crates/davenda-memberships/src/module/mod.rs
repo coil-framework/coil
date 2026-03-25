@@ -3,12 +3,12 @@ use davenda_auth::Capability;
 use davenda_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution, CapabilityContract,
     CoreServiceDependency, EventSubscription, ExtensionSlotDescriptor, ExtensionSlotKind,
-    HttpSurfaceArea, HttpSurfaceContribution, IntegrationKind, IntegrationPoint, JobContract,
-    JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency, ModuleManifest,
-    PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode, ReportFormat,
-    ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind, SearchFieldContribution,
-    SearchFieldRole, SearchIndexContribution, SearchInvalidationRule, SearchInvalidationTrigger,
-    SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
+    HttpSurfaceArea, HttpSurfaceContribution, HttpSurfaceMethod, IntegrationKind, IntegrationPoint,
+    JobContract, JobTriggerKind, MigrationContract, ModuleBehavior, ModuleDependency,
+    ModuleManifest, PlatformModule, RegistrationError, ReportDefinition, ReportDeliveryMode,
+    ReportFormat, ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind,
+    SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
+    SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility, ServiceRegistry,
 };
 use davenda_data::{MigrationId, MigrationOwner, MigrationPlan, MigrationStep};
 

@@ -103,11 +103,15 @@ fn module_migrations() -> Vec<MigrationContract> {
 fn route_surfaces() -> Vec<RouteSurface> {
     vec![
         RouteSurface::new(
+            "memberships.account.dashboard",
+            RouteSurfaceKind::FrontendPage,
+            "/account",
+        ),
+        RouteSurface::new(
             "memberships.account",
             RouteSurfaceKind::FrontendPage,
             "/account/memberships",
-        )
-        .gated_by(Capability::MembershipSubscriptionManage),
+        ),
         RouteSurface::new(
             "memberships.tiers",
             RouteSurfaceKind::AdminPage,
@@ -228,13 +232,20 @@ fn report_definitions() -> Vec<ReportDefinition> {
 
 fn http_surfaces() -> Vec<HttpSurfaceContribution> {
     vec![
+        HttpSurfaceContribution::redirect(
+            "memberships.account.dashboard",
+            HttpSurfaceMethod::Get,
+            HttpSurfaceArea::Account,
+            "/account",
+            "/account/memberships",
+            302,
+        ),
         HttpSurfaceContribution::page(
             "memberships.account",
             HttpSurfaceArea::Account,
             "/account/memberships",
             "memberships/account",
-        )
-        .gated_by(Capability::MembershipSubscriptionManage),
+        ),
         HttpSurfaceContribution::page(
             "memberships.tiers",
             HttpSurfaceArea::Admin,

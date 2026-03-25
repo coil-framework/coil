@@ -12,12 +12,13 @@ use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, Repo
 use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
 use davenda_assets::AssetDeliveryTarget;
 use davenda_auth::configured_auth_model_package;
-use davenda_config::PlatformConfig;
+use davenda_config::{PlatformConfig, StorageClass};
 use davenda_data::{MigrationPlan, MigrationRegistry};
 use davenda_import::ImportManifest;
 use std::path::{Path, PathBuf};
 use std::collections::BTreeSet;
 use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder};
+use davenda_storage::StoragePlanRequest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliApplication {
@@ -219,6 +220,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 })?;
             render_command_report(&report, output_mode)
         }
+        CliInput::StorageVerify {
+            output_mode,
+            config_path,
+            verify_policy,
+        } => {
+            let report = run_storage_verify(&config_path, verify_policy)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::AssetsPublish {
             output_mode,
             dry_run,
@@ -298,6 +307,7 @@ fn usage() -> String {
         "  platform migrate plan [--config <path>] [--json]",
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
+        "  platform storage verify [--config <path>] [--policy] [--json]",
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
         "",
@@ -309,6 +319,7 @@ fn usage() -> String {
         "  platform migrate plan --config config/platform.toml",
         "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
+        "  platform storage verify --config config/platform.toml --policy",
         "  platform assets publish --config apps/harbor-shop/platform.toml --dry-run",
         "  platform import run imports/wordpress-events.toml",
         "  platform import run imports/wordpress-events.toml --dry-run",
@@ -522,6 +533,183 @@ fn run_assets_publish(
         })?;
 
     build_assets_publish_report(&built.manifest, receipt.manifest(), Some(&receipt), false)
+}
+
+fn run_storage_verify(
+    config_path: &Path,
+    verify_policy: bool,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(config_path, true)?;
+    let runtime = &built.runtime_plan.runtime;
+    let storage_host = runtime.storage_host();
+
+    let mut report = CommandReport::new(
+        ["storage", "verify"],
+        if verify_policy {
+            format!(
+                "Verified storage policy planning for customer app `{}`",
+                built.manifest.id
+            )
+        } else {
+            format!(
+                "Verified storage topology and backend resolution for customer app `{}`",
+                built.manifest.id
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "class",
+        "logical_path",
+        "policy",
+        "durable_store",
+        "scope",
+        "backend",
+        "locator",
+        "result",
+        "detail",
+    ])
+    .map_err(report_build_error)?;
+
+    let object_store_result = runtime.object_store_client_config(&EnvironmentSecretResolver);
+    match &object_store_result {
+        Ok(Some(config)) => {
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Info,
+                "storage.object_store.resolved",
+                format!(
+                    "resolved object-store backend for bucket `{}` in region `{}`",
+                    config.bucket, config.region
+                ),
+            )?;
+        }
+        Ok(None) => {
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Warning,
+                "storage.object_store.missing",
+                format!(
+                    "customer app `{}` has no configured object-store backend; public asset and shared private writes cannot be verified as scalable",
+                    built.manifest.id
+                ),
+            )?;
+            report = report.with_status(ReportStatus::Warning);
+        }
+        Err(error) => {
+            push_report_diagnostic(
+                &mut report,
+                DiagnosticSeverity::Error,
+                "storage.object_store.invalid",
+                format!(
+                    "failed to resolve object-store backend for `{}`: {error}",
+                    built.manifest.id
+                ),
+            )?;
+            report = report.with_status(ReportStatus::Unsafe);
+        }
+    }
+
+    let checks = [
+        (
+            StorageClass::PublicAsset,
+            "verify/public-asset.bin",
+            false,
+            "verify platform-managed public deployment assets",
+        ),
+        (
+            StorageClass::PublicUpload,
+            "verify/public-upload.bin",
+            false,
+            "verify public uploads use scalable storage",
+        ),
+        (
+            StorageClass::PrivateShared,
+            "verify/private-shared.bin",
+            false,
+            "verify private shared assets use durable shared storage",
+        ),
+        (
+            StorageClass::LocalOnlySensitive,
+            "verify/local-only-sensitive.bin",
+            true,
+            "verify local-only sensitive assets stay on the single-node escape hatch",
+        ),
+    ];
+
+    for (class, logical_path, single_node_only, description) in checks {
+        let request = StoragePlanRequest::new(logical_path).with_storage_class(class);
+        let plan_result = if single_node_only {
+            storage_host.plan_single_node_escape_hatch_write(request)
+        } else {
+            storage_host.plan_write(request)
+        };
+
+        match plan_result {
+            Ok(plan) => {
+                let primary = plan.primary_write_target();
+                report.push_row(
+                    ReportRow::new()
+                        .with_cell("class", storage_class_label(class))
+                        .map_err(report_build_error)?
+                        .with_cell("logical_path", logical_path)
+                        .map_err(report_build_error)?
+                        .with_cell("policy", storage_policy_label(&plan))
+                        .map_err(report_build_error)?
+                        .with_cell("durable_store", format!("{:?}", plan.durable_store))
+                        .map_err(report_build_error)?
+                        .with_cell("scope", format!("{:?}", plan.deployment_scope))
+                        .map_err(report_build_error)?
+                        .with_cell(
+                            "backend",
+                            primary
+                                .map(|target| format!("{:?}", target.backend))
+                                .unwrap_or_else(|| "none".to_string()),
+                        )
+                        .map_err(report_build_error)?
+                        .with_cell(
+                            "locator",
+                            primary
+                                .map(|target| target.locator.clone())
+                                .unwrap_or_else(|| "none".to_string()),
+                        )
+                        .map_err(report_build_error)?
+                        .with_cell("result", "ok")
+                        .map_err(report_build_error)?
+                        .with_cell("detail", description)
+                        .map_err(report_build_error)?,
+                );
+            }
+            Err(error) => {
+                if report.status == ReportStatus::Ok {
+                    report = report.with_status(ReportStatus::Unsafe);
+                }
+                report.push_row(
+                    ReportRow::new()
+                        .with_cell("class", storage_class_label(class))
+                        .map_err(report_build_error)?
+                        .with_cell("logical_path", logical_path)
+                        .map_err(report_build_error)?
+                        .with_cell("policy", "unavailable")
+                        .map_err(report_build_error)?
+                        .with_cell("durable_store", "unavailable")
+                        .map_err(report_build_error)?
+                        .with_cell("scope", "unavailable")
+                        .map_err(report_build_error)?
+                        .with_cell("backend", "unavailable")
+                        .map_err(report_build_error)?
+                        .with_cell("locator", "unavailable")
+                        .map_err(report_build_error)?
+                        .with_cell("result", "invalid")
+                        .map_err(report_build_error)?
+                        .with_cell("detail", error.to_string())
+                        .map_err(report_build_error)?,
+                );
+            }
+        }
+    }
+
+    Ok(report)
 }
 
 fn build_customer_app_runtime_context(
@@ -793,6 +981,22 @@ fn format_asset_delivery_target(target: &AssetDeliveryTarget) -> String {
         AssetDeliveryTarget::AppProxy { path } => format!("app:{path}"),
         AssetDeliveryTarget::LocalPath { path } => format!("local:{path}"),
     }
+}
+
+fn storage_class_label(class: StorageClass) -> &'static str {
+    match class {
+        StorageClass::PublicAsset => "public_asset",
+        StorageClass::PublicUpload => "public_upload",
+        StorageClass::PrivateShared => "private_shared",
+        StorageClass::LocalOnlySensitive => "local_only_sensitive",
+    }
+}
+
+fn storage_policy_label(plan: &davenda_storage::StoragePlan) -> String {
+    format!(
+        "{:?}/{:?}/{:?}",
+        plan.policy.delivery_mode, plan.policy.sync_mode, plan.policy.sensitivity
+    )
 }
 
 fn push_report_diagnostic(
@@ -1294,6 +1498,7 @@ enabled = ["cms"]
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
         assert!(rendered.contains("platform migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform release doctor [--config <path>]"));
+        assert!(rendered.contains("platform storage verify [--config <path>] [--policy]"));
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
     }
@@ -1549,6 +1754,26 @@ description = "Import pages"
 
         assert!(rendered.contains("release doctor"));
         assert!(rendered.contains("showcase-events"));
+    }
+
+    #[test]
+    fn run_from_args_renders_storage_verify_policy_report() {
+        let fixture = customer_app_fixture_with_assets(false);
+
+        let rendered = run_from_args([
+            "storage".to_string(),
+            "verify".to_string(),
+            "--config".to_string(),
+            fixture.config_path.display().to_string(),
+            "--policy".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("storage verify"));
+        assert!(rendered.contains("public_upload"));
+        assert!(rendered.contains("private_shared"));
+        assert!(rendered.contains("local_only_sensitive"));
+        assert!(rendered.contains("result: ok"));
     }
 
     #[test]

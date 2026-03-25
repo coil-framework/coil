@@ -699,6 +699,7 @@ dependencies = [
  "davenda-ops",
  "davenda-report",
  "davenda-runtime",
+ "davenda-storage",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",

@@ -62,6 +62,11 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         config_path: PathBuf,
     },
+    StorageVerify {
+        output_mode: OutputMode,
+        config_path: PathBuf,
+        verify_policy: bool,
+    },
     AssetsPublish {
         output_mode: OutputMode,
         dry_run: bool,
@@ -82,6 +87,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut output_mode = OutputMode::Human;
     let mut dry_run = false;
     let mut confirmed = false;
+    let mut verify_policy = false;
     let mut subject: Option<DefaultSubject> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
@@ -96,6 +102,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--json" => output_mode = OutputMode::Json,
             "--dry-run" => dry_run = true,
             "--yes" => confirmed = true,
+            "--policy" => verify_policy = true,
             "--config" => {
                 config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
             }
@@ -254,6 +261,21 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             Ok(CliInput::ReleaseDoctor {
                 output_mode,
                 config_path,
+            })
+        }
+        [command, subcommand] if command == "storage" && subcommand == "verify" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`storage verify` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::StorageVerify {
+                output_mode,
+                config_path,
+                verify_policy,
             })
         }
         [command, subcommand] if command == "assets" && subcommand == "publish" => {
@@ -567,5 +589,31 @@ mod tests {
         assert!(dry_run);
         assert!(invocation.confirmed);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+    }
+
+    #[test]
+    fn parse_storage_verify_accepts_policy_flag() {
+        let input = parse([
+            "storage".to_string(),
+            "verify".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--policy".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::StorageVerify {
+            output_mode,
+            config_path,
+            verify_policy,
+        } = input
+        else {
+            panic!("expected storage verify input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(verify_policy);
+        assert_eq!(config_path, PathBuf::from("/tmp/davenda.toml"));
     }
 }

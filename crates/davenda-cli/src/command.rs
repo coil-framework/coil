@@ -154,6 +154,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Check release compatibility for the active customer app",
         )?,
         CommandDescriptor::new(
+            ["storage", "verify"],
+            CommandOwner::Core,
+            "Verify storage policy planning and backend availability for the active customer app",
+        )?,
+        CommandDescriptor::new(
             ["assets", "publish"],
             CommandOwner::Core,
             "Publish theme asset artifacts for the active customer app",

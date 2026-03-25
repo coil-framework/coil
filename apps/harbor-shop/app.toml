@@ -20,4 +20,4 @@ mode = "extend"
 package = "harbor-auth"
 
 [modules]
-enabled = ["cms", "media", "commerce", "events", "admin", "ops"]
+enabled = ["cms", "media", "commerce", "memberships", "events", "admin", "ops"]

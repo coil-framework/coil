@@ -1,18 +1,17 @@
 <section class="collection-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
-  <h2>Featured collections</h2>
-  <ul class="collection-grid__list" dv:if="${featuredCollections}">
-    <li class="collection-grid__item" dv:each="collection : ${featuredCollections}">
-      <a
-        class="collection-grid__link"
-        href="/collections/featured"
-        dv:href="${collection.url}"
-        dv:text="${collection.name}"
-      >
-        Featured collection
+  <h2>Member access</h2>
+  <p class="collection-grid__intro">
+    Browse the storefront, then open your account for membership status and
+    subscription details.
+  </p>
+  <ul class="collection-grid__list">
+    <li class="collection-grid__item">
+      <a class="collection-grid__link" href="/account">Open account</a>
+    </li>
+    <li class="collection-grid__item">
+      <a class="collection-grid__link" href="/account/memberships">
+        View memberships
       </a>
     </li>
   </ul>
-  <p class="collection-grid__empty" dv:unless="${featuredCollections}">
-    Featured collections will appear here once content is published.
-  </p>
 </section>

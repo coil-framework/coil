@@ -70,7 +70,7 @@ explain_api = false
 tenant_id = 101
 
 [modules]
-enabled = ["cms", "media", "commerce", "events", "admin", "ops"]
+enabled = ["cms", "media", "commerce", "memberships", "events", "admin", "ops"]
 
 [wasm]
 directory = "apps/harbor-shop/extensions"

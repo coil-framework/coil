@@ -1,0 +1,46 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Your account'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Your account</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main">
+      <section class="account-page">
+        <div class="account-page__intro">
+          <h1>Your account</h1>
+          <p>
+            Review your membership status, manage subscriptions, and return to
+            the storefront when you’re ready to browse again.
+          </p>
+        </div>
+        <div class="account-page__cards">
+          <article class="account-card">
+            <h2>Memberships</h2>
+            <p>Check your active tiers, renewals, and entitlement status.</p>
+            <a class="button" href="/account/memberships">View memberships</a>
+          </article>
+          <article class="account-card">
+            <h2>Storefront</h2>
+            <p>Continue browsing the public catalog and landing content.</p>
+            <a class="button button--secondary" href="/">Back to home</a>
+          </article>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

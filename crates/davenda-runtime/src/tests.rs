@@ -706,6 +706,22 @@ fn unique_temp_extension_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("davenda-runtime-{label}-{unique}"))
 }
 
+fn unique_temp_template_root(label: &str) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!("davenda-runtime-templates-{label}-{unique}"))
+}
+
+fn write_template_file(root: &Path, relative: &str, contents: &str) {
+    let path = root.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, contents).unwrap();
+}
+
 fn config_with_extension_directory(dir: &Path) -> PlatformConfig {
     PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
         "directory = \"extensions\"",

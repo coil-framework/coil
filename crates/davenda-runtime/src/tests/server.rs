@@ -873,6 +873,183 @@ async fn server_host_emits_hreflang_links_for_localized_page_routes() {
                 .localized(),
         )
         .with_handler(HandlerDefinition::page("events.list", "events/list").unwrap())
+#[tokio::test]
+async fn server_host_loads_customer_storefront_templates_from_template_roots() {
+    let config = config_with_app_name("harbor-shop-runtime-storefront");
+    let template_root = unique_temp_template_root("storefront-pages");
+    write_template_file(
+        &template_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev" dv:with="pageTitle='Harbor Shop'">
+  <head>
+    <title dv:text="${pageTitle}">Harbor Shop</title>
+  </head>
+  <body>
+    <header>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="storefront-home">
+      <section>
+        <h1 dv:text="${route_name}">Home</h1>
+        <div dv:replace="~{commerce/collection-grid}"></div>
+      </section>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/navigation/primary.html",
+        r#"<nav class="primary-nav" xmlns:dv="https://davenda.dev" dv:fragment="primary">
+  <a href="/collections">Collections</a>
+  <a href="/account">Account</a>
+</nav>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/collection-grid.html",
+        r#"<section class="collection-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
+  <p>Featured collections load from customer templates.</p>
+</section>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_template_root(&template_root)
+        .with_route(
+            RouteDefinition::new("storefront.home", HttpMethod::Get, "/")
+                .unwrap()
+                .from_module("commerce"),
+        )
+        .with_handler(HandlerDefinition::page("storefront.home", "pages/home").unwrap())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("primary-nav"), "{body}");
+    assert!(body.contains("Featured collections load from customer templates."), "{body}");
+    assert!(body.contains("storefront.home"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_loads_customer_account_templates_from_template_roots() {
+    let config = config_with_app_name("harbor-shop-runtime-account");
+    let template_root = unique_temp_template_root("account-pages");
+    write_template_file(
+        &template_root,
+        "templates/account/dashboard.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <head>
+    <title>Account</title>
+  </head>
+  <body>
+    <section class="account-dashboard">
+      <aside dv:replace="~{account/sidebar}"></aside>
+      <main>
+        <h1 dv:text="${route_name}">Account dashboard</h1>
+        <p class="principal" dv:text="${principal_id}">member</p>
+      </main>
+    </section>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/account/sidebar.html",
+        r#"<aside class="account-sidebar" xmlns:dv="https://davenda.dev" dv:fragment="sidebar">
+  <a href="/account">Dashboard</a>
+</aside>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_template_root(&template_root)
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session()
+                .from_module("memberships"),
+        )
+        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-template")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/account")
+        .header("host", "www.example.com")
+        .header("x-forwarded-proto", "https")
+        .header("cookie", format!("davenda_session={}", issued.cookie_value))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = server.respond(request).await.unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("account-sidebar"), "{body}");
+    assert!(body.contains("account.dashboard"), "{body}");
+    assert!(body.contains("member-live-template"), "{body}");
+}
+
         .with_template(page_template(customer_namespace, "events/list"))
         .build()
         .unwrap();

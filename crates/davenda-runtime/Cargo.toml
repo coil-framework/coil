@@ -8,6 +8,7 @@ axum = "0.8"
 davenda-auth = { path = "../davenda-auth" }
 davenda-assets = { path = "../davenda-assets" }
 davenda-cache = { path = "../davenda-cache" }
+davenda-commerce = { path = "../davenda-commerce" }
 davenda-config = { path = "../davenda-config" }
 davenda-core = { path = "../davenda-core" }
 davenda-data = { path = "../davenda-data" }
@@ -36,7 +37,6 @@ zanzibar = { workspace = true }
 [dev-dependencies]
 async-trait = "0.1"
 davenda-admin = { path = "../davenda-admin" }
-davenda-commerce = { path = "../davenda-commerce" }
 davenda-cms = { path = "../davenda-cms" }
 davenda-events = { path = "../davenda-events" }
 davenda-media = { path = "../davenda-media" }

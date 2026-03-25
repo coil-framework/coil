@@ -8,8 +8,8 @@ use davenda_core::{
     IntegrationKind, IntegrationPoint, JobContract, JobTriggerKind, MigrationContract,
     ModuleBehavior, ModuleDependency, ModuleManifest, ReportDefinition, ReportDeliveryMode,
     ReportFormat, ReportSensitivity, RouteSurface, RouteSurfaceKind, SearchDocumentKind,
-    SearchFieldContribution, SearchFieldRole, SearchIndexContribution,
-    SearchInvalidationRule, SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility,
+    SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
+    SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility,
 };
 
 pub(super) fn build_manifest(module: &CommerceModule) -> ModuleManifest {
@@ -139,44 +139,37 @@ fn route_surfaces() -> Vec<RouteSurface> {
             "/shop/products/{product_slug}",
         )
         .localized(),
-        RouteSurface::new("commerce.cart", RouteSurfaceKind::FrontendPage, "/cart")
-            .gated_by(Capability::CheckoutSessionCreate),
+        RouteSurface::new("commerce.cart", RouteSurfaceKind::FrontendPage, "/cart"),
         RouteSurface::new(
             "commerce.add-to-cart",
             RouteSurfaceKind::FrontendAction,
             "/cart/items",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         RouteSurface::new(
             "commerce.cart-update",
             RouteSurfaceKind::FrontendAction,
             "/cart",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         RouteSurface::new(
             "commerce.checkout",
             RouteSurfaceKind::FrontendPage,
             "/checkout",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         RouteSurface::new(
             "commerce.checkout-start",
             RouteSurfaceKind::FrontendAction,
             "/checkout/start",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         RouteSurface::new(
             "commerce.checkout-complete",
             RouteSurfaceKind::FrontendAction,
             "/checkout/complete",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         RouteSurface::new(
             "commerce.checkout-confirmation",
             RouteSurfaceKind::FrontendPage,
             "/checkout/confirmation",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         RouteSurface::new(
             "commerce.orders",
             RouteSurfaceKind::AdminPage,
@@ -384,8 +377,7 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             HttpSurfaceArea::Public,
             "/cart",
             "commerce/cart",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         HttpSurfaceContribution::redirect(
             "commerce.add-to-cart",
             HttpSurfaceMethod::Post,
@@ -393,8 +385,7 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "/cart/items",
             "/cart",
             303,
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         HttpSurfaceContribution::redirect(
             "commerce.cart-update",
             HttpSurfaceMethod::Post,
@@ -402,15 +393,13 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "/cart",
             "/cart",
             303,
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         HttpSurfaceContribution::page(
             "commerce.checkout",
             HttpSurfaceArea::Public,
             "/checkout",
             "commerce/checkout",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         HttpSurfaceContribution::redirect(
             "commerce.checkout-start",
             HttpSurfaceMethod::Post,
@@ -418,8 +407,7 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "/checkout/start",
             "/checkout",
             303,
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         HttpSurfaceContribution::redirect(
             "commerce.checkout-complete",
             HttpSurfaceMethod::Post,
@@ -427,15 +415,13 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "/checkout/complete",
             "/checkout/confirmation",
             303,
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         HttpSurfaceContribution::page(
             "commerce.checkout-confirmation",
             HttpSurfaceArea::Public,
             "/checkout/confirmation",
             "commerce/checkout-confirmation",
-        )
-        .gated_by(Capability::CheckoutSessionCreate),
+        ),
         HttpSurfaceContribution::page(
             "commerce.orders",
             HttpSurfaceArea::Admin,

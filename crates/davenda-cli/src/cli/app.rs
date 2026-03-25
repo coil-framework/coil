@@ -639,6 +639,7 @@ fn build_live_auth_backend(
             "failed to initialize the live {operation} backend: {error}"
         ))
     })?;
+    verify_live_data_client(&runtime, &client, operation)?;
     let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
     let auth = DavendaAuth::new(engine, config.auth.tenant_id);
 
@@ -660,6 +661,52 @@ fn build_cli_async_runtime() -> Result<tokio::runtime::Runtime, CliRunError> {
         .map_err(|error| {
             CliRunError::execution(format!("failed to start the CLI async runtime: {error}"))
         })
+}
+
+fn verify_live_data_client(
+    runtime: &tokio::runtime::Runtime,
+    client: &PostgresDataClient,
+    operation: &str,
+) -> Result<(), CliRunError> {
+    runtime.block_on(client.ping()).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to initialize the live {operation} backend: {error}"
+        ))
+    })
+}
+
+fn live_jobs_state_unavailable_reason(
+    built: &BuiltCustomerAppContext,
+    runtime: &tokio::runtime::Runtime,
+    guidance: &str,
+) -> Result<Option<String>, CliRunError> {
+    let _runtime_guard = runtime.enter();
+    let Some(database_url) = std::env::var("DATABASE_URL").ok() else {
+        return Ok(Some(format!(
+            "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to {guidance}",
+            built.manifest.id
+        )));
+    };
+
+    let data_runtime = built
+        .runtime_plan
+        .runtime
+        .data
+        .with_resolved_connection_url(database_url);
+    let client = data_runtime.connect_lazy_postgres().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to initialize the live jobs backend for `{}`: {error}",
+            built.manifest.id
+        ))
+    })?;
+    if let Err(error) = runtime.block_on(client.ping()) {
+        return Ok(Some(format!(
+            "live jobs coordinator state is unavailable for `{}`: DATABASE_URL could not initialize live state: {error}",
+            built.manifest.id
+        )));
+    }
+
+    Ok(None)
 }
 
 fn build_cli_jobs_host(
@@ -1332,7 +1379,7 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
         || installed_spec
             .and_then(|spec| spec.version_req.as_ref())
             .is_none()
-    {
+     {
         report = report.with_status(ReportStatus::Warning);
     }
 
@@ -1711,7 +1758,7 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
     } else if installed_spec
         .and_then(|spec| spec.version_req.as_ref())
         .is_none()
-    {
+     {
         push_report_diagnostic(
             &mut report,
             DiagnosticSeverity::Warning,
@@ -2963,18 +3010,19 @@ fn run_jobs_in_flight(invocation: &JobsInFlightInvocation) -> Result<CommandRepo
     ])
     .map_err(report_build_error)?;
 
-    let database_url = std::env::var("DATABASE_URL").ok();
-    let jobs_host = if database_url.is_some() {
-        Some(build_cli_jobs_host(
-            &built,
-            "platform-jobs-in-flight",
-            "in-flight",
-        )?)
+    let probe_runtime = build_cli_async_runtime()?;
+    if let Some(reason) =
+        live_jobs_state_unavailable_reason(&built, &probe_runtime, "inspect in-flight job state")?
+    {
+        report = report.with_status(ReportStatus::Warning);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "jobs.runtime.unavailable",
+            reason,
+        )?;
     } else {
-        None
-    };
-
-    if let Some((runtime, host)) = jobs_host {
+        let (runtime, host) = build_cli_jobs_host(&built, "platform-jobs-in-flight", "in-flight")?;
         let _runtime_guard = runtime.enter();
         let now_unix_seconds = unix_timestamp_now()?;
         let mut leases = host
@@ -3058,17 +3106,6 @@ fn run_jobs_in_flight(invocation: &JobsInFlightInvocation) -> Result<CommandRepo
                 format!("{expired_count} leased job(s) have expired worker leases"),
             )?;
         }
-    } else {
-        report = report.with_status(ReportStatus::Warning);
-        push_report_diagnostic(
-            &mut report,
-            DiagnosticSeverity::Warning,
-            "jobs.runtime.unavailable",
-            format!(
-                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to inspect in-flight job state",
-                built.manifest.id
-            ),
-        )?;
     }
 
     let topology = built.runtime_plan.runtime.jobs.describe().clone();
@@ -3101,7 +3138,6 @@ fn run_jobs_retry(
         ));
     }
 
-    let database_url = std::env::var("DATABASE_URL").ok();
     let mut report = CommandReport::new(
         ["jobs", "retry"],
         if dry_run {
@@ -3120,19 +3156,19 @@ fn run_jobs_retry(
     .with_columns(["dead_letter_id", "job_id", "queue", "status", "detail"])
     .map_err(report_build_error)?;
 
-    let Some(_database_url) = database_url else {
+    let probe_runtime = build_cli_async_runtime()?;
+    if let Some(reason) =
+        live_jobs_state_unavailable_reason(&built, &probe_runtime, "retry dead-lettered jobs")?
+    {
         report = report.with_status(ReportStatus::Warning);
         push_report_diagnostic(
             &mut report,
             DiagnosticSeverity::Warning,
             "jobs.runtime.unavailable",
-            format!(
-                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to retry dead-lettered jobs",
-                built.manifest.id
-            ),
+            reason,
         )?;
         return Ok(report);
-    };
+    }
 
     let (runtime, mut host) = build_cli_jobs_host(&built, "platform-jobs-retry", "retry")?;
     let _runtime_guard = runtime.enter();
@@ -3248,20 +3284,19 @@ fn run_jobs_promote(
     .with_columns(["job_id", "queue", "scheduled_for", "status"])
     .map_err(report_build_error)?;
 
-    let database_url = std::env::var("DATABASE_URL").ok();
-    let Some(_database_url) = database_url else {
+    let probe_runtime = build_cli_async_runtime()?;
+    if let Some(reason) =
+        live_jobs_state_unavailable_reason(&built, &probe_runtime, "promote due scheduled jobs")?
+    {
         report = report.with_status(ReportStatus::Warning);
         push_report_diagnostic(
             &mut report,
             DiagnosticSeverity::Warning,
             "jobs.runtime.unavailable",
-            format!(
-                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to promote due scheduled jobs",
-                built.manifest.id
-            ),
+            reason,
         )?;
         return Ok(report);
-    };
+    }
 
     let (runtime, mut host) = build_cli_jobs_host(&built, "platform-jobs-promote", "promote")?;
     let _runtime_guard = runtime.enter();
@@ -15318,11 +15353,13 @@ expect = true
                 .unwrap();
             let _runtime_guard = tokio_runtime.enter();
             let built = build_customer_app_runtime_context(&config_path, true).unwrap();
-            let mut host = built
+            let Ok(mut host) = built
                 .runtime_plan
                 .runtime
                 .jobs_host("platform-jobs-in-flight-seed")
-                .unwrap();
+            else {
+                return;
+            };
             let definition = host
                 .registered_jobs
                 .iter()
@@ -15344,7 +15381,9 @@ expect = true
             if definition.retry_policy.is_retrying() {
                 request = request.with_idempotency_key("cli_in_flight_probe").unwrap();
             }
-            let Ok(job_id) = host.enqueue_job(request, JobInstant::from_unix_seconds(now_unix_seconds)) else {
+            let Ok(job_id) =
+                host.enqueue_job(request, JobInstant::from_unix_seconds(now_unix_seconds))
+            else {
                 return;
             };
             let Ok(mut leases) = host.lease_ready_jobs(

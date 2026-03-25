@@ -130,7 +130,10 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .find(|surface| surface.name == "commerce.collection-detail")
         .expect("collection detail surface should exist");
     assert_eq!(collection_detail.kind, RouteSurfaceKind::FrontendPage);
-    assert_eq!(collection_detail.path, "/shop/collections/{collection_slug}");
+    assert_eq!(
+        collection_detail.path,
+        "/shop/collections/{collection_slug}"
+    );
     assert!(collection_detail.localized);
     assert_eq!(collection_detail.capability, None);
 
@@ -151,7 +154,7 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .expect("cart surface should exist");
     assert_eq!(cart.kind, RouteSurfaceKind::FrontendPage);
     assert_eq!(cart.path, "/cart");
-    assert_eq!(cart.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(cart.capability, None);
 
     let checkout = manifest
         .route_surfaces
@@ -160,7 +163,7 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .expect("checkout surface should exist");
     assert_eq!(checkout.kind, RouteSurfaceKind::FrontendPage);
     assert_eq!(checkout.path, "/checkout");
-    assert_eq!(checkout.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(checkout.capability, None);
 
     let add_to_cart = manifest
         .route_surfaces
@@ -169,7 +172,7 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .expect("add-to-cart surface should exist");
     assert_eq!(add_to_cart.kind, RouteSurfaceKind::FrontendAction);
     assert_eq!(add_to_cart.path, "/cart/items");
-    assert_eq!(add_to_cart.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(add_to_cart.capability, None);
 
     let cart_update = manifest
         .route_surfaces
@@ -178,7 +181,7 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .expect("cart update surface should exist");
     assert_eq!(cart_update.kind, RouteSurfaceKind::FrontendAction);
     assert_eq!(cart_update.path, "/cart");
-    assert_eq!(cart_update.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(cart_update.capability, None);
 
     let checkout_start = manifest
         .route_surfaces
@@ -187,10 +190,7 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .expect("checkout start surface should exist");
     assert_eq!(checkout_start.kind, RouteSurfaceKind::FrontendAction);
     assert_eq!(checkout_start.path, "/checkout/start");
-    assert_eq!(
-        checkout_start.capability,
-        Some(Capability::CheckoutSessionCreate)
-    );
+    assert_eq!(checkout_start.capability, None);
 
     let checkout_complete = manifest
         .route_surfaces
@@ -199,10 +199,7 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .expect("checkout complete surface should exist");
     assert_eq!(checkout_complete.kind, RouteSurfaceKind::FrontendAction);
     assert_eq!(checkout_complete.path, "/checkout/complete");
-    assert_eq!(
-        checkout_complete.capability,
-        Some(Capability::CheckoutSessionCreate)
-    );
+    assert_eq!(checkout_complete.capability, None);
 
     let checkout_confirmation = manifest
         .route_surfaces
@@ -211,10 +208,7 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
         .expect("checkout confirmation surface should exist");
     assert_eq!(checkout_confirmation.kind, RouteSurfaceKind::FrontendPage);
     assert_eq!(checkout_confirmation.path, "/checkout/confirmation");
-    assert_eq!(
-        checkout_confirmation.capability,
-        Some(Capability::CheckoutSessionCreate)
-    );
+    assert_eq!(checkout_confirmation.capability, None);
 }
 
 #[test]
@@ -228,7 +222,10 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         .find(|surface| surface.name == "commerce.collection-detail")
         .expect("collection detail http surface should exist");
     assert_eq!(collection_detail.area, HttpSurfaceArea::Public);
-    assert_eq!(collection_detail.path, "/shop/collections/{collection_slug}");
+    assert_eq!(
+        collection_detail.path,
+        "/shop/collections/{collection_slug}"
+    );
     assert!(collection_detail.localized);
     assert_eq!(collection_detail.capability, None);
     assert_eq!(
@@ -263,7 +260,7 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         .expect("cart http surface should exist");
     assert_eq!(cart.area, HttpSurfaceArea::Public);
     assert_eq!(cart.path, "/cart");
-    assert_eq!(cart.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(cart.capability, None);
     assert_eq!(
         cart.response,
         HttpResponseContract::Page {
@@ -279,10 +276,7 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         .expect("checkout http surface should exist");
     assert_eq!(checkout.area, HttpSurfaceArea::Public);
     assert_eq!(checkout.path, "/checkout");
-    assert_eq!(
-        checkout.capability,
-        Some(Capability::CheckoutSessionCreate)
-    );
+    assert_eq!(checkout.capability, None);
     assert_eq!(
         checkout.response,
         HttpResponseContract::Page {
@@ -299,7 +293,7 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
     assert_eq!(add_to_cart.area, HttpSurfaceArea::Public);
     assert_eq!(add_to_cart.method, HttpSurfaceMethod::Post);
     assert_eq!(add_to_cart.path, "/cart/items");
-    assert_eq!(add_to_cart.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(add_to_cart.capability, None);
     assert_eq!(
         add_to_cart.response,
         HttpResponseContract::Redirect {
@@ -316,7 +310,7 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
     assert_eq!(cart_update.area, HttpSurfaceArea::Public);
     assert_eq!(cart_update.method, HttpSurfaceMethod::Post);
     assert_eq!(cart_update.path, "/cart");
-    assert_eq!(cart_update.capability, Some(Capability::CheckoutSessionCreate));
+    assert_eq!(cart_update.capability, None);
     assert_eq!(
         cart_update.response,
         HttpResponseContract::Redirect {
@@ -333,10 +327,7 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
     assert_eq!(checkout_start.area, HttpSurfaceArea::Public);
     assert_eq!(checkout_start.method, HttpSurfaceMethod::Post);
     assert_eq!(checkout_start.path, "/checkout/start");
-    assert_eq!(
-        checkout_start.capability,
-        Some(Capability::CheckoutSessionCreate)
-    );
+    assert_eq!(checkout_start.capability, None);
     assert_eq!(
         checkout_start.response,
         HttpResponseContract::Redirect {
@@ -353,10 +344,7 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
     assert_eq!(checkout_complete.area, HttpSurfaceArea::Public);
     assert_eq!(checkout_complete.method, HttpSurfaceMethod::Post);
     assert_eq!(checkout_complete.path, "/checkout/complete");
-    assert_eq!(
-        checkout_complete.capability,
-        Some(Capability::CheckoutSessionCreate)
-    );
+    assert_eq!(checkout_complete.capability, None);
     assert_eq!(
         checkout_complete.response,
         HttpResponseContract::Redirect {
@@ -372,10 +360,7 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         .expect("checkout confirmation http surface should exist");
     assert_eq!(checkout_confirmation.area, HttpSurfaceArea::Public);
     assert_eq!(checkout_confirmation.path, "/checkout/confirmation");
-    assert_eq!(
-        checkout_confirmation.capability,
-        Some(Capability::CheckoutSessionCreate)
-    );
+    assert_eq!(checkout_confirmation.capability, None);
     assert_eq!(
         checkout_confirmation.response,
         HttpResponseContract::Page {
@@ -409,10 +394,7 @@ fn commerce_module_public_action_surfaces_stay_in_lockstep_between_route_and_htt
             .unwrap_or_else(|| panic!("route surface {name} should exist"));
         assert_eq!(route_surface.kind, RouteSurfaceKind::FrontendAction);
         assert_eq!(route_surface.path, path);
-        assert_eq!(
-            route_surface.capability,
-            Some(Capability::CheckoutSessionCreate)
-        );
+        assert_eq!(route_surface.capability, None);
 
         let http_surface = manifest
             .http_surfaces
@@ -422,10 +404,7 @@ fn commerce_module_public_action_surfaces_stay_in_lockstep_between_route_and_htt
         assert_eq!(http_surface.method, HttpSurfaceMethod::Post);
         assert_eq!(http_surface.area, HttpSurfaceArea::Public);
         assert_eq!(http_surface.path, path);
-        assert_eq!(
-            http_surface.capability,
-            Some(Capability::CheckoutSessionCreate)
-        );
+        assert_eq!(http_surface.capability, None);
         assert_eq!(
             http_surface.response,
             HttpResponseContract::Redirect {

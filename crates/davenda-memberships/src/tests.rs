@@ -259,7 +259,7 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
             .core_service_dependencies
             .contains(&CoreServiceDependency::Jobs)
     );
-    assert_eq!(manifest.migrations.len(), 3);
+    assert_eq!(manifest.migrations.len(), 4);
     assert_eq!(manifest.route_surfaces.len(), 3);
     assert_eq!(manifest.http_surfaces.len(), 3);
     assert_eq!(manifest.jobs.len(), 2);
@@ -273,7 +273,7 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
             .expect("memberships migration plan")
             .ordered_steps()
             .len(),
-        3
+        4
     );
 
     let mut registry = ServiceRegistry::new();

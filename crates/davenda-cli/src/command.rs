@@ -1,5 +1,5 @@
-use crate::CliModelError;
 use crate::validation::{require_non_empty, validate_token};
+use crate::CliModelError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -137,6 +137,16 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Inspect the active auth package capability bindings and their resolved relations",
         )?,
         CommandDescriptor::new(
+            ["auth", "list"],
+            CommandOwner::Core,
+            "List live objects reachable for a subject, relation, and resource namespace",
+        )?,
+        CommandDescriptor::new(
+            ["auth", "lookup"],
+            CommandOwner::Core,
+            "Lookup live subject ids for a resource, relation, and subject namespace",
+        )?,
+        CommandDescriptor::new(
             ["auth", "explain"],
             CommandOwner::Core,
             "Explain why a subject can or cannot exercise a capability",
@@ -150,6 +160,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             ["module", "list"],
             CommandOwner::Core,
             "List installed modules for the active customer app",
+        )?,
+        CommandDescriptor::new(
+            ["module", "inspect"],
+            CommandOwner::Core,
+            "Inspect the installed module manifest, dependency contracts, and operator-relevant contributions",
         )?,
         CommandDescriptor::new(
             ["migrate", "plan"],
@@ -178,6 +193,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             ["jobs", "status"],
             CommandOwner::Core,
             "Inspect registered runtime jobs, queue topology, and current queue health",
+        )?,
+        CommandDescriptor::new(
+            ["jobs", "dead-letters"],
+            CommandOwner::Core,
+            "Inspect dead-lettered jobs, failure reasons, and retry exhaustion outcomes",
         )?,
         CommandDescriptor::new(
             ["tls", "status"],
@@ -215,4 +235,17 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Evaluate or execute cutover preparation for an import package and its target customer app",
         )?,
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn baseline_commands_include_jobs_dead_letters() {
+        let commands = baseline_commands("harbor-shop").unwrap();
+        assert!(commands.iter().any(|descriptor| {
+            descriptor.path == vec!["jobs".to_string(), "dead-letters".to_string()]
+        }));
+    }
 }

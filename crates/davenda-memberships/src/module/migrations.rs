@@ -4,6 +4,8 @@ pub(super) fn install_module_migration_plan(module: &MembershipsModule) -> Optio
     let owner = MigrationOwner::Module(module.name().to_string());
     let mut plan = MigrationPlan::new();
 
+    plan.insert(membership_member_accounts_step(owner.clone()))
+        .expect("membership migration ids are unique");
     plan.insert(membership_tiers_step(owner.clone()))
         .expect("membership migration ids are unique");
     plan.insert(membership_subscriptions_step(owner.clone()))
@@ -12,6 +14,20 @@ pub(super) fn install_module_migration_plan(module: &MembershipsModule) -> Optio
         .expect("membership migration ids are unique");
 
     Some(plan)
+}
+
+fn membership_member_accounts_step(owner: MigrationOwner) -> MigrationStep {
+    MigrationStep::new(
+        MigrationId::new("membership_member_accounts").expect("constant migration id is valid"),
+        owner,
+        5,
+        "Create member account profile storage for imported and managed account state",
+    )
+    .expect("constant migration step is valid")
+    .with_statement(
+        "CREATE TABLE IF NOT EXISTS membership_member_accounts (id TEXT PRIMARY KEY, email TEXT, username TEXT, display_name TEXT, source_system TEXT, source_key TEXT UNIQUE, import_batch_id TEXT, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+    )
+    .expect("constant migration statement is valid")
 }
 
 fn membership_tiers_step(owner: MigrationOwner) -> MigrationStep {

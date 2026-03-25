@@ -2,7 +2,7 @@ use crate::cli::config::ConfigValidateInvocation;
 use crate::cli::error::CliRunError;
 use crate::cli::import::{ImportCutoverInvocation, ImportRunInvocation};
 use crate::command::OutputMode;
-use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Relation};
+use davenda_auth::{Capability, DefaultSubject, Entity, ExplainOptions, Namespace, Relation};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,8 +29,30 @@ pub struct AuthBindingsInspectInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthListInvocation {
+    pub config_path: PathBuf,
+    pub subject: DefaultSubject,
+    pub relation: Relation,
+    pub namespace: Namespace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthLookupInvocation {
+    pub config_path: PathBuf,
+    pub resource: Entity,
+    pub relation: Relation,
+    pub subject_namespace: Namespace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthPackageValidateInvocation {
     pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleInspectInvocation {
+    pub config_path: PathBuf,
+    pub module: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +86,13 @@ pub(crate) struct JobsStatusInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobsDeadLettersInvocation {
+    pub config_path: PathBuf,
+    pub queue: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TlsRenewInvocation {
     pub config_path: PathBuf,
     pub certificate_id: String,
@@ -93,6 +122,14 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         invocation: AuthBindingsInspectInvocation,
     },
+    AuthList {
+        output_mode: OutputMode,
+        invocation: AuthListInvocation,
+    },
+    AuthLookup {
+        output_mode: OutputMode,
+        invocation: AuthLookupInvocation,
+    },
     AuthPackageValidate {
         output_mode: OutputMode,
         invocation: AuthPackageValidateInvocation,
@@ -100,6 +137,10 @@ pub(crate) enum CliInput {
     ModuleList {
         output_mode: OutputMode,
         config_path: PathBuf,
+    },
+    ModuleInspect {
+        output_mode: OutputMode,
+        invocation: ModuleInspectInvocation,
     },
     MigratePlan {
         output_mode: OutputMode,
@@ -122,6 +163,10 @@ pub(crate) enum CliInput {
     JobsStatus {
         output_mode: OutputMode,
         invocation: JobsStatusInvocation,
+    },
+    JobsDeadLetters {
+        output_mode: OutputMode,
+        invocation: JobsDeadLettersInvocation,
     },
     TlsStatus {
         output_mode: OutputMode,
@@ -172,9 +217,13 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut cache_scope: Option<String> = None;
     let mut cache_routes = Vec::new();
     let mut jobs_queue: Option<String> = None;
+    let mut jobs_limit: Option<usize> = None;
     let mut tls_certificate_id: Option<String> = None;
     let mut tls_replacement_certificate_id: Option<String> = None;
     let mut subject: Option<DefaultSubject> = None;
+    let mut relation: Option<Relation> = None;
+    let mut namespace: Option<Namespace> = None;
+    let mut subject_namespace: Option<Namespace> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
     let mut max_depth: Option<usize> = None;
@@ -209,6 +258,17 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--queue" => {
                 jobs_queue = Some(next_value(&mut iter, "--queue")?);
             }
+            "--limit" => {
+                let parsed = next_value(&mut iter, "--limit")?
+                    .parse::<usize>()
+                    .map_err(|_| {
+                        CliRunError::usage("`--limit` must be a valid positive integer")
+                    })?;
+                if parsed == 0 {
+                    return Err(CliRunError::usage("`--limit` must be greater than zero"));
+                }
+                jobs_limit = Some(parsed);
+            }
             "--certificate" => {
                 tls_certificate_id = Some(next_value(&mut iter, "--certificate")?);
             }
@@ -220,6 +280,18 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             }
             "--subject" => {
                 subject = Some(parse_subject(&next_value(&mut iter, "--subject")?)?);
+            }
+            "--relation" => {
+                relation = Some(parse_relation(&next_value(&mut iter, "--relation")?)?);
+            }
+            "--namespace" => {
+                namespace = Some(parse_namespace(&next_value(&mut iter, "--namespace")?)?);
+            }
+            "--subject-namespace" => {
+                subject_namespace = Some(parse_namespace(&next_value(
+                    &mut iter,
+                    "--subject-namespace",
+                )?)?);
             }
             "--capability" => {
                 capability = Some(parse_capability(&next_value(&mut iter, "--capability")?)?);
@@ -361,6 +433,61 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 },
             })
         }
+        [command, subcommand] if command == "auth" && subcommand == "list" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`auth list` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+            let subject = subject
+                .ok_or_else(|| CliRunError::usage("`auth list` requires `--subject <subject>`"))?;
+            let relation = relation.ok_or_else(|| {
+                CliRunError::usage("`auth list` requires `--relation <relation>`")
+            })?;
+            let namespace = namespace.ok_or_else(|| {
+                CliRunError::usage("`auth list` requires `--namespace <namespace>`")
+            })?;
+
+            Ok(CliInput::AuthList {
+                output_mode,
+                invocation: AuthListInvocation {
+                    config_path,
+                    subject,
+                    relation,
+                    namespace,
+                },
+            })
+        }
+        [command, subcommand] if command == "auth" && subcommand == "lookup" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`auth lookup` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+            let resource = resource.ok_or_else(|| {
+                CliRunError::usage("`auth lookup` requires `--resource <namespace:id>`")
+            })?;
+            let relation = relation.ok_or_else(|| {
+                CliRunError::usage("`auth lookup` requires `--relation <relation>`")
+            })?;
+            let subject_namespace = subject_namespace.ok_or_else(|| {
+                CliRunError::usage("`auth lookup` requires `--subject-namespace <namespace>`")
+            })?;
+
+            Ok(CliInput::AuthLookup {
+                output_mode,
+                invocation: AuthLookupInvocation {
+                    config_path,
+                    resource,
+                    relation,
+                    subject_namespace,
+                },
+            })
+        }
         [command, group, subcommand]
             if command == "auth" && group == "package" && subcommand == "validate" =>
         {
@@ -389,6 +516,23 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             Ok(CliInput::ModuleList {
                 output_mode,
                 config_path,
+            })
+        }
+        [command, subcommand, module] if command == "module" && subcommand == "inspect" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`module inspect` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ModuleInspect {
+                output_mode,
+                invocation: ModuleInspectInvocation {
+                    config_path,
+                    module: module.to_string(),
+                },
             })
         }
         [command, subcommand] if command == "migrate" && subcommand == "plan" => {
@@ -481,6 +625,24 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: JobsStatusInvocation {
                     config_path,
                     queue: jobs_queue,
+                },
+            })
+        }
+        [command, subcommand] if command == "jobs" && subcommand == "dead-letters" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`jobs dead-letters` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::JobsDeadLetters {
+                output_mode,
+                invocation: JobsDeadLettersInvocation {
+                    config_path,
+                    queue: jobs_queue,
+                    limit: jobs_limit.unwrap_or(50),
                 },
             })
         }
@@ -678,6 +840,11 @@ fn parse_relation(input: &str) -> Result<Relation, CliRunError> {
         .ok_or_else(|| CliRunError::usage(format!("unknown relation `{input}`")))
 }
 
+fn parse_namespace(input: &str) -> Result<Namespace, CliRunError> {
+    Namespace::from_str(input)
+        .ok_or_else(|| CliRunError::usage(format!("unknown namespace `{input}`")))
+}
+
 fn parse_capability(input: &str) -> Result<Capability, CliRunError> {
     let capability = match input {
         "system.module.manage" => Capability::SystemModuleManage,
@@ -801,6 +968,73 @@ mod tests {
     }
 
     #[test]
+    fn parse_auth_list_requires_subject_relation_and_namespace() {
+        let input = parse([
+            "auth".to_string(),
+            "list".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--subject".to_string(),
+            "user:alice".to_string(),
+            "--relation".to_string(),
+            "view".to_string(),
+            "--namespace".to_string(),
+            "page".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::AuthList {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected auth list input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(
+            invocation.subject,
+            DefaultSubject::entity(Entity::user("alice"))
+        );
+        assert_eq!(invocation.relation, Relation::View);
+        assert_eq!(invocation.namespace, Namespace::Page);
+    }
+
+    #[test]
+    fn parse_auth_lookup_requires_resource_relation_and_subject_namespace() {
+        let input = parse([
+            "auth".to_string(),
+            "lookup".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--resource".to_string(),
+            "page:homepage".to_string(),
+            "--relation".to_string(),
+            "view".to_string(),
+            "--subject-namespace".to_string(),
+            "user".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::AuthLookup {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected auth lookup input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.resource, Entity::page("homepage"));
+        assert_eq!(invocation.relation, Relation::View);
+        assert_eq!(invocation.subject_namespace, Namespace::User);
+    }
+
+    #[test]
     fn parse_auth_package_validate_uses_explicit_config_path() {
         let input = parse([
             "auth".to_string(),
@@ -822,6 +1056,31 @@ mod tests {
 
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+    }
+
+    #[test]
+    fn parse_module_inspect_uses_explicit_config_path_and_module_name() {
+        let input = parse([
+            "module".to_string(),
+            "inspect".to_string(),
+            "cms".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ModuleInspect {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected module inspect input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.module, "cms");
     }
 
     #[test]
@@ -1046,6 +1305,62 @@ mod tests {
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.queue.as_deref(), Some("jobs.work"));
+    }
+
+    #[test]
+    fn parse_jobs_dead_letters_accepts_queue_and_limit() {
+        let input = parse([
+            "jobs".to_string(),
+            "dead-letters".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--queue".to_string(),
+            "jobs.dead-letter".to_string(),
+            "--limit".to_string(),
+            "25".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsDeadLetters {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected jobs dead-letters input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.queue.as_deref(), Some("jobs.dead-letter"));
+        assert_eq!(invocation.limit, 25);
+    }
+
+    #[test]
+    fn parse_jobs_dead_letters_defaults_limit_and_rejects_zero() {
+        let input = parse([
+            "jobs".to_string(),
+            "dead-letters".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsDeadLetters { invocation, .. } = input else {
+            panic!("expected jobs dead-letters input");
+        };
+        assert_eq!(invocation.limit, 50);
+
+        let error = parse([
+            "jobs".to_string(),
+            "dead-letters".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--limit".to_string(),
+            "0".to_string(),
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("greater than zero"));
     }
 
     #[test]

@@ -16,9 +16,12 @@ fn baseline_runtime_registers_core_command_families() {
     assert!(paths.contains(&"config validate".to_string()));
     assert!(paths.contains(&"auth check".to_string()));
     assert!(paths.contains(&"auth bindings inspect".to_string()));
+    assert!(paths.contains(&"auth list".to_string()));
+    assert!(paths.contains(&"auth lookup".to_string()));
     assert!(paths.contains(&"auth explain".to_string()));
     assert!(paths.contains(&"auth package validate".to_string()));
     assert!(paths.contains(&"module list".to_string()));
+    assert!(paths.contains(&"module inspect".to_string()));
     assert!(paths.contains(&"migrate plan".to_string()));
     assert!(paths.contains(&"migrate apply".to_string()));
     assert!(paths.contains(&"release doctor".to_string()));

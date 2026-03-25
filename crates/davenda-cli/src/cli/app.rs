@@ -1,8 +1,8 @@
-use crate::CliModelError;
 use crate::cli::args::{
-    AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
-    AuthPackageValidateInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
-    JobsStatusInvocation, MigrateApplyInvocation, TlsRenewInvocation, parse,
+    parse, AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
+    AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation, CacheWarmInvocation,
+    CliInput, DevServerInvocation, JobsDeadLettersInvocation, JobsStatusInvocation,
+    MigrateApplyInvocation, ModuleInspectInvocation, TlsRenewInvocation,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -11,12 +11,13 @@ use crate::cli::error::CliRunError;
 use crate::cli::import::{ImportCutoverInvocation, ImportRunInvocation};
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
+use crate::CliModelError;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
 use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::{
-    AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity,
-    Relation, configured_auth_model_package,
+    configured_auth_model_package, AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple,
+    DefaultTupleUpdate, Entity, Namespace, Relation,
 };
 use davenda_cache::CacheInstant;
 use davenda_commerce::EntitlementKey;
@@ -42,9 +43,9 @@ use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
 use davenda_tls::{CertificateId, TlsInstant};
-use reqwest::Url;
 use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::redirect::Policy as RedirectPolicy;
+use reqwest::Url;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -184,6 +185,20 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_auth_bindings_inspect(&invocation)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::AuthList {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_auth_list(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::AuthLookup {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_auth_lookup(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::AuthPackageValidate {
             output_mode,
             invocation,
@@ -212,6 +227,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                     config_path.display()
                 ))
             })?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::ModuleInspect {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_module_inspect(&invocation)?;
             render_command_report(&report, output_mode)
         }
         CliInput::MigratePlan {
@@ -281,6 +303,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             invocation,
         } => {
             let report = run_jobs_status(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::JobsDeadLetters {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_jobs_dead_letters(&invocation)?;
             render_command_report(&report, output_mode)
         }
         CliInput::TlsStatus {
@@ -354,14 +383,18 @@ fn usage() -> String {
         "  platform config validate [--config <path>] [--json]",
         "  platform auth check [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform auth bindings inspect [--config <path>] [--capability <capability>] [--json]",
+        "  platform auth list [--config <path>] --subject <subject> --relation <relation> --namespace <namespace> [--json]",
+        "  platform auth lookup [--config <path>] --resource <namespace:id> --relation <relation> --subject-namespace <namespace> [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform auth package validate [--config <path>] [--json]",
         "  platform module list [--config <path>] [--json]",
+        "  platform module inspect <module> [--config <path>] [--json]",
         "  platform migrate plan [--config <path>] [--json]",
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
         "  platform cache warm [--config <path>] --scope public --route <path> [--route <path> ...] [--dry-run] [--json]",
         "  platform jobs status [--config <path>] [--queue <name>] [--json]",
+        "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
         "  platform tls status [--config <path>] [--json]",
         "  platform tls renew [--config <path>] --certificate <id> --replacement <id> [--dry-run] [--yes] [--json]",
         "  platform storage verify [--config <path>] [--policy] [--json]",
@@ -377,14 +410,18 @@ fn usage() -> String {
         "  platform config validate --config config/platform.toml",
         "  platform auth check --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform auth bindings inspect --config config/platform.toml --capability cms.page.publish",
+        "  platform auth list --config config/platform.toml --subject user:alice --relation view --namespace page",
+        "  platform auth lookup --config config/platform.toml --resource page:homepage --relation view --subject-namespace user",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform auth package validate --config config/platform.toml",
         "  platform module list --config config/platform.toml",
+        "  platform module inspect cms --config config/platform.toml",
         "  platform migrate plan --config config/platform.toml",
         "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
         "  platform cache warm --config config/platform.toml --scope public --route /en-GB/home",
         "  platform jobs status --config config/platform.toml",
+        "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
         "  platform tls status --config config/platform.toml",
         "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
         "  platform storage verify --config config/platform.toml --policy",
@@ -424,31 +461,33 @@ struct LiveImportAuthContext {
     storefront_id: String,
 }
 
-fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, CliRunError> {
-    let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
+fn build_live_auth_backend(
+    config_path: &Path,
+    operation: &str,
+) -> Result<
+    (
+        PlatformConfig,
+        DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
+        tokio::runtime::Runtime,
+    ),
+    CliRunError,
+> {
+    let config = PlatformConfig::from_file(config_path).map_err(|error| {
         CliRunError::execution(format!(
             "failed to load platform config from `{}`: {error}",
-            invocation.config_path.display()
+            config_path.display()
         ))
     })?;
     let data = DataRuntime::from_config(&config.database).map_err(|error| {
         CliRunError::execution(format!(
-            "failed to initialize the live auth check backend: {error}"
+            "failed to initialize the live {operation} backend: {error}"
         ))
     })?;
     let client = data.connect_lazy_postgres().map_err(|error| {
         CliRunError::execution(format!(
-            "failed to initialize the live auth check backend: {error}"
+            "failed to initialize the live {operation} backend: {error}"
         ))
     })?;
-    let package = configured_auth_model_package(config.auth.package.clone());
-    let binding = package
-        .resolve_binding(invocation.capability, &invocation.resource)
-        .map_err(|error| {
-            CliRunError::execution(format!(
-                "failed to resolve capability binding for auth check: {error}"
-            ))
-        })?;
     let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
     let auth = DavendaAuth::new(engine, config.auth.tenant_id);
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -456,6 +495,20 @@ fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, Cli
         .build()
         .map_err(|error| {
             CliRunError::execution(format!("failed to start the CLI async runtime: {error}"))
+        })?;
+
+    Ok((config, auth, runtime))
+}
+
+fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, CliRunError> {
+    let (config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth check")?;
+    let package = configured_auth_model_package(config.auth.package.clone());
+    let binding = package
+        .resolve_binding(invocation.capability, &invocation.resource)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve capability binding for auth check: {error}"
+            ))
         })?;
     let allowed = runtime
         .block_on(async {
@@ -599,6 +652,140 @@ fn run_auth_bindings_inspect(
     Ok(report)
 }
 
+fn run_auth_list(invocation: &AuthListInvocation) -> Result<CommandReport, CliRunError> {
+    let (config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth list")?;
+    let package = configured_auth_model_package(config.auth.package.clone());
+    let mut object_ids = runtime
+        .block_on(async {
+            auth.list_objects(
+                &invocation.subject,
+                invocation.relation,
+                invocation.namespace,
+            )
+            .await
+        })
+        .map_err(|error| CliRunError::execution(format!("failed to execute auth list: {error}")))?;
+    object_ids.sort();
+
+    let mut report = CommandReport::new(
+        ["auth", "list"],
+        format!(
+            "Listed `{}` objects reachable for `{}` via relation `{}`",
+            invocation.namespace,
+            render_subject(&invocation.subject),
+            invocation.relation
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns(["subject", "relation", "namespace", "object", "auth_package"])
+    .map_err(report_build_error)?;
+
+    for object_id in &object_ids {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("subject", render_subject(&invocation.subject))
+                .map_err(report_build_error)?
+                .with_cell("relation", invocation.relation.as_str())
+                .map_err(report_build_error)?
+                .with_cell("namespace", invocation.namespace.as_str())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "object",
+                    render_namespace_identifier(invocation.namespace, object_id),
+                )
+                .map_err(report_build_error)?
+                .with_cell("auth_package", package.manifest().name.clone())
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.list.results",
+        format!(
+            "package={} subject={} relation={} namespace={} count={}",
+            package.manifest().name,
+            render_subject(&invocation.subject),
+            invocation.relation,
+            invocation.namespace,
+            object_ids.len()
+        ),
+    )?;
+    Ok(report)
+}
+
+fn run_auth_lookup(invocation: &AuthLookupInvocation) -> Result<CommandReport, CliRunError> {
+    let (config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth lookup")?;
+    let package = configured_auth_model_package(config.auth.package.clone());
+    let mut subject_ids = runtime
+        .block_on(async {
+            auth.list_subject_ids(
+                &invocation.resource,
+                invocation.relation,
+                invocation.subject_namespace,
+            )
+            .await
+        })
+        .map_err(|error| {
+            CliRunError::execution(format!("failed to execute auth lookup: {error}"))
+        })?;
+    subject_ids.sort();
+
+    let mut report = CommandReport::new(
+        ["auth", "lookup"],
+        format!(
+            "Looked up `{}` subjects for `{}` via relation `{}`",
+            invocation.subject_namespace,
+            render_entity(&invocation.resource),
+            invocation.relation
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "resource",
+        "relation",
+        "subject_namespace",
+        "subject",
+        "auth_package",
+    ])
+    .map_err(report_build_error)?;
+
+    for subject_id in &subject_ids {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("resource", render_entity(&invocation.resource))
+                .map_err(report_build_error)?
+                .with_cell("relation", invocation.relation.as_str())
+                .map_err(report_build_error)?
+                .with_cell("subject_namespace", invocation.subject_namespace.as_str())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "subject",
+                    render_namespace_identifier(invocation.subject_namespace, subject_id),
+                )
+                .map_err(report_build_error)?
+                .with_cell("auth_package", package.manifest().name.clone())
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.lookup.results",
+        format!(
+            "package={} resource={} relation={} subject_namespace={} count={}",
+            package.manifest().name,
+            render_entity(&invocation.resource),
+            invocation.relation,
+            invocation.subject_namespace,
+            subject_ids.len()
+        ),
+    )?;
+    Ok(report)
+}
+
 fn run_auth_package_validate(
     invocation: &AuthPackageValidateInvocation,
 ) -> Result<CommandReport, CliRunError> {
@@ -694,6 +881,456 @@ fn run_auth_package_validate(
             context.manifest.id
         ),
     )?;
+
+    Ok(report)
+}
+
+fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandReport, CliRunError> {
+    let context = load_customer_app_context(&invocation.config_path)?;
+    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let module_manifest = context
+        .module_manifests
+        .iter()
+        .find(|candidate| candidate.name == invocation.module)
+        .ok_or_else(|| {
+            CliRunError::execution(format!(
+                "customer app `{}` does not install module `{}`",
+                context.manifest.id, invocation.module
+            ))
+        })?;
+    let installed_spec = context
+        .manifest
+        .modules
+        .iter()
+        .find(|spec| spec.id.as_str() == module_manifest.name)
+        .ok_or_else(|| {
+            CliRunError::execution(format!(
+                "customer app `{}` is missing manifest metadata for module `{}`",
+                context.manifest.id, module_manifest.name
+            ))
+        })?;
+    let auth_validation = validate_module_capabilities(&auth_package, module_manifest);
+    let installed_modules = context
+        .manifest
+        .modules
+        .iter()
+        .map(|module| module.id.to_string())
+        .collect::<Vec<_>>();
+    let missing_required_dependencies = module_manifest
+        .module_dependencies
+        .iter()
+        .filter(|dependency| {
+            matches!(
+                dependency.kind,
+                davenda_core::ModuleDependencyKind::Required
+            ) && !installed_modules.contains(&dependency.module)
+        })
+        .map(|dependency| dependency.module.clone())
+        .collect::<Vec<_>>();
+
+    let mut report = CommandReport::new(
+        ["module", "inspect"],
+        format!(
+            "Inspected module `{}` for customer app `{}`",
+            module_manifest.name, context.manifest.id
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns(["category", "item", "status", "detail"])
+    .map_err(report_build_error)?;
+
+    if auth_validation.is_err() || !missing_required_dependencies.is_empty() {
+        report = report.with_status(ReportStatus::Unsafe);
+    } else if installed_spec.version_req.is_none() {
+        report = report.with_status(ReportStatus::Warning);
+    }
+
+    let version = installed_spec
+        .version_req
+        .clone()
+        .unwrap_or_else(|| "unpinned".to_string());
+    let config_namespace = module_manifest
+        .config_namespace
+        .clone()
+        .unwrap_or_else(|| "none".to_string());
+
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "installation")
+            .map_err(report_build_error)?
+            .with_cell("item", "module")
+            .map_err(report_build_error)?
+            .with_cell("status", "installed")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                format!("version={version} config_namespace={config_namespace}"),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "auth")
+            .map_err(report_build_error)?
+            .with_cell("item", "required_capabilities")
+            .map_err(report_build_error)?
+            .with_cell(
+                "status",
+                if auth_validation.is_ok() {
+                    "valid"
+                } else {
+                    "invalid"
+                },
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .required_capabilities
+                        .iter()
+                        .map(|capability| capability.as_str().to_string()),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "auth")
+            .map_err(report_build_error)?
+            .with_cell("item", "optional_capabilities")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .optional_capabilities
+                        .iter()
+                        .map(|capability| capability.as_str().to_string()),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "auth")
+            .map_err(report_build_error)?
+            .with_cell("item", "capability_contracts")
+            .map_err(report_build_error)?
+            .with_cell(
+                "status",
+                if auth_validation.is_ok() {
+                    "valid"
+                } else {
+                    "invalid"
+                },
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(module_manifest.capability_contracts.iter().map(|contract| {
+                    format!(
+                        "{}:{} [{}]",
+                        if contract.required {
+                            "required"
+                        } else {
+                            "optional"
+                        },
+                        contract.capability.as_str(),
+                        summarize_items(contract.resource_kinds.iter().cloned())
+                    )
+                })),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "dependencies")
+            .map_err(report_build_error)?
+            .with_cell("item", "modules")
+            .map_err(report_build_error)?
+            .with_cell(
+                "status",
+                if missing_required_dependencies.is_empty() {
+                    "satisfied"
+                } else {
+                    "missing"
+                },
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .module_dependencies
+                        .iter()
+                        .map(|dependency| {
+                            format!(
+                                "{}:{}",
+                                format!("{:?}", dependency.kind).to_lowercase(),
+                                dependency.module
+                            )
+                        }),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "dependencies")
+            .map_err(report_build_error)?
+            .with_cell("item", "core_services")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .core_service_dependencies
+                        .iter()
+                        .map(|dependency| format!("{dependency:?}").to_lowercase()),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "lifecycle")
+            .map_err(report_build_error)?
+            .with_cell("item", "migrations")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(module_manifest.migrations.iter().map(|migration| {
+                    format!(
+                        "{}:{} ({})",
+                        migration.owner, migration.order, migration.description
+                    )
+                })),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "runtime")
+            .map_err(report_build_error)?
+            .with_cell("item", "routes")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(module_manifest.route_surfaces.iter().map(|route| {
+                    let capability = route
+                        .capability
+                        .map(|capability| capability.as_str().to_string())
+                        .unwrap_or_else(|| "public".to_string());
+                    format!(
+                        "{}:{:?}:{} [{}]",
+                        route.name, route.kind, route.path, capability
+                    )
+                    .to_lowercase()
+                })),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "runtime")
+            .map_err(report_build_error)?
+            .with_cell("item", "jobs")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(module_manifest.jobs.iter().map(|job| {
+                    format!(
+                        "{}:{:?}:{}",
+                        job.name,
+                        job.trigger,
+                        if job.idempotent {
+                            "idempotent"
+                        } else {
+                            "non_idempotent"
+                        }
+                    )
+                    .to_lowercase()
+                })),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "runtime")
+            .map_err(report_build_error)?
+            .with_cell("item", "subscriptions")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .event_subscriptions
+                        .iter()
+                        .map(|subscription| match &subscription.job {
+                            Some(job) => format!("{} -> {}", subscription.event, job),
+                            None => subscription.event.clone(),
+                        }),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "runtime")
+            .map_err(report_build_error)?
+            .with_cell("item", "admin_resources")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(module_manifest.admin_resources.iter().map(|resource| {
+                    format!(
+                        "{}:{}:{}",
+                        resource.id,
+                        resource.route,
+                        resource.required_capability.as_str()
+                    )
+                })),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "runtime")
+            .map_err(report_build_error)?
+            .with_cell("item", "extension_slots")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .extension_slots
+                        .iter()
+                        .map(|slot| format!("{}:{:?}", slot.surface, slot.kind).to_lowercase()),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "operations")
+            .map_err(report_build_error)?
+            .with_cell("item", "search")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .search_contributions
+                        .iter()
+                        .map(|contribution| contribution.id.clone()),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "operations")
+            .map_err(report_build_error)?
+            .with_cell("item", "reports")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .report_definitions
+                        .iter()
+                        .map(|definition| definition.id.clone()),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("category", "operations")
+            .map_err(report_build_error)?
+            .with_cell("item", "bulk_operations")
+            .map_err(report_build_error)?
+            .with_cell("status", "declared")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                summarize_items(
+                    module_manifest
+                        .bulk_operations
+                        .iter()
+                        .map(|operation| operation.id.clone()),
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "module.inspect.summary",
+        format!(
+            "module={} installed=true version={} required_capabilities={} optional_capabilities={} routes={} jobs={} subscriptions={} extension_slots={}",
+            module_manifest.name,
+            version,
+            module_manifest.required_capabilities.len(),
+            module_manifest.optional_capabilities.len(),
+            module_manifest.route_surfaces.len(),
+            module_manifest.jobs.len(),
+            module_manifest.event_subscriptions.len(),
+            module_manifest.extension_slots.len()
+        ),
+    )?;
+    if installed_spec.version_req.is_none() {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "module.version.unpinned",
+            format!(
+                "official module `{}` is not version pinned in the customer app manifest",
+                module_manifest.name
+            ),
+        )?;
+    }
+    if let Err(error) = auth_validation {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Error,
+            "module.auth.invalid",
+            error.to_string(),
+        )?;
+    }
+    if !missing_required_dependencies.is_empty() {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Error,
+            "module.dependencies.missing",
+            format!(
+                "required module dependencies are missing: {}",
+                missing_required_dependencies.join(", ")
+            ),
+        )?;
+    }
 
     Ok(report)
 }
@@ -1067,6 +1704,142 @@ fn run_jobs_status(invocation: &JobsStatusInvocation) -> Result<CommandReport, C
             ),
         )?;
     }
+
+    Ok(report)
+}
+
+fn run_jobs_dead_letters(
+    invocation: &JobsDeadLettersInvocation,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    let queue_filter = invocation.queue.as_deref();
+    let mut report = CommandReport::new(
+        ["jobs", "dead-letters"],
+        format!("Dead-letter jobs for customer app `{}`", built.manifest.id),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "dead_letter_id",
+        "job_id",
+        "queue",
+        "reason",
+        "failed_attempts",
+        "routed_to",
+        "error_message",
+    ])
+    .map_err(report_build_error)?;
+
+    let database_url = std::env::var("DATABASE_URL").ok();
+    let jobs_host = if database_url.is_some() {
+        Some(
+            built
+                .runtime_plan
+                .runtime
+                .jobs_host("platform-jobs-dead-letters")
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to build jobs dead-letter host for `{}`: {error}",
+                        built.manifest.id
+                    ))
+                })?,
+        )
+    } else {
+        None
+    };
+
+    if let Some(host) = jobs_host {
+        let mut dead_letters = host
+            .coordinator()
+            .dead_letters()
+            .iter()
+            .filter(|dead_letter| {
+                queue_filter.map_or(true, |filter| dead_letter.queue.as_str() == filter)
+            })
+            .collect::<Vec<_>>();
+        dead_letters.sort_by(|left, right| {
+            left.dead_letter_id
+                .as_str()
+                .cmp(right.dead_letter_id.as_str())
+        });
+
+        let limited = dead_letters
+            .into_iter()
+            .take(invocation.limit)
+            .collect::<Vec<_>>();
+        if !limited.is_empty() {
+            report = report.with_status(ReportStatus::Unsafe);
+        }
+
+        for dead_letter in &limited {
+            report.push_row(
+                ReportRow::new()
+                    .with_cell("dead_letter_id", dead_letter.dead_letter_id.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("job_id", dead_letter.job_id.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("queue", dead_letter.queue.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell("reason", format!("{:?}", dead_letter.reason))
+                    .map_err(report_build_error)?
+                    .with_cell("failed_attempts", dead_letter.failed_attempts.to_string())
+                    .map_err(report_build_error)?
+                    .with_cell(
+                        "routed_to",
+                        dead_letter
+                            .routed_to
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| "none".to_string()),
+                    )
+                    .map_err(report_build_error)?
+                    .with_cell("error_message", dead_letter.error_message.clone())
+                    .map_err(report_build_error)?,
+            );
+        }
+
+        push_report_diagnostic(
+            &mut report,
+            if limited.is_empty() {
+                DiagnosticSeverity::Info
+            } else {
+                DiagnosticSeverity::Warning
+            },
+            "jobs.dead_letters",
+            format!(
+                "queue_filter={} limit={} returned {} dead-letter record(s)",
+                queue_filter.unwrap_or("all"),
+                invocation.limit,
+                limited.len()
+            ),
+        )?;
+    } else {
+        report = report.with_status(ReportStatus::Warning);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "jobs.runtime.unavailable",
+            format!(
+                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to inspect dead-letter state",
+                built.manifest.id
+            ),
+        )?;
+    }
+
+    let topology = built.runtime_plan.runtime.jobs.describe().clone();
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "jobs.topology",
+        format!(
+            "backend={:?} work_queue={} scheduled_queue={} domain_events_queue={} dead_letter_queue={} default_retry_limit={}",
+            built.runtime_plan.runtime.jobs.backend,
+            topology.work_queue,
+            topology.scheduled_queue,
+            topology.domain_events_queue,
+            topology.dead_letter_queue,
+            built.runtime_plan.runtime.jobs.default_retry_limit
+        ),
+    )?;
 
     Ok(report)
 }
@@ -1733,7 +2506,7 @@ fn run_import_manifest(
                 .any(|importer| {
                     matches!(
                         importer.resource_kind.as_str(),
-                        "page" | "event" | "membership_tier" | "subscription"
+                        "page" | "event" | "user" | "membership_tier" | "subscription"
                     )
                 });
         let requires_live_auth = publish_validated
@@ -1837,6 +2610,8 @@ fn run_import_manifest(
                         )?;
                     }
                     "user" if publish_validated => {
+                        let client =
+                            ensure_import_data_client(&data_runtime, &mut data_client)?;
                         let auth_context = auth_context
                             .as_mut()
                             .expect("publish-validated imports build a live auth context");
@@ -1844,6 +2619,7 @@ fn run_import_manifest(
                             tokio_runtime
                                 .as_ref()
                                 .expect("publish-validated imports build a runtime"),
+                            &client,
                             auth_context,
                             staged_record,
                         )?;
@@ -2724,13 +3500,11 @@ fn cutover_preflight_ready(plan: &CutoverPlan) -> bool {
 fn cutover_steps(
     cutover: &davenda_import::ImportCutover,
 ) -> Result<Vec<CutoverStepRecord>, CliRunError> {
-    let mut steps = vec![
-        CutoverStepRecord::new(
-            "final.import",
-            "Final publish-validated import executed against the target runtime",
-        )
-        .map_err(import_model_error)?,
-    ];
+    let mut steps = vec![CutoverStepRecord::new(
+        "final.import",
+        "Final publish-validated import executed against the target runtime",
+    )
+    .map_err(import_model_error)?];
     if cutover.requires_storage_validation {
         steps.push(
             CutoverStepRecord::new(
@@ -4031,16 +4805,8 @@ fn materialize_import_users(
             ))
         })?;
 
-        for table in records.iter().filter_map(|record| {
-            record
-                .get("normalized")
-                .and_then(Value::as_object)
-                .and_then(|normalized| normalized.get("persisted"))
-                .and_then(Value::as_object)
-                .and_then(|persisted| persisted.get("table"))
-                .and_then(Value::as_str)
-        }) {
-            *user_counts.entry(table.to_string()).or_insert(0) += 1;
+        for table in records.iter().flat_map(persisted_tables) {
+            *user_counts.entry(table).or_insert(0) += 1;
         }
     }
 
@@ -4305,10 +5071,20 @@ fn materialize_event_record(
 
 fn materialize_user_record(
     tokio_runtime: &tokio::runtime::Runtime,
+    data_client: &PostgresDataClient,
     auth_context: &LiveImportAuthContext,
     staged_record: &mut Value,
 ) -> Result<(), ImportModelError> {
-    let (updates, persisted) = user_import_updates(staged_record, auth_context.site_id.as_deref())?;
+    let (mutation, account_persisted) = user_account_import_mutation(staged_record)?;
+    let statement = mutation.compile(1).map_err(import_data_model_error)?;
+    tokio_runtime
+        .block_on(async { data_client.execute_statement(&statement).await })
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to persist imported user account state: {error}"),
+        })?;
+
+    let (updates, auth_persisted) =
+        user_import_updates(staged_record, auth_context.site_id.as_deref())?;
     tokio_runtime
         .block_on(async { auth_context.auth.write(updates).await })
         .map_err(|error| ImportModelError::ManifestParse {
@@ -4321,7 +5097,10 @@ fn materialize_user_record(
         .ok_or_else(|| ImportModelError::ManifestParse {
             message: "staged user record is missing `normalized` object data".to_string(),
         })?;
-    normalized.insert("persisted".to_string(), persisted);
+    normalized.insert(
+        "persisted".to_string(),
+        serde_json::json!([account_persisted, auth_persisted]),
+    );
     Ok(())
 }
 
@@ -4466,6 +5245,57 @@ fn user_import_updates(
             "site_id": site_id,
             "roles": effective_roles,
             "writes": updates.len(),
+        }),
+    ))
+}
+
+fn user_account_import_mutation(
+    staged_record: &Value,
+) -> Result<(MutationSpec, Value), ImportModelError> {
+    let source_system = required_staged_string(staged_record, "source_system")?;
+    let source_key = required_staged_string(staged_record, "source_key")?;
+    let target_id = required_staged_string(staged_record, "target_id")?;
+    MemberAccountId::new(target_id.clone()).map_err(import_membership_model_error)?;
+    let batch_id = required_staged_string(staged_record, "checksum")?;
+    let fingerprint = required_staged_string(staged_record, "checksum")?;
+    let normalized = staged_record
+        .get("normalized")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: "staged user record is missing `normalized` object data".to_string(),
+        })?;
+    let email = optional_normalized_string(normalized, "email")?.unwrap_or_default();
+    let username = optional_normalized_string(normalized, "username")?.unwrap_or_default();
+    let display_name = optional_normalized_string(normalized, "display_name")?.unwrap_or_default();
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to calculate user account update timestamp: {error}"),
+        })?
+        .as_secs();
+
+    let mutation = MutationSpec::new("membership_member_accounts", MutationAction::Upsert)
+        .and_then(|mutation| mutation.with_assignment("id", target_id.clone()))
+        .and_then(|mutation| mutation.with_assignment("email", email.clone()))
+        .and_then(|mutation| mutation.with_assignment("username", username.clone()))
+        .and_then(|mutation| mutation.with_assignment("display_name", display_name.clone()))
+        .and_then(|mutation| mutation.with_assignment("source_system", source_system))
+        .and_then(|mutation| mutation.with_assignment("source_key", source_key))
+        .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id))
+        .and_then(|mutation| mutation.with_assignment("fingerprint", fingerprint))
+        .and_then(|mutation| mutation.with_assignment("updated_at", DataValue::UInt(updated_at)))
+        .and_then(|mutation| mutation.on_conflict_field("id"))
+        .map_err(import_data_model_error)?;
+
+    Ok((
+        mutation,
+        serde_json::json!({
+            "table": "membership_member_accounts",
+            "member_account_id": target_id,
+            "email": email,
+            "username": username,
+            "display_name": display_name,
+            "updated_at": updated_at,
         }),
     ))
 }
@@ -4854,21 +5684,27 @@ fn optional_normalized_u64(
 ) -> Result<Option<u64>, ImportModelError> {
     match record.get(field) {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(value)) => value.as_u64().map(Some).ok_or_else(|| {
-            ImportModelError::ManifestParse {
-                message: format!(
+        Some(Value::Number(value)) => {
+            value
+                .as_u64()
+                .map(Some)
+                .ok_or_else(|| ImportModelError::ManifestParse {
+                    message: format!(
                     "staged import record field `normalized.{field}` must be an unsigned integer"
                 ),
-            }
-        }),
+                })
+        }
         Some(Value::String(value)) if value.is_empty() => Ok(None),
-        Some(Value::String(value)) => value.parse::<u64>().map(Some).map_err(|_| {
-            ImportModelError::ManifestParse {
-                message: format!(
+        Some(Value::String(value)) => {
+            value
+                .parse::<u64>()
+                .map(Some)
+                .map_err(|_| ImportModelError::ManifestParse {
+                    message: format!(
                     "staged import record field `normalized.{field}` must be an unsigned integer"
                 ),
-            }
-        }),
+                })
+        }
         Some(_) => Err(ImportModelError::ManifestParse {
             message: format!(
                 "staged import record field `normalized.{field}` must be an unsigned integer"
@@ -5037,6 +5873,10 @@ fn render_entity(entity: &Entity) -> String {
     format!("{}:{}", entity.namespace().as_str(), entity.id())
 }
 
+fn render_namespace_identifier(namespace: Namespace, id: &str) -> String {
+    format!("{}:{id}", namespace.as_str())
+}
+
 fn render_subject(subject: &DefaultSubject) -> String {
     match subject {
         DefaultSubject::Entity(entity) => render_entity(entity),
@@ -5059,6 +5899,26 @@ fn storage_deployment_label(deployment: davenda_config::StorageDeployment) -> &'
         davenda_config::StorageDeployment::Distributed => "distributed",
         davenda_config::StorageDeployment::SingleNode => "single_node",
     }
+}
+
+fn summarize_items(items: impl IntoIterator<Item = String>) -> String {
+    let items = items
+        .into_iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return "none".to_string();
+    }
+    const PREVIEW_LIMIT: usize = 4;
+    if items.len() <= PREVIEW_LIMIT {
+        return items.join(", ");
+    }
+    format!(
+        "{} (+{} more)",
+        items[..PREVIEW_LIMIT].join(", "),
+        items.len() - PREVIEW_LIMIT
+    )
 }
 
 #[cfg(test)]
@@ -5089,21 +5949,19 @@ mod tests {
             let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
             let stop_thread = Arc::clone(&stop);
             let store_thread = Arc::clone(&store);
-            let handle = thread::spawn(move || {
-                loop {
-                    if stop_thread.load(Ordering::SeqCst) {
-                        break;
+            let handle = thread::spawn(move || loop {
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let store = Arc::clone(&store_thread);
+                        handle_object_store_request(stream, &store);
                     }
-                    match listener.accept() {
-                        Ok((stream, _)) => {
-                            let store = Arc::clone(&store_thread);
-                            handle_object_store_request(stream, &store);
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(error) => panic!("object-store test server failed: {error}"),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
                     }
+                    Err(error) => panic!("object-store test server failed: {error}"),
                 }
             });
 
@@ -5199,24 +6057,22 @@ mod tests {
             let routes = Arc::new(routes);
             let stop_thread = Arc::clone(&stop);
             let routes_thread = Arc::clone(&routes);
-            let handle = thread::spawn(move || {
-                loop {
-                    if stop_thread.load(Ordering::SeqCst) {
-                        break;
+            let handle = thread::spawn(move || loop {
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((stream, _)) => handle_live_probe_request(
+                        stream,
+                        health_status,
+                        readiness_status,
+                        maintenance_enabled,
+                        &routes_thread,
+                    ),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
                     }
-                    match listener.accept() {
-                        Ok((stream, _)) => handle_live_probe_request(
-                            stream,
-                            health_status,
-                            readiness_status,
-                            maintenance_enabled,
-                            &routes_thread,
-                        ),
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(error) => panic!("live probe test server failed: {error}"),
-                    }
+                    Err(error) => panic!("live probe test server failed: {error}"),
                 }
             });
 
@@ -5927,15 +6783,20 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("platform config validate [--config <path>]"));
         assert!(rendered.contains("platform auth check [--config <path>]"));
         assert!(rendered.contains("platform auth bindings inspect [--config <path>]"));
+        assert!(rendered.contains("platform auth list [--config <path>]"));
+        assert!(rendered.contains("platform auth lookup [--config <path>]"));
         assert!(rendered.contains("platform auth explain [--config <path>]"));
         assert!(rendered.contains("platform module list [--config <path>]"));
+        assert!(rendered.contains("platform module inspect <module> [--config <path>]"));
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
         assert!(rendered.contains("platform migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform release doctor [--config <path>]"));
-        assert!(
-            rendered
-                .contains("platform cache warm [--config <path>] --scope public --route <path>")
-        );
+        assert!(rendered
+            .contains("platform cache warm [--config <path>] --scope public --route <path>"));
+        assert!(rendered.contains("platform jobs status [--config <path>] [--queue <name>]"));
+        assert!(rendered.contains(
+            "platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>]"
+        ));
         assert!(rendered.contains("platform storage verify [--config <path>] [--policy]"));
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
@@ -5966,6 +6827,64 @@ source_path = "fixtures/media.json"
             error
                 .to_string()
                 .contains("failed to initialize the live auth check backend"),
+            "{}",
+            error
+        );
+    }
+
+    #[test]
+    fn run_from_args_reports_live_auth_list_backend_initialization_failures() {
+        let config_path = PathBuf::from("/tmp/davenda-cli-auth-list.toml");
+        fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
+
+        let error = run_from_args([
+            "auth".to_string(),
+            "list".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--subject".to_string(),
+            "user:alice".to_string(),
+            "--relation".to_string(),
+            "view".to_string(),
+            "--namespace".to_string(),
+            "page".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("failed to initialize the live auth list backend"),
+            "{}",
+            error
+        );
+    }
+
+    #[test]
+    fn run_from_args_reports_live_auth_lookup_backend_initialization_failures() {
+        let config_path = PathBuf::from("/tmp/davenda-cli-auth-lookup.toml");
+        fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
+
+        let error = run_from_args([
+            "auth".to_string(),
+            "lookup".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--resource".to_string(),
+            "page:homepage".to_string(),
+            "--relation".to_string(),
+            "view".to_string(),
+            "--subject-namespace".to_string(),
+            "user".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("failed to initialize the live auth lookup backend"),
             "{}",
             error
         );
@@ -6793,6 +7712,25 @@ source_path = "fixtures/media.json"
     }
 
     #[test]
+    fn run_from_args_renders_module_inspect_for_an_installed_module() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "module".to_string(),
+            "inspect".to_string(),
+            "cms".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("module inspect"));
+        assert!(rendered.contains("Inspected module `cms`"));
+        assert!(rendered.contains("capability_contracts"));
+        assert!(rendered.contains("module.version.unpinned"));
+    }
+
+    #[test]
     fn run_from_args_validates_the_configured_auth_package_against_installed_modules() {
         let config_path = customer_app_fixture();
 
@@ -6840,11 +7778,9 @@ source_path = "fixtures/media.json"
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 2);
-        assert!(
-            error
-                .to_string()
-                .contains("`migrate apply` requires `--yes` unless `--dry-run` is used")
-        );
+        assert!(error
+            .to_string()
+            .contains("`migrate apply` requires `--yes` unless `--dry-run` is used"));
     }
 
     #[test]
@@ -6939,6 +7875,28 @@ source_path = "fixtures/media.json"
     }
 
     #[test]
+    fn run_from_args_renders_jobs_dead_letters_report_for_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "jobs".to_string(),
+            "dead-letters".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--queue".to_string(),
+            "jobs.dead-letter".to_string(),
+            "--limit".to_string(),
+            "10".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("jobs dead-letters"));
+        assert!(rendered.contains("showcase-events"));
+        assert!(rendered.contains("dead_letter_id"));
+        assert!(rendered.contains("DATABASE_URL"));
+    }
+
+    #[test]
     fn run_from_args_requires_confirmation_for_tls_renew() {
         let config_path = customer_app_fixture();
 
@@ -6955,11 +7913,9 @@ source_path = "fixtures/media.json"
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 2);
-        assert!(
-            error
-                .to_string()
-                .contains("`tls renew` requires `--yes` unless `--dry-run` is used")
-        );
+        assert!(error
+            .to_string()
+            .contains("`tls renew` requires `--yes` unless `--dry-run` is used"));
     }
 
     #[test]
@@ -7020,11 +7976,9 @@ source_path = "fixtures/media.json"
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 2);
-        assert!(
-            error
-                .to_string()
-                .contains("`assets publish` requires `--yes` unless `--dry-run` is used")
-        );
+        assert!(error
+            .to_string()
+            .contains("`assets publish` requires `--yes` unless `--dry-run` is used"));
     }
 
     #[test]
@@ -7120,16 +8074,12 @@ source_path = "fixtures/media.json"
 
         assert!(compiled.sql.contains("\"cms_pages\""));
         assert!(compiled.sql.contains("ON CONFLICT (\"page_id\")"));
-        assert!(
-            compiled
-                .bind_values
-                .contains(&DataValue::String("en-GB".to_string()))
-        );
-        assert!(
-            compiled
-                .bind_values
-                .contains(&DataValue::String("/en-GB/home".to_string()))
-        );
+        assert!(compiled
+            .bind_values
+            .contains(&DataValue::String("en-GB".to_string())));
+        assert!(compiled
+            .bind_values
+            .contains(&DataValue::String("/en-GB/home".to_string())));
         assert_eq!(persisted["table"], "cms_pages");
         assert_eq!(persisted["live_path"], "/en-GB/home");
     }
@@ -7174,11 +8124,9 @@ source_path = "fixtures/media.json"
 
         assert!(compiled.sql.contains("\"events_catalog\""));
         assert!(compiled.sql.contains("ON CONFLICT (\"id\")"));
-        assert!(
-            compiled
-                .bind_values
-                .contains(&DataValue::String("Festival".to_string()))
-        );
+        assert!(compiled
+            .bind_values
+            .contains(&DataValue::String("Festival".to_string())));
         assert_eq!(persisted["table"], "events_catalog");
         assert_eq!(persisted["event_id"], "event:festival");
     }
@@ -7221,11 +8169,9 @@ source_path = "fixtures/media.json"
 
         assert!(compiled.sql.contains("\"membership_tiers\""));
         assert!(compiled.sql.contains("ON CONFLICT (\"id\")"));
-        assert!(
-            compiled
-                .bind_values
-                .contains(&DataValue::String("Gold".to_string()))
-        );
+        assert!(compiled
+            .bind_values
+            .contains(&DataValue::String("Gold".to_string())));
         assert_eq!(persisted["table"], "membership_tiers");
         assert_eq!(persisted["tier_id"], "tier-gold");
     }
@@ -7254,16 +8200,12 @@ source_path = "fixtures/media.json"
         assert_eq!(mutations.len(), 2);
         let compiled_subscription = mutations[0].compile(1).unwrap();
         let compiled_entitlement = mutations[1].compile(1).unwrap();
-        assert!(
-            compiled_subscription
-                .sql
-                .contains("\"membership_subscriptions\"")
-        );
-        assert!(
-            compiled_entitlement
-                .sql
-                .contains("\"membership_entitlements\"")
-        );
+        assert!(compiled_subscription
+            .sql
+            .contains("\"membership_subscriptions\""));
+        assert!(compiled_entitlement
+            .sql
+            .contains("\"membership_entitlements\""));
         assert_eq!(updates.len(), 2);
         assert!(
             updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
@@ -7283,6 +8225,33 @@ source_path = "fixtures/media.json"
         assert_eq!(persisted[0]["table"], "membership_subscriptions");
         assert_eq!(persisted[1]["table"], "membership_entitlements");
         assert_eq!(persisted[2]["table"], "auth_tuples");
+    }
+
+    #[test]
+    fn user_account_import_mutation_targets_live_member_account_table() {
+        let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:user:alice",
+            "target_id": "alice",
+            "checksum": "user-alice-v1",
+            "normalized": {
+                "principal_id": "alice",
+                "email": "alice@example.com",
+                "username": "alice",
+                "display_name": "Alice Example",
+                "legacy_roles": ["administrator"]
+            }
+        });
+
+        let (mutation, persisted) = user_account_import_mutation(&staged).unwrap();
+        let compiled = mutation.compile(1).unwrap();
+
+        assert!(compiled.sql.contains("\"membership_member_accounts\""));
+        assert!(compiled.sql.contains("ON CONFLICT (\"id\")"));
+        assert_eq!(persisted["table"], "membership_member_accounts");
+        assert_eq!(persisted["member_account_id"], "alice");
+        assert_eq!(persisted["email"], "alice@example.com");
+        assert_eq!(persisted["display_name"], "Alice Example");
     }
 
     #[test]

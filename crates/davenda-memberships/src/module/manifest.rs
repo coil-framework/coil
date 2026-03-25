@@ -78,6 +78,11 @@ fn core_service_dependencies() -> Vec<CoreServiceDependency> {
 fn module_migrations() -> Vec<MigrationContract> {
     vec![
         MigrationContract::new(
+            "memberships.member_accounts",
+            5,
+            "Creates member account profile storage for imported and managed account state",
+        ),
+        MigrationContract::new(
             "memberships.tiers",
             10,
             "Creates membership tier, benefit, and merchandising policy tables",

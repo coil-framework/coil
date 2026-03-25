@@ -23,6 +23,12 @@ pub struct AuthCheckInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthBindingsInspectInvocation {
+    pub config_path: PathBuf,
+    pub capability: Option<Capability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthPackageValidateInvocation {
     pub config_path: PathBuf,
 }
@@ -82,6 +88,10 @@ pub(crate) enum CliInput {
     AuthCheck {
         output_mode: OutputMode,
         invocation: AuthCheckInvocation,
+    },
+    AuthBindingsInspect {
+        output_mode: OutputMode,
+        invocation: AuthBindingsInspectInvocation,
     },
     AuthPackageValidate {
         output_mode: OutputMode,
@@ -329,6 +339,25 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     subject,
                     capability,
                     resource,
+                },
+            })
+        }
+        [command, group, subcommand]
+            if command == "auth" && group == "bindings" && subcommand == "inspect" =>
+        {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`auth bindings inspect` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::AuthBindingsInspect {
+                output_mode,
+                invocation: AuthBindingsInspectInvocation {
+                    config_path,
+                    capability,
                 },
             })
         }
@@ -742,6 +771,33 @@ mod tests {
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
         assert_eq!(invocation.resource, Entity::admin_module("app"));
+    }
+
+    #[test]
+    fn parse_auth_bindings_inspect_accepts_optional_capability_filter() {
+        let input = parse([
+            "auth".to_string(),
+            "bindings".to_string(),
+            "inspect".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--capability".to_string(),
+            "cms.page.read".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::AuthBindingsInspect {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected auth bindings inspect input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.capability, Some(Capability::CmsPageRead));
     }
 
     #[test]

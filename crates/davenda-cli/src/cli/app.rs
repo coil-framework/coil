@@ -1,8 +1,8 @@
 use crate::CliModelError;
 use crate::cli::args::{
-    AssetsPublishInvocation, AuthCheckInvocation, AuthPackageValidateInvocation,
-    CacheWarmInvocation, CliInput, DevServerInvocation, JobsStatusInvocation,
-    MigrateApplyInvocation, TlsRenewInvocation, parse,
+    AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
+    AuthPackageValidateInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
+    JobsStatusInvocation, MigrateApplyInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -177,6 +177,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_auth_check(&invocation)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::AuthBindingsInspect {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_auth_bindings_inspect(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::AuthPackageValidate {
             output_mode,
             invocation,
@@ -346,6 +353,7 @@ fn usage() -> String {
         "  platform dev server [--config <path>]",
         "  platform config validate [--config <path>] [--json]",
         "  platform auth check [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
+        "  platform auth bindings inspect [--config <path>] [--capability <capability>] [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform auth package validate [--config <path>] [--json]",
         "  platform module list [--config <path>] [--json]",
@@ -368,6 +376,7 @@ fn usage() -> String {
         "  platform dev server --config config/platform.toml",
         "  platform config validate --config config/platform.toml",
         "  platform auth check --subject user:alice --capability cms.page.publish --resource page:homepage",
+        "  platform auth bindings inspect --config config/platform.toml --capability cms.page.publish",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform auth package validate --config config/platform.toml",
         "  platform module list --config config/platform.toml",
@@ -515,6 +524,76 @@ fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, Cli
                 .map(|namespace| namespace.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
+        ),
+    )?;
+    Ok(report)
+}
+
+fn run_auth_bindings_inspect(
+    invocation: &AuthBindingsInspectInvocation,
+) -> Result<CommandReport, CliRunError> {
+    let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load platform config from `{}`: {error}",
+            invocation.config_path.display()
+        ))
+    })?;
+    let package = configured_auth_model_package(config.auth.package.clone());
+    let mut bindings = package
+        .capability_bindings()
+        .values()
+        .filter(|binding| {
+            invocation
+                .capability
+                .is_none_or(|capability| binding.capability == capability)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    bindings.sort_by_key(|binding| binding.capability.as_str().to_string());
+
+    let mut report = CommandReport::new(
+        ["auth", "bindings", "inspect"],
+        format!(
+            "Inspected auth capability bindings for package `{}`",
+            package.manifest().name
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns(["capability", "relation", "namespaces", "auth_package"])
+    .map_err(report_build_error)?;
+
+    for binding in bindings {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("capability", binding.capability.to_string())
+                .map_err(report_build_error)?
+                .with_cell("relation", binding.relation.as_str())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "namespaces",
+                    binding
+                        .resource_namespaces
+                        .iter()
+                        .map(|namespace| namespace.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )
+                .map_err(report_build_error)?
+                .with_cell("auth_package", package.manifest().name.clone())
+                .map_err(report_build_error)?,
+        );
+    }
+
+    let binding_count = report.rows.len();
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.bindings.inspect",
+        format!(
+            "package={} binding_count={} capability_binding_version={}",
+            package.manifest().name,
+            binding_count,
+            package.manifest().capability_binding_version
         ),
     )?;
     Ok(report)
@@ -5847,6 +5926,7 @@ source_path = "fixtures/media.json"
         let rendered = run_from_args(["--help".to_string()]).unwrap();
         assert!(rendered.contains("platform config validate [--config <path>]"));
         assert!(rendered.contains("platform auth check [--config <path>]"));
+        assert!(rendered.contains("platform auth bindings inspect [--config <path>]"));
         assert!(rendered.contains("platform auth explain [--config <path>]"));
         assert!(rendered.contains("platform module list [--config <path>]"));
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
@@ -5889,6 +5969,27 @@ source_path = "fixtures/media.json"
             "{}",
             error
         );
+    }
+
+    #[test]
+    fn run_from_args_renders_auth_bindings_for_the_configured_package() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "auth".to_string(),
+            "bindings".to_string(),
+            "inspect".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--capability".to_string(),
+            "cms.page.read".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("auth bindings inspect"));
+        assert!(rendered.contains("platform-default-auth"));
+        assert!(rendered.contains("cms.page.read"));
+        assert!(rendered.contains("page"));
     }
 
     #[test]

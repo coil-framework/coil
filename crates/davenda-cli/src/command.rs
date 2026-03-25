@@ -132,6 +132,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Check whether a subject can currently exercise a capability against a live resource",
         )?,
         CommandDescriptor::new(
+            ["auth", "bindings", "inspect"],
+            CommandOwner::Core,
+            "Inspect the active auth package capability bindings and their resolved relations",
+        )?,
+        CommandDescriptor::new(
             ["auth", "explain"],
             CommandOwner::Core,
             "Explain why a subject can or cannot exercise a capability",

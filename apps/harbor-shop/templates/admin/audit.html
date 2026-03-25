@@ -1,0 +1,47 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Audit Log'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Audit Log</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operator audit</p>
+        <h1 dv:text="${page.title}">Audit Log</h1>
+        <p dv:text="${page.summary}">
+          Audit trail and operator action history.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Status</p>
+        <h2>No persisted audit entries yet</h2>
+        <p dv:text="${auditEmptyText}">
+          Audit capture is not persisted in the sample app yet.
+        </p>
+        <p>
+          Use the runtime diagnostics surface for now, then wire audit persistence once the back
+          office logging backend is in place.
+        </p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

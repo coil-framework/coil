@@ -1,5 +1,7 @@
 use super::*;
 use axum::response::Response;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 const LIVE_DATABASE_URL: &str = "postgres://platform:secret@db.internal/platform";
 const LIVE_OBJECT_STORE_SECRET: &str = r#"
@@ -10,6 +12,9 @@ access_key_id = "runtime-access"
 secret_access_key = "runtime-secret"
 signed_url_ttl_secs = 900
 "#;
+const PAYMENT_WEBHOOK_SECRET: &str = "harbor-shop-webhook-secret";
+
+type HmacSha256 = Hmac<Sha256>;
 
 fn live_backend_secret_resolver() -> StaticSecretResolver {
     StaticSecretResolver::new()
@@ -27,6 +32,39 @@ fn live_backend_secret_resolver() -> StaticSecretResolver {
             LIVE_OBJECT_STORE_SECRET,
         )
         .unwrap()
+}
+
+fn live_backend_secret_resolver_with_payment_webhook() -> StaticSecretResolver {
+    live_backend_secret_resolver()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "PAYMENT_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap()
+}
+
+fn with_payment_webhook_secret(config: PlatformConfig) -> PlatformConfig {
+    PlatformConfig::from_toml_str(&format!(
+        "{}\n[modules.commerce]\npayment_webhook_secret = {{ kind = \"env\", var = \"PAYMENT_WEBHOOK_SECRET\" }}\n",
+        VALID_CONFIG.replace(
+            "name = \"showcase-events\"",
+            &format!("name = \"{}\"", config.app.name),
+        )
+    ))
+    .unwrap()
+}
+
+fn payment_webhook_signature(provider: &str, event: &str, payment_reference: &str) -> String {
+    let mut mac =
+        HmacSha256::new_from_slice(PAYMENT_WEBHOOK_SECRET.as_bytes()).expect("valid hmac key");
+    mac.update(provider.as_bytes());
+    mac.update(b":");
+    mac.update(event.as_bytes());
+    mac.update(b":");
+    mac.update(payment_reference.as_bytes());
+    format!("{:x}", mac.finalize().into_bytes())
 }
 
 fn response_header(response: &Response<Body>, name: &str) -> String {
@@ -96,7 +134,14 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = live_backend_secret_resolver();
+    let resolver = live_backend_secret_resolver()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DAVENDA_PAYMENT_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap();
     let server = plan
         .server_host(
             &resolver,
@@ -210,7 +255,14 @@ async fn server_router_denies_diagnostics_probe_for_authenticated_sessions_witho
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = live_backend_secret_resolver();
+    let resolver = live_backend_secret_resolver()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DAVENDA_PAYMENT_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let server = HttpServerHost::new_with_authorizer(
         plan,
@@ -265,7 +317,14 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    let resolver = live_backend_secret_resolver();
+    let resolver = live_backend_secret_resolver()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DAVENDA_PAYMENT_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
         davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user("operator-live-1")),
@@ -1644,6 +1703,11 @@ async fn server_host_bootstraps_guest_storefront_session_and_injects_live_state(
   <body>
     <main class="cart-page">
       <h1 dv:text="${route_name}">Cart</h1>
+      <p class="empty" dv:unless="${hasCartItems}">Your cart is empty.</p>
+      <ul class="cart-lines">
+        <li dv:each="item : ${cartItems}" dv:text="${item.title}">Fallback item</li>
+      </ul>
+      <p class="subtotal" dv:text="${cartSummary.subtotal}">£0.00</p>
     </main>
   </body>
 </html>"#,
@@ -1697,6 +1761,136 @@ async fn server_host_bootstraps_guest_storefront_session_and_injects_live_state(
     assert!(body.contains("davenda-storefront-state"), "{body}");
     assert!(body.contains("\"route\":\"commerce.cart\""), "{body}");
     assert!(body.contains("\"item_count\":0"), "{body}");
+    assert!(body.contains("Your cart is empty."), "{body}");
+    assert!(body.contains("£0.00"), "{body}");
+    assert!(!body.contains("Harbor Cap"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_live_empty_checkout_instead_of_fixture_lines() {
+    let app_name = unique_app_name("harbor-shop-runtime-empty-checkout");
+    let config = config_with_app_name(&app_name);
+    let template_root = unique_temp_template_root("storefront-empty-checkout");
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-page">
+      <p class="empty" dv:unless="${hasLineItems}">No items are in checkout.</p>
+      <ul class="checkout-lines">
+        <li dv:each="item : ${lineItems}" dv:text="${item.title}">Fallback item</li>
+      </ul>
+      <p class="total" dv:text="${orderSummary.total}">£0.00</p>
+      <p class="intent" dv:text="${checkout.checkoutIntent}">PAYMENT-PENDING</p>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert!(body.contains("No items are in checkout."), "{body}");
+    assert!(body.contains("£0.00"), "{body}");
+    assert!(body.contains("PAYMENT-PENDING"), "{body}");
+    assert!(!body.contains("Harbor Cap"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_empty_confirmation_instead_of_fixture_order() {
+    let app_name = unique_app_name("harbor-shop-runtime-empty-confirmation");
+    let config = config_with_app_name(&app_name);
+    let template_root = unique_temp_template_root("storefront-empty-confirmation");
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout-confirmation.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-confirmation">
+      <p class="empty" dv:unless="${hasConfirmation}" dv:text="${confirmation.nextStep}">Empty</p>
+      <p class="reference" dv:if="${hasConfirmation}" dv:text="${confirmation.orderNumber}">ORD-10042</p>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout/confirmation")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert!(
+        body.contains("There is no recent checkout confirmation for this browser session yet."),
+        "{body}"
+    );
+    assert!(!body.contains("ORD-10042"), "{body}");
 }
 
 #[tokio::test]
@@ -2255,7 +2449,10 @@ async fn server_host_rejects_checkout_completion_without_payment_details() {
 
     assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
     assert_eq!(location, "/checkout");
-    assert!(body.contains("There is a problem with your checkout details."), "{body}");
+    assert!(
+        body.contains("There is a problem with your checkout details."),
+        "{body}"
+    );
     assert!(
         body.contains("Enter the final 4 digits for the payment card."),
         "{body}"
@@ -2482,7 +2679,10 @@ async fn server_host_rejects_checkout_completion_without_reserved_payment_intent
 
     assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
     assert_eq!(location, "/checkout");
-    assert!(body.contains("Refresh checkout before placing the order."), "{body}");
+    assert!(
+        body.contains("Refresh checkout before placing the order."),
+        "{body}"
+    );
     assert!(
         body.contains("Refresh checkout and try again before placing the order."),
         "{body}"
@@ -2540,7 +2740,13 @@ async fn server_host_redirects_cart_validation_failures_back_to_cart_with_repopu
     let session_cookie = format!("davenda_session={}", issued.cookie_value);
     let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
     store
-        .add_to_cart(&issued.record.session_id, None, "harbor-cap", 1, now.as_unix_seconds())
+        .add_to_cart(
+            &issued.record.session_id,
+            None,
+            "harbor-cap",
+            1,
+            now.as_unix_seconds(),
+        )
         .unwrap();
 
     let cart_response = server
@@ -2613,7 +2819,10 @@ async fn server_host_redirects_cart_validation_failures_back_to_cart_with_repopu
 
     fs::remove_dir_all(&template_root).unwrap();
 
-    assert!(body.contains("Fix the highlighted cart quantities and try again."), "{body}");
+    assert!(
+        body.contains("Fix the highlighted cart quantities and try again."),
+        "{body}"
+    );
     assert!(
         body.contains("Enter a whole-number quantity for this line."),
         "{body}"
@@ -2898,7 +3107,7 @@ async fn server_host_accepts_checkout_completion_with_card_last4_only() {
 #[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow() {
     let app_name = unique_app_name("harbor-shop-runtime-checked-in-storefront");
-    let config = config_with_app_name(&app_name);
+    let config = with_payment_webhook_secret(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
@@ -2906,7 +3115,7 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         .with_template_root(&template_root)
         .build()
         .unwrap();
-    let resolver = live_backend_secret_resolver();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
     let server = plan
         .server_host(
             &resolver,
@@ -2975,16 +3184,16 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
     )
     .unwrap();
     assert_eq!(account_status, StatusCode::OK, "{account_body}");
+    assert!(account_body.contains("Gold Membership"), "{account_body}");
     assert!(
-        account_body.contains("No active membership is attached yet."),
-        "{account_body}"
-    );
-    assert!(account_body.contains("View memberships"), "{account_body}");
-    assert!(
-        account_body.contains("View order history"),
+        account_body.contains("Pending activation"),
         "{account_body}"
     );
     assert!(account_body.contains("Pending Payment"), "{account_body}");
+    assert!(
+        account_body.contains("Included with order ORD-10042."),
+        "{account_body}"
+    );
 
     let memberships_response = server
         .respond(
@@ -3007,7 +3216,11 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
     )
     .unwrap();
     assert!(
-        memberships_body.contains("Membership purchase pending"),
+        memberships_body.contains("Gold Membership"),
+        "{memberships_body}"
+    );
+    assert!(
+        memberships_body.contains("Pending activation"),
         "{memberships_body}"
     );
     assert!(
@@ -3015,11 +3228,11 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         "{memberships_body}"
     );
     assert!(
-        memberships_body.contains("View order history"),
+        memberships_body.contains("member@example.com"),
         "{memberships_body}"
     );
     assert!(
-        memberships_body.contains("member@example.com"),
+        memberships_body.contains("Included with order ORD-10042."),
         "{memberships_body}"
     );
 
@@ -3056,9 +3269,113 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         "{order_history_body}"
     );
     assert!(
-        order_history_body
-            .contains("Membership activation will follow once the storefront sync completes."),
+        order_history_body.contains("Pending activation"),
         "{order_history_body}"
+    );
+
+    let webhook_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("provider", "stripe")
+        .append_pair("event", "payment.captured")
+        .append_pair("payment_reference", "PAY-50001")
+        .append_pair(
+            "signature",
+            &payment_webhook_signature("stripe", "payment.captured", "PAY-50001"),
+        )
+        .finish();
+    let webhook_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(webhook_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(webhook_response.status(), StatusCode::OK);
+    let webhook_response_body = String::from_utf8(
+        to_bytes(webhook_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        webhook_response_body.contains("\"status\":\"accepted\""),
+        "{webhook_response_body}"
+    );
+
+    let confirmation_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout/confirmation")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let confirmation_body = String::from_utf8(
+        to_bytes(confirmation_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        confirmation_body.contains("Status <strong>Paid</strong>"),
+        "{confirmation_body}"
+    );
+    assert!(
+        !confirmation_body.contains("Payment confirmation is pending."),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("Card ending 4242, reference PAY-50001"),
+        "{confirmation_body}"
+    );
+
+    let activated_memberships_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/account/memberships")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let activated_memberships_body = String::from_utf8(
+        to_bytes(activated_memberships_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        activated_memberships_body.contains("Gold Membership"),
+        "{activated_memberships_body}"
+    );
+    assert!(
+        activated_memberships_body.contains("Active"),
+        "{activated_memberships_body}"
+    );
+    assert!(
+        activated_memberships_body.contains("Activated from order ORD-10042."),
+        "{activated_memberships_body}"
+    );
+    assert!(
+        !activated_memberships_body.contains("Pending activation"),
+        "{activated_memberships_body}"
     );
 }
 
@@ -3117,6 +3434,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
     assert!(account_body.contains("Account overview"), "{account_body}");
     assert!(account_body.contains("Order history"), "{account_body}");
     assert!(account_body.contains("Memberships"), "{account_body}");
+    assert!(account_body.contains("End session"), "{account_body}");
 
     let order_history_response = server
         .respond(
@@ -3194,6 +3512,118 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
     assert!(
         memberships_body.contains("Explore memberships"),
         "{memberships_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_can_end_a_checked_in_harbor_shop_account_session() {
+    let app_name = unique_app_name("harbor-shop-runtime-account-session-end");
+    let config = config_with_app_name(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let account_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/account")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_cookie =
+        cookie_pair_from_response(&account_response, "davenda_session").expect("session cookie");
+    let account_body = String::from_utf8(
+        to_bytes(account_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let session_end_token =
+        storefront_csrf_token_from_body(&account_body, "commerce.account-session-end");
+    assert!(
+        account_body.contains("davenda-account-session-end"),
+        "{account_body}"
+    );
+
+    let end_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/account/session/end")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", session_end_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let end_status = end_response.status();
+    let end_location = response_header(&end_response, "location");
+    let cleared_session_cookie = end_response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.starts_with("davenda_session=") && value.contains("Max-Age=0"));
+    let flash_cookie =
+        cookie_pair_from_response(&end_response, "davenda_flash").expect("flash cookie");
+    assert_eq!(end_status, StatusCode::SEE_OTHER);
+    assert_eq!(end_location, "/account");
+    assert!(cleared_session_cookie);
+
+    let redirected_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/account")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &flash_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let redirected_status = redirected_response.status();
+    let renewed_session_cookie = cookie_pair_from_response(&redirected_response, "davenda_session")
+        .expect("renewed session cookie");
+    let redirected_body = String::from_utf8(
+        to_bytes(redirected_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(redirected_status, StatusCode::OK, "{redirected_body}");
+    assert_ne!(renewed_session_cookie, session_cookie);
+    assert!(
+        redirected_body
+            .contains("Account session ended. Start again from this browser when you are ready."),
+        "{redirected_body}"
+    );
+    assert!(
+        redirected_body.contains("Continue from this browser session"),
+        "{redirected_body}"
     );
 }
 
@@ -3775,6 +4205,80 @@ async fn server_host_executes_admin_widget_extensions_during_live_requests() {
     assert!(body.contains("Waitlist widget"));
 
     fs::remove_dir_all(&extension_dir).unwrap();
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
+    let template_root = checked_in_harbor_shop_root();
+    let mut config = config_with_app_name("harbor-shop");
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+
+    for (route, expected) in [
+        ("/admin", "Harbor Shop Admin"),
+        ("/admin/orders", "Orders"),
+        ("/admin/catalog/products", "Catalog Administration"),
+        ("/admin/pages", "Pages"),
+        ("/admin/navigation", "Navigation"),
+        ("/admin/redirects", "Redirects"),
+    ] {
+        let response = server
+            .respond(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("host", "www.example.com")
+                    .header("x-forwarded-proto", "https")
+                    .header("cookie", format!("davenda_session={}", issued.cookie_value))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+
+        assert_eq!(status, StatusCode::OK, "{route}");
+        assert!(body.contains(expected), "{route}: {body}");
+    }
 }
 
 #[tokio::test]

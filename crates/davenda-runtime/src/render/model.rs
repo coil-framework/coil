@@ -7,6 +7,10 @@ use davenda_commerce::{
     CheckoutId, CheckoutLine, CheckoutSession, CurrencyCode, EntitlementKey, Money, Order, OrderId,
     PricingPolicy, ProductId, ProductKind, Sku,
 };
+use davenda_memberships::{
+    BillingInterval, MemberAccountId, MembershipCatalog, MembershipInstant, MembershipModelError,
+    MembershipTier, MembershipTierId, SubscriptionStatus, TierVisibility,
+};
 use davenda_template::{RenderModel, RenderValue, TemplateModelError, TemplateNamespace};
 use std::collections::BTreeMap;
 
@@ -145,17 +149,7 @@ fn route_params_model(params: &BTreeMap<String, String>) -> RenderModel {
 
 fn navigation_model() -> RenderModel {
     RenderModel::new()
-        .with_list(
-            "primary",
-            vec![
-                nav_item("Home", "/"),
-                nav_item("Shop", "/shop"),
-                nav_item("Collections", "/shop/collections"),
-                nav_item("Events", "/events"),
-                nav_item("Cart", "/cart"),
-                nav_item("Account", "/account"),
-            ],
-        )
+        .with_list("primary", primary_navigation_items())
         .expect("navigation keys are valid")
 }
 
@@ -164,6 +158,17 @@ fn nav_item(label: &str, href: &str) -> RenderModel {
         .with_value("label", RenderValue::text(label))
         .and_then(|model| model.with_value("href", RenderValue::text(href)))
         .expect("navigation item keys are valid")
+}
+
+fn primary_navigation_items() -> Vec<RenderModel> {
+    vec![
+        nav_item("Home", "/"),
+        nav_item("Shop", "/shop"),
+        nav_item("Collections", "/shop/collections"),
+        nav_item("Events", "/events"),
+        nav_item("Cart", "/cart"),
+        nav_item("Account", "/account"),
+    ]
 }
 
 fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
@@ -190,7 +195,14 @@ fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
         .with_value("checkout", RenderValue::text("/checkout"))?
         .with_value("account", RenderValue::text("/account"))?
         .with_value("orders", RenderValue::text("/account/orders"))?
-        .with_value("memberships", RenderValue::text("/account/memberships"))
+        .with_value("memberships", RenderValue::text("/account/memberships"))?
+        .with_value("adminDashboard", RenderValue::text("/admin"))?
+        .with_value("adminAudit", RenderValue::text("/admin/audit"))?
+        .with_value("adminOrders", RenderValue::text("/admin/orders"))?
+        .with_value("adminCatalog", RenderValue::text("/admin/catalog/products"))?
+        .with_value("adminPages", RenderValue::text("/admin/pages"))?
+        .with_value("adminNavigation", RenderValue::text("/admin/navigation"))?
+        .with_value("adminRedirects", RenderValue::text("/admin/redirects"))
 }
 
 fn page_model_for_route(
@@ -218,6 +230,13 @@ fn page_model_for_route(
         "commerce.checkout" => "Checkout".to_string(),
         "commerce.checkout-confirmation" => "Order Confirmed".to_string(),
         "commerce.account.orders" => "Order History".to_string(),
+        "admin.dashboard" => "Harbor Shop Admin".to_string(),
+        "admin.audit" => "Audit Log".to_string(),
+        "commerce.orders" => "Orders".to_string(),
+        "commerce.catalog-admin" => "Catalog Administration".to_string(),
+        "cms.pages.index" => "Pages".to_string(),
+        "cms.navigation.index" => "Navigation".to_string(),
+        "cms.redirects.index" => "Redirects".to_string(),
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             "Your Account".to_string()
         }
@@ -247,6 +266,13 @@ fn page_model_for_route(
         "commerce.account.orders" => {
             "Review completed purchases, payment details, and membership-linked order history."
         }
+        "admin.dashboard" => "Operator overview for catalog, orders, and content.",
+        "admin.audit" => "Audit trail and operator action history.",
+        "commerce.orders" => "Operator order queue and payment history.",
+        "commerce.catalog-admin" => "Merchandising inventory, collections, and featured products.",
+        "cms.pages.index" => "Live page inventory and publication state.",
+        "cms.navigation.index" => "Navigation trees and top-level route links.",
+        "cms.redirects.index" => "Redirect rules and route handoff records.",
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             "Membership state, recent orders, and next actions for the signed-in customer."
         }
@@ -310,6 +336,7 @@ fn apply_route_specific_bindings(
         "commerce.cart" => {
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
                 model = model
+                    .with_bool("hasCartItems", !snapshot.cart.lines.is_empty())?
                     .with_list(
                         "cartItems",
                         cart_items_from_storefront(&snapshot.cart.lines, form_state)?,
@@ -318,6 +345,7 @@ fn apply_route_specific_bindings(
                     .with_object("cartForm", cart_form_model(form_state)?)?;
             } else {
                 model = model
+                    .with_bool("hasCartItems", !fixture.cart_items.is_empty())?
                     .with_list("cartItems", fixture.cart_items.clone())?
                     .with_object("cartSummary", fixture.cart_summary.clone())?
                     .with_object("cartForm", cart_form_model(form_state)?)?;
@@ -346,37 +374,39 @@ fn apply_route_specific_bindings(
             }
         }
         "commerce.checkout-confirmation" => {
+            let account = account_surface_bindings(plan, &fixture, locale, session, principal)?;
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
-                if let Some(order) = snapshot.latest_order.as_ref() {
+                let confirmation = snapshot
+                    .latest_order
+                    .as_ref()
+                    .map(confirmation_from_storefront)
+                    .transpose()?
+                    .unwrap_or(empty_confirmation_model()?);
+                if snapshot.latest_order.is_some() {
                     model = model
-                        .with_object("confirmation", confirmation_from_storefront(order)?)?
-                        .with_object("customer", checkout_customer(principal)?)?
-                        .with_list(
-                            "recentOrders",
-                            snapshot
-                                .recent_orders
-                                .iter()
-                                .map(account_order_from_storefront)
-                                .collect::<Result<Vec<_>, _>>()?,
-                        )?
-                        .with_object(
-                            "membershipSummary",
-                            membership_summary_from_storefront(Some(&snapshot))?
-                                .unwrap_or(empty_membership_summary()?),
-                        )?;
+                        .with_bool("hasConfirmation", true)?
+                        .with_object("confirmation", confirmation)?
+                        .with_object("account", account.account)?
+                        .with_object("customer", account.customer)?
+                        .with_list("recentOrders", account.recent_orders)?
+                        .with_object("membershipSummary", account.membership_summary)?;
                 } else {
                     model = model
-                        .with_object("confirmation", fixture.confirmation.clone())?
-                        .with_object("customer", fixture.customer.clone())?
-                        .with_list("recentOrders", fixture.recent_orders.clone())?
-                        .with_object("membershipSummary", fixture.membership_summary.clone())?;
+                        .with_bool("hasConfirmation", false)?
+                        .with_object("confirmation", confirmation)?
+                        .with_object("account", account.account)?
+                        .with_object("customer", account.customer)?
+                        .with_list("recentOrders", account.recent_orders)?
+                        .with_object("membershipSummary", account.membership_summary)?;
                 }
             } else {
                 model = model
+                    .with_bool("hasConfirmation", true)?
                     .with_object("confirmation", fixture.confirmation.clone())?
-                    .with_object("customer", fixture.customer.clone())?
-                    .with_list("recentOrders", fixture.recent_orders.clone())?
-                    .with_object("membershipSummary", fixture.membership_summary.clone())?;
+                    .with_object("account", account.account)?
+                    .with_object("customer", account.customer)?
+                    .with_list("recentOrders", account.recent_orders)?
+                    .with_object("membershipSummary", account.membership_summary)?;
             }
         }
         "commerce.account.orders"
@@ -389,6 +419,93 @@ fn apply_route_specific_bindings(
                 .with_object("customer", account.customer)?
                 .with_list("recentOrders", account.recent_orders)?
                 .with_object("membershipSummary", account.membership_summary)?;
+        }
+        "admin.dashboard" => {
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("hasAdminPanels", true)?
+                .with_list("adminPanels", admin_panels(locale, &fixture)?)?
+                .with_value(
+                    "catalogCount",
+                    RenderValue::text(fixture.product_cards.len().to_string()),
+                )?
+                .with_value(
+                    "orderCount",
+                    RenderValue::text(fixture.recent_orders.len().to_string()),
+                )?
+                .with_value(
+                    "contentCount",
+                    RenderValue::text(content_pages(locale)?.len().to_string()),
+                )?;
+        }
+        "admin.audit" => {
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("hasAuditEntries", false)?
+                .with_list("auditEntries", Vec::new())?
+                .with_value(
+                    "auditEmptyText",
+                    RenderValue::text(
+                        "Audit capture is not persisted in the sample app yet. Use diagnostics for runtime traces and add the audit backend when operator logging is wired.",
+                    ),
+                )?;
+        }
+        "commerce.orders" => {
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("hasRecentOrders", !fixture.recent_orders.is_empty())?
+                .with_list("recentOrders", fixture.recent_orders.clone())?
+                .with_value(
+                    "ordersEmptyText",
+                    RenderValue::text(
+                        "No completed orders have been captured in the checked-in sample app yet.",
+                    ),
+                )?;
+        }
+        "commerce.catalog-admin" => {
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("hasCatalogSections", !fixture.catalog_sections.is_empty())?
+                .with_list("catalogSections", fixture.catalog_sections.clone())?
+                .with_bool("hasProductCards", !fixture.product_cards.is_empty())?
+                .with_list("productCards", fixture.product_cards.clone())?
+                .with_value(
+                    "catalogEmptyText",
+                    RenderValue::text("No catalog entries are available in the sample app yet."),
+                )?;
+        }
+        "cms.pages.index" => {
+            let pages = content_pages(locale)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("hasContentPages", !pages.is_empty())?
+                .with_list("contentPages", pages)?
+                .with_value(
+                    "pagesEmptyText",
+                    RenderValue::text(
+                        "The current Harbor Shop sample app does not persist CMS page records yet. This screen reflects the live route inventory.",
+                    ),
+                )?;
+        }
+        "cms.navigation.index" => {
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("hasNavigationItems", !primary_navigation_items().is_empty())?
+                .with_list("navigationItems", primary_navigation_items())?
+                .with_value(
+                    "navigationEmptyText",
+                    RenderValue::text("Primary navigation is not configured yet."),
+                )?;
+        }
+        "cms.redirects.index" => {
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("hasRedirects", false)?
+                .with_list("redirects", Vec::new())?
+                .with_value(
+                    "redirectsEmptyText",
+                    RenderValue::text("Redirect rules are not configured yet in the sample app."),
+                )?;
         }
         _ => {}
     }
@@ -414,11 +531,7 @@ fn live_storefront_state(
             principal.and_then(|ctx| ctx.principal_id.as_deref()),
         )
         .map_err(template_store_error)?;
-    if snapshot.cart.lines.is_empty() && snapshot.latest_order.is_none() {
-        Ok(None)
-    } else {
-        Ok(Some(snapshot))
-    }
+    Ok(Some(snapshot))
 }
 
 fn live_storefront_latest_order(
@@ -509,6 +622,31 @@ fn confirmation_from_storefront(
         .with_list("lineItems", confirmation_line_items_from_storefront(order)?)
 }
 
+fn empty_confirmation_model() -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("orderNumber", RenderValue::text(String::new()))?
+        .with_value("status", RenderValue::text("No recent order".to_string()))?
+        .with_value("total", RenderValue::text("£0.00".to_string()))?
+        .with_bool("hasEmail", false)?
+        .with_value("email", RenderValue::text(String::new()))?
+        .with_value(
+            "nextStep",
+            RenderValue::text(
+                "There is no recent checkout confirmation for this browser session yet.",
+            ),
+        )?
+        .with_value(
+            "providerLabel",
+            RenderValue::text(payment_provider_label().to_string()),
+        )?
+        .with_value(
+            "paymentSummary",
+            RenderValue::text("No payment has been submitted yet."),
+        )?
+        .with_bool("hasLineItems", false)?
+        .with_list("lineItems", Vec::new())
+}
+
 fn account_order_from_storefront(
     order: &StorefrontOrderSnapshot,
 ) -> Result<RenderModel, TemplateModelError> {
@@ -545,6 +683,134 @@ fn account_order_from_storefront(
                     || order.payment.last4.is_some(),
             )
         })
+}
+
+fn operator_identity(
+    principal: Option<&PrincipalContext>,
+    session: Option<&SessionContext>,
+) -> Result<RenderModel, TemplateModelError> {
+    let principal_id = principal
+        .and_then(|principal| principal.principal_id.as_deref())
+        .unwrap_or_default();
+    let display_name = if principal_id.is_empty() {
+        "Current Operator".to_string()
+    } else {
+        display_name_from_principal_id(principal_id)
+    };
+    RenderModel::new()
+        .with_value("displayName", RenderValue::text(display_name))?
+        .with_value("principalId", RenderValue::text(principal_id.to_string()))?
+        .with_bool("hasPrincipal", principal.is_some())?
+        .with_bool(
+            "hasSession",
+            session
+                .and_then(|session| session.session_id.as_deref())
+                .is_some(),
+        )
+}
+
+fn admin_panels(
+    locale: &str,
+    fixture: &StorefrontFixture,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let content_pages = content_pages(locale)?;
+    Ok(vec![
+        admin_panel(
+            "Catalog",
+            "Inspect products and collections",
+            "/admin/catalog/products",
+            &format!(
+                "{} products and {} collections are currently represented in the sample app.",
+                fixture.product_cards.len(),
+                fixture.catalog_sections.len()
+            ),
+        )?,
+        admin_panel(
+            "Orders",
+            "Review recent purchases",
+            "/admin/orders",
+            &format!(
+                "{} completed orders are available for operator review.",
+                fixture.recent_orders.len()
+            ),
+        )?,
+        admin_panel(
+            "Content",
+            "Review live route inventory",
+            "/admin/pages",
+            &format!(
+                "{} content routes are represented in the checked-in Harbor Shop sample app.",
+                content_pages.len()
+            ),
+        )?,
+    ])
+}
+
+fn admin_panel(
+    title: &str,
+    label: &str,
+    href: &str,
+    summary: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("title", RenderValue::text(title))?
+        .with_value("label", RenderValue::text(label))?
+        .with_value("href", RenderValue::text(href))?
+        .with_value("summary", RenderValue::text(summary))
+}
+
+fn content_pages(locale: &str) -> Result<Vec<RenderModel>, TemplateModelError> {
+    Ok(vec![
+        content_page(
+            "Home",
+            "/",
+            "public",
+            "The landing page for the Harbor Shop storefront.",
+        )?,
+        content_page(
+            "Catalog",
+            &localized_shop_path(locale),
+            "public",
+            "The main shopping entry point for products and collections.",
+        )?,
+        content_page(
+            "Collections",
+            &localized_collections_path(locale),
+            "public",
+            "Curated collection landing pages for merchandising journeys.",
+        )?,
+        content_page(
+            "Account",
+            "/account",
+            "account",
+            "Customer account hub for orders and membership state.",
+        )?,
+        content_page(
+            "Order history",
+            "/account/orders",
+            "account",
+            "Order history and post-checkout confirmation records.",
+        )?,
+        content_page(
+            "Memberships",
+            "/account/memberships",
+            "account",
+            "Membership state and entitlement guidance for signed-in customers.",
+        )?,
+    ])
+}
+
+fn content_page(
+    title: &str,
+    href: &str,
+    surface: &str,
+    summary: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("title", RenderValue::text(title))?
+        .with_value("href", RenderValue::text(href))?
+        .with_value("surface", RenderValue::text(surface))?
+        .with_value("summary", RenderValue::text(summary))
 }
 
 fn cart_item_from_storefront(
@@ -712,6 +978,7 @@ fn payment_status_label(status: &str) -> String {
         "provider_pending" => "Awaiting provider confirmation".to_string(),
         "captured" => "Captured".to_string(),
         "authorized" => "Authorized".to_string(),
+        "failed" => "Failed".to_string(),
         other => display_status_label(other),
     }
 }
@@ -729,6 +996,20 @@ fn payment_summary(method: Option<&str>, last4: Option<&str>, reference: Option<
 fn template_store_error(error: crate::storefront::StorefrontStateError) -> TemplateModelError {
     TemplateModelError::TemplateRead {
         path: "storefront-state".to_string(),
+        message: error.to_string(),
+    }
+}
+
+fn template_membership_error(error: MembershipModelError) -> TemplateModelError {
+    TemplateModelError::TemplateRead {
+        path: "membership-projection".to_string(),
+        message: error.to_string(),
+    }
+}
+
+fn template_commerce_error(error: davenda_commerce::CommerceModelError) -> TemplateModelError {
+    TemplateModelError::TemplateRead {
+        path: "membership-projection".to_string(),
         message: error.to_string(),
     }
 }
@@ -1023,30 +1304,230 @@ fn membership_summary_from_storefront(
         return Ok(None);
     };
 
-    let Some((order, line)) = snapshot.recent_orders.iter().find_map(|order| {
-        if !matches!(order.status.as_str(), "paid" | "fulfilled") {
-            return None;
-        }
-        order.lines.iter().find_map(|line| {
-            if line.product_kind == "membership" {
-                Some((order, line))
-            } else {
-                None
-            }
-        })
-    }) else {
+    let Some(projected) = projected_membership_state(snapshot)? else {
         return Ok(None);
     };
 
     membership_summary(
-        &line.title,
-        "Purchased",
-        &format!(
-            "Included with order {}. Renewal timing and entitlement status will appear here once membership state sync completes.",
-            order.order_id
-        ),
+        &projected.tier_name,
+        projected.status_label(),
+        &projected.renewal_text,
     )
     .map(Some)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProjectedMembershipState {
+    tier_name: String,
+    status: SubscriptionStatus,
+    renewal_text: String,
+}
+
+impl ProjectedMembershipState {
+    fn status_label(&self) -> &'static str {
+        match self.status {
+            SubscriptionStatus::PendingActivation => "Pending activation",
+            SubscriptionStatus::Active => "Active",
+            SubscriptionStatus::InGracePeriod => "In grace period",
+            SubscriptionStatus::Paused => "Paused",
+            SubscriptionStatus::Cancelled => "Cancelled",
+            SubscriptionStatus::Expired => "Expired",
+        }
+    }
+}
+
+fn projected_membership_state(
+    snapshot: &StorefrontStateSnapshot,
+) -> Result<Option<ProjectedMembershipState>, TemplateModelError> {
+    if let Some(active) = projected_membership_state_for_statuses(snapshot, &["paid", "fulfilled"])?
+    {
+        return Ok(Some(active));
+    }
+
+    projected_membership_state_for_statuses(snapshot, &["pending_payment"])
+}
+
+fn projected_membership_state_for_statuses(
+    snapshot: &StorefrontStateSnapshot,
+    eligible_statuses: &[&str],
+) -> Result<Option<ProjectedMembershipState>, TemplateModelError> {
+    for order in &snapshot.recent_orders {
+        if !eligible_statuses
+            .iter()
+            .any(|status| order.status.as_str() == *status)
+        {
+            continue;
+        }
+        if let Some(projected) = projected_membership_state_for_order(snapshot, order)? {
+            return Ok(Some(projected));
+        }
+    }
+    Ok(None)
+}
+
+fn projected_membership_state_for_order(
+    snapshot: &StorefrontStateSnapshot,
+    order: &StorefrontOrderSnapshot,
+) -> Result<Option<ProjectedMembershipState>, TemplateModelError> {
+    let outcomes = storefront_membership_outcomes(order)?;
+    if outcomes.is_empty() {
+        return Ok(None);
+    }
+
+    let order_id = OrderId::new(order.order_id.clone()).map_err(template_commerce_error)?;
+    let member_id = storefront_member_account_id(snapshot)?;
+    let starts_at = MembershipInstant::from_unix_seconds(order.created_at_unix_seconds);
+    let catalog = storefront_membership_catalog(order)?;
+    let mut provisioned = catalog
+        .provision_from_order_outcomes(order_id, member_id, &outcomes, starts_at)
+        .map_err(template_membership_error)?;
+    let Some(mut provisioned) = provisioned.drain(..).next() else {
+        return Ok(None);
+    };
+
+    if matches!(order.status.as_str(), "paid" | "fulfilled") {
+        provisioned
+            .subscription
+            .activate(starts_at)
+            .map_err(template_membership_error)?;
+    }
+
+    let tier_name = catalog
+        .tier(&provisioned.subscription.tier_id)
+        .map(|tier| tier.title.clone())
+        .unwrap_or_else(|| {
+            order
+                .lines
+                .iter()
+                .find(|line| line.product_kind == "membership")
+                .map(|line| line.title.clone())
+                .unwrap_or_else(|| "Membership".to_string())
+        });
+    let renewal_text = match provisioned.subscription.status {
+        SubscriptionStatus::PendingActivation => format!(
+            "Included with order {}. Membership access will activate automatically after payment capture for this order.",
+            order.order_id
+        ),
+        SubscriptionStatus::Active => format!(
+            "Activated from order {}. Membership access is live for this account view.",
+            order.order_id
+        ),
+        SubscriptionStatus::InGracePeriod => format!(
+            "Membership from order {} is in its grace period while renewal is resolved.",
+            order.order_id
+        ),
+        SubscriptionStatus::Paused => format!(
+            "Membership from order {} is currently paused.",
+            order.order_id
+        ),
+        SubscriptionStatus::Cancelled => format!(
+            "Membership from order {} has been cancelled.",
+            order.order_id
+        ),
+        SubscriptionStatus::Expired => {
+            format!("Membership from order {} has expired.", order.order_id)
+        }
+    };
+
+    Ok(Some(ProjectedMembershipState {
+        tier_name,
+        status: provisioned.subscription.status,
+        renewal_text,
+    }))
+}
+
+fn storefront_membership_catalog(
+    order: &StorefrontOrderSnapshot,
+) -> Result<MembershipCatalog, TemplateModelError> {
+    let mut catalog = MembershipCatalog::new();
+    for line in &order.lines {
+        if line.product_kind != "membership" {
+            continue;
+        }
+        let Some(entitlement_key) = line.entitlement_key.as_deref() else {
+            continue;
+        };
+        let tier = MembershipTier::new(
+            MembershipTierId::new(format!(
+                "tier-{}",
+                sanitize_membership_token(entitlement_key)
+            ))
+            .map_err(template_membership_error)?,
+            line.title.clone(),
+            EntitlementKey::new(entitlement_key.to_string()).map_err(template_commerce_error)?,
+            10,
+            infer_membership_interval(&line.variant_title),
+            0,
+            TierVisibility::Public,
+            Vec::new(),
+        )
+        .map_err(template_membership_error)?;
+        if catalog
+            .tier_for_entitlement(&tier.entitlement_key)
+            .is_none()
+        {
+            catalog
+                .register_tier(tier)
+                .map_err(template_membership_error)?;
+        }
+    }
+    Ok(catalog)
+}
+
+fn storefront_membership_outcomes(
+    order: &StorefrontOrderSnapshot,
+) -> Result<Vec<davenda_commerce::OrderOutcome>, TemplateModelError> {
+    order
+        .lines
+        .iter()
+        .filter(|line| line.product_kind == "membership")
+        .filter_map(|line| {
+            line.entitlement_key.as_deref().map(|entitlement_key| {
+                EntitlementKey::new(entitlement_key.to_string())
+                    .map(
+                        |entitlement_key| davenda_commerce::OrderOutcome::GrantMembership {
+                            entitlement_key,
+                            quantity: line.quantity,
+                        },
+                    )
+                    .map_err(template_commerce_error)
+            })
+        })
+        .collect()
+}
+
+fn storefront_member_account_id(
+    snapshot: &StorefrontStateSnapshot,
+) -> Result<MemberAccountId, TemplateModelError> {
+    let raw = snapshot
+        .principal_id
+        .clone()
+        .unwrap_or_else(|| format!("session-{}", snapshot.session_id));
+    MemberAccountId::new(sanitize_membership_token(&raw)).map_err(template_membership_error)
+}
+
+fn sanitize_membership_token(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn infer_membership_interval(variant_title: &str) -> BillingInterval {
+    let normalized = variant_title.to_ascii_lowercase();
+    if normalized.contains("month") {
+        BillingInterval::Monthly
+    } else if normalized.contains("quarter") {
+        BillingInterval::Quarterly
+    } else {
+        BillingInterval::Annual
+    }
 }
 
 fn account_state_summary(base: &str, latest_order: Option<&StorefrontOrderSnapshot>) -> String {
@@ -1230,8 +1711,7 @@ fn storefront_fixture(locale: &str) -> Result<StorefrontFixture, TemplateModelEr
             handle: "events",
             title: "Events",
             href: "/shop/collections/events",
-            summary:
-                "Bookable offers and event-linked passes surfaced alongside editorial content.",
+            summary: "Bookable offers and event-linked passes surfaced alongside editorial content.",
             label: "Event-led offer",
         },
     ];

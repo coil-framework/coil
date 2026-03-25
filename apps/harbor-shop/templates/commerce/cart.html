@@ -43,7 +43,7 @@
       <div class="cart-page__grid">
         <section class="cart-card">
           <h2>Items</h2>
-          <form class="commerce-form cart-update-form" action="/cart" method="post">
+          <form class="commerce-form cart-update-form" action="/cart" method="post" dv:if="${hasCartItems}">
             <input type="hidden" name="cart_action" value="update" />
             <ul class="cart-lines">
               <li class="cart-line" dv:each="item : ${cartItems}">
@@ -71,17 +71,31 @@
               <button class="button button--secondary" type="submit">Update cart</button>
             </div>
           </form>
+          <div class="cart-card__empty" dv:unless="${hasCartItems}">
+            <p>Your cart is empty right now.</p>
+            <p>Browse the catalog, add a product, then return here to review totals before checkout.</p>
+            <div class="cart-page__actions">
+              <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+                Browse storefront
+              </a>
+            </div>
+          </div>
         </section>
         <aside class="cart-card">
           <h2>Summary</h2>
           <p><span>Subtotal</span><strong dv:text="${cartSummary.subtotal}">GBP 118</strong></p>
           <p><span>Delivery</span><strong dv:text="${cartSummary.shipping}">GBP 0</strong></p>
           <p><span>Total</span><strong dv:text="${cartSummary.total}">GBP 118</strong></p>
-          <div class="cart-page__actions">
+          <div class="cart-page__actions" dv:if="${hasCartItems}">
             <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
               <input type="hidden" name="cart_intent" value="reviewed" />
               <button class="button" type="submit">Checkout</button>
             </form>
+            <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Continue shopping
+            </a>
+          </div>
+          <div class="cart-page__actions" dv:unless="${hasCartItems}">
             <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
               Continue shopping
             </a>

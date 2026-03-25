@@ -72,6 +72,9 @@ tenant_id = 101
 [modules]
 enabled = ["cms", "media", "commerce", "memberships", "events", "admin", "ops"]
 
+[modules.commerce]
+payment_webhook_secret = { kind = "env", var = "PAYMENT_WEBHOOK_SECRET" }
+
 [wasm]
 directory = "apps/harbor-shop/extensions"
 default_time_limit_ms = 50

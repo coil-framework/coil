@@ -1,0 +1,60 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Pages'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Pages</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Content operations</p>
+        <h1 dv:text="${page.title}">Pages</h1>
+        <p dv:text="${page.summary}">
+          Live page inventory and publication state.
+        </p>
+        <p>
+          The Harbor Shop sample app does not persist CMS records yet. This route reflects the
+          live page inventory that operators can actually send customers to today.
+        </p>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasContentPages}">
+        <p class="admin-panel__eyebrow">Pages</p>
+        <div class="admin-card-grid">
+          <article class="admin-card" dv:each="pageRecord : ${contentPages}">
+            <p class="admin-card__eyebrow" dv:text="${pageRecord.surface}">public</p>
+            <h2 dv:text="${pageRecord.title}">Home</h2>
+            <p dv:text="${pageRecord.summary}">
+              Page summary
+            </p>
+            <a class="button" href="/" dv:attr="href=${pageRecord.href}">
+              Open route
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" dv:unless="${hasContentPages}">
+        <p class="admin-panel__eyebrow">Pages</p>
+        <h2>No content pages yet</h2>
+        <p dv:text="${pagesEmptyText}">
+          The current Harbor Shop sample app does not persist CMS page records yet.
+        </p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

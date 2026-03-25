@@ -1,0 +1,56 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Orders'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Orders</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Commerce operations</p>
+        <h1 dv:text="${page.title}">Orders</h1>
+        <p dv:text="${page.summary}">
+          Operator order queue and payment history.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
+        </p>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasRecentOrders}">
+        <p class="admin-panel__eyebrow">Recent orders</p>
+        <ol class="admin-panel__list">
+          <li dv:each="order : ${recentOrders}">
+            <div>
+              <strong dv:text="${order.reference}">ORD-10042</strong>
+              <span dv:text="${order.status}">Paid</span>
+            </div>
+            <p dv:text="${order.total}">£0.00</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="admin-panel" dv:unless="${hasRecentOrders}">
+        <p class="admin-panel__eyebrow">Recent orders</p>
+        <h2>No completed orders yet</h2>
+        <p dv:text="${ordersEmptyText}">
+          No completed orders have been captured in the checked-in sample app yet.
+        </p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

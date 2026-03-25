@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -28,14 +28,20 @@ pub enum StorefrontStateError {
     InvalidPaymentLast4,
     #[error("checkout completion requires a payment intent reference")]
     MissingPaymentIntent,
-    #[error(
-        "checkout intent `{received}` does not match the reserved payment intent `{expected}`"
-    )]
+    #[error("checkout intent `{received}` does not match the reserved payment intent `{expected}`")]
     PaymentIntentMismatch { expected: String, received: String },
     #[error("checkout for session `{session_id}` is not ready for payment")]
     CheckoutNotReady { session_id: String },
     #[error("cart for session `{session_id}` is empty")]
     EmptyCart { session_id: String },
+    #[error("payment reference `{payment_reference}` does not match any storefront order")]
+    UnknownPaymentReference { payment_reference: String },
+    #[error("unknown storefront payment webhook event `{event}`")]
+    UnknownPaymentWebhookEvent { event: String },
+    #[error("payment webhook verification failed")]
+    InvalidPaymentWebhookSignature,
+    #[error("payment webhook secret is not configured")]
+    MissingPaymentWebhookSecret,
     #[error("failed to serialize storefront state: {reason}")]
     Serialization { reason: String },
     #[error("failed to initialize storefront state store `{path}`: {reason}")]
@@ -186,11 +192,20 @@ pub struct StorefrontOrderHistoryResponse {
     pub orders: Vec<StorefrontOrderSnapshot>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorefrontPaymentWebhookReceipt {
+    pub order: StorefrontOrderSnapshot,
+    pub needs_paid_event_dispatch: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct StorefrontResponseAugmentation {
     pub html_fragment: Option<String>,
     pub headers: BTreeMap<String, String>,
 }
+
+const ACCOUNT_SESSION_END_ACTION: &str = "commerce.account-session-end";
+const ACCOUNT_SESSION_END_PATH: &str = "/account/session/end";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorefrontFormState {
@@ -329,6 +344,7 @@ impl StorefrontStateStore {
                     line_count INTEGER NOT NULL,
                     subtotal_minor INTEGER NOT NULL,
                     total_minor INTEGER NOT NULL,
+                    order_paid_event_dispatched_at_unix_seconds INTEGER,
                     created_at_unix_seconds INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS order_lines (
@@ -687,12 +703,168 @@ impl StorefrontStateStore {
         })
     }
 
+    pub fn apply_payment_webhook(
+        &self,
+        payment_reference: &str,
+        event: &str,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontPaymentWebhookReceipt, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront payment-webhook transaction: {error}"
+            ))
+        })?;
+
+        let Some((
+            order_id,
+            session_id,
+            principal_id,
+            current_status,
+            payment_status,
+            paid_event_dispatched_at,
+        )) =
+            self.load_order_header_by_payment_reference(&tx, payment_reference)?
+        else {
+            return Err(StorefrontStateError::UnknownPaymentReference {
+                payment_reference: payment_reference.to_string(),
+            });
+        };
+
+        let payment_is_final = payment_status == "captured";
+        let (next_status, next_payment_status) = match event {
+            "payment.captured" | "payment.succeeded" | "commerce.order.paid" => (
+                if current_status == "fulfilled" {
+                    current_status.clone()
+                } else {
+                    "paid".to_string()
+                },
+                "captured".to_string(),
+            ),
+            "payment.authorized" => {
+                if payment_is_final {
+                    (current_status.clone(), payment_status.clone())
+                } else {
+                    (current_status.clone(), "authorized".to_string())
+                }
+            }
+            "payment.failed" => {
+                if payment_is_final {
+                    (current_status.clone(), payment_status.clone())
+                } else {
+                    ("pending_payment".to_string(), "failed".to_string())
+                }
+            }
+            other => {
+                return Err(StorefrontStateError::UnknownPaymentWebhookEvent {
+                    event: other.to_string(),
+                });
+            }
+        };
+        let needs_paid_event_dispatch = next_payment_status == "captured"
+            && matches!(next_status.as_str(), "paid" | "fulfilled")
+            && paid_event_dispatched_at.is_none();
+
+        if current_status != next_status || payment_status != next_payment_status {
+            tx.execute(
+                r#"
+                UPDATE orders
+                SET status = ?2,
+                    payment_status = ?3
+                WHERE order_id = ?1
+                "#,
+                params![order_id, next_status, next_payment_status],
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to update storefront order payment state: {error}"
+                ))
+            })?;
+        }
+
+        let cart_payment = self.load_cart_payment(&tx, session_id.as_str())?;
+        self.touch_cart(
+            &tx,
+            session_id.as_str(),
+            principal_id.as_deref(),
+            "completed",
+            now_unix_seconds,
+        )?;
+        self.update_cart_payment(
+            &tx,
+            session_id.as_str(),
+            next_payment_status.as_str(),
+            cart_payment.method.as_deref(),
+            cart_payment.last4.as_deref(),
+            cart_payment.checkout_email.as_deref(),
+            Some(payment_reference),
+        )?;
+
+        let order = self
+            .load_order_by_id(&tx, order_id.as_str())
+            .map_err(|error| {
+                query_error(format!("failed to load updated storefront order: {error}"))
+            })?
+            .ok_or_else(|| {
+                query_error(format!(
+                    "updated storefront order `{order_id}` could not be reloaded"
+                ))
+            })?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront payment-webhook transaction: {error}"
+            ))
+        })?;
+        Ok(StorefrontPaymentWebhookReceipt {
+            order,
+            needs_paid_event_dispatch,
+        })
+    }
+
+    pub fn mark_order_paid_event_dispatched(
+        &self,
+        order_id: &str,
+        now_unix_seconds: u64,
+    ) -> Result<(), StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront paid-event-dispatch transaction: {error}"
+            ))
+        })?;
+        tx.execute(
+            r#"
+            UPDATE orders
+            SET order_paid_event_dispatched_at_unix_seconds = COALESCE(
+                order_paid_event_dispatched_at_unix_seconds,
+                ?2
+            )
+            WHERE order_id = ?1
+            "#,
+            params![order_id, saturating_i64(now_unix_seconds)],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to mark storefront order paid event dispatched: {error}"
+            ))
+        })?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront paid-event-dispatch transaction: {error}"
+            ))
+        })?;
+        Ok(())
+    }
+
     pub fn build_response_augmentation(
         &self,
         route_name: &str,
         snapshot: &StorefrontStateSnapshot,
         csrf_tokens: BTreeMap<String, String>,
     ) -> Result<StorefrontResponseAugmentation, StorefrontStateError> {
+        let account_session_end_markup = csrf_tokens
+            .get(ACCOUNT_SESSION_END_ACTION)
+            .map(|token| account_session_end_form_markup(token));
         let payload = serde_json::to_string(&serde_json::json!({
             "route": route_name,
             "sessionId": snapshot.session_id,
@@ -707,9 +879,12 @@ impl StorefrontStateStore {
             reason: error.to_string(),
         })?;
         let escaped = payload.replace("</script", "<\\/script");
-        let html_fragment = Some(format!(
+        let mut html_fragment = format!(
             r#"<script id="davenda-storefront-state" type="application/json">{escaped}</script>"#
-        ));
+        );
+        if let Some(markup) = account_session_end_markup {
+            html_fragment.push_str(&markup);
+        }
         let mut headers = BTreeMap::new();
         headers.insert(
             "x-davenda-storefront-cart-items".to_string(),
@@ -760,7 +935,7 @@ impl StorefrontStateStore {
             );
         }
         Ok(StorefrontResponseAugmentation {
-            html_fragment,
+            html_fragment: Some(html_fragment),
             headers,
         })
     }
@@ -1248,6 +1423,147 @@ impl StorefrontStateStore {
             })?
             .collect()
     }
+
+    fn load_order_header_by_payment_reference(
+        &self,
+        tx: &Transaction<'_>,
+        payment_reference: &str,
+    ) -> Result<
+        Option<(String, String, Option<String>, String, String, Option<i64>)>,
+        StorefrontStateError,
+    >
+    {
+        tx.query_row(
+            r#"
+            SELECT
+                order_id,
+                session_id,
+                principal_id,
+                status,
+                payment_status,
+                order_paid_event_dispatched_at_unix_seconds
+            FROM orders
+            WHERE payment_reference = ?1
+            ORDER BY created_at_unix_seconds DESC, order_id DESC
+            LIMIT 1
+            "#,
+            params![payment_reference],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| {
+            query_error(format!(
+                "failed to load storefront order by payment reference: {error}"
+            ))
+        })
+    }
+
+    fn load_order_by_id(
+        &self,
+        tx: &Transaction<'_>,
+        order_id: &str,
+    ) -> rusqlite::Result<Option<StorefrontOrderSnapshot>> {
+        let order_header = tx
+            .query_row(
+                r#"
+                SELECT
+                    order_id, session_id, principal_id, status, payment_status,
+                    payment_method, payment_reference, payment_last4, checkout_email,
+                    currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
+                FROM orders
+                WHERE order_id = ?1
+                "#,
+                params![order_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, i64>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, i64>(12)?,
+                        row.get::<_, i64>(13)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let Some((
+            order_id,
+            session_id,
+            principal_id,
+            status,
+            payment_status,
+            payment_method,
+            payment_reference,
+            payment_last4,
+            checkout_email,
+            currency,
+            line_count_i64,
+            subtotal_minor,
+            total_minor,
+            created_i64,
+        )) = order_header
+        else {
+            return Ok(None);
+        };
+
+        let lines = self.load_order_lines(tx, order_id.as_str())?;
+        Ok(Some(StorefrontOrderSnapshot {
+            order_id,
+            session_id,
+            principal_id,
+            status,
+            payment: StorefrontPaymentSnapshot {
+                status: payment_status,
+                method: payment_method,
+                reference: payment_reference,
+                last4: payment_last4,
+                checkout_email,
+            },
+            currency,
+            line_count: u32::try_from(line_count_i64)
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(10, line_count_i64))?,
+            subtotal_minor,
+            total_minor,
+            subtotal: format_minor_currency(subtotal_minor),
+            total: format_minor_currency(total_minor),
+            created_at_unix_seconds: u64::try_from(created_i64)
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(13, created_i64))?,
+            lines,
+        }))
+    }
+}
+
+fn account_session_end_form_markup(token: &str) -> String {
+    let escaped = escape_html_attribute(token);
+    format!(
+        r#"<form id="davenda-account-session-end" action="{ACCOUNT_SESSION_END_PATH}" method="post" hidden><input type="hidden" name="_csrf" value="{escaped}" /></form>"#
+    )
+}
+
+fn escape_html_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn next_order_id(tx: &Transaction<'_>) -> Result<String, StorefrontStateError> {
@@ -1327,6 +1643,7 @@ fn ensure_storefront_columns(connection: &Connection) -> Result<(), StorefrontSt
             "payment_reference TEXT",
             "payment_last4 TEXT",
             "checkout_email TEXT",
+            "order_paid_event_dispatched_at_unix_seconds INTEGER",
         ],
     )?;
     Ok(())

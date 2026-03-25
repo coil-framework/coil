@@ -1,0 +1,52 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Navigation'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Navigation</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Content operations</p>
+        <h1 dv:text="${page.title}">Navigation</h1>
+        <p dv:text="${page.summary}">
+          Navigation trees and top-level route links.
+        </p>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasNavigationItems}">
+        <p class="admin-panel__eyebrow">Primary navigation</p>
+        <ul class="admin-panel__list">
+          <li dv:each="item : ${navigationItems}">
+            <div>
+              <strong dv:text="${item.label}">Home</strong>
+              <span dv:text="${item.href}">/</span>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="admin-panel" dv:unless="${hasNavigationItems}">
+        <p class="admin-panel__eyebrow">Primary navigation</p>
+        <h2>No navigation items yet</h2>
+        <p dv:text="${navigationEmptyText}">
+          Primary navigation is not configured yet.
+        </p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

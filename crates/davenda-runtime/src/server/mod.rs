@@ -11,6 +11,7 @@ use axum::http::Request;
 use axum::response::Response;
 use axum::routing::any;
 use axum::{Router, serve};
+use davenda_config::{PlatformConfig, SecretRef};
 
 mod auth;
 mod backend;
@@ -59,6 +60,10 @@ pub enum RuntimeServerError {
     BrowserHostBuild(#[from] BrowserHostBuildError),
     #[error(transparent)]
     Storefront(#[from] StorefrontStateError),
+    #[error(transparent)]
+    Jobs(#[from] RuntimeJobsError),
+    #[error("server configuration is invalid: {reason}")]
+    Configuration { reason: String },
     #[error("request body exceeds configured maximum of {limit} bytes")]
     RequestBodyTooLarge { limit: usize },
     #[error("live request authorization failed: {reason}")]
@@ -74,6 +79,7 @@ pub(crate) struct RuntimeServerState {
     storefront: StorefrontStateStore,
     cookie_secret: Vec<u8>,
     csrf_secret: Vec<u8>,
+    payment_webhook_secret: Option<String>,
     backends: SharedBackendClients,
     route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
     auth_explainer: Option<Arc<dyn auth::LiveAuthExplainer>>,
@@ -100,6 +106,7 @@ impl HttpServerHost {
         plan: RuntimePlan,
         backends: SharedBackendClients,
         wasm_secrets: BTreeMap<String, String>,
+        payment_webhook_secret: Option<String>,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
     ) -> Result<Self, RuntimeServerError> {
@@ -140,6 +147,7 @@ impl HttpServerHost {
             wasm_host,
             storefront,
             backends,
+            payment_webhook_secret,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -170,6 +178,7 @@ impl HttpServerHost {
             wasm_host,
             storefront,
             backends,
+            None,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -195,6 +204,7 @@ impl HttpServerHost {
             wasm_host,
             storefront,
             backends,
+            None,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -220,6 +230,7 @@ impl HttpServerHost {
             wasm_host,
             storefront,
             backends,
+            None,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -233,6 +244,7 @@ impl HttpServerHost {
         wasm_host: WasmHost,
         storefront: StorefrontStateStore,
         backends: SharedBackendClients,
+        payment_webhook_secret: Option<String>,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
         route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
@@ -245,6 +257,7 @@ impl HttpServerHost {
             plan,
             cookie_secret,
             csrf_secret,
+            payment_webhook_secret,
             backends,
             route_authorizer,
             auth_explainer,
@@ -321,6 +334,33 @@ impl HttpServerHost {
         .await
         .map_err(std::io::Error::other)
     }
+}
+
+pub(crate) fn resolve_commerce_payment_webhook_secret<R: SecretResolver>(
+    config: &PlatformConfig,
+    resolver: &R,
+) -> Result<Option<String>, RuntimeServerError> {
+    let Some(commerce_settings) = config.modules.settings.get("commerce") else {
+        return Ok(None);
+    };
+    let Some(table) = commerce_settings.as_table() else {
+        return Err(RuntimeServerError::Configuration {
+            reason: "modules.commerce must be a table when provided".to_string(),
+        });
+    };
+    let Some(secret_value) = table.get("payment_webhook_secret") else {
+        return Ok(None);
+    };
+    let secret_ref: SecretRef =
+        secret_value
+            .clone()
+            .try_into()
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!(
+                    "modules.commerce.payment_webhook_secret is invalid: {error}"
+                ),
+            })?;
+    Ok(Some(resolver.resolve(&secret_ref)?))
 }
 
 fn build_auth_explainer(

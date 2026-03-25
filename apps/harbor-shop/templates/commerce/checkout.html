@@ -89,18 +89,10 @@
               <strong dv:text="${item.total}">GBP 48</strong>
             </li>
           </ul>
-          <ul class="checkout-summary" dv:unless="${hasLineItems}">
-            <li>
-              <span>Harbor pantry set</span>
-              <span>1</span>
-              <strong>GBP 48</strong>
-            </li>
-            <li>
-              <span>Weekend market tote</span>
-              <span>1</span>
-              <strong>GBP 22</strong>
-            </li>
-          </ul>
+          <div class="checkout-card__empty" dv:unless="${hasLineItems}">
+            <p>No items are in checkout for this browser session yet.</p>
+            <p>Return to the cart or keep browsing to add products before placing an order.</p>
+          </div>
 
           <div class="checkout-totals">
             <p><span>Subtotal</span><strong dv:text="${orderSummary.subtotal}">GBP 70</strong></p>
@@ -108,7 +100,7 @@
             <p><span>Total</span><strong dv:text="${orderSummary.total}">GBP 76</strong></p>
           </div>
 
-          <div class="checkout-actions">
+          <div class="checkout-actions" dv:if="${hasLineItems}">
             <a class="button button--secondary" href="/cart">Return to cart</a>
             <form class="commerce-form checkout-form" action="/checkout/complete" method="post">
               <div class="checkout-form__grid">
@@ -196,6 +188,12 @@
               </p>
               <button class="button" type="submit" dv:text="${checkout.submitLabel}">Place order</button>
             </form>
+          </div>
+          <div class="checkout-actions" dv:unless="${hasLineItems}">
+            <a class="button button--secondary" href="/cart">Return to cart</a>
+            <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Continue shopping
+            </a>
           </div>
         </aside>
       </div>

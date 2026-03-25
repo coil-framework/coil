@@ -5,6 +5,8 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -21,13 +23,23 @@ const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.checkout-start",
     "commerce.checkout-complete",
     "commerce.checkout-confirmation",
+    "commerce.account-session-end",
 ];
 const STOREFRONT_CSRF_ACTIONS: &[&str] = &[
     "commerce.add-to-cart",
     "commerce.cart-update",
     "commerce.checkout-start",
     "commerce.checkout-complete",
+    "commerce.account-session-end",
 ];
+
+type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VerifiedPaymentWebhook {
+    event: String,
+    payment_reference: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveHttpRequest {
@@ -171,12 +183,16 @@ pub(super) async fn execute_live_request(
             return storefront_order_history_response(state, &request, native_response_cookies);
         }
         authorize_live_request(state, &mut request).await?;
+        let resolved_session = SessionContext {
+            session_id: request.session_id.clone(),
+            resolved_from_cookie: resolved.session.resolved_from_cookie,
+        };
 
         let mut execution =
             state
                 .plan
                 .execute_request(request, &state.cookie_secret, &state.csrf_secret)?;
-        execution.session = resolved.session;
+        execution.session = resolved_session;
         if execution.principal.principal_id.is_none() {
             execution.principal.principal_id = resolved.principal_id;
         }
@@ -237,8 +253,14 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
             | StorefrontStateError::MissingPaymentIntent
             | StorefrontStateError::PaymentIntentMismatch { .. }
             | StorefrontStateError::CheckoutNotReady { .. }
-            | StorefrontStateError::EmptyCart { .. },
+            | StorefrontStateError::EmptyCart { .. }
+            | StorefrontStateError::UnknownPaymentReference { .. }
+            | StorefrontStateError::UnknownPaymentWebhookEvent { .. }
+            | StorefrontStateError::InvalidPaymentWebhookSignature,
         ) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret) => {
+            (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response()
+        }
         RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
             (StatusCode::NOT_FOUND, "not found").into_response()
         }
@@ -504,6 +526,32 @@ fn storefront_redirect_response(location: &str, response_cookies: &[String]) -> 
     response
 }
 
+fn revoke_storefront_session(
+    state: &RuntimeServerState,
+    session_id: &str,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<(), RuntimeServerError> {
+    let clear_cookie = {
+        let mut browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        match browser.revoke_session(session_id, now) {
+            Ok(()) => {}
+            Err(
+                RuntimeBrowserError::UnknownSession { .. }
+                | RuntimeBrowserError::ExpiredSession { .. }
+                | RuntimeBrowserError::RevokedSession { .. },
+            ) => {}
+            Err(error) => return Err(RequestExecutionError::from_browser_error(error).into()),
+        }
+        browser.clear_session_cookie_header()
+    };
+    response_cookies.push(clear_cookie);
+    Ok(())
+}
+
 fn parse_quantity_field(value: Option<&str>) -> Option<u32> {
     value.and_then(|raw| raw.trim().parse::<u32>().ok())
 }
@@ -648,11 +696,11 @@ fn validated_storefront_payment_input_from_execution(
     {
         has_errors = true;
         form_state = form_state
-        .with_summary("Refresh checkout before placing the order.")
-        .with_field_error(
-            "checkout_intent",
-            "Refresh checkout and try again before placing the order.",
-        );
+            .with_summary("Refresh checkout before placing the order.")
+            .with_field_error(
+                "checkout_intent",
+                "Refresh checkout and try again before placing the order.",
+            );
     }
     if execution_form_field(execution, "terms_accepted").is_none() {
         has_errors = true;
@@ -707,6 +755,67 @@ fn validated_storefront_payment_input_from_execution(
     })
 }
 
+fn validated_payment_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<VerifiedPaymentWebhook, RuntimeServerError> {
+    let provider = execution_form_field(execution, "provider")
+        .unwrap_or("generic")
+        .trim()
+        .to_ascii_lowercase();
+    let event = execution_form_field(execution, "event")
+        .or_else(|| execution_form_field(execution, "payment_event"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentWebhookEvent {
+                event: "<missing>".to_string(),
+            })
+        })?;
+    let payment_reference = execution_form_field(execution, "payment_reference")
+        .or_else(|| execution_form_field(execution, "paymentReference"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentReference {
+                payment_reference: "<missing>".to_string(),
+            })
+        })?;
+    let signature = execution_form_field(execution, "signature")
+        .or_else(|| execution_form_field(execution, "webhook_signature"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ))?;
+    let secret = state
+        .payment_webhook_secret
+        .as_deref()
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::MissingPaymentWebhookSecret,
+        ))?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| {
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret)
+    })?;
+    mac.update(provider.as_bytes());
+    mac.update(b":");
+    mac.update(event.as_bytes());
+    mac.update(b":");
+    mac.update(payment_reference.as_bytes());
+    let expected = format!("{:x}", mac.finalize().into_bytes());
+    if expected != signature {
+        return Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ));
+    }
+    Ok(VerifiedPaymentWebhook {
+        event,
+        payment_reference,
+    })
+}
+
 fn storefront_payment_input_from_execution(
     execution: &RequestExecution,
 ) -> Result<StorefrontPaymentInput, RuntimeServerError> {
@@ -741,6 +850,22 @@ fn apply_native_storefront_mutations(
     now: BrowserInstant,
     response_cookies: &mut Vec<String>,
 ) -> Result<Option<String>, RuntimeServerError> {
+    if execution.route.route_name.as_str() == "commerce.payment-provider-webhook" {
+        let webhook = validated_payment_webhook_from_execution(state, execution)?;
+        let receipt = state.storefront.apply_payment_webhook(
+            webhook.payment_reference.as_str(),
+            webhook.event.as_str(),
+            now.as_unix_seconds(),
+        )?;
+        if receipt.needs_paid_event_dispatch {
+            dispatch_paid_order_event(state, &receipt.order, now)?;
+            state
+                .storefront
+                .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())?;
+        }
+        return Ok(None);
+    }
+
     let Some(session_id) = execution.session.session_id.as_deref() else {
         return Ok(None);
     };
@@ -884,9 +1009,42 @@ fn apply_native_storefront_mutations(
                 });
             push_storefront_flash(state, response_cookies, FlashLevel::Success, message)?;
         }
+        "commerce.account-session-end" => {
+            revoke_storefront_session(state, session_id, now, response_cookies)?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Account session ended. Start again from this browser when you are ready.",
+            )?;
+            return Ok(Some("/account".to_string()));
+        }
         _ => {}
     }
     Ok(None)
+}
+
+fn dispatch_paid_order_event(
+    state: &RuntimeServerState,
+    order: &StorefrontOrderSnapshot,
+    now: BrowserInstant,
+) -> Result<(), RuntimeServerError> {
+    let mut jobs = state.plan.jobs_host("runtime-http")?;
+    let payment_reference = order
+        .payment
+        .reference
+        .as_deref()
+        .unwrap_or(order.order_id.as_str());
+    let _ = jobs.emit_domain_event(
+        DomainEventDispatchRequest::new(
+            "commerce.order.paid",
+            "order",
+            order.order_id.clone(),
+            format!("payment provider confirmed {payment_reference}"),
+        )?,
+        JobInstant::from_unix_seconds(now.as_unix_seconds()),
+    )?;
+    Ok(())
 }
 
 fn execution_form_field<'a>(execution: &'a RequestExecution, name: &str) -> Option<&'a str> {

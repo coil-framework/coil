@@ -107,6 +107,26 @@ pub(crate) async fn serve_diagnostics_probe(
     State(state): State<Arc<RuntimeServerState>>,
 ) -> Response<Body> {
     let backends = &state.backends;
+    let webhook_handlers = state
+        .plan
+        .extension_registry
+        .registered_handlers()
+        .iter()
+        .filter(|handler| handler.point == ExtensionPointKind::Webhook)
+        .map(|handler| {
+            let event = handler
+                .selector
+                .split_once('/')
+                .map(|(_, event)| event.to_string())
+                .unwrap_or_else(|| handler.selector.clone());
+            json!({
+                "extension_id": handler.extension_id.to_string(),
+                "handler_id": handler.handler_id.to_string(),
+                "source": handler.surface,
+                "event": event,
+            })
+        })
+        .collect::<Vec<_>>();
     let metadata_audit = match state.wasm_host.metadata_audit_snapshot(25) {
         Ok(snapshot) => json!({
             "backend": snapshot.backend.as_str(),
@@ -133,6 +153,39 @@ pub(crate) async fn serve_diagnostics_probe(
             "backend": state.wasm_host.metadata_audit_backend_kind(),
             "shared_namespace": state.plan.shared_backend_namespace(),
             "location": state.wasm_host.metadata_audit_location(),
+            "error": error,
+        }),
+    };
+    let webhook_observation = match state.wasm_host.webhook_observation_snapshot(100) {
+        Ok(snapshot) => json!({
+            "backend": snapshot.backend.as_str(),
+            "location": snapshot.location,
+            "path": snapshot.path.as_ref().map(|path| path.display().to_string()),
+            "entry_count": snapshot.entry_count,
+            "status_counts": {
+                "accepted": snapshot.status_counts.accepted,
+                "verification_failed": snapshot.status_counts.verification_failed,
+                "replay_rejected": snapshot.status_counts.replay_rejected,
+                "execution_failed": snapshot.status_counts.execution_failed,
+            },
+            "recent_events": snapshot
+                .recent_events
+                .into_iter()
+                .map(|record| json!({
+                    "id": record.id,
+                    "recorded_at_unix_seconds": record.recorded_at_unix_seconds,
+                    "app_id": record.app_id,
+                    "source": record.source,
+                    "event": record.event,
+                    "status": record.status.as_str(),
+                    "trace_id": record.trace_id,
+                    "principal_kind": record.principal_kind,
+                    "principal_id": record.principal_id,
+                    "detail": record.detail,
+                }))
+                .collect::<Vec<_>>(),
+        }),
+        Err(error) => json!({
             "error": error,
         }),
     };
@@ -190,6 +243,12 @@ pub(crate) async fn serve_diagnostics_probe(
                         "credential_reference": backend.credential_reference,
                         "local_root": backend.local_root,
                     })),
+            },
+            "extensions": {
+                "webhooks": {
+                    "registered_handlers": webhook_handlers,
+                    "observability": webhook_observation,
+                }
             },
             "metadata": metadata_audit,
         }),

@@ -1,0 +1,66 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Harbor Shop Admin'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Harbor Shop Admin</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operator dashboard</p>
+        <h1 dv:text="${page.title}">Harbor Shop Admin</h1>
+        <p dv:text="${page.summary}">
+          Operator overview for catalog, orders, and content.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
+        </p>
+        <p dv:unless="${operator.hasPrincipal}">
+          This operator view is using the current browser session.
+        </p>
+      </section>
+
+      <section class="admin-metrics">
+        <article class="admin-metric">
+          <p class="admin-metric__label">Catalog products</p>
+          <strong dv:text="${catalogCount}">3</strong>
+        </article>
+        <article class="admin-metric">
+          <p class="admin-metric__label">Recent orders</p>
+          <strong dv:text="${orderCount}">2</strong>
+        </article>
+        <article class="admin-metric">
+          <p class="admin-metric__label">Content routes</p>
+          <strong dv:text="${contentCount}">6</strong>
+        </article>
+      </section>
+
+      <section class="admin-panels">
+        <article class="admin-panel" dv:each="panel : ${adminPanels}">
+          <p class="admin-panel__eyebrow" dv:text="${panel.label}">Inspect products and collections</p>
+          <h2 dv:text="${panel.title}">Catalog</h2>
+          <p dv:text="${panel.summary}">
+            Products and collections represented in the sample app.
+          </p>
+          <a class="button" href="/admin/catalog/products" dv:attr="href=${panel.href}">
+            Open panel
+          </a>
+        </article>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

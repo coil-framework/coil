@@ -14,6 +14,7 @@ davenda-core = { path = "../davenda-core" }
 davenda-data = { path = "../davenda-data" }
 davenda-i18n = { path = "../davenda-i18n" }
 davenda-jobs = { path = "../davenda-jobs" }
+davenda-memberships = { path = "../davenda-memberships" }
 davenda-observability = { path = "../davenda-observability" }
 davenda-ops = { path = "../davenda-ops" }
 davenda-seo = { path = "../davenda-seo" }
@@ -21,6 +22,7 @@ davenda-storage = { path = "../davenda-storage" }
 davenda-template = { path = "../davenda-template" }
 davenda-tls = { path = "../davenda-tls" }
 davenda-wasm = { path = "../davenda-wasm" }
+hmac = "0.12"
 ipnet = "2"
 rusqlite = { version = "0.30", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }

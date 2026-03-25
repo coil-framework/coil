@@ -1,0 +1,52 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Redirects'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Redirects</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Content operations</p>
+        <h1 dv:text="${page.title}">Redirects</h1>
+        <p dv:text="${page.summary}">
+          Redirect rules and route handoff records.
+        </p>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasRedirects}">
+        <p class="admin-panel__eyebrow">Redirect rules</p>
+        <ul class="admin-panel__list">
+          <li dv:each="redirect : ${redirects}">
+            <div>
+              <strong dv:text="${redirect.from}">/legacy/home</strong>
+              <span dv:text="${redirect.to}">/</span>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="admin-panel" dv:unless="${hasRedirects}">
+        <p class="admin-panel__eyebrow">Redirect rules</p>
+        <h2>No redirect rules configured</h2>
+        <p dv:text="${redirectsEmptyText}">
+          Redirect rules are not configured yet in the sample app.
+        </p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

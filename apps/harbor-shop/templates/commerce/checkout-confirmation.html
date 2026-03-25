@@ -17,7 +17,7 @@
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main account-page">
-      <section class="account-page__intro">
+      <section class="account-page__intro" dv:if="${hasConfirmation}">
         <p class="account-page__eyebrow">Confirmation</p>
         <h1>Order received</h1>
         <p class="checkout-confirmation__order">
@@ -50,6 +50,23 @@
         </ul>
         <div class="checkout-actions">
           <a class="button" href="/account">View account</a>
+          <a
+            class="button button--secondary"
+            href="/en-GB/shop"
+            dv:attr="href=${links.catalog}"
+          >
+            Continue shopping
+          </a>
+        </div>
+      </section>
+      <section class="account-page__intro" dv:unless="${hasConfirmation}">
+        <p class="account-page__eyebrow">Confirmation</p>
+        <h1>No recent order to confirm</h1>
+        <p dv:text="${confirmation.nextStep}">
+          There is no recent checkout confirmation for this browser session yet.
+        </p>
+        <div class="checkout-actions">
+          <a class="button" href="/cart">Return to cart</a>
           <a
             class="button button--secondary"
             href="/en-GB/shop"

@@ -1395,18 +1395,21 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
         .checkout_start("session-live-1", Some("member-live-1"), 102)
         .unwrap();
     assert_eq!(snapshot.cart.status, "checkout");
+    assert_eq!(snapshot.payment.status, "ready_for_payment");
+    assert_eq!(snapshot.payment.reference.as_deref(), Some("PAY-50001"));
 
     let snapshot = store
         .checkout_complete(
             "session-live-1",
             Some("member-live-1"),
-            &StorefrontPaymentInput::card("member-live-1@example.com", "4242").unwrap(),
+            &StorefrontPaymentInput::card("member-live-1@example.com", "4242", "PAY-50001")
+                .unwrap(),
             103,
         )
         .unwrap();
     assert_eq!(snapshot.cart.item_count, 0);
     assert_eq!(snapshot.cart.status, "completed");
-    assert_eq!(snapshot.payment.status, "captured");
+    assert_eq!(snapshot.payment.status, "provider_pending");
     assert_eq!(snapshot.payment.method.as_deref(), Some("card"));
     assert_eq!(snapshot.payment.last4.as_deref(), Some("4242"));
     assert_eq!(
@@ -1432,6 +1435,13 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
         snapshot
             .latest_order
             .as_ref()
+            .map(|order| order.status.as_str()),
+        Some("pending_payment")
+    );
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
             .and_then(|order| order.payment.reference.as_deref()),
         Some("PAY-50001")
     );
@@ -1452,6 +1462,127 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
     assert!(snapshot.cart.lines.is_empty());
     assert_eq!(snapshot.cart.status, "completed");
     assert_eq!(snapshot.payment.reference.as_deref(), Some("PAY-50001"));
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn storefront_payment_webhook_captures_pending_orders_and_marks_dispatch_once() {
+    let root = unique_temp_template_root("storefront-payment-webhook");
+    let _ = fs::remove_dir_all(&root);
+    let store = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
+
+    store
+        .add_to_cart(
+            "session-payment-1",
+            Some("member-live-1"),
+            "membership-gold",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start("session-payment-1", Some("member-live-1"), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            "session-payment-1",
+            Some("member-live-1"),
+            &StorefrontPaymentInput::card("member-live-1@example.com", "4242", "PAY-50001")
+                .unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let captured = store
+        .apply_payment_webhook("PAY-50001", "payment.captured", 103)
+        .unwrap();
+    assert_eq!(captured.order.order_id, "ORD-10042");
+    assert_eq!(captured.order.status, "paid");
+    assert_eq!(captured.order.payment.status, "captured");
+    assert_eq!(captured.order.payment.method.as_deref(), Some("card"));
+    assert_eq!(captured.order.payment.last4.as_deref(), Some("4242"));
+    assert_eq!(
+        captured.order.payment.checkout_email.as_deref(),
+        Some("member-live-1@example.com")
+    );
+    assert!(captured.needs_paid_event_dispatch);
+
+    store
+        .mark_order_paid_event_dispatched(&captured.order.order_id, 104)
+        .unwrap();
+
+    let repeated = store
+        .apply_payment_webhook("PAY-50001", "payment.captured", 105)
+        .unwrap();
+    assert_eq!(repeated.order.status, "paid");
+    assert_eq!(repeated.order.payment.status, "captured");
+    assert_eq!(repeated.order.payment.method.as_deref(), Some("card"));
+    assert_eq!(repeated.order.payment.last4.as_deref(), Some("4242"));
+    assert_eq!(
+        repeated.order.payment.checkout_email.as_deref(),
+        Some("member-live-1@example.com")
+    );
+    assert!(!repeated.needs_paid_event_dispatch);
+
+    let snapshot = store
+        .snapshot("session-payment-1", Some("member-live-1"))
+        .unwrap();
+    assert_eq!(snapshot.payment.status, "captured");
+    assert_eq!(snapshot.payment.method.as_deref(), Some("card"));
+    assert_eq!(snapshot.payment.last4.as_deref(), Some("4242"));
+    assert_eq!(
+        snapshot.payment.checkout_email.as_deref(),
+        Some("member-live-1@example.com")
+    );
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
+            .map(|order| order.status.as_str()),
+        Some("paid")
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn storefront_checkout_completion_rejects_mismatched_payment_intent() {
+    let root = unique_temp_template_root("storefront-payment-intent");
+    let _ = fs::remove_dir_all(&root);
+    let store = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
+
+    store
+        .add_to_cart(
+            "session-intent-1",
+            Some("member-live-1"),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    let snapshot = store
+        .checkout_start("session-intent-1", Some("member-live-1"), 101)
+        .unwrap();
+    assert_eq!(snapshot.payment.reference.as_deref(), Some("PAY-50001"));
+
+    let error = store
+        .checkout_complete(
+            "session-intent-1",
+            Some("member-live-1"),
+            &StorefrontPaymentInput::card("member-live-1@example.com", "4242", "PAY-99999")
+                .unwrap(),
+            102,
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        StorefrontStateError::PaymentIntentMismatch {
+            expected,
+            received,
+        } if expected == "PAY-50001" && received == "PAY-99999"
+    ));
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -1535,7 +1666,7 @@ fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
         .checkout_complete(
             "session-account-live",
             Some("member-live"),
-            &StorefrontPaymentInput::card("member-live@example.com", "4242").unwrap(),
+            &StorefrontPaymentInput::card("member-live@example.com", "4242", "PAY-50001").unwrap(),
             103,
         )
         .unwrap();
@@ -1561,13 +1692,13 @@ fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
     assert!(html.contains("Member Live"), "{html}");
     assert!(html.contains("member-live@example.com"), "{html}");
     assert!(html.contains("ORD-10042"), "{html}");
-    assert!(html.contains("Paid"), "{html}");
-    assert!(html.contains("Gold Membership"), "{html}");
-    assert!(html.contains("Purchased"), "{html}");
+    assert!(html.contains("Pending Payment"), "{html}");
     assert!(
-        html.contains("Latest order ORD-10042 is currently Paid."),
+        html.contains("Latest order ORD-10042 is currently Pending Payment."),
         "{html}"
     );
+    assert!(!html.contains("Gold Membership"), "{html}");
+    assert!(!html.contains("Purchased"), "{html}");
     assert!(!html.contains("Alex Mariner"), "{html}");
     assert!(!html.contains("Harbor Circle"), "{html}");
 }
@@ -2576,14 +2707,34 @@ fn runtime_builder_materializes_memberships_account_surfaces_as_session_gated_ro
     assert_eq!(memberships.area, RouteArea::Account);
     assert_eq!(memberships.auth, RouteAuthGate::Session);
 
+    let order_history = plan
+        .http
+        .routes
+        .iter()
+        .find(|route| route.name == "commerce.account.orders")
+        .expect("commerce account orders route should be materialized");
+    assert_eq!(order_history.path, "/account/orders");
+    assert_eq!(order_history.area, RouteArea::Account);
+    assert_eq!(order_history.auth, RouteAuthGate::Session);
+
+    let account_session_end = plan
+        .http
+        .routes
+        .iter()
+        .find(|route| route.name == "commerce.account-session-end")
+        .expect("commerce account session end route should be materialized");
+    assert_eq!(account_session_end.path, "/account/session/end");
+    assert_eq!(account_session_end.area, RouteArea::Account);
+    assert_eq!(account_session_end.auth, RouteAuthGate::Session);
+
     assert_eq!(
         plan.handlers
             .get("memberships.account.dashboard")
             .expect("memberships account dashboard handler should exist")
             .response,
-        HandlerResponse::Redirect(RedirectResponse {
-            location: "/account/memberships".to_string(),
-            status: 302,
+        HandlerResponse::Page(PageResponse {
+            template: "account/dashboard".to_string(),
+            status: 200,
         })
     );
     assert_eq!(
@@ -2594,6 +2745,26 @@ fn runtime_builder_materializes_memberships_account_surfaces_as_session_gated_ro
         HandlerResponse::Page(PageResponse {
             template: "memberships/account".to_string(),
             status: 200,
+        })
+    );
+    assert_eq!(
+        plan.handlers
+            .get("commerce.account.orders")
+            .expect("commerce account orders handler should exist")
+            .response,
+        HandlerResponse::Page(PageResponse {
+            template: "account/orders".to_string(),
+            status: 200,
+        })
+    );
+    assert_eq!(
+        plan.handlers
+            .get("commerce.account-session-end")
+            .expect("commerce account session end handler should exist")
+            .response,
+        HandlerResponse::Redirect(RedirectResponse {
+            location: "/account".to_string(),
+            status: 303,
         })
     );
 }

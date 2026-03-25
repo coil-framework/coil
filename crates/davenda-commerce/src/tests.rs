@@ -5,6 +5,7 @@ use davenda_core::{
     HttpSurfaceMethod, PlatformModule, RouteSurfaceKind, ServiceRegistry,
 };
 use davenda_data::{MigrationOwner, PublicationVisibility, QueryCacheScope, TransactionIsolation};
+use std::collections::BTreeMap;
 
 fn gbp(value: i64) -> Money {
     Money::new(CurrencyCode::new("GBP").unwrap(), value).unwrap()
@@ -211,6 +212,15 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
     assert_eq!(checkout_complete.path, "/checkout/complete");
     assert_eq!(checkout_complete.capability, None);
 
+    let payment_webhook = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.payment-provider-webhook")
+        .expect("payment webhook surface should exist");
+    assert_eq!(payment_webhook.kind, RouteSurfaceKind::Webhook);
+    assert_eq!(payment_webhook.path, "/webhooks/commerce/payment-provider");
+    assert_eq!(payment_webhook.capability, None);
+
     let checkout_confirmation = manifest
         .route_surfaces
         .iter()
@@ -228,6 +238,15 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
     assert_eq!(account_orders.kind, RouteSurfaceKind::FrontendPage);
     assert_eq!(account_orders.path, "/account/orders");
     assert_eq!(account_orders.capability, None);
+
+    let account_session_end = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.account-session-end")
+        .expect("account session end surface should exist");
+    assert_eq!(account_session_end.kind, RouteSurfaceKind::FrontendAction);
+    assert_eq!(account_session_end.path, "/account/session/end");
+    assert_eq!(account_session_end.capability, None);
 }
 
 #[test]
@@ -389,6 +408,23 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         }
     );
 
+    let payment_webhook = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.payment-provider-webhook")
+        .expect("payment webhook http surface should exist");
+    assert_eq!(payment_webhook.area, HttpSurfaceArea::Api);
+    assert_eq!(payment_webhook.method, HttpSurfaceMethod::Post);
+    assert_eq!(payment_webhook.path, "/webhooks/commerce/payment-provider");
+    assert_eq!(payment_webhook.capability, None);
+    assert_eq!(
+        payment_webhook.response,
+        HttpResponseContract::Json {
+            status: 200,
+            payload: BTreeMap::from([("status".to_string(), "accepted".to_string())]),
+        }
+    );
+
     let checkout_confirmation = manifest
         .http_surfaces
         .iter()
@@ -418,6 +454,22 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         HttpResponseContract::Page {
             template: "account/orders".to_string(),
             status: 200,
+        }
+    );
+
+    let account_session_end = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.account-session-end")
+        .expect("account session end http surface should exist");
+    assert_eq!(account_session_end.area, HttpSurfaceArea::Account);
+    assert_eq!(account_session_end.path, "/account/session/end");
+    assert_eq!(account_session_end.capability, None);
+    assert_eq!(
+        account_session_end.response,
+        HttpResponseContract::Redirect {
+            location: "/account".to_string(),
+            status: 303,
         }
     );
 }

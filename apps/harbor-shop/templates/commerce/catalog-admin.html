@@ -1,0 +1,73 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Catalog Administration'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Catalog Administration</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Commerce operations</p>
+        <h1 dv:text="${page.title}">Catalog Administration</h1>
+        <p dv:text="${page.summary}">
+          Merchandising inventory, collections, and featured products.
+        </p>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasProductCards}">
+        <p class="admin-panel__eyebrow">Products</p>
+        <div class="admin-card-grid">
+          <article class="admin-card" dv:each="product : ${productCards}">
+            <p class="admin-card__eyebrow" dv:text="${product.collectionName}">Featured</p>
+            <h2 dv:text="${product.name}">Harbor Cap</h2>
+            <p dv:text="${product.summary}">
+              Product summary
+            </p>
+            <p dv:text="${product.price}">£29.00</p>
+            <a class="button" href="/shop/products/harbor-cap" dv:attr="href=${product.url}">
+              View storefront page
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasCatalogSections}">
+        <p class="admin-panel__eyebrow">Collections</p>
+        <div class="admin-card-grid">
+          <article class="admin-card" dv:each="section : ${catalogSections}">
+            <p class="admin-card__eyebrow" dv:text="${section.label}">Featured edit</p>
+            <h2 dv:text="${section.title}">Featured</h2>
+            <p dv:text="${section.summary}">
+              Collection summary
+            </p>
+            <a class="button button--secondary" href="/shop/collections/featured" dv:attr="href=${section.url}">
+              Open collection
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" dv:unless="${hasProductCards}">
+        <p class="admin-panel__eyebrow">Products</p>
+        <h2>No catalog entries yet</h2>
+        <p dv:text="${catalogEmptyText}">
+          No catalog entries are available in the sample app yet.
+        </p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

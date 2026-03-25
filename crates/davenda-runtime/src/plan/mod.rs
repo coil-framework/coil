@@ -364,10 +364,13 @@ impl RuntimePlan {
         }
 
         let wasm_secrets = self.wasm_secret_values(resolver)?;
+        let payment_webhook_secret =
+            crate::server::resolve_commerce_payment_webhook_secret(&self.config, resolver)?;
         HttpServerHost::new(
             self.clone(),
             self.shared_backend_clients(resolver)?,
             wasm_secrets,
+            payment_webhook_secret,
             cookie_secret.to_vec(),
             csrf_secret.to_vec(),
         )

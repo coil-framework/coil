@@ -233,6 +233,13 @@ impl BrowserHost {
             .render_set_cookie("", Some(Duration::from_secs(0)))
     }
 
+    pub fn clear_session_cookie_header(&self) -> String {
+        self.services
+            .sessions
+            .session_cookie
+            .render_set_cookie("", Some(Duration::from_secs(0)))
+    }
+
     pub fn session(
         &self,
         session_id: &str,

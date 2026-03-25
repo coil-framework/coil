@@ -11,6 +11,7 @@ use davenda_core::{
     SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
     SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility,
 };
+use std::collections::BTreeMap;
 
 pub(super) fn build_manifest(module: &CommerceModule) -> ModuleManifest {
     ModuleManifest::new(module.name().to_string())
@@ -172,6 +173,11 @@ fn route_surfaces() -> Vec<RouteSurface> {
             "/checkout/complete",
         ),
         RouteSurface::new(
+            "commerce.payment-provider-webhook",
+            RouteSurfaceKind::Webhook,
+            "/webhooks/commerce/payment-provider",
+        ),
+        RouteSurface::new(
             "commerce.checkout-confirmation",
             RouteSurfaceKind::FrontendPage,
             "/checkout/confirmation",
@@ -180,6 +186,11 @@ fn route_surfaces() -> Vec<RouteSurface> {
             "commerce.account.orders",
             RouteSurfaceKind::FrontendPage,
             "/account/orders",
+        ),
+        RouteSurface::new(
+            "commerce.account-session-end",
+            RouteSurfaceKind::FrontendAction,
+            "/account/session/end",
         ),
         RouteSurface::new(
             "commerce.orders",
@@ -434,6 +445,14 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "/checkout/confirmation",
             303,
         ),
+        HttpSurfaceContribution::json(
+            "commerce.payment-provider-webhook",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Api,
+            "/webhooks/commerce/payment-provider",
+            200,
+            BTreeMap::from([("status".to_string(), "accepted".to_string())]),
+        ),
         HttpSurfaceContribution::page(
             "commerce.checkout-confirmation",
             HttpSurfaceArea::Public,
@@ -445,6 +464,14 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             HttpSurfaceArea::Account,
             "/account/orders",
             "account/orders",
+        ),
+        HttpSurfaceContribution::redirect(
+            "commerce.account-session-end",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Account,
+            "/account/session/end",
+            "/account",
+            303,
         ),
         HttpSurfaceContribution::page(
             "commerce.orders",

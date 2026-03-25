@@ -362,10 +362,45 @@ impl CutoverDnsRecordChange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CutoverTrafficTargetChange {
+    pub resource_kind: String,
+    pub zone_id: String,
+    pub resource_id: String,
+    pub previous_target: String,
+    pub current_target: String,
+}
+
+impl CutoverTrafficTargetChange {
+    pub fn new(
+        resource_kind: impl Into<String>,
+        zone_id: impl Into<String>,
+        resource_id: impl Into<String>,
+        previous_target: impl Into<String>,
+        current_target: impl Into<String>,
+    ) -> Result<Self, ImportModelError> {
+        Ok(Self {
+            resource_kind: validate_token("cutover_traffic_resource_kind", resource_kind.into())?,
+            zone_id: require_non_empty("cutover_traffic_zone_id", zone_id.into())?,
+            resource_id: require_non_empty("cutover_traffic_resource_id", resource_id.into())?,
+            previous_target: require_non_empty(
+                "cutover_traffic_previous_target",
+                previous_target.into(),
+            )?,
+            current_target: require_non_empty(
+                "cutover_traffic_current_target",
+                current_target.into(),
+            )?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CutoverSwitchExecution {
     pub method: String,
     #[serde(default)]
     pub dns_records: Vec<CutoverDnsRecordChange>,
+    #[serde(default)]
+    pub traffic_targets: Vec<CutoverTrafficTargetChange>,
 }
 
 impl CutoverSwitchExecution {
@@ -373,11 +408,17 @@ impl CutoverSwitchExecution {
         Ok(Self {
             method: validate_token("cutover_switch_method", method.into())?,
             dns_records: Vec::new(),
+            traffic_targets: Vec::new(),
         })
     }
 
     pub fn with_dns_record(mut self, record: CutoverDnsRecordChange) -> Self {
         self.dns_records.push(record);
+        self
+    }
+
+    pub fn with_traffic_target(mut self, target: CutoverTrafficTargetChange) -> Self {
+        self.traffic_targets.push(target);
         self
     }
 }

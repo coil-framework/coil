@@ -970,13 +970,19 @@ redirect_plan = "docs/redirect-plan.csv"
 extraction_spec = "docs/extraction-spec.md"
 cutover_runbook = "docs/cutover-runbook.md"
 
-[verification]
-required = ["record_counts", "route_resolution"]
-sample_routes = ["/en/home"]
-sample_users = ["editor@example.com"]
+	[verification]
+	required = ["record_counts", "route_resolution"]
+	sample_routes = ["/en/home"]
+	sample_users = ["editor@example.com"]
 
-[cutover]
-freeze_legacy_writes = true
+	[[verification.webhooks]]
+	source = "commerce.payment-provider"
+	event = "payment.authorized"
+	max_verification_failures = 0
+	max_replay_rejections = 1
+
+	[cutover]
+	freeze_legacy_writes = true
 switch_method = "dns"
 hostnames = ["shop.example.com"]
 requires_assets_publish = true
@@ -1031,6 +1037,19 @@ dependencies = ["pages"]
     assert_eq!(
         manifest.verification.as_ref().unwrap().required,
         vec!["record_counts".to_string(), "route_resolution".to_string()]
+    );
+    assert_eq!(manifest.verification.as_ref().unwrap().webhooks.len(), 1);
+    assert_eq!(
+        manifest.verification.as_ref().unwrap().webhooks[0].source,
+        "commerce.payment-provider".to_string()
+    );
+    assert_eq!(
+        manifest.verification.as_ref().unwrap().webhooks[0].event,
+        "payment.authorized".to_string()
+    );
+    assert_eq!(
+        manifest.verification.as_ref().unwrap().webhooks[0].max_replay_rejections,
+        1
     );
     assert_eq!(
         manifest.cutover.as_ref().unwrap().rollback_triggers.len(),
@@ -1183,21 +1202,19 @@ fn cutover_execution_journal_persists_switch_execution_metadata() {
     );
 
     journal.record_switch_execution(
-        CutoverSwitchExecution::new("dns")
+        CutoverSwitchExecution::new("dns").unwrap().with_dns_record(
+            CutoverDnsRecordChange::new(
+                "shop.example.com",
+                "zone-123",
+                "record-123",
+                "CNAME",
+                "legacy-origin.example.net",
+                "davenda-origin.example.net",
+            )
             .unwrap()
-            .with_dns_record(
-                CutoverDnsRecordChange::new(
-                    "shop.example.com",
-                    "zone-123",
-                    "record-123",
-                    "CNAME",
-                    "legacy-origin.example.net",
-                    "davenda-origin.example.net",
-                )
-                .unwrap()
-                .with_previous_proxied(Some(false))
-                .with_current_proxied(Some(true)),
-            ),
+            .with_previous_proxied(Some(false))
+            .with_current_proxied(Some(true)),
+        ),
     );
 
     let stored = journal
@@ -1207,6 +1224,51 @@ fn cutover_execution_journal_persists_switch_execution_metadata() {
     assert_eq!(stored.method, "dns");
     assert_eq!(stored.dns_records.len(), 1);
     assert_eq!(stored.dns_records[0].hostname, "shop.example.com");
-    assert_eq!(stored.dns_records[0].previous_content, "legacy-origin.example.net");
-    assert_eq!(stored.dns_records[0].current_content, "davenda-origin.example.net");
+    assert_eq!(
+        stored.dns_records[0].previous_content,
+        "legacy-origin.example.net"
+    );
+    assert_eq!(
+        stored.dns_records[0].current_content,
+        "davenda-origin.example.net"
+    );
+    assert!(stored.traffic_targets.is_empty());
+}
+
+#[test]
+fn cutover_execution_journal_persists_non_dns_switch_targets() {
+    let run_id = ImportRunId::new("wordpress-cutover").unwrap();
+    let mut journal = CutoverExecutionJournal::new(
+        &run_id,
+        "harbor-shop",
+        vec![CutoverStepRecord::new("switch.confirmed", "Switch").unwrap()],
+    );
+
+    journal.record_switch_execution(
+        CutoverSwitchExecution::new("load-balancer")
+            .unwrap()
+            .with_traffic_target(
+                CutoverTrafficTargetChange::new(
+                    "load_balancer",
+                    "zone-123",
+                    "lb-edge-1",
+                    "legacy-origin",
+                    "davenda-origin",
+                )
+                .unwrap(),
+            ),
+    );
+
+    let stored = journal
+        .switch_execution
+        .as_ref()
+        .expect("switch execution is persisted");
+    assert_eq!(stored.method, "load-balancer");
+    assert!(stored.dns_records.is_empty());
+    assert_eq!(stored.traffic_targets.len(), 1);
+    assert_eq!(stored.traffic_targets[0].resource_kind, "load_balancer");
+    assert_eq!(stored.traffic_targets[0].zone_id, "zone-123");
+    assert_eq!(stored.traffic_targets[0].resource_id, "lb-edge-1");
+    assert_eq!(stored.traffic_targets[0].previous_target, "legacy-origin");
+    assert_eq!(stored.traffic_targets[0].current_target, "davenda-origin");
 }

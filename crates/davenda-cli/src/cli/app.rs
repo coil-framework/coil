@@ -34,7 +34,8 @@ use davenda_data::{
 };
 use davenda_import::{
     CutoverCheck, CutoverDnsRecordChange, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord,
-    CutoverSwitchExecution, ImportManifest, ImportModelError, PublicationMode, RollbackTrigger,
+    CutoverSwitchExecution, CutoverTrafficTargetChange, ImportManifest, ImportModelError,
+    PublicationMode, RollbackTrigger,
 };
 use davenda_jobs::JobInstant;
 use davenda_memberships::{
@@ -44,7 +45,8 @@ use davenda_memberships::{
 use davenda_runtime::{
     BrowserInstant, CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod,
     RequestExecutionError, RequestInput, RouteArea, RouteAuthGate, RuntimeBuilder, SecretResolver,
-    SessionIssueRequest, StorageHost,
+    SessionIssueRequest, StorageHost, WebhookObservationEvent, WebhookObservationSnapshot,
+    WebhookObservationStatus,
 };
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
@@ -56,7 +58,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, Header
 use reqwest::redirect::Policy as RedirectPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -416,8 +418,10 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
         }
         CliInput::ImportCutover {
             output_mode,
-            invocation,
+            dry_run,
+            mut invocation,
         } => {
+            invocation.dry_run = dry_run;
             let report = run_import_cutover(&invocation)?;
             render_command_report(&report, output_mode)
         }
@@ -474,7 +478,7 @@ fn usage() -> String {
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
         "  platform import cutover <manifest-path> [--apply] [--yes] [--legacy-freeze-confirmed] [--json]",
-        "  platform import cutover <manifest-path> --switch --base-url <url> --dns-zone-id <zone> --dns-target <hostname> --yes [--json]",
+        "  platform import cutover <manifest-path> --switch --base-url <url> [--dry-run] [--dns-zone-id <zone> --dns-target <hostname> | --switch-zone-id <zone> --switch-resource-id <id> --switch-target <target>] [--yes] [--json]",
         "  platform import cutover <manifest-path> --observe --base-url <url> --yes [--json]",
         "  platform import cutover <manifest-path> --rollback --base-url <url> --reason <text> --yes [--json]",
         "",
@@ -514,7 +518,9 @@ fn usage() -> String {
         "  platform import cutover imports/wordpress-events.toml",
         "  platform import cutover imports/wordpress-events.toml --apply --yes --legacy-freeze-confirmed",
         "  platform import cutover imports/wordpress-events.toml --switch --base-url https://shop.example.com --dns-zone-id zone_123 --dns-target davenda-origin.example.net --yes",
+        "  platform import cutover imports/wordpress-events.toml --switch --base-url https://shop.example.com --switch-zone-id zone_123 --switch-resource-id lb-edge-1 --switch-target davenda-origin-pool --dry-run",
         "  platform import cutover imports/wordpress-events.toml --observe --base-url https://shop.example.com --yes",
+        "  platform import cutover imports/wordpress-events.toml --rollback --base-url https://shop.example.com --reason \"edge routing failed\" --yes",
         "  platform import cutover imports/wordpress-events.toml --rollback --base-url https://shop.example.com --reason \"systemic auth failure\" --yes",
         "",
         "Environment:",
@@ -3582,30 +3588,72 @@ fn resolve_cache_route_execution(
     route: &str,
 ) -> Result<(davenda_runtime::RequestExecution, String), CliRunError> {
     let host = built.runtime_plan.runtime.config.seo.canonical_host.clone();
-    let request = RequestInput::new(HttpMethod::Get, host.as_str(), route).map_err(|error| {
-        CliRunError::execution(format!(
-            "failed to prepare cache route request `{route}`: {error}"
-        ))
-    })?;
     let cookie_secret = b"01234567012345670123456701234567";
     let csrf_secret = b"76543210765432107654321076543210";
-    let execution = built
-        .runtime_plan
-        .runtime
-        .execute_request(request, cookie_secret, csrf_secret)
-        .map_err(|error| {
-            CliRunError::execution(format!(
-                "failed to resolve cache route `{route}` for `{}`: {error}",
-                built.manifest.id
-            ))
-        })?;
-    let cache_key = execution
-        .cache_plan
-        .plan
-        .application()
-        .map(|plan| plan.key().to_string())
-        .unwrap_or_else(|| "none".to_string());
-    Ok((execution, cache_key))
+    let mut candidate_routes = vec![route.to_string()];
+    if let Some(localized_route) = localized_cache_route_candidate(built, route) {
+        if !candidate_routes
+            .iter()
+            .any(|candidate| candidate == &localized_route)
+        {
+            candidate_routes.push(localized_route);
+        }
+    }
+
+    let mut last_error = None;
+    for candidate in &candidate_routes {
+        let request =
+            RequestInput::new(HttpMethod::Get, host.as_str(), candidate).map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to prepare cache route request `{candidate}`: {error}"
+                ))
+            })?;
+        match built
+            .runtime_plan
+            .runtime
+            .execute_request(request, cookie_secret, csrf_secret)
+        {
+            Ok(execution) => {
+                let cache_key = execution
+                    .cache_plan
+                    .plan
+                    .application()
+                    .map(|plan| plan.key().to_string())
+                    .unwrap_or_else(|| "none".to_string());
+                return Ok((execution, cache_key));
+            }
+            Err(error) => last_error = Some((candidate.clone(), error)),
+        }
+    }
+
+    let attempted = candidate_routes.join(", ");
+    let (failed_route, error) =
+        last_error.expect("cache route execution should attempt at least one route");
+    Err(CliRunError::execution(format!(
+        "failed to resolve cache route `{route}` for `{}` after trying [{attempted}] (last attempt `{failed_route}`): {error}",
+        built.manifest.id
+    )))
+}
+
+fn localized_cache_route_candidate(built: &BuiltCustomerAppContext, route: &str) -> Option<String> {
+    let i18n = &built.runtime_plan.runtime.config.i18n;
+    if !i18n.localized_routes || route == "/" {
+        return None;
+    }
+    let trimmed = route.trim_start_matches('/');
+    let first_segment = trimmed.split('/').next().unwrap_or_default();
+    if i18n
+        .supported_locales
+        .iter()
+        .any(|locale| locale == first_segment)
+    {
+        return None;
+    }
+    Some(format!(
+        "/{}/{}",
+        i18n.default_locale.trim_matches('/'),
+        trimmed
+    ))
 }
 
 fn cache_backend_availability_error(built: &BuiltCustomerAppContext) -> Option<String> {
@@ -4190,14 +4238,26 @@ struct EvaluatedImportCutover {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct VerificationRouteProbe {
+    name: String,
+    method: HttpMethod,
     path: String,
     auth: RouteAuthGate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VerificationWebhookProbe {
+    extension_id: String,
+    handler_id: String,
+    source: String,
+    event: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct CutoverVerificationSupport {
     fragment_probe: Option<VerificationRouteProbe>,
     auth_probe: Option<VerificationRouteProbe>,
+    transactional_probes: Vec<VerificationRouteProbe>,
+    webhook_probes: Vec<VerificationWebhookProbe>,
 }
 
 const CLOUDFLARE_API_BASE_URL_ENV: &str = "DAVENDA_CLOUDFLARE_API_BASE_URL";
@@ -4206,6 +4266,13 @@ const CUTOVER_CLOUDFLARE_SECRET_ENV: &str = "DAVENDA_CUTOVER_CLOUDFLARE_SECRET";
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CloudflareDnsSwitchRequest {
     zone_id: String,
+    target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CloudflareTrafficTargetSwitchRequest {
+    zone_id: String,
+    resource_id: String,
     target: String,
 }
 
@@ -4258,6 +4325,40 @@ struct CloudflareDnsRecordUpdate<'a> {
     ttl: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     proxied: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct CloudflareLoadBalancer {
+    id: String,
+    #[serde(default)]
+    default_pools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CloudflareLoadBalancerUpdate<'a> {
+    default_pools: Vec<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct CloudflareOriginRule {
+    id: String,
+    origin: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CloudflareOriginRuleUpdate<'a> {
+    origin: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct CloudflareRoutingRule {
+    id: String,
+    service: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CloudflareRoutingRuleUpdate<'a> {
+    service: &'a str,
 }
 
 fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandReport, CliRunError> {
@@ -4489,7 +4590,12 @@ fn switch_import_cutover(
     invocation: &ImportCutoverInvocation,
     evaluated: &EvaluatedImportCutover,
 ) -> Result<CommandReport, CliRunError> {
-    if !invocation.confirmed {
+    if invocation.switch_plan_path.is_some() {
+        return Err(CliRunError::usage(
+            "`import cutover --switch` does not yet consume `--switch-plan`; use the provider-managed switch flags for the declared switch method",
+        ));
+    }
+    if !invocation.dry_run && !invocation.confirmed {
         return Err(CliRunError::usage(
             "`import cutover --switch` requires `--yes`",
         ));
@@ -4529,6 +4635,9 @@ fn switch_import_cutover(
     }
 
     let switch_execution = execute_cutover_switch(invocation, evaluated)?;
+    if invocation.dry_run {
+        return planned_cutover_switch_report(evaluated, base_url, &switch_execution);
+    }
     let switch_detail = render_cutover_switch_detail(&switch_execution, base_url);
     let switched_at = unix_timestamp_now()?;
     run_cutover_step(
@@ -4567,14 +4676,73 @@ fn switch_import_cutover(
     Ok(report)
 }
 
+fn planned_cutover_switch_report(
+    evaluated: &EvaluatedImportCutover,
+    base_url: &str,
+    switch_execution: &CutoverSwitchExecution,
+) -> Result<CommandReport, CliRunError> {
+    let mut report = CommandReport::new(
+        ["import", "cutover"],
+        format!(
+            "Planned cutover switch for import run `{}` against `{}`",
+            evaluated.manifest.run_id, base_url
+        ),
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to build cutover switch dry-run report for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+    report.status = ReportStatus::Ok;
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.switch.dry_run",
+        format!(
+            "{}; no provider state or cutover journal was modified",
+            render_cutover_switch_detail(switch_execution, base_url)
+        ),
+    )?;
+    for target in &switch_execution.traffic_targets {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "cutover.switch.target",
+            format!(
+                "{} `{}` would move from `{}` to `{}`",
+                target.resource_kind,
+                target.resource_id,
+                target.previous_target,
+                target.current_target
+            ),
+        )?;
+    }
+    for record in &switch_execution.dns_records {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "cutover.switch.dns",
+            format!(
+                "DNS hostname `{}` would move from `{}` to `{}`",
+                record.hostname, record.previous_content, record.current_content
+            ),
+        )?;
+    }
+    Ok(report)
+}
+
 fn execute_cutover_switch(
     invocation: &ImportCutoverInvocation,
     evaluated: &EvaluatedImportCutover,
 ) -> Result<CutoverSwitchExecution, CliRunError> {
     match evaluated.cutover.switch_method.as_deref() {
         Some("dns") => execute_dns_cutover_switch(invocation, evaluated),
+        Some("load-balancer") => execute_load_balancer_cutover_switch(invocation, evaluated),
+        Some("cdn-origin") => execute_cdn_origin_cutover_switch(invocation, evaluated),
+        Some("routing") => execute_routing_cutover_switch(invocation, evaluated),
         Some(other) => Err(CliRunError::execution(format!(
-            "cutover switch method `{other}` is declared but not yet executable; use `dns` for provider-managed switch execution"
+            "cutover switch method `{other}` is declared but not yet executable"
         ))),
         None => Err(CliRunError::execution(
             "cutover manifest does not declare a switch method".to_string(),
@@ -4596,15 +4764,25 @@ fn execute_dns_cutover_switch(
     for hostname in &evaluated.cutover.hostnames {
         let record =
             fetch_cloudflare_cname_record(&client, &credentials, &request.zone_id, hostname)?;
-        let updated = update_cloudflare_cname_record(
-            &client,
-            &credentials,
-            &request.zone_id,
-            &record.id,
-            hostname,
-            &request.target,
-            record.proxied,
-        )?;
+        let updated = if invocation.dry_run {
+            CloudflareDnsRecord {
+                id: record.id.clone(),
+                name: hostname.clone(),
+                record_type: record.record_type.clone(),
+                content: request.target.clone(),
+                proxied: record.proxied,
+            }
+        } else {
+            update_cloudflare_cname_record(
+                &client,
+                &credentials,
+                &request.zone_id,
+                &record.id,
+                hostname,
+                &request.target,
+                record.proxied,
+            )?
+        };
         execution = execution.with_dns_record(
             CutoverDnsRecordChange::new(
                 hostname.clone(),
@@ -4623,11 +4801,150 @@ fn execute_dns_cutover_switch(
     Ok(execution)
 }
 
+fn execute_load_balancer_cutover_switch(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CutoverSwitchExecution, CliRunError> {
+    validate_cutover_dns_hostnames(evaluated)?;
+    validate_cutover_tls_readiness(evaluated)?;
+    let request = resolve_traffic_target_switch_request(invocation, "load-balancer")?;
+    let credentials = resolve_cloudflare_credentials(&evaluated.runtime.built)?;
+    let client = build_cutover_provider_client("Cloudflare load-balancer switch")?;
+    let load_balancer = fetch_cloudflare_load_balancer(
+        &client,
+        &credentials,
+        &request.zone_id,
+        &request.resource_id,
+    )?;
+    let previous_target = load_balancer
+        .default_pools
+        .first()
+        .cloned()
+        .ok_or_else(|| {
+            CliRunError::execution(format!(
+                "Cloudflare load balancer `{}` does not declare a default pool target",
+                request.resource_id
+            ))
+        })?;
+    if !invocation.dry_run {
+        update_cloudflare_load_balancer(
+            &client,
+            &credentials,
+            &request.zone_id,
+            &request.resource_id,
+            &request.target,
+        )?;
+    }
+
+    Ok(CutoverSwitchExecution::new("load-balancer")
+        .map_err(import_model_error)?
+        .with_traffic_target(
+            CutoverTrafficTargetChange::new(
+                "load_balancer",
+                request.zone_id,
+                request.resource_id,
+                previous_target,
+                request.target,
+            )
+            .map_err(import_model_error)?,
+        ))
+}
+
+fn execute_cdn_origin_cutover_switch(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CutoverSwitchExecution, CliRunError> {
+    validate_cutover_dns_hostnames(evaluated)?;
+    validate_cutover_tls_readiness(evaluated)?;
+    let request = resolve_traffic_target_switch_request(invocation, "cdn-origin")?;
+    let credentials = resolve_cloudflare_credentials(&evaluated.runtime.built)?;
+    let client = build_cutover_provider_client("Cloudflare CDN origin switch")?;
+    let origin_rule = fetch_cloudflare_origin_rule(
+        &client,
+        &credentials,
+        &request.zone_id,
+        &request.resource_id,
+    )?;
+    if !invocation.dry_run {
+        update_cloudflare_origin_rule(
+            &client,
+            &credentials,
+            &request.zone_id,
+            &request.resource_id,
+            &request.target,
+        )?;
+    }
+
+    Ok(CutoverSwitchExecution::new("cdn-origin")
+        .map_err(import_model_error)?
+        .with_traffic_target(
+            CutoverTrafficTargetChange::new(
+                "cdn_origin",
+                request.zone_id,
+                request.resource_id,
+                origin_rule.origin,
+                request.target,
+            )
+            .map_err(import_model_error)?,
+        ))
+}
+
+fn execute_routing_cutover_switch(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CutoverSwitchExecution, CliRunError> {
+    validate_cutover_dns_hostnames(evaluated)?;
+    validate_cutover_tls_readiness(evaluated)?;
+    let request = resolve_traffic_target_switch_request(invocation, "routing")?;
+    let credentials = resolve_cloudflare_credentials(&evaluated.runtime.built)?;
+    let client = build_cutover_provider_client("Cloudflare routing switch")?;
+    let routing_rule = fetch_cloudflare_routing_rule(
+        &client,
+        &credentials,
+        &request.zone_id,
+        &request.resource_id,
+    )?;
+    if !invocation.dry_run {
+        update_cloudflare_routing_rule(
+            &client,
+            &credentials,
+            &request.zone_id,
+            &request.resource_id,
+            &request.target,
+        )?;
+    }
+
+    Ok(CutoverSwitchExecution::new("routing")
+        .map_err(import_model_error)?
+        .with_traffic_target(
+            CutoverTrafficTargetChange::new(
+                "routing_rule",
+                request.zone_id,
+                request.resource_id,
+                routing_rule.service,
+                request.target,
+            )
+            .map_err(import_model_error)?,
+        ))
+}
+
 fn render_cutover_switch_detail(execution: &CutoverSwitchExecution, base_url: &str) -> String {
     match execution.method.as_str() {
         "dns" => format!(
             "live DNS switch executed for {} hostname(s) and observation will target `{base_url}`",
             execution.dns_records.len()
+        ),
+        "load-balancer" => format!(
+            "live load-balancer switch executed for {} target(s) and observation will target `{base_url}`",
+            execution.traffic_targets.len()
+        ),
+        "cdn-origin" => format!(
+            "live CDN origin switch executed for {} target(s) and observation will target `{base_url}`",
+            execution.traffic_targets.len()
+        ),
+        "routing" => format!(
+            "live routing switch executed for {} target(s) and observation will target `{base_url}`",
+            execution.traffic_targets.len()
         ),
         _ => format!("live switch executed against `{base_url}`"),
     }
@@ -4636,7 +4953,7 @@ fn render_cutover_switch_detail(execution: &CutoverSwitchExecution, base_url: &s
 fn validate_cutover_dns_hostnames(evaluated: &EvaluatedImportCutover) -> Result<(), CliRunError> {
     if evaluated.cutover.hostnames.is_empty() {
         return Err(CliRunError::execution(
-            "cutover DNS switch requires at least one hostname".to_string(),
+            "cutover switch requires at least one hostname".to_string(),
         ));
     }
 
@@ -4717,10 +5034,18 @@ fn validate_cutover_tls_readiness(evaluated: &EvaluatedImportCutover) -> Result<
 fn resolve_dns_switch_request(
     invocation: &ImportCutoverInvocation,
 ) -> Result<CloudflareDnsSwitchRequest, CliRunError> {
-    let zone_id = invocation.dns_zone_id.as_ref().ok_or_else(|| {
+    let zone_id = invocation
+        .dns_zone_id
+        .as_ref()
+        .or(invocation.switch_zone_id.as_ref())
+        .ok_or_else(|| {
         CliRunError::usage("`import cutover --switch` with `switch_method = \"dns\"` requires `--dns-zone-id <zone>`")
     })?;
-    let target = invocation.dns_target.as_ref().ok_or_else(|| {
+    let target = invocation
+        .dns_target
+        .as_ref()
+        .or(invocation.switch_target.as_ref())
+        .ok_or_else(|| {
         CliRunError::usage("`import cutover --switch` with `switch_method = \"dns\"` requires `--dns-target <hostname>`")
     })?;
     if target.contains("://") || target.contains('/') {
@@ -4732,6 +5057,33 @@ fn resolve_dns_switch_request(
     Ok(CloudflareDnsSwitchRequest {
         zone_id: zone_id.trim().to_string(),
         target: target.trim().trim_end_matches('.').to_string(),
+    })
+}
+
+fn resolve_traffic_target_switch_request(
+    invocation: &ImportCutoverInvocation,
+    method: &str,
+) -> Result<CloudflareTrafficTargetSwitchRequest, CliRunError> {
+    let zone_id = invocation.switch_zone_id.as_ref().ok_or_else(|| {
+        CliRunError::usage(format!(
+            "`import cutover --switch` with `switch_method = \"{method}\"` requires `--switch-zone-id <zone>`"
+        ))
+    })?;
+    let resource_id = invocation.switch_resource_id.as_ref().ok_or_else(|| {
+        CliRunError::usage(format!(
+            "`import cutover --switch` with `switch_method = \"{method}\"` requires `--switch-resource-id <id>`"
+        ))
+    })?;
+    let target = invocation.switch_target.as_ref().ok_or_else(|| {
+        CliRunError::usage(format!(
+            "`import cutover --switch` with `switch_method = \"{method}\"` requires `--switch-target <target>`"
+        ))
+    })?;
+
+    Ok(CloudflareTrafficTargetSwitchRequest {
+        zone_id: zone_id.trim().to_string(),
+        resource_id: resource_id.trim().to_string(),
+        target: target.trim().to_string(),
     })
 }
 
@@ -4937,6 +5289,224 @@ fn update_cloudflare_cname_record(
     Ok(envelope.result)
 }
 
+fn fetch_cloudflare_load_balancer(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    resource_id: &str,
+) -> Result<CloudflareLoadBalancer, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/load_balancers/{resource_id}",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .get(url)
+        .headers(credentials.headers()?)
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to query Cloudflare load balancer `{resource_id}` in zone `{zone_id}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<CloudflareLoadBalancer>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare load balancer lookup for `{resource_id}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare load balancer lookup for `{resource_id}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    Ok(envelope.result)
+}
+
+fn update_cloudflare_load_balancer(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    resource_id: &str,
+    target: &str,
+) -> Result<CloudflareLoadBalancer, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/load_balancers/{resource_id}",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .put(url)
+        .headers(credentials.headers()?)
+        .json(&CloudflareLoadBalancerUpdate {
+            default_pools: vec![target],
+        })
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to update Cloudflare load balancer `{resource_id}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<CloudflareLoadBalancer>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare load balancer update for `{resource_id}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare load balancer update for `{resource_id}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    Ok(envelope.result)
+}
+
+fn fetch_cloudflare_origin_rule(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    resource_id: &str,
+) -> Result<CloudflareOriginRule, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/origin_rules/{resource_id}",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .get(url)
+        .headers(credentials.headers()?)
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to query Cloudflare CDN origin rule `{resource_id}` in zone `{zone_id}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<CloudflareOriginRule>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare CDN origin rule lookup for `{resource_id}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare CDN origin lookup for `{resource_id}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    Ok(envelope.result)
+}
+
+fn update_cloudflare_origin_rule(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    resource_id: &str,
+    target: &str,
+) -> Result<CloudflareOriginRule, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/origin_rules/{resource_id}",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .put(url)
+        .headers(credentials.headers()?)
+        .json(&CloudflareOriginRuleUpdate { origin: target })
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to update Cloudflare CDN origin rule `{resource_id}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<CloudflareOriginRule>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare CDN origin update for `{resource_id}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare CDN origin update for `{resource_id}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    Ok(envelope.result)
+}
+
+fn fetch_cloudflare_routing_rule(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    resource_id: &str,
+) -> Result<CloudflareRoutingRule, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/routing_rules/{resource_id}",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .get(url)
+        .headers(credentials.headers()?)
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to query Cloudflare routing rule `{resource_id}` in zone `{zone_id}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<CloudflareRoutingRule>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare routing rule lookup for `{resource_id}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare routing rule lookup for `{resource_id}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    Ok(envelope.result)
+}
+
+fn update_cloudflare_routing_rule(
+    client: &BlockingHttpClient,
+    credentials: &CloudflareCredentials,
+    zone_id: &str,
+    resource_id: &str,
+    target: &str,
+) -> Result<CloudflareRoutingRule, CliRunError> {
+    let url = format!(
+        "{}/zones/{zone_id}/routing_rules/{resource_id}",
+        cloudflare_api_base_url().trim_end_matches('/')
+    );
+    let response = client
+        .put(url)
+        .headers(credentials.headers()?)
+        .json(&CloudflareRoutingRuleUpdate { service: target })
+        .send()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to update Cloudflare routing rule `{resource_id}`: {error}"
+            ))
+        })?;
+    let envelope = response
+        .json::<CloudflareResponseEnvelope<CloudflareRoutingRule>>()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to parse Cloudflare routing rule update for `{resource_id}`: {error}"
+            ))
+        })?;
+    if !envelope.success {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare routing rule update for `{resource_id}` failed: {}",
+            render_cloudflare_errors(&envelope.errors)
+        )));
+    }
+    Ok(envelope.result)
+}
+
 fn render_cloudflare_errors(errors: &[CloudflareError]) -> String {
     if errors.is_empty() {
         "unknown Cloudflare error".to_string()
@@ -4977,6 +5547,8 @@ struct ObservationVerificationChecks {
     fragment_rendering: bool,
     session_creation: bool,
     auth_failures: bool,
+    transactional_journey_errors: bool,
+    webhook_failures: bool,
 }
 
 fn observe_import_cutover(
@@ -5010,7 +5582,7 @@ fn observe_import_cutover(
         })
         .transpose()?
         .unwrap_or_default();
-    if sample_routes.is_empty() {
+    if sample_routes.is_empty() && cutover_observation_requires_sample_routes(verification_checks) {
         return Err(CliRunError::execution(
             "cutover observation requires `[verification].sample_routes` so live public routes can be probed"
                 .to_string(),
@@ -5048,15 +5620,22 @@ fn observe_import_cutover(
 
     let probe_time = unix_timestamp_now()?;
     journal.begin_observation(base_url.clone(), probe_time);
+    let observation_started_at = journal
+        .observation_started_at_unix_seconds
+        .unwrap_or(probe_time);
     save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
 
     let client = build_cutover_probe_client()?;
     let probe = execute_cutover_observation_probe(
+        &evaluated.runtime.built,
         &client,
         base_url,
+        evaluated.manifest.verification.as_ref(),
         &sample_routes,
         evaluated.verification_support.auth_probe.as_ref(),
+        &evaluated.verification_support.transactional_probes,
         verification_checks,
+        observation_started_at,
     )?;
 
     if !probe.failures.is_empty() {
@@ -5078,9 +5657,6 @@ fn observe_import_cutover(
         )));
     }
 
-    let observation_started_at = journal
-        .observation_started_at_unix_seconds
-        .unwrap_or(probe_time);
     let elapsed_seconds = probe_time.saturating_sub(observation_started_at);
     let required_seconds = observation_window_minutes.saturating_mul(60) as u64;
     let window_elapsed = elapsed_seconds >= required_seconds;
@@ -5170,6 +5746,11 @@ fn rollback_import_cutover(
     invocation: &ImportCutoverInvocation,
     evaluated: &EvaluatedImportCutover,
 ) -> Result<CommandReport, CliRunError> {
+    if invocation.switch_plan_path.is_some() {
+        return Err(CliRunError::usage(
+            "`import cutover --rollback` does not yet consume `--switch-plan`; rollback reuses the provider-managed switch metadata recorded in the cutover journal",
+        ));
+    }
     if !invocation.confirmed {
         return Err(CliRunError::usage(
             "`import cutover --rollback` requires `--yes`",
@@ -5279,6 +5860,57 @@ fn restore_cutover_switch(
             Ok(format!(
                 "restored {} DNS hostname(s) to their pre-cutover targets",
                 execution.dns_records.len()
+            ))
+        }
+        "load-balancer" => {
+            let credentials = resolve_cloudflare_credentials(built)?;
+            let client = build_cutover_provider_client("Cloudflare load-balancer rollback")?;
+            for target in &execution.traffic_targets {
+                update_cloudflare_load_balancer(
+                    &client,
+                    &credentials,
+                    &target.zone_id,
+                    &target.resource_id,
+                    &target.previous_target,
+                )?;
+            }
+            Ok(format!(
+                "restored {} load-balancer target(s) to their pre-cutover state",
+                execution.traffic_targets.len()
+            ))
+        }
+        "cdn-origin" => {
+            let credentials = resolve_cloudflare_credentials(built)?;
+            let client = build_cutover_provider_client("Cloudflare CDN origin rollback")?;
+            for target in &execution.traffic_targets {
+                update_cloudflare_origin_rule(
+                    &client,
+                    &credentials,
+                    &target.zone_id,
+                    &target.resource_id,
+                    &target.previous_target,
+                )?;
+            }
+            Ok(format!(
+                "restored {} CDN origin target(s) to their pre-cutover state",
+                execution.traffic_targets.len()
+            ))
+        }
+        "routing" => {
+            let credentials = resolve_cloudflare_credentials(built)?;
+            let client = build_cutover_provider_client("Cloudflare routing rollback")?;
+            for target in &execution.traffic_targets {
+                update_cloudflare_routing_rule(
+                    &client,
+                    &credentials,
+                    &target.zone_id,
+                    &target.resource_id,
+                    &target.previous_target,
+                )?;
+            }
+            Ok(format!(
+                "restored {} routing target(s) to their pre-cutover state",
+                execution.traffic_targets.len()
             ))
         }
         other => Err(CliRunError::execution(format!(
@@ -5672,6 +6304,8 @@ fn build_cutover_verification_support(
         .iter()
         .find(|route| route.area == RouteArea::Fragment && !route.path.contains('{'))
         .map(|route| VerificationRouteProbe {
+            name: route.name.clone(),
+            method: route.method,
             path: route.path.clone(),
             auth: route.auth,
         });
@@ -5683,13 +6317,55 @@ fn build_cutover_verification_support(
         .iter()
         .find(|route| !matches!(route.auth, RouteAuthGate::Public) && !route.path.contains('{'))
         .map(|route| VerificationRouteProbe {
+            name: route.name.clone(),
+            method: route.method,
             path: route.path.clone(),
             auth: route.auth,
         });
+    let transactional_probes = built
+        .runtime_plan
+        .runtime
+        .http
+        .routes
+        .iter()
+        .filter(|route| {
+            route.method.is_state_changing()
+                && matches!(
+                    route.area,
+                    RouteArea::Public | RouteArea::Account | RouteArea::Api
+                )
+        })
+        .map(|route| VerificationRouteProbe {
+            name: route.name.clone(),
+            method: route.method,
+            path: route.path.clone(),
+            auth: route.auth,
+        })
+        .collect();
+    let webhook_probes = built
+        .runtime_plan
+        .runtime
+        .extension_registry
+        .registered_handlers()
+        .iter()
+        .filter(|handler| handler.point.to_string() == "webhook")
+        .map(|handler| VerificationWebhookProbe {
+            extension_id: handler.extension_id.to_string(),
+            handler_id: handler.handler_id.to_string(),
+            source: handler.surface.clone(),
+            event: handler
+                .selector
+                .split_once('/')
+                .map(|(_, event)| event.to_string())
+                .unwrap_or_else(|| handler.selector.clone()),
+        })
+        .collect();
 
     CutoverVerificationSupport {
         fragment_probe,
         auth_probe,
+        transactional_probes,
+        webhook_probes,
     }
 }
 
@@ -5726,6 +6402,8 @@ fn build_cutover_verification_checks(
             "fragment_rendering" => checks.fragment_rendering = true,
             "session_creation" => checks.session_creation = true,
             "auth_failure" | "auth_failures" => checks.auth_failures = true,
+            "transactional_journey_errors" => checks.transactional_journey_errors = true,
+            "webhook_failure" | "webhook_failures" => checks.webhook_failures = true,
             other => {
                 return Err(CliRunError::execution(format!(
                     "verification check `{other}` is not yet supported by cutover verification"
@@ -5760,8 +6438,36 @@ fn build_cutover_verification_checks(
                 .to_string(),
         ));
     }
+    if checks.transactional_journey_errors && support.transactional_probes.is_empty() {
+        return Err(CliRunError::execution(
+            "verification check `transactional_journey_errors` requires at least one public or account state-changing route in the target runtime"
+                .to_string(),
+        ));
+    }
+    if checks.webhook_failures && verification.webhooks.is_empty() {
+        return Err(CliRunError::execution(
+            "verification check `webhook_failures` requires `[[verification.webhooks]]` declarations"
+                .to_string(),
+        ));
+    }
+    if checks.webhook_failures {
+        let missing = missing_webhook_verification_probes(verification, support);
+        if !missing.is_empty() {
+            return Err(CliRunError::execution(format!(
+                "verification check `webhook_failures` requires installed webhook handlers for: {}",
+                missing.join(", ")
+            )));
+        }
+    }
 
     Ok(checks)
+}
+
+fn cutover_observation_requires_sample_routes(checks: ObservationVerificationChecks) -> bool {
+    checks.route_resolution
+        || checks.canonical_urls
+        || checks.media_reachability
+        || checks.transactional_journey_errors
 }
 
 fn render_supported_verification_checks(
@@ -5786,6 +6492,9 @@ fn render_supported_verification_checks(
     if checks.auth_failures {
         rendered.push("auth_failures(local+observe)");
     }
+    if checks.transactional_journey_errors {
+        rendered.push("transactional_journey_errors(local+observe)");
+    }
     if checks.route_resolution {
         rendered.push("route_resolution(observe)");
     }
@@ -5794,6 +6503,9 @@ fn render_supported_verification_checks(
     }
     if checks.media_reachability {
         rendered.push("media_reachability(observe)");
+    }
+    if checks.webhook_failures {
+        rendered.push("webhook_failures(local+observe)");
     }
     rendered.join(", ")
 }
@@ -5841,6 +6553,22 @@ fn execute_local_cutover_verification_checks(
         verify_local_auth_failure_probe(built, route)?;
         completed.push(format!("auth_failures({})", route.path));
     }
+    if checks.transactional_journey_errors {
+        let routes = derive_transactional_probe_routes(verification, support)?;
+        for route in &routes {
+            verify_local_transactional_probe(built, route)?;
+            completed.push(format!(
+                "transactional_journey_errors({} {})",
+                render_http_method(route.method),
+                route.path
+            ));
+        }
+    }
+    if checks.webhook_failures {
+        for probe in verify_local_webhook_failure_probes(verification, support)? {
+            completed.push(format!("webhook_failures({probe})"));
+        }
+    }
 
     if completed.is_empty() {
         completed.push("no local verification probes required".to_string());
@@ -5850,6 +6578,194 @@ fn execute_local_cutover_verification_checks(
         "local verification probes passed: {}",
         completed.join(", ")
     ))
+}
+
+fn verify_local_webhook_failure_probes(
+    verification: &davenda_import::ImportVerification,
+    support: &CutoverVerificationSupport,
+) -> Result<Vec<String>, CliRunError> {
+    let missing = missing_webhook_verification_probes(verification, support);
+    if !missing.is_empty() {
+        return Err(CliRunError::execution(format!(
+            "verification check `webhook_failures` requires installed webhook handlers for: {}",
+            missing.join(", ")
+        )));
+    }
+
+    Ok(verification
+        .webhooks
+        .iter()
+        .filter_map(|webhook| {
+            support
+                .webhook_probes
+                .iter()
+                .find(|probe| probe.source == webhook.source && probe.event == webhook.event)
+                .map(|probe| {
+                    format!(
+                        "{}/{} via {}:{}",
+                        probe.source, probe.event, probe.extension_id, probe.handler_id
+                    )
+                })
+        })
+        .collect())
+}
+
+fn missing_webhook_verification_probes(
+    verification: &davenda_import::ImportVerification,
+    support: &CutoverVerificationSupport,
+) -> Vec<String> {
+    verification
+        .webhooks
+        .iter()
+        .filter(|webhook| {
+            !support
+                .webhook_probes
+                .iter()
+                .any(|probe| probe.source == webhook.source && probe.event == webhook.event)
+        })
+        .map(|webhook| format!("{}/{}", webhook.source, webhook.event))
+        .collect()
+}
+
+fn derive_transactional_probe_routes(
+    verification: &davenda_import::ImportVerification,
+    support: &CutoverVerificationSupport,
+) -> Result<Vec<VerificationRouteProbe>, CliRunError> {
+    let mut derived = Vec::new();
+    for route in &support.transactional_probes {
+        if !route.path.contains('{') {
+            derived.push(route.clone());
+            continue;
+        }
+        for sample_route in &verification.sample_routes {
+            if let Some(path) =
+                derive_transactional_probe_path(route.path.as_str(), sample_route.as_str())
+            {
+                derived.push(VerificationRouteProbe {
+                    name: route.name.clone(),
+                    method: route.method,
+                    path,
+                    auth: route.auth,
+                });
+                break;
+            }
+        }
+    }
+
+    if derived.is_empty() {
+        return Err(CliRunError::execution(
+            "verification check `transactional_journey_errors` requires `[verification].sample_routes` that resolve at least one concrete transactional route"
+                .to_string(),
+        ));
+    }
+
+    Ok(derived)
+}
+
+fn derive_transactional_probe_path(pattern: &str, sample_route: &str) -> Option<String> {
+    let pattern_segments = pattern
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let sample_segments = sample_route
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+
+    if pattern_segments.is_empty() {
+        return (sample_route == "/").then_some("/".to_string());
+    }
+
+    if sample_segments.len() > pattern_segments.len() {
+        return None;
+    }
+
+    let mut rendered = Vec::with_capacity(pattern_segments.len());
+    for (index, segment) in pattern_segments.iter().enumerate() {
+        if index < sample_segments.len() {
+            if segment.starts_with('{') && segment.ends_with('}') {
+                rendered.push(sample_segments[index].to_string());
+            } else if *segment == sample_segments[index] {
+                rendered.push(segment.to_string());
+            } else {
+                return None;
+            }
+        } else if segment.starts_with('{') && segment.ends_with('}') {
+            return None;
+        } else {
+            rendered.push(segment.to_string());
+        }
+    }
+
+    Some(format!("/{}", rendered.join("/")))
+}
+
+fn verify_local_transactional_probe(
+    built: &BuiltCustomerAppContext,
+    route: &VerificationRouteProbe,
+) -> Result<(), CliRunError> {
+    let mut request = RequestInput::new(
+        route.method,
+        built
+            .runtime_plan
+            .runtime
+            .config
+            .seo
+            .canonical_host
+            .as_str(),
+        route.path.as_str(),
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to prepare transactional verification request `{}`: {error}",
+            route.path
+        ))
+    })?;
+    if let RouteAuthGate::Capability(capability) = route.auth {
+        request = request.grant_capability(capability);
+    }
+    match built.runtime_plan.runtime.execute_request(
+        request,
+        b"01234567012345670123456701234567",
+        b"76543210765432107654321076543210",
+    ) {
+        Ok(_) => Ok(()),
+        Err(
+            RequestExecutionError::SessionRequired { .. }
+            | RequestExecutionError::CapabilityRequired { .. }
+            | RequestExecutionError::MissingCsrfToken { .. }
+            | RequestExecutionError::MissingSessionForCsrf { .. }
+            | RequestExecutionError::InvalidCsrfToken { .. },
+        ) => Ok(()),
+        Err(other) => Err(CliRunError::execution(format!(
+            "transactional verification route `{}` returned `{other}` instead of a bounded auth/csrf rejection or handler response",
+            route.path
+        ))),
+    }
+}
+
+fn render_http_method(method: HttpMethod) -> &'static str {
+    match method {
+        HttpMethod::Get => "GET",
+        HttpMethod::Head => "HEAD",
+        HttpMethod::Post => "POST",
+        HttpMethod::Put => "PUT",
+        HttpMethod::Patch => "PATCH",
+        HttpMethod::Delete => "DELETE",
+    }
+}
+
+fn reqwest_method(method: HttpMethod) -> reqwest::Method {
+    match method {
+        HttpMethod::Get => reqwest::Method::GET,
+        HttpMethod::Head => reqwest::Method::HEAD,
+        HttpMethod::Post => reqwest::Method::POST,
+        HttpMethod::Put => reqwest::Method::PUT,
+        HttpMethod::Patch => reqwest::Method::PATCH,
+        HttpMethod::Delete => reqwest::Method::DELETE,
+    }
 }
 
 fn verify_session_creation_probe(
@@ -6035,11 +6951,15 @@ fn verify_local_auth_failure_probe(
 }
 
 fn execute_cutover_observation_probe(
+    built: &BuiltCustomerAppContext,
     client: &BlockingHttpClient,
     base_url: &str,
+    verification: Option<&davenda_import::ImportVerification>,
     sample_routes: &[String],
     auth_probe_route: Option<&VerificationRouteProbe>,
+    transactional_routes: &[VerificationRouteProbe],
     verification_checks: ObservationVerificationChecks,
+    observation_started_at_unix_seconds: u64,
 ) -> Result<CutoverObservationProbe, CliRunError> {
     let base = Url::parse(base_url).map_err(|error| {
         CliRunError::execution(format!(
@@ -6086,14 +7006,25 @@ fn execute_cutover_observation_probe(
             ))
         })?;
         let status_code = response.status().as_u16();
+        let actual_cache_headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+            })
+            .collect::<BTreeMap<_, _>>();
         let body = response.text().map_err(|error| {
             CliRunError::execution(format!(
                 "failed to read cutover route `{}` at `{}`: {error}",
                 route, url
             ))
         })?;
-        let outcome = if (200..400).contains(&status_code) {
-            let mut outcome = vec!["healthy".to_string()];
+        let mut outcome = Vec::new();
+        if (200..400).contains(&status_code) {
+            outcome.push("healthy".to_string());
             if verification_checks.canonical_urls {
                 match extract_canonical_url(&body, &url) {
                     Ok(canonical_url) => {
@@ -6136,18 +7067,50 @@ fn execute_cutover_observation_probe(
                     Err(error) => failures.push(error.to_string()),
                 }
             }
-            outcome.join(" ")
+            match resolve_cache_route_execution(built, route) {
+                Ok((execution, cache_key)) => {
+                    let expected_cache_headers = execution
+                        .cache_plan
+                        .headers
+                        .iter()
+                        .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+                        .collect::<BTreeMap<_, _>>();
+                    let mut cache_mismatches = Vec::new();
+                    for (name, expected) in expected_cache_headers {
+                        match actual_cache_headers.get(&name) {
+                            Some(actual) if actual == &expected => {}
+                            Some(actual) => cache_mismatches.push(format!(
+                                "{name} expected `{expected}` but observed `{actual}`"
+                            )),
+                            None => cache_mismatches
+                                .push(format!("{name} expected `{expected}` but was missing")),
+                        }
+                    }
+                    if cache_mismatches.is_empty() {
+                        outcome.push(format!("cache_ok({cache_key})"));
+                    } else {
+                        outcome.push("cache_mismatch".to_string());
+                        failures.push(format!(
+                            "cache headers for route `{route}` did not match the runtime cache policy: {}",
+                            cache_mismatches.join("; ")
+                        ));
+                    }
+                }
+                Err(_error) => {
+                    outcome.push("cache_skipped".to_string());
+                }
+            }
         } else {
             failures.push(format!(
                 "route `{route}` returned unexpected status {} during live observation",
                 status_code
             ));
-            "unexpected_status".to_string()
-        };
+            outcome.push("unexpected_status".to_string());
+        }
         routes.push(ObservedCutoverRoute {
             route: route.clone(),
             status_code,
-            outcome,
+            outcome: outcome.join(" "),
         });
     }
 
@@ -6188,6 +7151,72 @@ fn execute_cutover_observation_probe(
         });
     }
 
+    if verification_checks.transactional_journey_errors {
+        let verification = verification.ok_or_else(|| {
+            CliRunError::execution(
+                "verification requires transactional_journey_errors but the import manifest does not declare a `[verification]` section"
+                    .to_string(),
+            )
+        })?;
+        let support = CutoverVerificationSupport {
+            fragment_probe: None,
+            auth_probe: None,
+            transactional_probes: transactional_routes.to_vec(),
+            webhook_probes: Vec::new(),
+        };
+        let concrete_routes = derive_transactional_probe_routes(verification, &support)?;
+        for route in &concrete_routes {
+            let url = base.join(route.path.as_str()).map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to resolve transactional verification route `{}` against `{base_url}`: {error}",
+                    route.path
+                ))
+            })?;
+            let response = client
+                .request(reqwest_method(route.method), url.clone())
+                .header("content-type", "application/json")
+                .body("{}")
+                .send()
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to probe transactional verification route `{}` at `{}`: {error}",
+                        route.path, url
+                    ))
+                })?;
+            let status_code = response.status().as_u16();
+            if status_code >= 500 || status_code == 404 || status_code == 405 {
+                failures.push(format!(
+                    "transactional verification route `{}` returned {} during live observation",
+                    route.path, status_code
+                ));
+            }
+            routes.push(ObservedCutoverRoute {
+                route: format!("{} {}", render_http_method(route.method), route.path),
+                status_code,
+                outcome: if status_code >= 500 || status_code == 404 || status_code == 405 {
+                    "transactional_error".to_string()
+                } else {
+                    format!("transactional_ok({status_code})")
+                },
+            });
+        }
+    }
+    if verification_checks.webhook_failures {
+        let verification = verification.ok_or_else(|| {
+            CliRunError::execution(
+                "verification requires webhook_failures but the import manifest does not declare a `[verification]` section"
+                    .to_string(),
+            )
+        })?;
+        observe_webhook_failures_since(
+            built,
+            verification,
+            observation_started_at_unix_seconds,
+            &mut routes,
+            &mut failures,
+        )?;
+    }
+
     if verification_checks.media_reachability && media_probe_count == 0 {
         failures.push(
             "verification requires media_reachability but no same-origin media URLs were found across the sample routes"
@@ -6202,6 +7231,115 @@ fn execute_cutover_observation_probe(
         routes,
         failures,
     })
+}
+
+fn observe_webhook_failures_since(
+    built: &BuiltCustomerAppContext,
+    verification: &davenda_import::ImportVerification,
+    observation_started_at_unix_seconds: u64,
+    routes: &mut Vec<ObservedCutoverRoute>,
+    failures: &mut Vec<String>,
+) -> Result<(), CliRunError> {
+    let snapshot = built
+        .runtime_plan
+        .runtime
+        .wasm_host()
+        .webhook_observation_snapshot(250)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read webhook observation state for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    apply_webhook_observation_snapshot(
+        verification,
+        &snapshot,
+        observation_started_at_unix_seconds,
+        routes,
+        failures,
+    );
+    Ok(())
+}
+
+fn apply_webhook_observation_snapshot(
+    verification: &davenda_import::ImportVerification,
+    snapshot: &WebhookObservationSnapshot,
+    observation_started_at_unix_seconds: u64,
+    routes: &mut Vec<ObservedCutoverRoute>,
+    failures: &mut Vec<String>,
+) {
+    let recent_events = snapshot
+        .recent_events
+        .iter()
+        .filter(|event| event.recorded_at_unix_seconds >= observation_started_at_unix_seconds as i64)
+        .cloned()
+        .collect::<Vec<_>>();
+    apply_webhook_observation_events(
+        verification,
+        recent_events.as_slice(),
+        routes,
+        failures,
+    );
+}
+
+fn apply_webhook_observation_events(
+    verification: &davenda_import::ImportVerification,
+    recent_events: &[WebhookObservationEvent],
+    routes: &mut Vec<ObservedCutoverRoute>,
+    failures: &mut Vec<String>,
+) {
+    for webhook in &verification.webhooks {
+        let verification_failures = recent_events
+            .iter()
+            .filter(|event| {
+                event.source == webhook.source
+                    && event.event == webhook.event
+                    && event.status == WebhookObservationStatus::VerificationFailed
+            })
+            .count();
+        let replay_rejections = recent_events
+            .iter()
+            .filter(|event| {
+                event.source == webhook.source
+                    && event.event == webhook.event
+                    && event.status == WebhookObservationStatus::ReplayRejected
+            })
+            .count();
+        let over_budget = verification_failures > webhook.max_verification_failures as usize
+            || replay_rejections > webhook.max_replay_rejections as usize;
+        routes.push(ObservedCutoverRoute {
+            route: format!("webhook {}/{}", webhook.source, webhook.event),
+            status_code: 200,
+            outcome: format!(
+                "verification_failures={} replay_rejections={} {}",
+                verification_failures,
+                replay_rejections,
+                if over_budget {
+                    "threshold_exceeded"
+                } else {
+                    "within_budget"
+                }
+            ),
+        });
+        if verification_failures > webhook.max_verification_failures as usize {
+            failures.push(format!(
+                "webhook `{}/{}` observed {} verification failure(s) after observation started (max {})",
+                webhook.source,
+                webhook.event,
+                verification_failures,
+                webhook.max_verification_failures
+            ));
+        }
+        if replay_rejections > webhook.max_replay_rejections as usize {
+            failures.push(format!(
+                "webhook `{}/{}` observed {} replay rejection(s) after observation started (max {})",
+                webhook.source,
+                webhook.event,
+                replay_rejections,
+                webhook.max_replay_rejections
+            ));
+        }
+    }
 }
 
 fn extract_canonical_url(body: &str, route_url: &Url) -> Result<Url, CliRunError> {
@@ -7561,16 +8699,14 @@ fn user_import_updates(
         .ok_or_else(|| ImportModelError::ManifestParse {
             message: "staged user record is missing `normalized.legacy_roles`".to_string(),
         })?;
-    if legacy_roles.is_empty() {
-        return Err(ImportModelError::ManifestParse {
-            message: "live user import requires at least one `legacy_roles` entry".to_string(),
-        });
-    }
 
     let user = DefaultSubject::entity(Entity::user(principal_id.clone()));
     let site = Entity::site(site_id.to_string());
     let mut updates = Vec::new();
+    let mut imported_roles = Vec::new();
     let mut effective_roles = Vec::new();
+    let mut preserved_only_roles = Vec::new();
+    let mut seen_roles = BTreeSet::new();
 
     for role in legacy_roles {
         let role = role
@@ -7580,44 +8716,26 @@ fn user_import_updates(
                 message: "staged user record has a non-string `normalized.legacy_roles` entry"
                     .to_string(),
             })?;
+        if !seen_roles.insert(role.to_string()) {
+            continue;
+        }
+        imported_roles.push(role.to_string());
         let group = Entity::group(format!("legacy-role:{role}"));
         updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
             group.clone(),
             Relation::Member,
             user.clone(),
         )));
-        match role {
-            "administrator" => {
+        match supported_legacy_wordpress_role(role)? {
+            Some(site_relation) => {
                 updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
                     site.clone(),
-                    Relation::Admin,
+                    site_relation,
                     DefaultSubject::userset(group, Relation::Member),
                 )));
                 effective_roles.push(role.to_string());
             }
-            "editor" => {
-                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
-                    site.clone(),
-                    Relation::Editor,
-                    DefaultSubject::userset(group, Relation::Member),
-                )));
-                effective_roles.push(role.to_string());
-            }
-            "subscriber" | "customer" => {
-                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
-                    site.clone(),
-                    Relation::Viewer,
-                    DefaultSubject::userset(group, Relation::Member),
-                )));
-                effective_roles.push(role.to_string());
-            }
-            other => {
-                return Err(ImportModelError::ManifestParse {
-                    message: format!(
-                        "legacy role `{other}` cannot be imported safely into the current auth model; add an explicit supported mapping before publishing live user auth state"
-                    ),
-                });
-            }
+            None => preserved_only_roles.push(role.to_string()),
         }
     }
 
@@ -7627,10 +8745,27 @@ fn user_import_updates(
             "table": "auth_tuples",
             "principal_id": principal_id,
             "site_id": site_id,
+            "legacy_roles": imported_roles,
             "roles": effective_roles,
+            "preserved_only_roles": preserved_only_roles,
             "writes": updates.len(),
         }),
     ))
+}
+
+fn supported_legacy_wordpress_role(role: &str) -> Result<Option<Relation>, ImportModelError> {
+    match role {
+        "administrator" => Ok(Some(Relation::Admin)),
+        "editor" => Ok(Some(Relation::Editor)),
+        // These roles are common in WordPress and WooCommerce, but the shipped auth model
+        // has no narrow equivalent that would avoid over-granting admin-shell or domain access.
+        "author" | "contributor" | "subscriber" | "customer" | "shop_manager" => Ok(None),
+        other => Err(ImportModelError::ManifestParse {
+            message: format!(
+                "legacy role `{other}` cannot be imported safely into the current auth model; add an explicit supported mapping before publishing live user auth state"
+            ),
+        }),
+    }
 }
 
 fn user_account_import_mutation(
@@ -8493,6 +9628,7 @@ mod tests {
         status_code: u16,
         content_type: &'static str,
         body: Vec<u8>,
+        headers: BTreeMap<String, String>,
     }
 
     impl LiveProbeResponse {
@@ -8501,6 +9637,7 @@ mod tests {
                 status_code,
                 content_type: "text/html; charset=utf-8",
                 body: body.into().into_bytes(),
+                headers: BTreeMap::new(),
             }
         }
 
@@ -8509,8 +9646,28 @@ mod tests {
                 status_code,
                 content_type: "application/octet-stream",
                 body,
+                headers: BTreeMap::new(),
             }
         }
+
+        fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+            self.headers.insert(name.into(), value.into());
+            self
+        }
+    }
+
+    fn cache_probe_response(
+        built: &BuiltCustomerAppContext,
+        route: &str,
+        body: impl Into<String>,
+    ) -> LiveProbeResponse {
+        let mut response = LiveProbeResponse::html(200, body);
+        if let Ok((execution, _)) = resolve_cache_route_execution(built, route) {
+            for (name, value) in &execution.cache_plan.headers {
+                response = response.with_header(name.clone(), value.clone());
+            }
+        }
+        response
     }
 
     impl LiveProbeTestServer {
@@ -8622,16 +9779,75 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    struct CloudflareTestLoadBalancer {
+        id: String,
+        #[serde(default)]
+        default_pools: Vec<String>,
+    }
+
+    impl CloudflareTestLoadBalancer {
+        fn new(id: impl Into<String>, default_pool: impl Into<String>) -> Self {
+            Self {
+                id: id.into(),
+                default_pools: vec![default_pool.into()],
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    struct CloudflareTestOriginRule {
+        id: String,
+        origin: String,
+    }
+
+    impl CloudflareTestOriginRule {
+        fn new(id: impl Into<String>, origin: impl Into<String>) -> Self {
+            Self {
+                id: id.into(),
+                origin: origin.into(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    struct CloudflareTestRoutingRule {
+        id: String,
+        service: String,
+    }
+
+    impl CloudflareTestRoutingRule {
+        fn new(id: impl Into<String>, service: impl Into<String>) -> Self {
+            Self {
+                id: id.into(),
+                service: service.into(),
+            }
+        }
+    }
+
     struct CloudflareTestServer {
         base_url: String,
         zone_id: String,
         stop: Arc<AtomicBool>,
         records: Arc<Mutex<BTreeMap<String, CloudflareTestRecord>>>,
+        load_balancers: Arc<Mutex<BTreeMap<String, CloudflareTestLoadBalancer>>>,
+        origin_rules: Arc<Mutex<BTreeMap<String, CloudflareTestOriginRule>>>,
+        routing_rules: Arc<Mutex<BTreeMap<String, CloudflareTestRoutingRule>>>,
         handle: Option<thread::JoinHandle<()>>,
     }
 
     impl CloudflareTestServer {
         fn spawn(zone_id: impl Into<String>, records: Vec<CloudflareTestRecord>) -> Self {
+            Self::spawn_extended(zone_id, records, Vec::new(), Vec::new(), Vec::new())
+        }
+
+        fn spawn_extended(
+            zone_id: impl Into<String>,
+            records: Vec<CloudflareTestRecord>,
+            load_balancers: Vec<CloudflareTestLoadBalancer>,
+            origin_rules: Vec<CloudflareTestOriginRule>,
+            routing_rules: Vec<CloudflareTestRoutingRule>,
+        ) -> Self {
             let zone_id = zone_id.into();
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -8643,8 +9859,29 @@ mod tests {
                     .map(|record| (record.name.clone(), record))
                     .collect::<BTreeMap<_, _>>(),
             ));
+            let load_balancers = Arc::new(Mutex::new(
+                load_balancers
+                    .into_iter()
+                    .map(|resource| (resource.id.clone(), resource))
+                    .collect::<BTreeMap<_, _>>(),
+            ));
+            let origin_rules = Arc::new(Mutex::new(
+                origin_rules
+                    .into_iter()
+                    .map(|resource| (resource.id.clone(), resource))
+                    .collect::<BTreeMap<_, _>>(),
+            ));
+            let routing_rules = Arc::new(Mutex::new(
+                routing_rules
+                    .into_iter()
+                    .map(|resource| (resource.id.clone(), resource))
+                    .collect::<BTreeMap<_, _>>(),
+            ));
             let stop_thread = Arc::clone(&stop);
             let records_thread = Arc::clone(&records);
+            let load_balancers_thread = Arc::clone(&load_balancers);
+            let origin_rules_thread = Arc::clone(&origin_rules);
+            let routing_rules_thread = Arc::clone(&routing_rules);
             let zone_id_thread = zone_id.clone();
             let handle = thread::spawn(move || {
                 loop {
@@ -8652,9 +9889,14 @@ mod tests {
                         break;
                     }
                     match listener.accept() {
-                        Ok((stream, _)) => {
-                            handle_cloudflare_test_request(stream, &zone_id_thread, &records_thread)
-                        }
+                        Ok((stream, _)) => handle_cloudflare_test_request(
+                            stream,
+                            &zone_id_thread,
+                            &records_thread,
+                            &load_balancers_thread,
+                            &origin_rules_thread,
+                            &routing_rules_thread,
+                        ),
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(10));
                         }
@@ -8668,6 +9910,9 @@ mod tests {
                 zone_id,
                 stop,
                 records,
+                load_balancers,
+                origin_rules,
+                routing_rules,
                 handle: Some(handle),
             }
         }
@@ -8682,6 +9927,33 @@ mod tests {
 
         fn record(&self, hostname: &str) -> CloudflareTestRecord {
             self.records.lock().unwrap().get(hostname).cloned().unwrap()
+        }
+
+        fn load_balancer(&self, resource_id: &str) -> CloudflareTestLoadBalancer {
+            self.load_balancers
+                .lock()
+                .unwrap()
+                .get(resource_id)
+                .cloned()
+                .unwrap()
+        }
+
+        fn origin_rule(&self, resource_id: &str) -> CloudflareTestOriginRule {
+            self.origin_rules
+                .lock()
+                .unwrap()
+                .get(resource_id)
+                .cloned()
+                .unwrap()
+        }
+
+        fn routing_rule(&self, resource_id: &str) -> CloudflareTestRoutingRule {
+            self.routing_rules
+                .lock()
+                .unwrap()
+                .get(resource_id)
+                .cloned()
+                .unwrap()
         }
     }
 
@@ -8702,6 +9974,23 @@ mod tests {
     }
 
     impl Drop for DnsCutoverTestContext {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var(CLOUDFLARE_API_BASE_URL_ENV);
+                std::env::remove_var(&self.secret_env_var);
+            }
+        }
+    }
+
+    struct TrafficTargetCutoverTestContext {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        server: CloudflareTestServer,
+        secret_env_var: String,
+        resource_id: String,
+        target: String,
+    }
+
+    impl Drop for TrafficTargetCutoverTestContext {
         fn drop(&mut self) {
             unsafe {
                 std::env::remove_var(CLOUDFLARE_API_BASE_URL_ENV);
@@ -8800,6 +10089,9 @@ mod tests {
         mut stream: std::net::TcpStream,
         expected_zone_id: &str,
         records: &Arc<Mutex<BTreeMap<String, CloudflareTestRecord>>>,
+        load_balancers: &Arc<Mutex<BTreeMap<String, CloudflareTestLoadBalancer>>>,
+        origin_rules: &Arc<Mutex<BTreeMap<String, CloudflareTestOriginRule>>>,
+        routing_rules: &Arc<Mutex<BTreeMap<String, CloudflareTestRoutingRule>>>,
     ) {
         stream.set_nonblocking(false).unwrap();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -8880,6 +10172,108 @@ mod tests {
                 .to_string()
                 .into_bytes()
             }
+            ("GET", get_path)
+                if get_path.starts_with(&format!("/zones/{expected_zone_id}/load_balancers/")) =>
+            {
+                let resource_id = get_path
+                    .trim_start_matches(&format!("/zones/{expected_zone_id}/load_balancers/"));
+                let result = load_balancers.lock().unwrap().get(resource_id).cloned();
+                serde_json::json!({
+                    "success": result.is_some(),
+                    "errors": if result.is_some() { vec![] } else { vec![serde_json::json!({ "message": "unsupported request" })] },
+                    "result": result,
+                })
+                .to_string()
+                .into_bytes()
+            }
+            ("PUT", put_path)
+                if put_path.starts_with(&format!("/zones/{expected_zone_id}/load_balancers/")) =>
+            {
+                let resource_id = put_path
+                    .trim_start_matches(&format!("/zones/{expected_zone_id}/load_balancers/"));
+                let update: Value = serde_json::from_slice(&body).unwrap();
+                let pools = update["default_pools"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|value| value.as_str().map(ToString::to_string))
+                    .collect::<Vec<_>>();
+                let mut guard = load_balancers.lock().unwrap();
+                let resource = guard.get_mut(resource_id).unwrap();
+                resource.default_pools = pools;
+                serde_json::json!({
+                    "success": true,
+                    "errors": [],
+                    "result": resource.clone(),
+                })
+                .to_string()
+                .into_bytes()
+            }
+            ("GET", get_path)
+                if get_path.starts_with(&format!("/zones/{expected_zone_id}/origin_rules/")) =>
+            {
+                let resource_id = get_path
+                    .trim_start_matches(&format!("/zones/{expected_zone_id}/origin_rules/"));
+                let result = origin_rules.lock().unwrap().get(resource_id).cloned();
+                serde_json::json!({
+                    "success": result.is_some(),
+                    "errors": if result.is_some() { vec![] } else { vec![serde_json::json!({ "message": "unsupported request" })] },
+                    "result": result,
+                })
+                .to_string()
+                .into_bytes()
+            }
+            ("PUT", put_path)
+                if put_path.starts_with(&format!("/zones/{expected_zone_id}/origin_rules/")) =>
+            {
+                let resource_id = put_path
+                    .trim_start_matches(&format!("/zones/{expected_zone_id}/origin_rules/"));
+                let update: Value = serde_json::from_slice(&body).unwrap();
+                let origin = update["origin"].as_str().unwrap();
+                let mut guard = origin_rules.lock().unwrap();
+                let resource = guard.get_mut(resource_id).unwrap();
+                resource.origin = origin.to_string();
+                serde_json::json!({
+                    "success": true,
+                    "errors": [],
+                    "result": resource.clone(),
+                })
+                .to_string()
+                .into_bytes()
+            }
+            ("GET", get_path)
+                if get_path.starts_with(&format!("/zones/{expected_zone_id}/routing_rules/")) =>
+            {
+                let resource_id = get_path
+                    .trim_start_matches(&format!("/zones/{expected_zone_id}/routing_rules/"));
+                let result = routing_rules.lock().unwrap().get(resource_id).cloned();
+                serde_json::json!({
+                    "success": result.is_some(),
+                    "errors": if result.is_some() { vec![] } else { vec![serde_json::json!({ "message": "unsupported request" })] },
+                    "result": result,
+                })
+                .to_string()
+                .into_bytes()
+            }
+            ("PUT", put_path)
+                if put_path.starts_with(&format!("/zones/{expected_zone_id}/routing_rules/")) =>
+            {
+                let resource_id = put_path
+                    .trim_start_matches(&format!("/zones/{expected_zone_id}/routing_rules/"));
+                let update: Value = serde_json::from_slice(&body).unwrap();
+                let service = update["service"].as_str().unwrap();
+                let mut guard = routing_rules.lock().unwrap();
+                let resource = guard.get_mut(resource_id).unwrap();
+                resource.service = service.to_string();
+                serde_json::json!({
+                    "success": true,
+                    "errors": [],
+                    "result": resource.clone(),
+                })
+                .to_string()
+                .into_bytes()
+            }
             _ => serde_json::json!({
                 "success": false,
                 "errors": [{ "message": "unsupported request" }],
@@ -8916,9 +10310,9 @@ mod tests {
             .next()
             .unwrap_or("/");
 
-        let (status, content_type, response_body) = match path {
+        let (status, content_type, response_body, response_headers) = match path {
             "/health" => (
-                "200 OK",
+                "200 OK".to_string(),
                 "application/json",
                 serde_json::json!({
                     "status": health_status,
@@ -8926,33 +10320,43 @@ mod tests {
                 })
                 .to_string()
                 .into_bytes(),
+                BTreeMap::<String, String>::new(),
             ),
             "/ready" | "/readiness" => (
-                "200 OK",
+                "200 OK".to_string(),
                 "application/json",
                 serde_json::json!({ "status": readiness_status })
                     .to_string()
                     .into_bytes(),
+                BTreeMap::<String, String>::new(),
             ),
             route => {
                 let response = routes.get(route).cloned().unwrap_or_else(|| {
                     LiveProbeResponse::html(404, format!("<html><body>{route}</body></html>"))
                 });
-                let status = match response.status_code {
-                    200 => "200 OK",
-                    401 => "401 Unauthorized",
-                    403 => "403 Forbidden",
-                    302 => "302 Found",
-                    304 => "304 Not Modified",
-                    500 => "500 Internal Server Error",
-                    _ => "404 Not Found",
-                };
-                (status, response.content_type, response.body)
+                let status = reqwest::StatusCode::from_u16(response.status_code)
+                    .ok()
+                    .and_then(|status| {
+                        status
+                            .canonical_reason()
+                            .map(|reason| format!("{} {}", response.status_code, reason))
+                    })
+                    .unwrap_or_else(|| format!("{} Unknown", response.status_code));
+                (
+                    status.to_string(),
+                    response.content_type,
+                    response.body,
+                    response.headers,
+                )
             }
         };
 
+        let extra_headers = response_headers
+            .into_iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect::<String>();
         let response = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
             response_body.len()
         );
         stream.write_all(response.as_bytes()).unwrap();
@@ -9190,6 +10594,97 @@ enabled = ["cms"]
         }
     }
 
+    fn configure_load_balancer_cutover_for_import_fixture(
+        _fixture: &ImportFixture,
+    ) -> TrafficTargetCutoverTestContext {
+        configure_traffic_target_cutover(
+            "load-balancer",
+            vec![CloudflareTestLoadBalancer::new(
+                "lb-edge-1",
+                "legacy-origin-pool",
+            )],
+            Vec::new(),
+            Vec::new(),
+            "lb-edge-1",
+            "davenda-origin-pool",
+        )
+    }
+
+    fn configure_cdn_origin_cutover_for_import_fixture(
+        _fixture: &ImportFixture,
+    ) -> TrafficTargetCutoverTestContext {
+        configure_traffic_target_cutover(
+            "cdn-origin",
+            Vec::new(),
+            vec![CloudflareTestOriginRule::new(
+                "origin-main",
+                "legacy-origin.example.net",
+            )],
+            Vec::new(),
+            "origin-main",
+            "davenda-origin.example.net",
+        )
+    }
+
+    fn configure_routing_cutover_for_import_fixture(
+        _fixture: &ImportFixture,
+    ) -> TrafficTargetCutoverTestContext {
+        configure_traffic_target_cutover(
+            "routing",
+            Vec::new(),
+            Vec::new(),
+            vec![CloudflareTestRoutingRule::new(
+                "route-primary",
+                "legacy-service",
+            )],
+            "route-primary",
+            "davenda-service",
+        )
+    }
+
+    fn configure_traffic_target_cutover(
+        _label: &str,
+        load_balancers: Vec<CloudflareTestLoadBalancer>,
+        origin_rules: Vec<CloudflareTestOriginRule>,
+        routing_rules: Vec<CloudflareTestRoutingRule>,
+        resource_id: &str,
+        target: &str,
+    ) -> TrafficTargetCutoverTestContext {
+        let lock = cloudflare_test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let server = CloudflareTestServer::spawn_extended(
+            format!("zone-{suffix}"),
+            vec![CloudflareTestRecord::cname(
+                format!("record-{suffix}"),
+                "shop.example.com",
+                "legacy-origin.example.net",
+            )],
+            load_balancers,
+            origin_rules,
+            routing_rules,
+        );
+        unsafe {
+            std::env::set_var(
+                CUTOVER_CLOUDFLARE_SECRET_ENV,
+                r#"{"cloudflare_api_token":"test-cloudflare-token"}"#,
+            );
+            std::env::set_var(CLOUDFLARE_API_BASE_URL_ENV, server.base_url());
+        }
+
+        TrafficTargetCutoverTestContext {
+            _lock: lock,
+            server,
+            secret_env_var: CUTOVER_CLOUDFLARE_SECRET_ENV.to_string(),
+            resource_id: resource_id.to_string(),
+            target: target.to_string(),
+        }
+    }
+
     fn write_test_file(path: impl AsRef<Path>, content: &str) {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -9407,24 +10902,32 @@ dependencies = ["users", "media"]
         name: &str,
         observation_window_minutes: u32,
     ) -> PathBuf {
-        write_cutover_observe_manifest_with_checks(
+        write_cutover_observe_manifest_for_switch_method(
             fixture,
             name,
             observation_window_minutes,
+            "dns",
             &["record_counts"],
         )
     }
 
-    fn write_cutover_observe_manifest_with_checks(
+    fn write_cutover_observe_manifest_with_routes_and_checks(
         fixture: &ImportFixture,
         name: &str,
         observation_window_minutes: u32,
+        switch_method: &str,
         required_checks: &[&str],
+        sample_routes: &[&str],
     ) -> PathBuf {
         let manifest_path = fixture.root.join("imports").join(name);
         let required = required_checks
             .iter()
             .map(|check| format!("\"{check}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sample_routes = sample_routes
+            .iter()
+            .map(|route| format!("\"{route}\""))
             .collect::<Vec<_>>()
             .join(", ");
         write_test_file(
@@ -9446,11 +10949,11 @@ expected_modules = ["media"]
 
 [verification]
 required = [{required}]
-sample_routes = ["/", "/events"]
+sample_routes = [{sample_routes}]
 
 [cutover]
 freeze_legacy_writes = false
-switch_method = "dns"
+switch_method = "{switch_method}"
 hostnames = ["shop.example.com"]
 requires_assets_publish = false
 requires_migrate_apply = false
@@ -9472,6 +10975,38 @@ source_path = "fixtures/media.json"
             ),
         );
         manifest_path
+    }
+
+    fn write_cutover_observe_manifest_with_checks(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+        required_checks: &[&str],
+    ) -> PathBuf {
+        write_cutover_observe_manifest_for_switch_method(
+            fixture,
+            name,
+            observation_window_minutes,
+            "dns",
+            required_checks,
+        )
+    }
+
+    fn write_cutover_observe_manifest_for_switch_method(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+        switch_method: &str,
+        required_checks: &[&str],
+    ) -> PathBuf {
+        write_cutover_observe_manifest_with_routes_and_checks(
+            fixture,
+            name,
+            observation_window_minutes,
+            switch_method,
+            required_checks,
+            &["/", "/events"],
+        )
     }
 
     fn write_cutover_observe_manifest_with_users_and_checks(
@@ -9540,6 +11075,140 @@ source_path = "fixtures/media.json"
         manifest_path
     }
 
+    fn write_cutover_observe_manifest_with_webhooks_and_checks(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+        required_checks: &[&str],
+        webhooks: &[(&str, &str, u32, u32)],
+    ) -> PathBuf {
+        let manifest_path = fixture.root.join("imports").join(name);
+        let required = required_checks
+            .iter()
+            .map(|check| format!("\"{check}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let webhook_blocks = webhooks
+            .iter()
+            .map(|(source, event, max_verification_failures, max_replay_rejections)| {
+                format!(
+                    "\n[[verification.webhooks]]\nsource = \"{source}\"\nevent = \"{event}\"\nmax_verification_failures = {max_verification_failures}\nmax_replay_rejections = {max_replay_rejections}\n"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        write_test_file(
+            &manifest_path,
+            &format!(
+                r#"
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "showcase-events"
+modules = ["media"]
+publication_mode = "publish_validated"
+asset_storage_default = "public_upload"
+
+[target]
+app_manifest = "../apps/showcase-events/app.toml"
+platform_config = "../config/platform.toml"
+expected_modules = ["media"]
+
+[verification]
+required = [{required}]
+{webhook_blocks}
+
+[cutover]
+freeze_legacy_writes = false
+switch_method = "dns"
+hostnames = ["shop.example.com"]
+requires_assets_publish = false
+requires_migrate_apply = false
+requires_storage_validation = false
+requires_cache_warm = false
+observation_window_minutes = {observation_window_minutes}
+
+[[cutover.rollback_triggers]]
+id = "webhook-failure"
+description = "Webhook failure"
+
+[[importers]]
+id = "media"
+phase = 20
+resource_kind = "asset"
+description = "Import media"
+source_path = "fixtures/media.json"
+"#
+            ),
+        );
+        manifest_path
+    }
+
+    fn write_cutover_observe_manifest_with_sample_routes(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+        required_checks: &[&str],
+        sample_routes: &[&str],
+    ) -> PathBuf {
+        let manifest_path = fixture.root.join("imports").join(name);
+        let required = required_checks
+            .iter()
+            .map(|check| format!("\"{check}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sample_routes = sample_routes
+            .iter()
+            .map(|route| format!("\"{route}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        write_test_file(
+            &manifest_path,
+            &format!(
+                r#"
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "showcase-events"
+modules = ["media"]
+publication_mode = "publish_validated"
+asset_storage_default = "public_upload"
+
+[target]
+app_manifest = "../apps/showcase-events/app.toml"
+platform_config = "../config/platform.toml"
+expected_modules = ["media"]
+
+[verification]
+required = [{required}]
+sample_routes = [{sample_routes}]
+
+[cutover]
+freeze_legacy_writes = false
+switch_method = "dns"
+hostnames = ["shop.example.com"]
+requires_assets_publish = false
+requires_migrate_apply = false
+requires_storage_validation = false
+requires_cache_warm = false
+observation_window_minutes = {observation_window_minutes}
+
+[[cutover.rollback_triggers]]
+id = "auth-failure"
+description = "Auth failure"
+
+[[importers]]
+id = "media"
+phase = 20
+resource_kind = "asset"
+description = "Import media"
+source_path = "fixtures/media.json"
+"#
+            ),
+        );
+        manifest_path
+    }
+
     fn enable_admin_and_ops_for_import_fixture(fixture: &ImportFixture) {
         let config_path = fixture.root.join("config").join("platform.toml");
         let app_manifest_path = fixture
@@ -9576,6 +11245,64 @@ source_path = "fixtures/media.json"
             "--dns-target".to_string(),
             dns.dns_target.clone(),
             "--yes".to_string(),
+        ])
+        .unwrap()
+    }
+
+    fn run_traffic_target_cutover_switch(
+        manifest_path: &Path,
+        base_url: &str,
+        context: &TrafficTargetCutoverTestContext,
+    ) -> String {
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            manifest_path.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            base_url.to_string(),
+            "--switch-zone-id".to_string(),
+            context.server.zone_id().to_string(),
+            "--switch-resource-id".to_string(),
+            context.resource_id.clone(),
+            "--switch-target".to_string(),
+            context.target.clone(),
+            "--yes".to_string(),
+        ])
+        .unwrap()
+    }
+
+    fn choose_cache_probe_route(
+        built: &BuiltCustomerAppContext,
+        candidates: &[&str],
+    ) -> Option<String> {
+        for route in candidates {
+            if resolve_cache_route_execution(&built, route).is_ok() {
+                return Some((*route).to_string());
+            }
+        }
+        None
+    }
+
+    fn run_traffic_target_cutover_switch_dry_run(
+        manifest_path: &Path,
+        base_url: &str,
+        context: &TrafficTargetCutoverTestContext,
+    ) -> String {
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            manifest_path.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            base_url.to_string(),
+            "--switch-zone-id".to_string(),
+            context.server.zone_id().to_string(),
+            "--switch-resource-id".to_string(),
+            context.resource_id.clone(),
+            "--switch-target".to_string(),
+            context.target.clone(),
+            "--dry-run".to_string(),
         ])
         .unwrap()
     }
@@ -10145,6 +11872,207 @@ expect = true
     }
 
     #[test]
+    fn verification_readiness_executes_local_transactional_cutover_checks_when_declared() {
+        let fixture = import_fixture();
+        let cutover_manifest = write_cutover_observe_manifest_with_routes_and_checks(
+            &fixture,
+            "cutover-local-transactional-verification.toml",
+            60,
+            "dns",
+            &["record_counts", "transactional_journey_errors"],
+            &["/", "/events/festival"],
+        );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        unsafe {
+            std::env::set_var(
+                "DATABASE_URL",
+                "postgres://davenda:test@127.0.0.1:5432/davenda",
+            );
+            std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
+        }
+        let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _runtime_guard = tokio_runtime.enter();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
+        let support = build_cutover_verification_support(&runtime.built);
+        let verification = manifest.verification.as_ref().unwrap();
+
+        let (ready, detail) =
+            evaluate_verification_readiness(verification, &runtime.built, &support);
+
+        assert!(ready, "{detail}");
+        assert!(detail.contains("transactional_journey_errors"));
+        assert!(detail.contains("POST /events/festival/book"));
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+            std::env::remove_var("REDIS_URL");
+        }
+    }
+
+    #[test]
+    fn verification_readiness_rejects_webhook_failures_without_matching_runtime_handler() {
+        let fixture = import_fixture();
+        let cutover_manifest = write_cutover_observe_manifest_with_webhooks_and_checks(
+            &fixture,
+            "cutover-local-webhook-verification.toml",
+            60,
+            &["record_counts", "webhook_failures"],
+            &[("commerce.payment-provider", "payment.authorized", 0, 0)],
+        );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
+        let support = build_cutover_verification_support(&runtime.built);
+        let verification = manifest.verification.as_ref().unwrap();
+
+        let (ready, detail) =
+            evaluate_verification_readiness(verification, &runtime.built, &support);
+
+        assert!(!ready);
+        assert!(detail.contains("webhook_failures"));
+        assert!(detail.contains("commerce.payment-provider/payment.authorized"));
+    }
+
+    #[test]
+    fn local_webhook_verification_supports_matching_runtime_handlers() {
+        let verification = davenda_import::ImportVerification::default()
+            .with_required("webhook_failures")
+            .unwrap()
+            .with_webhook(
+                davenda_import::ImportWebhookVerification::new(
+                    "commerce.payment-provider",
+                    "payment.authorized",
+                )
+                .unwrap()
+                .with_max_replay_rejections(1),
+            );
+        let support = CutoverVerificationSupport {
+            fragment_probe: None,
+            auth_probe: None,
+            transactional_probes: Vec::new(),
+            webhook_probes: vec![VerificationWebhookProbe {
+                extension_id: "commerce.webhooks".to_string(),
+                handler_id: "payment-authorized".to_string(),
+                source: "commerce.payment-provider".to_string(),
+                event: "payment.authorized".to_string(),
+            }],
+        };
+
+        let checks = build_cutover_verification_checks(&verification, &support).unwrap();
+        let probes = verify_local_webhook_failure_probes(&verification, &support).unwrap();
+        let rendered = render_supported_verification_checks(&verification, checks);
+
+        assert!(checks.webhook_failures);
+        assert_eq!(
+            probes,
+            vec!["commerce.payment-provider/payment.authorized via commerce.webhooks:payment-authorized"]
+        );
+        assert!(rendered.contains("webhook_failures(local+observe)"));
+    }
+
+    #[test]
+    fn webhook_observation_ignores_events_before_the_observation_window() {
+        let verification = davenda_import::ImportVerification::default().with_webhook(
+            davenda_import::ImportWebhookVerification::new(
+                "commerce.payment-provider",
+                "payment.authorized",
+            )
+            .unwrap(),
+        );
+        let snapshot = WebhookObservationSnapshot {
+            backend: davenda_runtime::WebhookObservationBackendKind::LocalSqlite,
+            location: "local-sqlite:test".to_string(),
+            path: None,
+            entry_count: 2,
+            status_counts: davenda_runtime::WebhookObservationStatusCounts {
+                verification_failed: 2,
+                ..Default::default()
+            },
+            recent_events: vec![
+                WebhookObservationEvent {
+                    id: 1,
+                    recorded_at_unix_seconds: 99,
+                    app_id: "showcase-events".to_string(),
+                    source: "commerce.payment-provider".to_string(),
+                    event: "payment.authorized".to_string(),
+                    status: WebhookObservationStatus::VerificationFailed,
+                    trace_id: "trace.old".to_string(),
+                    principal_kind: "service_account".to_string(),
+                    principal_id: Some("commerce.webhooks".to_string()),
+                    detail: Some("old failure".to_string()),
+                },
+                WebhookObservationEvent {
+                    id: 2,
+                    recorded_at_unix_seconds: 100,
+                    app_id: "showcase-events".to_string(),
+                    source: "commerce.payment-provider".to_string(),
+                    event: "payment.authorized".to_string(),
+                    status: WebhookObservationStatus::VerificationFailed,
+                    trace_id: "trace.window".to_string(),
+                    principal_kind: "service_account".to_string(),
+                    principal_id: Some("commerce.webhooks".to_string()),
+                    detail: Some("current failure".to_string()),
+                },
+            ],
+        };
+        let mut routes = Vec::new();
+        let mut failures = Vec::new();
+
+        apply_webhook_observation_snapshot(&verification, &snapshot, 100, &mut routes, &mut failures);
+
+        assert_eq!(routes.len(), 1);
+        assert!(routes[0].outcome.contains("verification_failures=1"));
+        assert!(failures.contains(
+            &"webhook `commerce.payment-provider/payment.authorized` observed 1 verification failure(s) after observation started (max 0)"
+                .to_string()
+        ));
+    }
+
+    #[test]
+    fn webhook_observation_tracks_replay_rejections_within_budget() {
+        let verification = davenda_import::ImportVerification::default().with_webhook(
+            davenda_import::ImportWebhookVerification::new(
+                "commerce.payment-provider",
+                "payment.authorized",
+            )
+            .unwrap()
+            .with_max_replay_rejections(1),
+        );
+        let mut routes = Vec::new();
+        let mut failures = Vec::new();
+
+        apply_webhook_observation_events(
+            &verification,
+            &[WebhookObservationEvent {
+                id: 1,
+                recorded_at_unix_seconds: 100,
+                app_id: "showcase-events".to_string(),
+                source: "commerce.payment-provider".to_string(),
+                event: "payment.authorized".to_string(),
+                status: WebhookObservationStatus::ReplayRejected,
+                trace_id: "trace.replay".to_string(),
+                principal_kind: "service_account".to_string(),
+                principal_id: Some("commerce.webhooks".to_string()),
+                detail: Some("duplicate delivery".to_string()),
+            }],
+            &mut routes,
+            &mut failures,
+        );
+
+        assert_eq!(routes.len(), 1);
+        assert!(routes[0].outcome.contains("replay_rejections=1"));
+        assert!(routes[0].outcome.contains("within_budget"));
+        assert!(failures.is_empty());
+    }
+
+    #[test]
     fn run_from_args_executes_cutover_preparation_and_persists_a_journal() {
         let fixture = import_fixture();
         let cutover_manifest = fixture.root.join("imports").join("cutover-apply.toml");
@@ -10244,12 +12172,17 @@ expect = true
     }
 
     #[test]
-    fn run_from_args_observes_a_prepared_cutover_until_it_passes() {
+    fn run_from_args_dry_runs_load_balancer_cutover_switch_without_mutating_provider_state() {
         let fixture = import_fixture();
         enable_admin_and_ops_for_import_fixture(&fixture);
-        let dns = configure_dns_cutover_for_import_fixture(&fixture);
-        let cutover_manifest =
-            write_cutover_observe_manifest(&fixture, "cutover-observe-pass.toml", 0);
+        let context = configure_load_balancer_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_for_switch_method(
+            &fixture,
+            "cutover-switch-load-balancer-dry-run.toml",
+            60,
+            "load-balancer",
+            &["record_counts"],
+        );
 
         run_from_args([
             "import".to_string(),
@@ -10260,11 +12193,211 @@ expect = true
         ])
         .unwrap();
 
-        let probe_server = LiveProbeTestServer::spawn(
+        let rendered = run_traffic_target_cutover_switch_dry_run(
+            &cutover_manifest,
+            "https://shop.example.com",
+            &context,
+        );
+
+        assert!(rendered.contains("Planned cutover switch"));
+        assert!(rendered.contains("no provider state or cutover journal was modified"));
+        assert!(rendered.contains("load_balancer"));
+        assert_eq!(
+            context
+                .server
+                .load_balancer(&context.resource_id)
+                .default_pools,
+            vec!["legacy-origin-pool".to_string()]
+        );
+
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"prepared\""));
+        assert!(journal.contains("\"switch_confirmed_at_unix_seconds\": null"));
+        assert!(!journal.contains("\"resource_kind\": \"load_balancer\""));
+    }
+
+    #[test]
+    fn run_from_args_executes_load_balancer_cutover_switch_and_rollback() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let context = configure_load_balancer_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_for_switch_method(
+            &fixture,
+            "cutover-switch-load-balancer.toml",
+            60,
+            "load-balancer",
+            &["record_counts"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let switched = run_traffic_target_cutover_switch(
+            &cutover_manifest,
+            "https://shop.example.com",
+            &context,
+        );
+        assert!(switched.contains("Cutover switch"));
+        assert_eq!(
+            context
+                .server
+                .load_balancer(&context.resource_id)
+                .default_pools,
+            vec![context.target.clone()]
+        );
+
+        let rolled_back = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--rollback".to_string(),
+            "--base-url".to_string(),
+            "https://shop.example.com".to_string(),
+            "--reason".to_string(),
+            "load balancer rollback".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+        assert!(rolled_back.contains("Cutover rollback"));
+        assert_eq!(
+            context
+                .server
+                .load_balancer(&context.resource_id)
+                .default_pools,
+            vec!["legacy-origin-pool".to_string()]
+        );
+    }
+
+    #[test]
+    fn run_from_args_executes_cdn_origin_cutover_switch() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let context = configure_cdn_origin_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_for_switch_method(
+            &fixture,
+            "cutover-switch-cdn-origin.toml",
+            60,
+            "cdn-origin",
+            &["record_counts"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let switched = run_traffic_target_cutover_switch(
+            &cutover_manifest,
+            "https://shop.example.com",
+            &context,
+        );
+        assert!(switched.contains("Cutover switch"));
+        assert_eq!(
+            context.server.origin_rule(&context.resource_id).origin,
+            context.target
+        );
+    }
+
+    #[test]
+    fn run_from_args_executes_routing_cutover_switch() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let context = configure_routing_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_for_switch_method(
+            &fixture,
+            "cutover-switch-routing.toml",
+            60,
+            "routing",
+            &["record_counts"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let switched = run_traffic_target_cutover_switch(
+            &cutover_manifest,
+            "https://shop.example.com",
+            &context,
+        );
+        assert!(switched.contains("Cutover switch"));
+        assert_eq!(
+            context.server.routing_rule(&context.resource_id).service,
+            context.target
+        );
+    }
+
+    #[test]
+    fn run_from_args_observes_a_prepared_cutover_until_it_passes() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
+        let cache_route_candidates = ["/", "/events", "/en-GB/pages/home"];
+        let cutover_manifest = write_cutover_observe_manifest_with_sample_routes(
+            &fixture,
+            "cutover-observe-pass.toml",
+            0,
+            &["record_counts"],
+            &cache_route_candidates,
+        );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
+        let Some(cache_route) = choose_cache_probe_route(&runtime.built, &cache_route_candidates)
+        else {
+            return;
+        };
+
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
             "healthy",
             "healthy",
             false,
-            BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 200_u16)]),
+            cache_route_candidates
+                .iter()
+                .map(|route| {
+                    let response = if *route == cache_route {
+                        cache_probe_response(
+                            &runtime.built,
+                            route,
+                            format!("<html><body>{route}</body></html>"),
+                        )
+                    } else {
+                        LiveProbeResponse::html(200, format!("<html><body>{route}</body></html>"))
+                    };
+                    ((*route).to_string(), response)
+                })
+                .collect(),
         );
         let switched = run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
         assert!(switched.contains("Cutover switch"));
@@ -10283,6 +12416,7 @@ expect = true
         assert!(rendered.contains("passed against"));
         assert!(rendered.contains("switch.confirmed"));
         assert!(rendered.contains("cutover.observe"));
+        assert!(rendered.contains("cache_ok"));
 
         let journal_path = cutover_journal_path(
             &cutover_manifest,
@@ -10301,6 +12435,11 @@ expect = true
         let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest =
             write_cutover_observe_manifest(&fixture, "cutover-observe-fail.toml", 0);
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -10311,11 +12450,20 @@ expect = true
         ])
         .unwrap();
 
-        let probe_server = LiveProbeTestServer::spawn(
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
             "healthy",
             "healthy",
             false,
-            BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 500_u16)]),
+            BTreeMap::from([
+                (
+                    "/".to_string(),
+                    LiveProbeResponse::html(200, "<html><body>/</body></html>"),
+                ),
+                (
+                    "/events".to_string(),
+                    LiveProbeResponse::html(500, "<html><body>/events</body></html>"),
+                ),
+            ]),
         );
         run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
         let error = run_from_args([
@@ -10355,6 +12503,11 @@ expect = true
                 "media_reachability",
             ],
         );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -10379,8 +12532,9 @@ expect = true
                 ),
                 (
                     "/events".to_string(),
-                    LiveProbeResponse::html(
-                        200,
+                    cache_probe_response(
+                        &runtime.built,
+                        "/events",
                         r#"<html><head><link rel="canonical" href="/events" /></head><body><img src="/media/festival.jpg" /></body></html>"#,
                     ),
                 ),
@@ -10427,6 +12581,11 @@ expect = true
                 "media_reachability",
             ],
         );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -10451,8 +12610,9 @@ expect = true
                 ),
                 (
                     "/events".to_string(),
-                    LiveProbeResponse::html(
-                        200,
+                    cache_probe_response(
+                        &runtime.built,
+                        "/events",
                         r#"<html><head></head><body><img src="/media/festival.jpg" /></body></html>"#,
                     ),
                 ),
@@ -10499,6 +12659,11 @@ expect = true
             &["record_counts", "auth_failures"],
             &["alice"],
         );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -10520,7 +12685,11 @@ expect = true
                 ),
                 (
                     "/events".to_string(),
-                    LiveProbeResponse::html(200, "<html><body>events</body></html>"),
+                    cache_probe_response(
+                        &runtime.built,
+                        "/events",
+                        "<html><body>events</body></html>",
+                    ),
                 ),
                 (
                     "/admin/pages/preview".to_string(),
@@ -10542,6 +12711,206 @@ expect = true
         .unwrap();
 
         assert!(rendered.contains("auth_gate_ok"));
+    }
+
+    #[test]
+    fn run_from_args_observation_executes_transactional_journey_checks() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_with_routes_and_checks(
+            &fixture,
+            "cutover-observe-transactional.toml",
+            0,
+            "dns",
+            &["record_counts", "transactional_journey_errors"],
+            &["/", "/events/festival"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
+            "healthy",
+            "healthy",
+            false,
+            BTreeMap::from([
+                (
+                    "/".to_string(),
+                    LiveProbeResponse::html(200, "<html><body>home</body></html>"),
+                ),
+                (
+                    "/events/festival".to_string(),
+                    LiveProbeResponse::html(200, "<html><body>festival</body></html>"),
+                ),
+                (
+                    "/events/festival/book".to_string(),
+                    LiveProbeResponse::html(202, "<html><body>queued</body></html>"),
+                ),
+            ]),
+        );
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
+
+        let rendered = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("POST /events/festival/book"));
+        assert!(rendered.contains("transactional_ok(202)"));
+    }
+
+    #[test]
+    fn run_from_args_marks_transactional_journey_failures_for_rollback_review() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
+        let cutover_manifest = write_cutover_observe_manifest_with_routes_and_checks(
+            &fixture,
+            "cutover-observe-transactional-fail.toml",
+            0,
+            "dns",
+            &["record_counts", "transactional_journey_errors"],
+            &["/", "/events/festival"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
+            "healthy",
+            "healthy",
+            false,
+            BTreeMap::from([
+                (
+                    "/".to_string(),
+                    LiveProbeResponse::html(200, "<html><body>home</body></html>"),
+                ),
+                (
+                    "/events/festival".to_string(),
+                    LiveProbeResponse::html(200, "<html><body>festival</body></html>"),
+                ),
+                (
+                    "/events/festival/book".to_string(),
+                    LiveProbeResponse::html(500, "<html><body>error</body></html>"),
+                ),
+            ]),
+        );
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
+
+        let error = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("requires rollback review"));
+        assert!(
+            error
+                .to_string()
+                .contains("transactional verification route `/events/festival/book` returned 500")
+        );
+    }
+
+    #[test]
+    fn run_from_args_marks_cache_header_mismatches_for_rollback_review() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let dns = configure_dns_cutover_for_import_fixture(&fixture);
+        let cache_route_candidates = ["/", "/events", "/en-GB/pages/home"];
+        let cutover_manifest = write_cutover_observe_manifest_with_sample_routes(
+            &fixture,
+            "cutover-observe-cache-fail.toml",
+            0,
+            &["record_counts"],
+            &cache_route_candidates,
+        );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
+        let Some(cache_route) = choose_cache_probe_route(&runtime.built, &cache_route_candidates)
+        else {
+            return;
+        };
+
+        let mismatched_events = cache_probe_response(
+            &runtime.built,
+            &cache_route,
+            format!("<html><body>{cache_route}</body></html>"),
+        )
+        .with_header("Cache-Control", "public,max-age=1,stale-while-revalidate=1");
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
+            "healthy",
+            "healthy",
+            false,
+            cache_route_candidates
+                .iter()
+                .map(|route| {
+                    let response = if *route == cache_route {
+                        mismatched_events.clone()
+                    } else {
+                        LiveProbeResponse::html(200, format!("<html><body>{route}</body></html>"))
+                    };
+                    ((*route).to_string(), response)
+                })
+                .collect(),
+        );
+        run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
+
+        let error = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cache headers"));
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"rollback_required\""));
+        assert!(journal.contains(&format!("cache headers for route `{cache_route}`")));
     }
 
     #[test]
@@ -11683,37 +14052,85 @@ expect = true
     }
 
     #[test]
-    fn user_import_updates_map_subscribers_into_site_viewer_tuples() {
+    fn user_import_updates_preserve_lower_privilege_wordpress_roles_as_legacy_groups_only() {
+        for role in [
+            "author",
+            "contributor",
+            "subscriber",
+            "customer",
+            "shop_manager",
+        ] {
+            let staged = serde_json::json!({
+                "normalized": {
+                    "principal_id": "alice",
+                    "legacy_roles": [role]
+                }
+            });
+
+            let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
+
+            assert_eq!(updates.len(), 1, "{role}");
+            assert_eq!(
+                persisted["legacy_roles"],
+                serde_json::json!([role]),
+                "{role}"
+            );
+            assert_eq!(persisted["roles"], serde_json::json!([]), "{role}");
+            assert_eq!(
+                persisted["preserved_only_roles"],
+                serde_json::json!([role]),
+                "{role}"
+            );
+            assert!(
+                updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                    Entity::group(format!("legacy-role:{role}")),
+                    Relation::Member,
+                    DefaultSubject::entity(Entity::user("alice")),
+                ))),
+                "{role}"
+            );
+            assert!(
+                !updates.iter().any(|update| matches!(
+                    update,
+                    DefaultTupleUpdate::Write(DefaultTuple {
+                        object: Entity::Site(_),
+                        ..
+                    })
+                )),
+                "{role}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_import_updates_allows_empty_legacy_roles_without_live_auth_grants() {
         let staged = serde_json::json!({
             "normalized": {
                 "principal_id": "alice",
-                "legacy_roles": ["subscriber"]
+                "legacy_roles": []
             }
         });
 
         let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
 
-        assert_eq!(persisted["roles"], serde_json::json!(["subscriber"]));
-        assert!(
-            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
-                Entity::site("main"),
-                Relation::Viewer,
-                DefaultSubject::userset(Entity::group("legacy-role:subscriber"), Relation::Member),
-            )))
-        );
+        assert!(updates.is_empty());
+        assert_eq!(persisted["legacy_roles"], serde_json::json!([]));
+        assert_eq!(persisted["roles"], serde_json::json!([]));
+        assert_eq!(persisted["preserved_only_roles"], serde_json::json!([]));
+        assert_eq!(persisted["writes"], 0);
     }
 
     #[test]
-    fn user_import_updates_rejects_unsupported_legacy_roles() {
+    fn user_import_updates_rejects_unknown_legacy_roles() {
         let staged = serde_json::json!({
             "normalized": {
                 "principal_id": "alice",
-                "legacy_roles": ["shop_manager"]
+                "legacy_roles": ["seo_manager"]
             }
         });
 
         let error = user_import_updates(&staged, Some("main")).unwrap_err();
-        assert!(error.to_string().contains("shop_manager"));
+        assert!(error.to_string().contains("seo_manager"));
         assert!(error.to_string().contains("cannot be imported safely"));
     }
 

@@ -298,6 +298,7 @@ pub(crate) enum CliInput {
     },
     ImportCutover {
         output_mode: OutputMode,
+        dry_run: bool,
         invocation: ImportCutoverInvocation,
     },
 }
@@ -315,6 +316,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut observe_cutover = false;
     let mut rollback_cutover = false;
     let mut cutover_base_url: Option<String> = None;
+    let mut cutover_switch_plan_path: Option<PathBuf> = None;
+    let mut cutover_switch_zone_id: Option<String> = None;
+    let mut cutover_switch_resource_id: Option<String> = None;
+    let mut cutover_switch_target: Option<String> = None;
     let mut cutover_dns_zone_id: Option<String> = None;
     let mut cutover_dns_target: Option<String> = None;
     let mut cutover_reason: Option<String> = None;
@@ -350,6 +355,19 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--rollback" => rollback_cutover = true,
             "--base-url" => {
                 cutover_base_url = Some(next_value(&mut iter, "--base-url")?);
+            }
+            "--switch-plan" => {
+                cutover_switch_plan_path =
+                    Some(PathBuf::from(next_value(&mut iter, "--switch-plan")?));
+            }
+            "--switch-zone-id" => {
+                cutover_switch_zone_id = Some(next_value(&mut iter, "--switch-zone-id")?);
+            }
+            "--switch-resource-id" => {
+                cutover_switch_resource_id = Some(next_value(&mut iter, "--switch-resource-id")?);
+            }
+            "--switch-target" => {
+                cutover_switch_target = Some(next_value(&mut iter, "--switch-target")?);
             }
             "--dns-zone-id" => {
                 cutover_dns_zone_id = Some(next_value(&mut iter, "--dns-zone-id")?);
@@ -1030,13 +1048,19 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
         [command, subcommand, manifest_path] if command == "import" && subcommand == "cutover" => {
             Ok(CliInput::ImportCutover {
                 output_mode,
+                dry_run,
                 invocation: ImportCutoverInvocation {
                     manifest_path: PathBuf::from(manifest_path),
+                    dry_run,
                     apply: apply_cutover,
                     switch: switch_cutover,
                     observe: observe_cutover,
                     rollback: rollback_cutover,
                     base_url: cutover_base_url,
+                    switch_plan_path: cutover_switch_plan_path,
+                    switch_zone_id: cutover_switch_zone_id,
+                    switch_resource_id: cutover_switch_resource_id,
+                    switch_target: cutover_switch_target,
                     dns_zone_id: cutover_dns_zone_id,
                     dns_target: cutover_dns_target,
                     reason: cutover_reason,
@@ -1569,6 +1593,7 @@ mod tests {
 
         let CliInput::ImportCutover {
             output_mode,
+            dry_run,
             invocation,
         } = input
         else {
@@ -1576,10 +1601,12 @@ mod tests {
         };
 
         assert_eq!(output_mode, OutputMode::Json);
+        assert!(!dry_run);
         assert_eq!(
             invocation.manifest_path,
             PathBuf::from("imports/wordpress-events.toml")
         );
+        assert!(!invocation.dry_run);
         assert!(invocation.apply);
         assert!(invocation.confirmed);
         assert!(invocation.legacy_freeze_confirmed);
@@ -1587,6 +1614,10 @@ mod tests {
         assert!(!invocation.observe);
         assert!(!invocation.rollback);
         assert_eq!(invocation.base_url, None);
+        assert_eq!(invocation.switch_plan_path, None);
+        assert_eq!(invocation.switch_zone_id, None);
+        assert_eq!(invocation.switch_resource_id, None);
+        assert_eq!(invocation.switch_target, None);
         assert_eq!(invocation.dns_zone_id, None);
         assert_eq!(invocation.dns_target, None);
         assert_eq!(invocation.reason, None);
@@ -1607,6 +1638,7 @@ mod tests {
 
         let CliInput::ImportCutover {
             output_mode,
+            dry_run,
             invocation,
         } = input
         else {
@@ -1614,10 +1646,12 @@ mod tests {
         };
 
         assert_eq!(output_mode, OutputMode::Human);
+        assert!(!dry_run);
         assert_eq!(
             invocation.manifest_path,
             PathBuf::from("imports/wordpress-events.toml")
         );
+        assert!(!invocation.dry_run);
         assert!(!invocation.apply);
         assert!(!invocation.switch);
         assert!(invocation.observe);
@@ -1626,6 +1660,10 @@ mod tests {
             invocation.base_url.as_deref(),
             Some("https://shop.example.com")
         );
+        assert_eq!(invocation.switch_plan_path, None);
+        assert_eq!(invocation.switch_zone_id, None);
+        assert_eq!(invocation.switch_resource_id, None);
+        assert_eq!(invocation.switch_target, None);
         assert_eq!(invocation.dns_zone_id, None);
         assert_eq!(invocation.dns_target, None);
         assert_eq!(invocation.reason, None);
@@ -1639,8 +1677,11 @@ mod tests {
             "cutover".to_string(),
             "imports/wordpress-events.toml".to_string(),
             "--switch".to_string(),
+            "--dry-run".to_string(),
             "--base-url".to_string(),
             "https://shop.example.com".to_string(),
+            "--switch-plan".to_string(),
+            "cutover/load-balancer.json".to_string(),
             "--dns-zone-id".to_string(),
             "zone-123".to_string(),
             "--dns-target".to_string(),
@@ -1651,6 +1692,7 @@ mod tests {
 
         let CliInput::ImportCutover {
             output_mode,
+            dry_run,
             invocation,
         } = input
         else {
@@ -1658,6 +1700,8 @@ mod tests {
         };
 
         assert_eq!(output_mode, OutputMode::Human);
+        assert!(dry_run);
+        assert!(invocation.dry_run);
         assert!(!invocation.apply);
         assert!(invocation.switch);
         assert!(!invocation.observe);
@@ -1666,6 +1710,13 @@ mod tests {
             invocation.base_url.as_deref(),
             Some("https://shop.example.com")
         );
+        assert_eq!(
+            invocation.switch_plan_path,
+            Some(PathBuf::from("cutover/load-balancer.json"))
+        );
+        assert_eq!(invocation.switch_zone_id, None);
+        assert_eq!(invocation.switch_resource_id, None);
+        assert_eq!(invocation.switch_target, None);
         assert_eq!(invocation.dns_zone_id.as_deref(), Some("zone-123"));
         assert_eq!(
             invocation.dns_target.as_deref(),
@@ -1692,6 +1743,7 @@ mod tests {
 
         let CliInput::ImportCutover {
             output_mode,
+            dry_run,
             invocation,
         } = input
         else {
@@ -1699,6 +1751,8 @@ mod tests {
         };
 
         assert_eq!(output_mode, OutputMode::Human);
+        assert!(!dry_run);
+        assert!(!invocation.dry_run);
         assert!(!invocation.apply);
         assert!(!invocation.switch);
         assert!(!invocation.observe);
@@ -1707,10 +1761,48 @@ mod tests {
             invocation.base_url.as_deref(),
             Some("https://shop.example.com")
         );
+        assert_eq!(invocation.switch_plan_path, None);
+        assert_eq!(invocation.switch_zone_id, None);
+        assert_eq!(invocation.switch_resource_id, None);
+        assert_eq!(invocation.switch_target, None);
         assert_eq!(invocation.dns_zone_id, None);
         assert_eq!(invocation.dns_target, None);
         assert_eq!(invocation.reason.as_deref(), Some("auth failure"));
         assert!(invocation.confirmed);
+    }
+
+    #[test]
+    fn parse_import_cutover_accepts_generic_switch_inputs() {
+        let input = parse([
+            "import".to_string(),
+            "cutover".to_string(),
+            "imports/wordpress-events.toml".to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            "https://shop.example.com".to_string(),
+            "--switch-zone-id".to_string(),
+            "zone-123".to_string(),
+            "--switch-resource-id".to_string(),
+            "lb-edge-1".to_string(),
+            "--switch-target".to_string(),
+            "davenda-origin-pool".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ImportCutover { invocation, .. } = input else {
+            panic!("expected import cutover input");
+        };
+
+        assert!(invocation.switch);
+        assert_eq!(invocation.switch_zone_id.as_deref(), Some("zone-123"));
+        assert_eq!(invocation.switch_resource_id.as_deref(), Some("lb-edge-1"));
+        assert_eq!(
+            invocation.switch_target.as_deref(),
+            Some("davenda-origin-pool")
+        );
+        assert_eq!(invocation.dns_zone_id, None);
+        assert_eq!(invocation.dns_target, None);
     }
 
     #[test]
@@ -1806,10 +1898,7 @@ mod tests {
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
         assert_eq!(
             invocation.tags,
-            vec![
-                "route:events.list".to_string(),
-                "locale:en-GB".to_string()
-            ]
+            vec!["route:events.list".to_string(), "locale:en-GB".to_string()]
         );
         assert!(invocation.confirmed);
     }

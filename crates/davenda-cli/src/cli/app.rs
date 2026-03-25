@@ -2012,6 +2012,13 @@ struct CutoverObservationProbe {
     failures: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct ObservationVerificationChecks {
+    route_resolution: bool,
+    canonical_urls: bool,
+    media_reachability: bool,
+}
+
 fn observe_import_cutover(
     invocation: &ImportCutoverInvocation,
     evaluated: &EvaluatedImportCutover,
@@ -2033,6 +2040,13 @@ fn observe_import_cutover(
         .verification
         .as_ref()
         .map(|verification| verification.sample_routes.clone())
+        .unwrap_or_default();
+    let verification_checks = evaluated
+        .manifest
+        .verification
+        .as_ref()
+        .map(build_observation_verification_checks)
+        .transpose()?
         .unwrap_or_default();
     if sample_routes.is_empty() {
         return Err(CliRunError::execution(
@@ -2075,7 +2089,8 @@ fn observe_import_cutover(
     save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
 
     let client = build_cutover_probe_client()?;
-    let probe = execute_cutover_observation_probe(&client, base_url, &sample_routes)?;
+    let probe =
+        execute_cutover_observation_probe(&client, base_url, &sample_routes, verification_checks)?;
 
     if !probe.failures.is_empty() {
         journal
@@ -2344,14 +2359,13 @@ fn evaluate_import_cutover(
         )?);
 
     if let Some(verification) = &manifest.verification {
+        let (verification_ready, verification_detail) =
+            evaluate_verification_readiness(verification);
         cutover_plan = cutover_plan.with_check(build_cutover_check(
             "verification.plan",
-            format!(
-                "verification checks declared: {}",
-                verification.required.join(", ")
-            ),
+            verification_detail,
             true,
-            !verification.required.is_empty(),
+            verification_ready,
         )?);
     }
 
@@ -2644,10 +2658,80 @@ fn build_cutover_probe_client() -> Result<BlockingHttpClient, CliRunError> {
         })
 }
 
+fn evaluate_verification_readiness(
+    verification: &davenda_import::ImportVerification,
+) -> (bool, String) {
+    match build_observation_verification_checks(verification) {
+        Ok(checks) => (
+            true,
+            format!(
+                "verification checks supported: {}",
+                render_supported_verification_checks(verification, checks)
+            ),
+        ),
+        Err(error) => (false, error.to_string()),
+    }
+}
+
+fn build_observation_verification_checks(
+    verification: &davenda_import::ImportVerification,
+) -> Result<ObservationVerificationChecks, CliRunError> {
+    let mut checks = ObservationVerificationChecks::default();
+    for required in &verification.required {
+        match required.as_str() {
+            "record_counts" => {}
+            "route_resolution" => checks.route_resolution = true,
+            "canonical_urls" => checks.canonical_urls = true,
+            "media_reachability" => checks.media_reachability = true,
+            other => {
+                return Err(CliRunError::execution(format!(
+                    "verification check `{other}` is not yet supported by cutover observation"
+                )));
+            }
+        }
+    }
+
+    if (checks.route_resolution || checks.canonical_urls || checks.media_reachability)
+        && verification.sample_routes.is_empty()
+    {
+        return Err(CliRunError::execution(
+            "verification checks that require live route probes must declare `[verification].sample_routes`"
+                .to_string(),
+        ));
+    }
+
+    Ok(checks)
+}
+
+fn render_supported_verification_checks(
+    verification: &davenda_import::ImportVerification,
+    checks: ObservationVerificationChecks,
+) -> String {
+    let mut rendered = Vec::new();
+    if verification
+        .required
+        .iter()
+        .any(|check| check == "record_counts")
+    {
+        rendered.push("record_counts(import-run)");
+    }
+    if checks.route_resolution {
+        rendered.push("route_resolution(observe)");
+    }
+    if checks.canonical_urls {
+        rendered.push("canonical_urls(observe)");
+    }
+    if checks.media_reachability {
+        rendered.push("media_reachability(observe)");
+    }
+    rendered.join(", ")
+}
+
 fn execute_cutover_observation_probe(
     client: &BlockingHttpClient,
     base_url: &str,
     sample_routes: &[String],
+    verification_checks: ObservationVerificationChecks,
 ) -> Result<CutoverObservationProbe, CliRunError> {
     let base = Url::parse(base_url).map_err(|error| {
         CliRunError::execution(format!(
@@ -2680,6 +2764,7 @@ fn execute_cutover_observation_probe(
     }
 
     let mut routes = Vec::new();
+    let mut media_probe_count = 0usize;
     for route in sample_routes {
         let url = base.join(route).map_err(|error| {
             CliRunError::execution(format!(
@@ -2693,8 +2778,57 @@ fn execute_cutover_observation_probe(
             ))
         })?;
         let status_code = response.status().as_u16();
+        let body = response.text().map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to read cutover route `{}` at `{}`: {error}",
+                route, url
+            ))
+        })?;
         let outcome = if (200..400).contains(&status_code) {
-            "healthy".to_string()
+            let mut outcome = vec!["healthy".to_string()];
+            if verification_checks.canonical_urls {
+                match extract_canonical_url(&body, &url) {
+                    Ok(canonical_url) => {
+                        if canonical_url_matches(&canonical_url, &url) {
+                            outcome.push("canonical_ok".to_string());
+                        } else {
+                            failures.push(format!(
+                                "route `{route}` returned canonical URL `{}` instead of `{}`",
+                                canonical_url, url
+                            ));
+                        }
+                    }
+                    Err(error) => failures.push(error.to_string()),
+                }
+            }
+            if verification_checks.media_reachability {
+                match extract_same_origin_media_urls(&body, &base) {
+                    Ok(media_urls) => {
+                        if media_urls.is_empty() {
+                            outcome.push("media_none".to_string());
+                        } else {
+                            for media_url in &media_urls {
+                                let media_response = client.get(media_url.clone()).send().map_err(|error| {
+                                    CliRunError::execution(format!(
+                                        "failed to probe media URL `{media_url}` for route `{route}`: {error}"
+                                    ))
+                                })?;
+                                let media_status = media_response.status().as_u16();
+                                if !(200..400).contains(&media_status) {
+                                    failures.push(format!(
+                                        "route `{route}` references media URL `{media_url}` that returned {} during live observation",
+                                        media_status
+                                    ));
+                                }
+                            }
+                            media_probe_count += media_urls.len();
+                            outcome.push(format!("media_ok({})", media_urls.len()));
+                        }
+                    }
+                    Err(error) => failures.push(error.to_string()),
+                }
+            }
+            outcome.join(" ")
         } else {
             failures.push(format!(
                 "route `{route}` returned unexpected status {} during live observation",
@@ -2709,6 +2843,13 @@ fn execute_cutover_observation_probe(
         });
     }
 
+    if verification_checks.media_reachability && media_probe_count == 0 {
+        failures.push(
+            "verification requires media_reachability but no same-origin media URLs were found across the sample routes"
+                .to_string(),
+        );
+    }
+
     Ok(CutoverObservationProbe {
         health_status: health.status,
         readiness_status: ready.status,
@@ -2716,6 +2857,126 @@ fn execute_cutover_observation_probe(
         routes,
         failures,
     })
+}
+
+fn extract_canonical_url(body: &str, route_url: &Url) -> Result<Url, CliRunError> {
+    let lower = body.to_ascii_lowercase();
+    let mut search_offset = 0usize;
+    while let Some(found) = lower[search_offset..].find("<link") {
+        let tag_start = search_offset + found;
+        let Some(tag_end_offset) = lower[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + tag_end_offset + 1;
+        let tag = &body[tag_start..tag_end];
+        let rel = extract_html_attribute_value(tag, "rel")
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        if rel.split_whitespace().any(|value| value == "canonical") {
+            let href = extract_html_attribute_value(tag, "href").ok_or_else(|| {
+                CliRunError::execution(format!(
+                    "route `{}` declares a canonical link without an href",
+                    route_url.path()
+                ))
+            })?;
+            return resolve_relative_or_absolute_url(&href, route_url);
+        }
+        search_offset = tag_end;
+    }
+
+    Err(CliRunError::execution(format!(
+        "route `{}` did not include a canonical URL",
+        route_url.path()
+    )))
+}
+
+fn extract_same_origin_media_urls(body: &str, base_url: &Url) -> Result<Vec<Url>, CliRunError> {
+    let mut urls = BTreeSet::new();
+    for attribute in ["src", "href"] {
+        for value in extract_html_attribute_values(body, attribute) {
+            if !looks_like_media_reference(&value) {
+                continue;
+            }
+            let resolved = resolve_relative_or_absolute_url(&value, base_url)?;
+            if urls_match_origin(&resolved, base_url) {
+                urls.insert(resolved);
+            }
+        }
+    }
+    Ok(urls.into_iter().collect())
+}
+
+fn extract_html_attribute_values(body: &str, attribute: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let lower = body.to_ascii_lowercase();
+    let needle = format!("{attribute}=");
+    let mut offset = 0usize;
+    while let Some(found) = lower[offset..].find(&needle) {
+        let start = offset + found;
+        if let Some(value) = extract_html_attribute_value(&body[start..], attribute) {
+            values.push(value);
+        }
+        offset = start + needle.len();
+    }
+    values
+}
+
+fn extract_html_attribute_value(tag: &str, attribute: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let needle = format!("{attribute}=");
+    let found = lower.find(&needle)?;
+    let value_start = found + needle.len();
+    let remainder = &tag[value_start..];
+    let first = remainder.chars().next()?;
+    if first == '"' || first == '\'' {
+        let closing = remainder[1..].find(first)?;
+        return Some(remainder[1..1 + closing].to_string());
+    }
+
+    let end = remainder
+        .find(|ch: char| ch.is_whitespace() || ch == '>')
+        .unwrap_or(remainder.len());
+    Some(remainder[..end].to_string())
+}
+
+fn resolve_relative_or_absolute_url(value: &str, base_url: &Url) -> Result<Url, CliRunError> {
+    match Url::parse(value) {
+        Ok(url) => Ok(url),
+        Err(_) => base_url.join(value).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve relative URL `{value}` against `{base_url}`: {error}"
+            ))
+        }),
+    }
+}
+
+fn canonical_url_matches(actual: &Url, expected: &Url) -> bool {
+    let mut actual = actual.clone();
+    let mut expected = expected.clone();
+    actual.set_fragment(None);
+    expected.set_fragment(None);
+    actual.set_query(None);
+    expected.set_query(None);
+    actual == expected
+}
+
+fn urls_match_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn looks_like_media_reference(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("/media/")
+        || lower.contains("/assets/")
+        || lower.contains("/uploads/")
+        || [
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif", ".mp4", ".webm", ".mp3",
+            ".pdf", ".woff", ".woff2",
+        ]
+        .iter()
+        .any(|extension| lower.contains(extension))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4665,12 +4926,63 @@ mod tests {
         handle: Option<thread::JoinHandle<()>>,
     }
 
+    #[derive(Debug, Clone)]
+    struct LiveProbeResponse {
+        status_code: u16,
+        content_type: &'static str,
+        body: Vec<u8>,
+    }
+
+    impl LiveProbeResponse {
+        fn html(status_code: u16, body: impl Into<String>) -> Self {
+            Self {
+                status_code,
+                content_type: "text/html; charset=utf-8",
+                body: body.into().into_bytes(),
+            }
+        }
+
+        fn binary(status_code: u16, body: Vec<u8>) -> Self {
+            Self {
+                status_code,
+                content_type: "application/octet-stream",
+                body,
+            }
+        }
+    }
+
     impl LiveProbeTestServer {
         fn spawn(
             health_status: &'static str,
             readiness_status: &'static str,
             maintenance_enabled: bool,
             routes: BTreeMap<String, u16>,
+        ) -> Self {
+            let responses = routes
+                .into_iter()
+                .map(|(route, status_code)| {
+                    (
+                        route.clone(),
+                        LiveProbeResponse::html(
+                            status_code,
+                            format!("<html><body>{route}</body></html>"),
+                        ),
+                    )
+                })
+                .collect();
+            Self::spawn_with_responses(
+                health_status,
+                readiness_status,
+                maintenance_enabled,
+                responses,
+            )
+        }
+
+        fn spawn_with_responses(
+            health_status: &'static str,
+            readiness_status: &'static str,
+            maintenance_enabled: bool,
+            routes: BTreeMap<String, LiveProbeResponse>,
         ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -4807,7 +5119,7 @@ mod tests {
         health_status: &str,
         readiness_status: &str,
         maintenance_enabled: bool,
-        routes: &BTreeMap<String, u16>,
+        routes: &BTreeMap<String, LiveProbeResponse>,
     ) {
         stream.set_nonblocking(false).unwrap();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -4840,17 +5152,17 @@ mod tests {
                     .into_bytes(),
             ),
             route => {
-                let status = match routes.get(route).copied().unwrap_or(404) {
+                let response = routes.get(route).cloned().unwrap_or_else(|| {
+                    LiveProbeResponse::html(404, format!("<html><body>{route}</body></html>"))
+                });
+                let status = match response.status_code {
                     200 => "200 OK",
                     302 => "302 Found",
+                    304 => "304 Not Modified",
                     500 => "500 Internal Server Error",
                     _ => "404 Not Found",
                 };
-                (
-                    status,
-                    "text/html; charset=utf-8",
-                    format!("<html><body>{route}</body></html>").into_bytes(),
-                )
+                (status, response.content_type, response.body)
             }
         };
 
@@ -5252,7 +5564,26 @@ dependencies = ["users", "media"]
         name: &str,
         observation_window_minutes: u32,
     ) -> PathBuf {
+        write_cutover_observe_manifest_with_checks(
+            fixture,
+            name,
+            observation_window_minutes,
+            &["record_counts"],
+        )
+    }
+
+    fn write_cutover_observe_manifest_with_checks(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+        required_checks: &[&str],
+    ) -> PathBuf {
         let manifest_path = fixture.root.join("imports").join(name);
+        let required = required_checks
+            .iter()
+            .map(|check| format!("\"{check}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         write_test_file(
             &manifest_path,
             &format!(
@@ -5271,7 +5602,7 @@ platform_config = "../config/platform.toml"
 expected_modules = ["media"]
 
 [verification]
-required = ["record_counts"]
+required = [{required}]
 sample_routes = ["/", "/events"]
 
 [cutover]
@@ -5841,6 +6172,200 @@ source_path = "fixtures/media.json"
         let journal = fs::read_to_string(journal_path).unwrap();
         assert!(journal.contains("\"state\": \"rollback_required\""));
         assert!(journal.contains("unexpected status 500"));
+    }
+
+    #[test]
+    fn run_from_args_observation_executes_canonical_and_media_checks() {
+        let fixture = import_fixture();
+        let config_path = fixture.root.join("config").join("platform.toml");
+        let app_manifest_path = fixture
+            .root
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&config_path, config).unwrap();
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+        let cutover_manifest = write_cutover_observe_manifest_with_checks(
+            &fixture,
+            "cutover-observe-verification.toml",
+            0,
+            &[
+                "record_counts",
+                "route_resolution",
+                "canonical_urls",
+                "media_reachability",
+            ],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
+            "healthy",
+            "healthy",
+            false,
+            BTreeMap::from([
+                (
+                    "/".to_string(),
+                    LiveProbeResponse::html(
+                        200,
+                        r#"<html><head><link rel="canonical" href="/" /></head><body><img src="/media/home.jpg" /></body></html>"#,
+                    ),
+                ),
+                (
+                    "/events".to_string(),
+                    LiveProbeResponse::html(
+                        200,
+                        r#"<html><head><link rel="canonical" href="/events" /></head><body><img src="/media/festival.jpg" /></body></html>"#,
+                    ),
+                ),
+                (
+                    "/media/home.jpg".to_string(),
+                    LiveProbeResponse::binary(200, b"home".to_vec()),
+                ),
+                (
+                    "/media/festival.jpg".to_string(),
+                    LiveProbeResponse::binary(200, b"festival".to_vec()),
+                ),
+            ]),
+        );
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let rendered = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("canonical_ok"));
+        assert!(rendered.contains("media_ok(1)"));
+    }
+
+    #[test]
+    fn run_from_args_marks_missing_canonical_or_media_as_rollback_required() {
+        let fixture = import_fixture();
+        let config_path = fixture.root.join("config").join("platform.toml");
+        let app_manifest_path = fixture
+            .root
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&config_path, config).unwrap();
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+        let cutover_manifest = write_cutover_observe_manifest_with_checks(
+            &fixture,
+            "cutover-observe-verification-fail.toml",
+            0,
+            &[
+                "record_counts",
+                "route_resolution",
+                "canonical_urls",
+                "media_reachability",
+            ],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn_with_responses(
+            "healthy",
+            "healthy",
+            false,
+            BTreeMap::from([
+                (
+                    "/".to_string(),
+                    LiveProbeResponse::html(
+                        200,
+                        r#"<html><head><link rel="canonical" href="/" /></head><body><img src="/media/home.jpg" /></body></html>"#,
+                    ),
+                ),
+                (
+                    "/events".to_string(),
+                    LiveProbeResponse::html(
+                        200,
+                        r#"<html><head></head><body><img src="/media/festival.jpg" /></body></html>"#,
+                    ),
+                ),
+                (
+                    "/media/home.jpg".to_string(),
+                    LiveProbeResponse::binary(200, b"home".to_vec()),
+                ),
+                (
+                    "/media/festival.jpg".to_string(),
+                    LiveProbeResponse::binary(404, Vec::new()),
+                ),
+            ]),
+        );
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let _error = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"rollback_required\""));
     }
 
     #[test]

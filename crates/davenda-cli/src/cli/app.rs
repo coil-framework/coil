@@ -1,7 +1,8 @@
 use crate::CliModelError;
 use crate::cli::args::{
-    AssetsPublishInvocation, AuthPackageValidateInvocation, CacheWarmInvocation, CliInput,
-    DevServerInvocation, JobsStatusInvocation, MigrateApplyInvocation, TlsRenewInvocation, parse,
+    AssetsPublishInvocation, AuthCheckInvocation, AuthPackageValidateInvocation,
+    CacheWarmInvocation, CliInput, DevServerInvocation, JobsStatusInvocation,
+    MigrateApplyInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -22,7 +23,8 @@ use davenda_commerce::EntitlementKey;
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_core::validate_module_capabilities;
 use davenda_data::{
-    DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient,
+    DataRuntime, DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec,
+    PostgresDataClient,
 };
 use davenda_import::{
     CutoverCheck, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord, ImportManifest,
@@ -167,6 +169,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                 explanation,
             };
             render_auth_explain(&result, output_mode)
+        }
+        CliInput::AuthCheck {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_auth_check(&invocation)?;
+            render_command_report(&report, output_mode)
         }
         CliInput::AuthPackageValidate {
             output_mode,
@@ -336,6 +345,7 @@ fn usage() -> String {
         "Usage:",
         "  platform dev server [--config <path>]",
         "  platform config validate [--config <path>] [--json]",
+        "  platform auth check [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform auth explain [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]",
         "  platform auth package validate [--config <path>] [--json]",
         "  platform module list [--config <path>] [--json]",
@@ -357,6 +367,7 @@ fn usage() -> String {
         "Examples:",
         "  platform dev server --config config/platform.toml",
         "  platform config validate --config config/platform.toml",
+        "  platform auth check --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform auth explain --subject user:alice --capability cms.page.publish --resource page:homepage",
         "  platform auth package validate --config config/platform.toml",
         "  platform module list --config config/platform.toml",
@@ -402,6 +413,111 @@ struct LiveImportAuthContext {
     auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
     site_id: Option<String>,
     storefront_id: String,
+}
+
+fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, CliRunError> {
+    let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load platform config from `{}`: {error}",
+            invocation.config_path.display()
+        ))
+    })?;
+    let data = DataRuntime::from_config(&config.database).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to initialize the live auth check backend: {error}"
+        ))
+    })?;
+    let client = data.connect_lazy_postgres().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to initialize the live auth check backend: {error}"
+        ))
+    })?;
+    let package = configured_auth_model_package(config.auth.package.clone());
+    let binding = package
+        .resolve_binding(invocation.capability, &invocation.resource)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve capability binding for auth check: {error}"
+            ))
+        })?;
+    let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
+    let auth = DavendaAuth::new(engine, config.auth.tenant_id);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| {
+            CliRunError::execution(format!("failed to start the CLI async runtime: {error}"))
+        })?;
+    let allowed = runtime
+        .block_on(async {
+            auth.check_capability(
+                &package,
+                &invocation.subject,
+                invocation.capability,
+                &invocation.resource,
+            )
+            .await
+        })
+        .map_err(|error| {
+            CliRunError::execution(format!("failed to execute auth check: {error}"))
+        })?;
+
+    let mut report = CommandReport::new(
+        ["auth", "check"],
+        format!(
+            "Checked capability `{}` for subject `{}` on `{}`",
+            invocation.capability,
+            render_subject(&invocation.subject),
+            render_entity(&invocation.resource)
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "subject",
+        "capability",
+        "resource",
+        "result",
+        "relation",
+        "auth_package",
+    ])
+    .map_err(report_build_error)?;
+    report = report.with_status(if allowed {
+        ReportStatus::Ok
+    } else {
+        ReportStatus::Warning
+    });
+    report.push_row(
+        ReportRow::new()
+            .with_cell("subject", render_subject(&invocation.subject))
+            .map_err(report_build_error)?
+            .with_cell("capability", invocation.capability.to_string())
+            .map_err(report_build_error)?
+            .with_cell("resource", render_entity(&invocation.resource))
+            .map_err(report_build_error)?
+            .with_cell("result", if allowed { "allowed" } else { "denied" })
+            .map_err(report_build_error)?
+            .with_cell("relation", binding.relation.as_str())
+            .map_err(report_build_error)?
+            .with_cell("auth_package", package.manifest().name.clone())
+            .map_err(report_build_error)?,
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "auth.check.binding",
+        format!(
+            "capability `{}` resolves to relation `{}` for namespaces [{}]",
+            invocation.capability,
+            binding.relation.as_str(),
+            binding
+                .resource_namespaces
+                .iter()
+                .map(|namespace| namespace.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    )?;
+    Ok(report)
 }
 
 fn run_auth_package_validate(
@@ -4838,6 +4954,19 @@ fn render_storage_delivery(delivery: &StorageDeliveryLocation) -> Value {
     }
 }
 
+fn render_entity(entity: &Entity) -> String {
+    format!("{}:{}", entity.namespace().as_str(), entity.id())
+}
+
+fn render_subject(subject: &DefaultSubject) -> String {
+    match subject {
+        DefaultSubject::Entity(entity) => render_entity(entity),
+        DefaultSubject::Userset { object, relation } => {
+            format!("{}#{}", render_entity(object), relation.as_str())
+        }
+    }
+}
+
 fn environment_label(environment: davenda_config::Environment) -> &'static str {
     match environment {
         davenda_config::Environment::Development => "development",
@@ -5717,6 +5846,7 @@ source_path = "fixtures/media.json"
     fn run_from_args_returns_usage_for_help() {
         let rendered = run_from_args(["--help".to_string()]).unwrap();
         assert!(rendered.contains("platform config validate [--config <path>]"));
+        assert!(rendered.contains("platform auth check [--config <path>]"));
         assert!(rendered.contains("platform auth explain [--config <path>]"));
         assert!(rendered.contains("platform module list [--config <path>]"));
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
@@ -5730,6 +5860,35 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
         assert!(rendered.contains("platform import cutover <manifest-path>"));
+    }
+
+    #[test]
+    fn run_from_args_reports_live_auth_check_backend_initialization_failures() {
+        let config_path = PathBuf::from("/tmp/davenda-cli-auth-check.toml");
+        fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
+
+        let error = run_from_args([
+            "auth".to_string(),
+            "check".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--subject".to_string(),
+            "user:alice".to_string(),
+            "--capability".to_string(),
+            "cms.page.read".to_string(),
+            "--resource".to_string(),
+            "page:homepage".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("failed to initialize the live auth check backend"),
+            "{}",
+            error
+        );
     }
 
     #[test]

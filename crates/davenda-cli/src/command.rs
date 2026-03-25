@@ -127,6 +127,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Validate effective platform configuration",
         )?,
         CommandDescriptor::new(
+            ["auth", "check"],
+            CommandOwner::Core,
+            "Check whether a subject can currently exercise a capability against a live resource",
+        )?,
+        CommandDescriptor::new(
             ["auth", "explain"],
             CommandOwner::Core,
             "Explain why a subject can or cannot exercise a capability",

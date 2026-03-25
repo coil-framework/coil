@@ -15,6 +15,14 @@ pub struct AuthExplainInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthCheckInvocation {
+    pub config_path: PathBuf,
+    pub subject: DefaultSubject,
+    pub capability: Capability,
+    pub resource: Entity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthPackageValidateInvocation {
     pub config_path: PathBuf,
 }
@@ -70,6 +78,10 @@ pub(crate) enum CliInput {
     AuthExplain {
         output_mode: OutputMode,
         invocation: AuthExplainInvocation,
+    },
+    AuthCheck {
+        output_mode: OutputMode,
+        invocation: AuthCheckInvocation,
     },
     AuthPackageValidate {
         output_mode: OutputMode,
@@ -290,6 +302,33 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     capability,
                     resource,
                     options,
+                },
+            })
+        }
+        [command, subcommand] if command == "auth" && subcommand == "check" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`auth check` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+            let subject = subject
+                .ok_or_else(|| CliRunError::usage("`auth check` requires `--subject <subject>`"))?;
+            let capability = capability.ok_or_else(|| {
+                CliRunError::usage("`auth check` requires `--capability <capability>`")
+            })?;
+            let resource = resource.ok_or_else(|| {
+                CliRunError::usage("`auth check` requires `--resource <namespace:id>`")
+            })?;
+
+            Ok(CliInput::AuthCheck {
+                output_mode,
+                invocation: AuthCheckInvocation {
+                    config_path,
+                    subject,
+                    capability,
+                    resource,
                 },
             })
         }
@@ -674,6 +713,35 @@ mod tests {
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
         assert_eq!(invocation.resource, Entity::admin_module("app"));
         assert!(invocation.options.cycle_protection);
+    }
+
+    #[test]
+    fn parse_auth_check_requires_subject_capability_and_resource() {
+        let input = parse([
+            "auth".to_string(),
+            "check".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--subject".to_string(),
+            "user:alice".to_string(),
+            "--capability".to_string(),
+            "admin.audit.read".to_string(),
+            "--resource".to_string(),
+            "admin_module:app".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::AuthCheck {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected auth check input");
+        };
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+        assert_eq!(invocation.resource, Entity::admin_module("app"));
     }
 
     #[test]

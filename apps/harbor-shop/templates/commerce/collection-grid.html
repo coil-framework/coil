@@ -1,17 +1,19 @@
 <section class="collection-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
-  <h2>Member access</h2>
+  <h2>Featured collections</h2>
   <p class="collection-grid__intro">
-    Browse the storefront, then open your account for membership status and
-    subscription details.
+    Browse the current storefront collections, then carry the basket through to
+    checkout and account follow-up.
   </p>
-  <ul class="collection-grid__list">
-    <li class="collection-grid__item">
-      <a class="collection-grid__link" href="/account">Open account</a>
-    </li>
-    <li class="collection-grid__item">
-      <a class="collection-grid__link" href="/account/memberships">
-        View memberships
+  <ul class="collection-grid__list" dv:if="${catalogSections}">
+    <li class="collection-grid__item" dv:each="section : ${catalogSections}">
+      <a class="collection-grid__link" href="/shop/collections/featured" dv:href="${section.url}">
+        <span dv:text="${section.title}">Featured</span>
       </a>
+    </li>
+  </ul>
+  <ul class="collection-grid__list" dv:unless="${catalogSections}">
+    <li class="collection-grid__item">
+      <a class="collection-grid__link" href="/shop/collections/featured">Featured</a>
     </li>
   </ul>
 </section>

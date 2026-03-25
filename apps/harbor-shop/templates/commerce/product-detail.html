@@ -1,0 +1,48 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Product detail'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${page.title}">Product detail</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main product-page">
+      <section class="product-page__hero">
+        <div class="product-page__media">
+          <img
+            src="/theme/assets/logo.svg"
+            dv:src="${product.imageUrl}"
+            alt="Product image"
+            dv:attr="alt=${product.imageAlt}"
+          />
+        </div>
+        <div class="product-page__details">
+          <p class="product-page__eyebrow" dv:text="${product.collectionName}">Featured</p>
+          <h1 dv:text="${product.name}">Harbor Cap</h1>
+          <p class="product-page__price" dv:text="${product.price}">GBP 29</p>
+          <p dv:text="${product.summary}">
+            Built for gift baskets, repeat baskets, and easy replenishment after the first order.
+          </p>
+          <div class="product-page__actions">
+            <a class="button" href="/cart" dv:href="${product.addToCartUrl}">Add to cart</a>
+            <a class="button" href="/checkout">Buy now</a>
+          </div>
+        </div>
+      </section>
+      <div dv:replace="~{commerce/product-grid :: grid}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

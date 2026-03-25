@@ -11,7 +11,7 @@
   <ul class="product-grid__list" dv:if="${productCards}">
     <li class="product-grid__item" dv:each="product : ${productCards}">
       <article class="product-card">
-        <a class="product-card__media" href="/products/harbor-tin" dv:href="${product.url}">
+        <a class="product-card__media" href="/shop/products/harbor-cap" dv:href="${product.url}">
           <img
             src="/theme/assets/logo.svg"
             dv:src="${product.imageUrl}"
@@ -22,7 +22,7 @@
         <div class="product-card__body">
           <p class="product-card__eyebrow" dv:text="${product.collectionName}">Harbor pantry</p>
           <h3>
-            <a href="/products/harbor-tin" dv:href="${product.url}" dv:text="${product.name}">
+            <a href="/shop/products/harbor-cap" dv:href="${product.url}" dv:text="${product.name}">
               Harbor tin
             </a>
           </h3>

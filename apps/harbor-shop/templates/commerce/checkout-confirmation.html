@@ -1,0 +1,33 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Order confirmed'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${page.title}">Order confirmed</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main account-page">
+      <section class="account-page__intro">
+        <p class="account-page__eyebrow">Confirmation</p>
+        <h1>Order received</h1>
+        <p dv:text="${confirmation.nextStep}">
+          A confirmation email and membership activation will follow shortly.
+        </p>
+      </section>
+      <div dv:replace="~{account/summary-panels :: panels}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

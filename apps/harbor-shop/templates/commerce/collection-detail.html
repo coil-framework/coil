@@ -1,0 +1,33 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Collection'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${page.title}">Collection</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main collections-page">
+      <section class="collections-page__intro">
+        <p class="collections-page__eyebrow">Collection</p>
+        <h1 dv:text="${collection.title}">Featured</h1>
+        <p dv:text="${collection.summary}">
+          Curated storefront grouping with a direct path into product detail and checkout.
+        </p>
+      </section>
+      <div dv:replace="~{commerce/product-grid :: grid}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Harbor Shop</small>
+    </footer>
+  </body>
+</html>

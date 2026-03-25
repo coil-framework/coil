@@ -17,7 +17,7 @@ pub(crate) use testing::{shared_cache_runtime_for_test, shared_jobs_runtime_for_
 #[derive(Clone)]
 pub(crate) struct SharedJobsRuntimeHandle {
     namespace: String,
-    runtime: Arc<OnceLock<Arc<dyn davenda_jobs::JobsCoordinationRuntime>>>,
+    runtime: Arc<OnceLock<Result<Arc<dyn davenda_jobs::JobsCoordinationRuntime>, String>>>,
 }
 
 impl SharedJobsRuntimeHandle {
@@ -31,11 +31,17 @@ impl SharedJobsRuntimeHandle {
     pub(crate) fn get_or_init(
         &self,
         runtime: &JobsRuntimeServices,
-    ) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+    ) -> Result<Arc<dyn davenda_jobs::JobsCoordinationRuntime>, RuntimeJobsError> {
         let namespace = self.namespace.clone();
         self.runtime
             .get_or_init(|| shared_jobs_runtime(runtime, namespace.clone()))
             .clone()
+            .map_err(|error| {
+                RuntimeJobsError::Jobs(JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+                    backend: runtime.backend,
+                    namespace: error,
+                })
+            })
     }
 }
 
@@ -137,7 +143,7 @@ impl RuntimePlan {
         let scheduler_node_id =
             validate_runtime_identifier("scheduler_node_id", scheduler_node_id.into())?;
         let namespace = self.shared_backend_namespace();
-        let shared_runtime = self.shared_jobs_runtime.get_or_init(&self.jobs);
+        let shared_runtime = self.shared_jobs_runtime.get_or_init(&self.jobs)?;
         Ok(JobsHost::new(
             self.config.app.name.clone(),
             scheduler_node_id,
@@ -369,16 +375,19 @@ impl RuntimePlan {
 fn shared_jobs_runtime(
     runtime: &JobsRuntimeServices,
     namespace: String,
-) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
-    crate::plan::shared_jobs_runtime_for_test(runtime, namespace)
+) -> Result<Arc<dyn davenda_jobs::JobsCoordinationRuntime>, String> {
+    Ok(crate::plan::shared_jobs_runtime_for_test(
+        runtime, namespace,
+    ))
 }
 
 #[cfg(not(test))]
 fn shared_jobs_runtime(
     runtime: &JobsRuntimeServices,
     namespace: String,
-) -> Arc<dyn davenda_jobs::JobsCoordinationRuntime> {
+) -> Result<Arc<dyn davenda_jobs::JobsCoordinationRuntime>, String> {
     davenda_jobs::JobsBackendAdapter::live_shared_runtime(runtime, namespace, PathBuf::new())
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

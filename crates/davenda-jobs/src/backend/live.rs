@@ -27,10 +27,9 @@ pub fn live_shared_runtime(
     runtime: &JobsRuntime,
     namespace: impl Into<String>,
     _root: impl Into<PathBuf>,
-) -> Arc<dyn JobsCoordinationRuntime> {
-    Arc::new(ProductionPostgresSharedJobsCoordinationRuntime::new(
-        runtime.clone(),
-        namespace.into(),
+) -> Result<Arc<dyn JobsCoordinationRuntime>, JobsModelError> {
+    Ok(Arc::new(
+        ProductionPostgresSharedJobsCoordinationRuntime::new(runtime.clone(), namespace.into())?,
     ))
 }
 
@@ -52,11 +51,11 @@ struct ProductionPostgresSharedJobsCoordinationRuntime {
 
 #[cfg(not(test))]
 impl ProductionPostgresSharedJobsCoordinationRuntime {
-    fn new(runtime: JobsRuntime, namespace: String) -> Self {
-        Self {
-            store: ProductionPostgresSharedJobsStore::open(&runtime, namespace),
-            runtime,
-        }
+    fn new(runtime: JobsRuntime, namespace: String) -> Result<Self, JobsModelError> {
+        let store = ProductionPostgresSharedJobsStore::open(&runtime, namespace)?;
+        store.read_snapshot(|_| ())?;
+
+        Ok(Self { store, runtime })
     }
 }
 
@@ -161,24 +160,30 @@ struct ProductionPostgresSharedJobsStore {
 
 #[cfg(not(test))]
 impl ProductionPostgresSharedJobsStore {
-    fn open(runtime: &JobsRuntime, namespace: String) -> Self {
-        let url = jobs_backend_url(runtime.backend, std::env::var("DATABASE_URL").ok())
-            .unwrap_or_else(|error| panic!("{error}"));
+    fn open(runtime: &JobsRuntime, namespace: String) -> Result<Self, JobsModelError> {
+        let url = jobs_backend_url(runtime.backend, std::env::var("DATABASE_URL").ok())?;
         let pool = sqlx::postgres::PgPoolOptions::new()
             .min_connections(1)
             .max_connections(4)
             .connect_lazy(&url)
-            .unwrap_or_else(|error| {
-                panic!("failed to open postgres jobs backend `{url}`: {error}")
-            });
-        let executor = Runtime::new()
-            .unwrap_or_else(|error| panic!("failed to create postgres jobs runtime: {error}"));
-        Self {
+            .map_err(
+                |error| JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+                    backend: runtime.backend,
+                    namespace: format!("failed to open postgres jobs backend `{url}`: {error}"),
+                },
+            )?;
+        let executor = Runtime::new().map_err(|error| {
+            JobsModelError::LiveSharedBackendRequiresExplicitRuntime {
+                backend: runtime.backend,
+                namespace: format!("failed to create postgres jobs runtime: {error}"),
+            }
+        })?;
+        Ok(Self {
             pool,
             runtime: executor,
             backend: runtime.backend,
             namespace,
-        }
+        })
     }
 
     fn block_on<T>(&self, future: impl Future<Output = T>) -> T {

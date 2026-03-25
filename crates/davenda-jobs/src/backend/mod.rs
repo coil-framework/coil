@@ -159,8 +159,16 @@ impl JobsBackendAdapter {
         runtime: &JobsRuntime,
         namespace: impl Into<String>,
         root: impl Into<std::path::PathBuf>,
-    ) -> Arc<dyn JobsCoordinationRuntime> {
-        live::live_shared_runtime(runtime, namespace, root)
+    ) -> Result<Arc<dyn JobsCoordinationRuntime>, JobsModelError> {
+        #[cfg(test)]
+        {
+            Ok(live::live_shared_runtime(runtime, namespace, root))
+        }
+
+        #[cfg(not(test))]
+        {
+            live::live_shared_runtime(runtime, namespace, root)
+        }
     }
 
     pub fn emulated_shared_runtime(runtime: &JobsRuntime) -> Arc<dyn JobsCoordinationRuntime> {

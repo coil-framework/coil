@@ -249,6 +249,7 @@ pub enum CutoverExecutionState {
     Observing,
     ObservationPassed,
     RollbackRequired,
+    RolledBack,
     Failed,
 }
 
@@ -262,6 +263,7 @@ impl CutoverExecutionState {
             Self::Observing => "observing",
             Self::ObservationPassed => "observation_passed",
             Self::RollbackRequired => "rollback_required",
+            Self::RolledBack => "rolled_back",
             Self::Failed => "failed",
         }
     }
@@ -317,11 +319,15 @@ pub struct CutoverExecutionJournal {
     #[serde(default)]
     pub observation_started_at_unix_seconds: Option<u64>,
     #[serde(default)]
+    pub rollback_confirmed_at_unix_seconds: Option<u64>,
+    #[serde(default)]
     pub observation_base_url: Option<String>,
     #[serde(default)]
     pub last_probe_at_unix_seconds: Option<u64>,
     #[serde(default)]
     pub last_probe_failures: Vec<String>,
+    #[serde(default)]
+    pub rollback_reason: Option<String>,
     #[serde(default)]
     pub steps: Vec<CutoverStepRecord>,
 }
@@ -334,9 +340,11 @@ impl CutoverExecutionJournal {
             state: CutoverExecutionState::Planned,
             switch_confirmed_at_unix_seconds: None,
             observation_started_at_unix_seconds: None,
+            rollback_confirmed_at_unix_seconds: None,
             observation_base_url: None,
             last_probe_at_unix_seconds: None,
             last_probe_failures: Vec::new(),
+            rollback_reason: None,
             steps,
         }
     }
@@ -489,6 +497,20 @@ impl CutoverExecutionJournal {
         self.state = CutoverExecutionState::RollbackRequired;
     }
 
+    pub fn mark_rolled_back(
+        &mut self,
+        base_url: impl Into<String>,
+        at_unix_seconds: u64,
+        reason: impl Into<String>,
+    ) -> Result<(), ImportModelError> {
+        self.confirm_switch(base_url.into(), at_unix_seconds);
+        self.rollback_confirmed_at_unix_seconds = Some(at_unix_seconds);
+        self.rollback_reason = Some(require_non_empty("rollback_reason", reason.into())?);
+        self.last_probe_at_unix_seconds = Some(at_unix_seconds);
+        self.state = CutoverExecutionState::RolledBack;
+        Ok(())
+    }
+
     pub fn command_report(&self) -> Result<CommandReport, ImportModelError> {
         let mut report = CommandReport::new(
             ["import", "cutover"],
@@ -506,6 +528,7 @@ impl CutoverExecutionJournal {
             CutoverExecutionState::RollbackRequired | CutoverExecutionState::Failed => {
                 ReportStatus::Unsafe
             }
+            CutoverExecutionState::RolledBack => ReportStatus::Warning,
             CutoverExecutionState::Planned
             | CutoverExecutionState::FreezeConfirmed
             | CutoverExecutionState::SwitchConfirmed

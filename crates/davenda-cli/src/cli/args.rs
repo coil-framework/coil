@@ -140,8 +140,11 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut dry_run = false;
     let mut confirmed = false;
     let mut apply_cutover = false;
+    let mut switch_cutover = false;
     let mut observe_cutover = false;
+    let mut rollback_cutover = false;
     let mut cutover_base_url: Option<String> = None;
+    let mut cutover_reason: Option<String> = None;
     let mut legacy_freeze_confirmed = false;
     let mut verify_policy = false;
     let mut cache_scope: Option<String> = None;
@@ -164,9 +167,14 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--dry-run" => dry_run = true,
             "--yes" => confirmed = true,
             "--apply" => apply_cutover = true,
+            "--switch" => switch_cutover = true,
             "--observe" => observe_cutover = true,
+            "--rollback" => rollback_cutover = true,
             "--base-url" => {
                 cutover_base_url = Some(next_value(&mut iter, "--base-url")?);
+            }
+            "--reason" => {
+                cutover_reason = Some(next_value(&mut iter, "--reason")?);
             }
             "--legacy-freeze-confirmed" => legacy_freeze_confirmed = true,
             "--policy" => verify_policy = true,
@@ -494,8 +502,11 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: ImportCutoverInvocation {
                     manifest_path: PathBuf::from(manifest_path),
                     apply: apply_cutover,
+                    switch: switch_cutover,
                     observe: observe_cutover,
+                    rollback: rollback_cutover,
                     base_url: cutover_base_url,
+                    reason: cutover_reason,
                     confirmed,
                     legacy_freeze_confirmed,
                 },
@@ -746,8 +757,11 @@ mod tests {
         assert!(invocation.apply);
         assert!(invocation.confirmed);
         assert!(invocation.legacy_freeze_confirmed);
+        assert!(!invocation.switch);
         assert!(!invocation.observe);
+        assert!(!invocation.rollback);
         assert_eq!(invocation.base_url, None);
+        assert_eq!(invocation.reason, None);
     }
 
     #[test]
@@ -777,11 +791,50 @@ mod tests {
             PathBuf::from("imports/wordpress-events.toml")
         );
         assert!(!invocation.apply);
+        assert!(!invocation.switch);
         assert!(invocation.observe);
+        assert!(!invocation.rollback);
         assert_eq!(
             invocation.base_url.as_deref(),
             Some("https://shop.example.com")
         );
+        assert_eq!(invocation.reason, None);
+        assert!(invocation.confirmed);
+    }
+
+    #[test]
+    fn parse_import_cutover_accepts_switch_and_rollback_inputs() {
+        let input = parse([
+            "import".to_string(),
+            "cutover".to_string(),
+            "imports/wordpress-events.toml".to_string(),
+            "--rollback".to_string(),
+            "--base-url".to_string(),
+            "https://shop.example.com".to_string(),
+            "--reason".to_string(),
+            "auth failure".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ImportCutover {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected import cutover input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Human);
+        assert!(!invocation.apply);
+        assert!(!invocation.switch);
+        assert!(!invocation.observe);
+        assert!(invocation.rollback);
+        assert_eq!(
+            invocation.base_url.as_deref(),
+            Some("https://shop.example.com")
+        );
+        assert_eq!(invocation.reason.as_deref(), Some("auth failure"));
         assert!(invocation.confirmed);
     }
 

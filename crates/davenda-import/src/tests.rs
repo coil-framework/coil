@@ -1143,3 +1143,32 @@ fn cutover_execution_journal_round_trips_and_reports_prepared_steps() {
     assert_eq!(report.status, ReportStatus::Ok);
     assert_eq!(report.rows.len(), 3);
 }
+
+#[test]
+fn cutover_execution_journal_records_rolled_back_state() {
+    let run_id = ImportRunId::new("wordpress-cutover").unwrap();
+    let mut journal = CutoverExecutionJournal::new(
+        &run_id,
+        "harbor-shop",
+        vec![CutoverStepRecord::new("rollback.executed", "Rollback").unwrap()],
+    );
+
+    journal.mark_prepared();
+    journal.confirm_switch("https://shop.example.com", 100);
+    journal
+        .mark_step_completed("rollback.executed", "rolled back after auth failure")
+        .unwrap();
+    journal
+        .mark_rolled_back("https://shop.example.com", 120, "systemic auth failure")
+        .unwrap();
+
+    assert_eq!(journal.state, CutoverExecutionState::RolledBack);
+    assert_eq!(
+        journal.rollback_reason.as_deref(),
+        Some("systemic auth failure")
+    );
+    assert_eq!(
+        journal.command_report().unwrap().status,
+        ReportStatus::Warning
+    );
+}

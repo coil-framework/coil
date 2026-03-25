@@ -350,7 +350,9 @@ fn usage() -> String {
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
         "  platform import cutover <manifest-path> [--apply] [--yes] [--legacy-freeze-confirmed] [--json]",
+        "  platform import cutover <manifest-path> --switch --base-url <url> --yes [--json]",
         "  platform import cutover <manifest-path> --observe --base-url <url> --yes [--json]",
+        "  platform import cutover <manifest-path> --rollback --base-url <url> --reason <text> --yes [--json]",
         "",
         "Examples:",
         "  platform dev server --config config/platform.toml",
@@ -371,7 +373,9 @@ fn usage() -> String {
         "  platform import run imports/wordpress-events.toml --dry-run",
         "  platform import cutover imports/wordpress-events.toml",
         "  platform import cutover imports/wordpress-events.toml --apply --yes --legacy-freeze-confirmed",
+        "  platform import cutover imports/wordpress-events.toml --switch --base-url https://shop.example.com --yes",
         "  platform import cutover imports/wordpress-events.toml --observe --base-url https://shop.example.com --yes",
+        "  platform import cutover imports/wordpress-events.toml --rollback --base-url https://shop.example.com --reason \"systemic auth failure\" --yes",
         "",
         "Environment:",
         "  DAVENDA_COOKIE_SECRET and DAVENDA_CSRF_SECRET are required for `dev server`",
@@ -1690,10 +1694,25 @@ struct EvaluatedImportCutover {
 
 fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandReport, CliRunError> {
     let evaluated = evaluate_import_cutover(invocation)?;
-    if invocation.apply && invocation.observe {
+    let actions = [
+        invocation.apply,
+        invocation.switch,
+        invocation.observe,
+        invocation.rollback,
+    ]
+    .into_iter()
+    .filter(|enabled| *enabled)
+    .count();
+    if actions > 1 {
         return Err(CliRunError::usage(
-            "`import cutover` accepts either `--apply` or `--observe`, not both",
+            "`import cutover` accepts only one of `--apply`, `--switch`, `--observe`, or `--rollback`",
         ));
+    }
+    if invocation.rollback {
+        return rollback_import_cutover(invocation, &evaluated);
+    }
+    if invocation.switch {
+        return switch_import_cutover(invocation, &evaluated);
     }
     if invocation.observe {
         return observe_import_cutover(invocation, &evaluated);
@@ -1898,6 +1917,85 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
     Ok(report)
 }
 
+fn switch_import_cutover(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CommandReport, CliRunError> {
+    if !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`import cutover --switch` requires `--yes`",
+        ));
+    }
+    let base_url = invocation.base_url.as_ref().ok_or_else(|| {
+        CliRunError::usage("`import cutover --switch` requires `--base-url <url>`")
+    })?;
+
+    let journal_path = cutover_journal_path(&invocation.manifest_path, &evaluated.manifest.run_id);
+    let expected_steps = cutover_steps(&evaluated.cutover)?;
+    let mut journal = CutoverExecutionJournal::load(
+        &journal_path,
+        &evaluated.manifest.run_id,
+        evaluated.manifest.customer_app_id.as_str(),
+        expected_steps,
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load cutover journal for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+
+    match journal.state {
+        davenda_import::CutoverExecutionState::Prepared
+        | davenda_import::CutoverExecutionState::SwitchConfirmed
+        | davenda_import::CutoverExecutionState::Observing
+        | davenda_import::CutoverExecutionState::ObservationPassed
+        | davenda_import::CutoverExecutionState::RollbackRequired => {}
+        _ => {
+            return Err(CliRunError::execution(format!(
+                "cutover `{}` must be prepared with `platform import cutover {} --apply --yes` before switch confirmation",
+                evaluated.manifest.run_id,
+                invocation.manifest_path.display()
+            )));
+        }
+    }
+
+    let switched_at = unix_timestamp_now()?;
+    run_cutover_step(
+        &mut journal,
+        &journal_path,
+        &evaluated.manifest.run_id,
+        "switch.confirmed",
+        || Ok(format!("operator confirmed live switch to `{base_url}`")),
+    )?;
+    journal.confirm_switch(base_url.clone(), switched_at);
+    save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
+
+    let mut report = journal.command_report().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to render cutover switch report for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+    report.summary = format!(
+        "Cutover switch for import run `{}` is confirmed against `{}`",
+        evaluated.manifest.run_id, base_url
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.switch",
+        format!("live switch confirmed against `{base_url}`"),
+    )?;
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.journal",
+        format!("cutover journal persisted at `{}`", journal_path.display()),
+    )?;
+    Ok(report)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObservedCutoverRoute {
     route: String,
@@ -1959,14 +2057,13 @@ fn observe_import_cutover(
     })?;
 
     match journal.state {
-        davenda_import::CutoverExecutionState::Prepared
-        | davenda_import::CutoverExecutionState::SwitchConfirmed
+        davenda_import::CutoverExecutionState::SwitchConfirmed
         | davenda_import::CutoverExecutionState::Observing
         | davenda_import::CutoverExecutionState::ObservationPassed
         | davenda_import::CutoverExecutionState::RollbackRequired => {}
         _ => {
             return Err(CliRunError::execution(format!(
-                "cutover `{}` must be prepared with `platform import cutover {} --apply --yes` before observation can start",
+                "cutover `{}` must be switched with `platform import cutover {} --switch --base-url <url> --yes` before observation can start",
                 evaluated.manifest.run_id,
                 invocation.manifest_path.display()
             )));
@@ -1974,13 +2071,6 @@ fn observe_import_cutover(
     }
 
     let probe_time = unix_timestamp_now()?;
-    run_cutover_step(
-        &mut journal,
-        &journal_path,
-        &evaluated.manifest.run_id,
-        "switch.confirmed",
-        || Ok(format!("operator confirmed live switch to `{base_url}`")),
-    )?;
     journal.begin_observation(base_url.clone(), probe_time);
     save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
 
@@ -2085,6 +2175,93 @@ fn observe_import_cutover(
             ),
         )?;
     }
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.journal",
+        format!("cutover journal persisted at `{}`", journal_path.display()),
+    )?;
+    Ok(report)
+}
+
+fn rollback_import_cutover(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CommandReport, CliRunError> {
+    if !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`import cutover --rollback` requires `--yes`",
+        ));
+    }
+    let base_url = invocation.base_url.as_ref().ok_or_else(|| {
+        CliRunError::usage("`import cutover --rollback` requires `--base-url <url>`")
+    })?;
+    let reason = invocation.reason.as_ref().ok_or_else(|| {
+        CliRunError::usage("`import cutover --rollback` requires `--reason <text>`")
+    })?;
+
+    let journal_path = cutover_journal_path(&invocation.manifest_path, &evaluated.manifest.run_id);
+    let expected_steps = cutover_steps(&evaluated.cutover)?;
+    let mut journal = CutoverExecutionJournal::load(
+        &journal_path,
+        &evaluated.manifest.run_id,
+        evaluated.manifest.customer_app_id.as_str(),
+        expected_steps,
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load cutover journal for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+
+    match journal.state {
+        davenda_import::CutoverExecutionState::SwitchConfirmed
+        | davenda_import::CutoverExecutionState::Observing
+        | davenda_import::CutoverExecutionState::ObservationPassed
+        | davenda_import::CutoverExecutionState::RollbackRequired
+        | davenda_import::CutoverExecutionState::RolledBack => {}
+        _ => {
+            return Err(CliRunError::execution(format!(
+                "cutover `{}` cannot be rolled back before the live switch has been confirmed",
+                evaluated.manifest.run_id
+            )));
+        }
+    }
+
+    let rolled_back_at = unix_timestamp_now()?;
+    run_cutover_step(
+        &mut journal,
+        &journal_path,
+        &evaluated.manifest.run_id,
+        "rollback.executed",
+        || {
+            Ok(format!(
+                "operator rolled traffic back from `{base_url}`: {reason}"
+            ))
+        },
+    )?;
+    journal
+        .mark_rolled_back(base_url.clone(), rolled_back_at, reason.clone())
+        .map_err(import_model_error)?;
+    save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
+
+    let mut report = journal.command_report().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to render cutover rollback report for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+    report.summary = format!(
+        "Cutover rollback for import run `{}` is recorded against `{}`",
+        evaluated.manifest.run_id, base_url
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Warning,
+        "cutover.rollback",
+        format!("rollback confirmed for `{base_url}`: {reason}"),
+    )?;
     push_report_diagnostic(
         &mut report,
         DiagnosticSeverity::Info,
@@ -2399,6 +2576,13 @@ fn cutover_steps(
         CutoverStepRecord::new(
             "cutover.observe",
             "The live system remained healthy across the declared post-switch observation window",
+        )
+        .map_err(import_model_error)?,
+    );
+    steps.push(
+        CutoverStepRecord::new(
+            "rollback.executed",
+            "The operator recorded a rollback after the live switch and documented the reason",
         )
         .map_err(import_model_error)?,
     );
@@ -5554,6 +5738,18 @@ source_path = "fixtures/media.json"
             false,
             BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 200_u16)]),
         );
+        let switched = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+        assert!(switched.contains("Cutover switch"));
+
         let rendered = run_from_args([
             "import".to_string(),
             "cutover".to_string(),
@@ -5616,6 +5812,16 @@ source_path = "fixtures/media.json"
             false,
             BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 500_u16)]),
         );
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
         let error = run_from_args([
             "import".to_string(),
             "cutover".to_string(),
@@ -5635,6 +5841,74 @@ source_path = "fixtures/media.json"
         let journal = fs::read_to_string(journal_path).unwrap();
         assert!(journal.contains("\"state\": \"rollback_required\""));
         assert!(journal.contains("unexpected status 500"));
+    }
+
+    #[test]
+    fn run_from_args_records_cutover_rollbacks_after_the_live_switch() {
+        let fixture = import_fixture();
+        let config_path = fixture.root.join("config").join("platform.toml");
+        let app_manifest_path = fixture
+            .root
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&config_path, config).unwrap();
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+        let cutover_manifest =
+            write_cutover_observe_manifest(&fixture, "cutover-rollback.toml", 60);
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+        let switched = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--switch".to_string(),
+            "--base-url".to_string(),
+            "https://shop.example.com".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+        assert!(switched.contains("Cutover switch"));
+
+        let rolled_back = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--rollback".to_string(),
+            "--base-url".to_string(),
+            "https://shop.example.com".to_string(),
+            "--reason".to_string(),
+            "systemic auth failure".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rolled_back.contains("rollback"));
+        assert!(rolled_back.contains("systemic auth failure"));
+
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"rolled_back\""));
+        assert!(journal.contains("\"rollback_confirmed_at_unix_seconds\""));
+        assert!(journal.contains("systemic auth failure"));
     }
 
     #[test]

@@ -32,6 +32,13 @@ pub(crate) struct AssetsPublishInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CacheWarmInvocation {
+    pub config_path: PathBuf,
+    pub scope: String,
+    pub routes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliInput {
     Help,
     DevServer {
@@ -61,6 +68,11 @@ pub(crate) enum CliInput {
     ReleaseDoctor {
         output_mode: OutputMode,
         config_path: PathBuf,
+    },
+    CacheWarm {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: CacheWarmInvocation,
     },
     StorageVerify {
         output_mode: OutputMode,
@@ -92,6 +104,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut dry_run = false;
     let mut confirmed = false;
     let mut verify_policy = false;
+    let mut cache_scope: Option<String> = None;
+    let mut cache_routes = Vec::new();
     let mut subject: Option<DefaultSubject> = None;
     let mut capability: Option<Capability> = None;
     let mut resource: Option<Entity> = None;
@@ -107,6 +121,12 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--dry-run" => dry_run = true,
             "--yes" => confirmed = true,
             "--policy" => verify_policy = true,
+            "--scope" => {
+                cache_scope = Some(next_value(&mut iter, "--scope")?);
+            }
+            "--route" => {
+                cache_routes.push(next_value(&mut iter, "--route")?);
+            }
             "--config" => {
                 config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
             }
@@ -265,6 +285,36 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             Ok(CliInput::ReleaseDoctor {
                 output_mode,
                 config_path,
+            })
+        }
+        [command, subcommand] if command == "cache" && subcommand == "warm" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`cache warm` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+            let scope = cache_scope.unwrap_or_else(|| "public".to_string());
+            if scope != "public" {
+                return Err(CliRunError::usage(
+                    "`cache warm` currently supports only `--scope public`",
+                ));
+            }
+            if cache_routes.is_empty() {
+                return Err(CliRunError::usage(
+                    "`cache warm` requires at least one `--route <path>`",
+                ));
+            }
+
+            Ok(CliInput::CacheWarm {
+                output_mode,
+                dry_run,
+                invocation: CacheWarmInvocation {
+                    config_path,
+                    scope,
+                    routes: cache_routes,
+                },
             })
         }
         [command, subcommand] if command == "storage" && subcommand == "verify" => {
@@ -531,6 +581,43 @@ mod tests {
         assert_eq!(
             invocation.manifest_path,
             PathBuf::from("imports/wordpress-events.toml")
+        );
+    }
+
+    #[test]
+    fn parse_cache_warm_accepts_scope_routes_and_dry_run() {
+        let input = parse([
+            "cache".to_string(),
+            "warm".to_string(),
+            "--config".to_string(),
+            "/tmp/davenda.toml".to_string(),
+            "--scope".to_string(),
+            "public".to_string(),
+            "--route".to_string(),
+            "/en-GB/home".to_string(),
+            "--route".to_string(),
+            "/en-GB/events".to_string(),
+            "--dry-run".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::CacheWarm {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected cache warm input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/davenda.toml"));
+        assert_eq!(invocation.scope, "public");
+        assert_eq!(
+            invocation.routes,
+            vec!["/en-GB/home".to_string(), "/en-GB/events".to_string()]
         );
     }
 

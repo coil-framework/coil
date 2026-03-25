@@ -1,6 +1,7 @@
 use crate::CliModelError;
 use crate::cli::args::{
-    AssetsPublishInvocation, CliInput, DevServerInvocation, MigrateApplyInvocation, parse,
+    AssetsPublishInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
+    MigrateApplyInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -16,6 +17,7 @@ use davenda_auth::{
     DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
     configured_auth_model_package,
 };
+use davenda_cache::CacheInstant;
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_data::{
     DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient,
@@ -23,7 +25,10 @@ use davenda_data::{
 use davenda_import::{
     CutoverCheck, CutoverPlan, ImportManifest, ImportModelError, PublicationMode, RollbackTrigger,
 };
-use davenda_runtime::{EnvironmentSecretResolver, RuntimeBuilder, StorageHost};
+use davenda_runtime::{
+    CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod, RequestInput,
+    RuntimeBuilder, StorageHost,
+};
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
@@ -227,6 +232,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
                         config_path.display()
                     ))
                 })?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::CacheWarm {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_cache_warm(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
         CliInput::StorageVerify {
@@ -440,6 +453,7 @@ fn usage() -> String {
         "  platform migrate plan [--config <path>] [--json]",
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
+        "  platform cache warm [--config <path>] --scope public --route <path> [--route <path> ...] [--dry-run] [--json]",
         "  platform storage verify [--config <path>] [--policy] [--json]",
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
@@ -453,6 +467,7 @@ fn usage() -> String {
         "  platform migrate plan --config config/platform.toml",
         "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
+        "  platform cache warm --config config/platform.toml --scope public --route /en-GB/home",
         "  platform storage verify --config config/platform.toml --policy",
         "  platform assets publish --config apps/harbor-shop/platform.toml --dry-run",
         "  platform import run imports/wordpress-events.toml",
@@ -680,6 +695,212 @@ fn run_assets_publish(
         })?;
 
     build_assets_publish_report(&built.manifest, receipt.manifest(), Some(&receipt), false)
+}
+
+fn run_cache_warm(
+    invocation: &CacheWarmInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    warm_cache_routes(&built, &invocation.routes, &invocation.scope, dry_run)
+}
+
+fn warm_cache_routes(
+    built: &BuiltCustomerAppContext,
+    routes: &[String],
+    scope: &str,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    if scope != "public" {
+        return Err(CliRunError::usage(
+            "`cache warm` currently supports only `--scope public`",
+        ));
+    }
+
+    let mut report = CommandReport::new(
+        ["cache", "warm"],
+        if dry_run {
+            format!(
+                "Planned cache warm for `{}` across {} route(s)",
+                built.manifest.id,
+                routes.len()
+            )
+        } else {
+            format!(
+                "Warmed cache for `{}` across {} route(s)",
+                built.manifest.id,
+                routes.len()
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "route",
+        "route_name",
+        "scope",
+        "cache",
+        "status",
+        "cache_key",
+    ])
+    .map_err(report_build_error)?;
+
+    let host = built.runtime_plan.runtime.config.seo.canonical_host.clone();
+    let now = CacheInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| {
+                CliRunError::execution(format!("failed to calculate cache warm timestamp: {error}"))
+            })?
+            .as_secs(),
+    );
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let mut cache_host = if dry_run {
+        None
+    } else {
+        Some(built.runtime_plan.runtime.cache_host().map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build cache host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?)
+    };
+
+    for route in routes {
+        let request =
+            RequestInput::new(HttpMethod::Get, host.as_str(), route).map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to prepare cache warm request `{route}`: {error}"
+                ))
+            })?;
+        let execution = built
+            .runtime_plan
+            .runtime
+            .execute_request(request, cookie_secret, csrf_secret)
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to resolve cache warm route `{route}` for `{}`: {error}",
+                    built.manifest.id
+                ))
+            })?;
+        if execution.cache != CacheDisposition::Public {
+            return Err(CliRunError::execution(format!(
+                "cache warm route `{route}` resolved to `{}` cache disposition; only public routes are supported",
+                cache_disposition_label(execution.cache)
+            )));
+        }
+        let cache_key = execution
+            .cache_plan
+            .plan
+            .application()
+            .ok_or_else(|| {
+                CliRunError::execution(format!(
+                    "cache warm route `{route}` does not produce an application cache plan"
+                ))
+            })?
+            .key()
+            .to_string();
+        let status = if dry_run {
+            "planned".to_string()
+        } else {
+            let value = render_cache_warm_value(&built.runtime_plan.runtime, &execution)?;
+            let cache_host = cache_host
+                .as_mut()
+                .expect("non-dry-run cache warm builds a cache host");
+            let fill = cache_host
+                .begin_fill(&execution, "platform:cache:warm")
+                .ok_or_else(|| {
+                    CliRunError::execution(format!(
+                        "cache warm route `{route}` could not acquire an application cache fill"
+                    ))
+                })?;
+            cache_host
+                .store_execution(&execution, value, now)
+                .ok_or_else(|| {
+                    CliRunError::execution(format!(
+                        "cache warm route `{route}` is not application-cacheable"
+                    ))
+                })?;
+            cache_host.complete_fill(&fill).map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to complete cache fill for route `{route}`: {error}"
+                ))
+            })?;
+            "warmed".to_string()
+        };
+
+        report.push_row(
+            ReportRow::new()
+                .with_cell("route", route.clone())
+                .map_err(report_build_error)?
+                .with_cell("route_name", execution.route.route_name.clone())
+                .map_err(report_build_error)?
+                .with_cell("scope", scope.to_string())
+                .map_err(report_build_error)?
+                .with_cell("cache", cache_disposition_label(execution.cache))
+                .map_err(report_build_error)?
+                .with_cell("status", status)
+                .map_err(report_build_error)?
+                .with_cell("cache_key", cache_key)
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cache.routes",
+        format!(
+            "cache warm {} route(s) against host `{}` for customer app `{}`",
+            routes.len(),
+            host,
+            built.manifest.id
+        ),
+    )?;
+
+    Ok(report)
+}
+
+fn render_cache_warm_value(
+    runtime: &davenda_runtime::RuntimePlan,
+    execution: &davenda_runtime::RequestExecution,
+) -> Result<String, CliRunError> {
+    match &execution.response {
+        HandlerResponse::Page(page) => {
+            runtime
+                .render_page_response(execution, page, None)
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to render cache warm page `{}`: {error}",
+                        execution.route.route_name
+                    ))
+                })
+        }
+        HandlerResponse::Fragment(fragment) => runtime
+            .render_fragment_response(execution, fragment)
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to render cache warm fragment `{}`: {error}",
+                    execution.route.route_name
+                ))
+            }),
+        HandlerResponse::Json(json) => serde_json::to_string(&json.payload).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to serialize cache warm json `{}`: {error}",
+                execution.route.route_name
+            ))
+        }),
+        HandlerResponse::Redirect(redirect) => Ok(redirect.location.clone()),
+        HandlerResponse::File(file) => Ok(format!("{}:{}", file.content_type, file.logical_path)),
+    }
+}
+
+fn cache_disposition_label(disposition: CacheDisposition) -> &'static str {
+    match disposition {
+        CacheDisposition::Public => "public",
+        CacheDisposition::Private => "private",
+        CacheDisposition::Uncacheable => "uncacheable",
+    }
 }
 
 fn run_storage_verify(
@@ -982,11 +1203,39 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
     }
 
     if cutover.requires_cache_warm {
+        let (cache_ready, cache_detail) = match manifest.verification.as_ref() {
+            Some(verification) if !verification.sample_routes.is_empty() => {
+                match warm_cache_routes(
+                    &runtime.built,
+                    &verification.sample_routes,
+                    "public",
+                    true,
+                ) {
+                    Ok(_) => (
+                        true,
+                        format!(
+                            "cache warm plan validated for routes: {}",
+                            verification.sample_routes.join(", ")
+                        ),
+                    ),
+                    Err(error) => (false, error.to_string()),
+                }
+            }
+            Some(_) => (
+                false,
+                "cache warm requires verification.sample_routes so representative public routes can be warmed"
+                    .to_string(),
+            ),
+            None => (
+                false,
+                "cache warm requires a `[verification]` section with sample routes".to_string(),
+            ),
+        };
         cutover_plan = cutover_plan.with_check(build_cutover_check(
             "cache.warm",
-            "cache warm command surface is not implemented yet for production cutover",
+            cache_detail,
             true,
-            false,
+            cache_ready,
         )?);
     }
 
@@ -2990,6 +3239,10 @@ dependencies = ["users", "media"]
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
         assert!(rendered.contains("platform migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform release doctor [--config <path>]"));
+        assert!(
+            rendered
+                .contains("platform cache warm [--config <path>] --scope public --route <path>")
+        );
         assert!(rendered.contains("platform storage verify [--config <path>] [--policy]"));
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform import run <manifest-path> [--dry-run]"));
@@ -3333,6 +3586,26 @@ dependencies = ["users", "media"]
 
         assert!(rendered.contains("release doctor"));
         assert!(rendered.contains("showcase-events"));
+    }
+
+    #[test]
+    fn run_from_args_plans_cache_warm_for_sample_customer_app_routes() {
+        let rendered = run_from_args([
+            "cache".to_string(),
+            "warm".to_string(),
+            "--config".to_string(),
+            harbor_shop_platform_config().display().to_string(),
+            "--scope".to_string(),
+            "public".to_string(),
+            "--route".to_string(),
+            "/en-GB/pages/home".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("cache warm"));
+        assert!(rendered.contains("status: planned"));
+        assert!(rendered.contains("/en-GB/pages/home"));
     }
 
     #[test]

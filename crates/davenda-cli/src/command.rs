@@ -154,6 +154,12 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Check release compatibility for the active customer app",
         )?,
         CommandDescriptor::new(
+            ["cache", "warm"],
+            CommandOwner::Core,
+            "Warm public application cache entries for explicit customer-app routes",
+        )?
+        .with_dry_run(),
+        CommandDescriptor::new(
             ["storage", "verify"],
             CommandOwner::Core,
             "Verify storage policy planning and backend availability for the active customer app",

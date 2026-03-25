@@ -10,6 +10,7 @@ davenda-admin = { path = "../davenda-admin" }
 davenda-assets = { path = "../davenda-assets" }
 davenda-auth = { path = "../davenda-auth" }
 davenda-app = { path = "../davenda-app" }
+davenda-cache = { path = "../davenda-cache" }
 davenda-core = { path = "../davenda-core" }
 davenda-cms = { path = "../davenda-cms" }
 davenda-commerce = { path = "../davenda-commerce" }

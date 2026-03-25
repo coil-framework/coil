@@ -66,6 +66,7 @@ mod plan;
 mod render;
 mod server;
 mod storage;
+mod storefront;
 mod tls;
 mod wasm;
 mod wasm_data;
@@ -81,6 +82,7 @@ pub use plan::*;
 pub use render::*;
 pub use server::*;
 pub use storage::*;
+pub use storefront::*;
 pub use tls::*;
 pub use wasm::*;
 

@@ -57,6 +57,8 @@ pub enum RuntimeServerError {
     WasmExecution(#[from] LiveWasmExecutionError),
     #[error(transparent)]
     BrowserHostBuild(#[from] BrowserHostBuildError),
+    #[error(transparent)]
+    Storefront(#[from] StorefrontStateError),
     #[error("request body exceeds configured maximum of {limit} bytes")]
     RequestBodyTooLarge { limit: usize },
     #[error("live request authorization failed: {reason}")]
@@ -69,6 +71,7 @@ pub(crate) struct RuntimeServerState {
     plan: RuntimePlan,
     browser: Mutex<BrowserHost>,
     wasm_host: WasmHost,
+    storefront: StorefrontStateStore,
     cookie_secret: Vec<u8>,
     csrf_secret: Vec<u8>,
     backends: SharedBackendClients,
@@ -130,10 +133,12 @@ impl HttpServerHost {
             plan.registered_runtime_jobs.clone(),
             RuntimeWasmHostServices::with_runtime_secrets(plan.clone(), storage_host, wasm_secrets),
         );
+        let storefront = StorefrontStateStore::open_for_plan(&plan)?;
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
             wasm_host,
+            storefront,
             backends,
             cookie_secret,
             csrf_secret,
@@ -158,10 +163,12 @@ impl HttpServerHost {
             ));
         let auth_explainer = build_auth_explainer(&plan)?;
         let wasm_host = plan.wasm_host();
+        let storefront = StorefrontStateStore::open_for_plan(&plan)?;
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
             wasm_host,
+            storefront,
             backends,
             cookie_secret,
             csrf_secret,
@@ -181,10 +188,12 @@ impl HttpServerHost {
         let browser = plan.browser_host()?;
         let wasm_host = plan.wasm_host();
         let auth_explainer = build_auth_explainer(&plan)?;
+        let storefront = StorefrontStateStore::open_for_plan(&plan)?;
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
             wasm_host,
+            storefront,
             backends,
             cookie_secret,
             csrf_secret,
@@ -204,10 +213,12 @@ impl HttpServerHost {
     ) -> Result<Self, RuntimeServerError> {
         let browser = plan.browser_host()?;
         let wasm_host = plan.wasm_host();
+        let storefront = StorefrontStateStore::open_for_plan(&plan)?;
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
             wasm_host,
+            storefront,
             backends,
             cookie_secret,
             csrf_secret,
@@ -220,6 +231,7 @@ impl HttpServerHost {
         plan: RuntimePlan,
         browser: BrowserHost,
         wasm_host: WasmHost,
+        storefront: StorefrontStateStore,
         backends: SharedBackendClients,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
@@ -229,6 +241,7 @@ impl HttpServerHost {
         let state = Arc::new(RuntimeServerState {
             browser: Mutex::new(browser),
             wasm_host,
+            storefront,
             plan,
             cookie_secret,
             csrf_secret,
@@ -267,6 +280,11 @@ impl HttpServerHost {
         diagnostics_router(self.state.clone())
             .merge(auth_explain_router(self.state.clone()))
             .with_state(self.state.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wasm_host(&self) -> WasmHost {
+        self.state.wasm_host.clone()
     }
 
     pub fn issue_session(

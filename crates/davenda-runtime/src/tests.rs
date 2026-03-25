@@ -1362,6 +1362,78 @@ fn cache_host_shares_distributed_state_by_default_within_a_plan() {
 }
 
 #[test]
+fn storefront_state_store_persists_carts_and_orders_across_reopen() {
+    let root = unique_temp_template_root("storefront-state");
+    let _ = fs::remove_dir_all(&root);
+    let store = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
+
+    let snapshot = store
+        .add_to_cart(
+            "session-live-1",
+            Some("member-live-1"),
+            "harbor-cap",
+            2,
+            100,
+        )
+        .unwrap();
+    assert_eq!(snapshot.cart.item_count, 2);
+    assert_eq!(snapshot.cart.subtotal_minor, 5_800);
+
+    let snapshot = store
+        .add_to_cart(
+            "session-live-1",
+            Some("member-live-1"),
+            "membership-gold",
+            1,
+            101,
+        )
+        .unwrap();
+    assert_eq!(snapshot.cart.item_count, 3);
+    assert_eq!(snapshot.cart.subtotal_minor, 14_700);
+
+    let snapshot = store
+        .checkout_start("session-live-1", Some("member-live-1"), 102)
+        .unwrap();
+    assert_eq!(snapshot.cart.status, "checkout");
+
+    let snapshot = store
+        .checkout_complete("session-live-1", Some("member-live-1"), 103)
+        .unwrap();
+    assert_eq!(snapshot.cart.item_count, 0);
+    assert_eq!(snapshot.cart.status, "completed");
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
+            .map(|order| order.order_id.as_str()),
+        Some("ORD-10042")
+    );
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
+            .map(|order| order.total_minor),
+        Some(14_700)
+    );
+
+    let reopened = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
+    let history = reopened
+        .order_history("session-live-1", Some("member-live-1"), 10)
+        .unwrap();
+    assert_eq!(history.orders.len(), 1);
+    assert_eq!(history.orders[0].order_id, "ORD-10042");
+    assert_eq!(history.orders[0].line_count, 3);
+
+    let snapshot = reopened
+        .snapshot("session-live-1", Some("member-live-1"))
+        .unwrap();
+    assert!(snapshot.cart.lines.is_empty());
+    assert_eq!(snapshot.cart.status, "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn browser_host_shares_distributed_sessions_when_reusing_an_explicit_client() {
     let services = plan_browser_services();
     let client = DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Redis);

@@ -1,4 +1,5 @@
 use super::*;
+use axum::response::Response;
 
 const LIVE_DATABASE_URL: &str = "postgres://platform:secret@db.internal/platform";
 const LIVE_OBJECT_STORE_SECRET: &str = r#"
@@ -26,6 +27,50 @@ fn live_backend_secret_resolver() -> StaticSecretResolver {
             LIVE_OBJECT_STORE_SECRET,
         )
         .unwrap()
+}
+
+fn response_header(response: &Response<Body>, name: &str) -> String {
+    response
+        .headers()
+        .get(name)
+        .unwrap_or_else(|| panic!("missing response header `{name}`"))
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+fn response_session_cookie(response: &Response<Body>) -> String {
+    let header = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with("davenda_session="))
+        .expect("response should include a davenda_session cookie");
+    cookie_value(header)
+}
+
+fn cookie_pair_from_response(response: &Response<Body>, name: &str) -> Option<String> {
+    response
+        .headers()
+        .get_all(axum::http::header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|header: &str| {
+            let prefix = format!("{name}=");
+            header
+                .strip_prefix(&prefix)
+                .and_then(|rest: &str| rest.split(';').next())
+                .map(|value| format!("{name}={value}"))
+        })
+}
+
+fn unique_app_name(label: &str) -> String {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{label}-{unique}")
 }
 
 #[tokio::test]
@@ -172,6 +217,14 @@ async fn server_router_denies_diagnostics_probe_for_authenticated_sessions_witho
             now,
         )
         .unwrap();
+    let _ = server.wasm_host().prepare_webhook_invocation(
+        "commerce.payment-provider",
+        "payment.authorized",
+        false,
+        true,
+        "trace.webhooks.verification-failed",
+        ExtensionPrincipal::service_account("commerce.webhooks"),
+    );
     let diagnostics = server
         .privileged_router()
         .oneshot(
@@ -250,6 +303,9 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
     assert!(diagnostics_body.contains("\"customer_app\""));
     assert!(diagnostics_body.contains("\"database\""));
     assert!(diagnostics_body.contains("\"metadata\""));
+    assert!(diagnostics_body.contains("\"extensions\""));
+    assert!(diagnostics_body.contains("\"webhooks\""));
+    assert!(diagnostics_body.contains("\"verification_failed\""));
     assert!(diagnostics_body.contains("\"backend\":\"local-sqlite\""));
     assert!(diagnostics_body.contains("\"path\""));
 }
@@ -984,17 +1040,6 @@ async fn server_host_renders_page_templates_as_html() {
 }
 
 #[tokio::test]
-async fn server_host_emits_hreflang_links_for_localized_page_routes() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
-    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
-    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
-        .with_route(
-            RouteDefinition::new("events.list", HttpMethod::Get, "/events")
-                .unwrap()
-                .localized(),
-        )
-        .with_handler(HandlerDefinition::page("events.list", "events/list").unwrap())
-#[tokio::test]
 async fn server_host_loads_customer_storefront_templates_from_template_roots() {
     let config = config_with_app_name("harbor-shop-runtime-storefront");
     let template_root = unique_temp_template_root("storefront-pages");
@@ -1075,7 +1120,10 @@ async fn server_host_loads_customer_storefront_templates_from_template_roots() {
 
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.contains("primary-nav"), "{body}");
-    assert!(body.contains("Featured collections load from customer templates."), "{body}");
+    assert!(
+        body.contains("Featured collections load from customer templates."),
+        "{body}"
+    );
     assert!(body.contains("storefront.home"), "{body}");
 }
 
@@ -1171,6 +1219,603 @@ async fn server_host_loads_customer_account_templates_from_template_roots() {
     assert!(body.contains("member-live-template"), "{body}");
 }
 
+#[tokio::test]
+async fn server_host_renders_checkout_confirmation_and_account_history_from_sample_order() {
+    let config = config_with_app_name("harbor-shop-runtime-order-flow");
+    let template_root = unique_temp_template_root("order-flow-pages");
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-page">
+      <h1 dv:text="${page.title}">Checkout</h1>
+      <p class="customer" dv:text="${customer.email}">customer@example.com</p>
+      <ul class="line-items">
+        <li dv:each="item : ${lineItems}">
+          <span class="item-title" dv:text="${item.title}">Item</span>
+          <span class="item-qty" dv:text="${item.quantity}">1</span>
+          <strong class="item-total" dv:text="${item.total}">£0.00</strong>
+        </li>
+      </ul>
+      <p class="grand-total" dv:text="${orderSummary.total}">£0.00</p>
+      <form action="/checkout/complete" method="post">
+        <button type="submit">Place order</button>
+      </form>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout-confirmation.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-confirmation">
+      <h1 dv:text="${confirmation.orderNumber}">ORD-10042</h1>
+      <p class="confirmation-email" dv:text="${confirmation.email}">member@example.com</p>
+      <p class="confirmation-next-step" dv:text="${confirmation.nextStep}">
+        A confirmation email and membership activation will follow shortly.
+      </p>
+      <div dv:replace="~{account/summary-panels :: panels}"></div>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/account/dashboard.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="account-dashboard">
+      <h1 dv:text="${customer.displayName}">Account</h1>
+      <p class="principal" dv:text="${principal_id}">member</p>
+      <div dv:replace="~{account/summary-panels :: panels}"></div>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/account/summary-panels.html",
+        r#"<section class="account-panels" xmlns:dv="https://davenda.dev" dv:fragment="panels">
+  <div class="account-panels__grid">
+    <article class="account-panel">
+      <h2>Recent purchases</h2>
+      <ul class="account-panel__list">
+        <li dv:each="order : ${recentOrders}">
+          <strong dv:text="${order.reference}">ORD-10042</strong>
+          <span dv:text="${order.status}">Paid</span>
+          <span dv:text="${order.total}">£118.00</span>
+        </li>
+      </ul>
+    </article>
+    <article class="account-panel">
+      <h2>Membership</h2>
+      <strong dv:text="${membershipSummary.tierName}">Harbor Circle</strong>
+      <span dv:text="${membershipSummary.status}">Active</span>
+      <p dv:text="${membershipSummary.renewalText}">Renews on 18 April</p>
+    </article>
+  </div>
+</section>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_template_root(&template_root)
+        .with_route(
+            RouteDefinition::new("commerce.checkout", HttpMethod::Get, "/checkout")
+                .unwrap()
+                .from_module("commerce"),
+        )
+        .with_handler(HandlerDefinition::page("commerce.checkout", "commerce/checkout").unwrap())
+        .with_route(
+            RouteDefinition::new(
+                "commerce.checkout-confirmation",
+                HttpMethod::Get,
+                "/checkout/confirmation",
+            )
+            .unwrap()
+            .from_module("commerce"),
+        )
+        .with_handler(
+            HandlerDefinition::page(
+                "commerce.checkout-confirmation",
+                "commerce/checkout-confirmation",
+            )
+            .unwrap(),
+        )
+        .with_route(
+            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session()
+                .from_module("memberships"),
+        )
+        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-order-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_body = String::from_utf8(
+        to_bytes(checkout_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(checkout_body.contains("Harbor Cap"), "{checkout_body}");
+    assert!(checkout_body.contains("Gold Membership"), "{checkout_body}");
+    assert!(checkout_body.contains("£118.00"), "{checkout_body}");
+    assert!(
+        checkout_body.contains("/checkout/complete"),
+        "{checkout_body}"
+    );
+
+    let confirmation_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout/confirmation")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let confirmation_body = String::from_utf8(
+        to_bytes(confirmation_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        confirmation_body.contains("ORD-10042"),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("membership activation"),
+        "{confirmation_body}"
+    );
+    assert!(confirmation_body.contains("Paid"), "{confirmation_body}");
+
+    let account_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/account")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let account_body = String::from_utf8(
+        to_bytes(account_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert!(
+        account_body.contains("member-live-order-1"),
+        "{account_body}"
+    );
+    assert!(account_body.contains("ORD-10042"), "{account_body}");
+    assert!(account_body.contains("Paid"), "{account_body}");
+    assert!(account_body.contains("£118.00"), "{account_body}");
+    assert!(account_body.contains("Harbor Circle"), "{account_body}");
+}
+
+#[tokio::test]
+async fn server_host_bootstraps_guest_storefront_session_and_injects_live_state() {
+    let app_name = unique_app_name("harbor-shop-runtime-storefront-state");
+    let config = config_with_app_name(&app_name);
+    let template_root = unique_temp_template_root("storefront-state-pages");
+    write_template_file(
+        &template_root,
+        "templates/commerce/cart.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="cart-page">
+      <h1 dv:text="${route_name}">Cart</h1>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let cart_items = response_header(&response, "x-davenda-storefront-cart-items");
+    let add_to_cart_token =
+        response_header(&response, "x-davenda-storefront-csrf-commerce-add-to-cart");
+    let session_cookie = response_session_cookie(&response);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(cart_items, "0");
+    assert!(!add_to_cart_token.is_empty());
+    assert!(!session_cookie.is_empty());
+    assert!(body.contains("davenda-storefront-state"), "{body}");
+    assert!(body.contains("\"route\":\"commerce.cart\""), "{body}");
+    assert!(body.contains("\"item_count\":0"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_flow() {
+    let app_name = unique_app_name("harbor-shop-runtime-native-storefront");
+    let config = config_with_app_name(&app_name);
+    let template_root = unique_temp_template_root("native-storefront-flow");
+    write_template_file(
+        &template_root,
+        "templates/commerce/cart.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="cart-page">
+      <ul class="cart-lines">
+        <li dv:each="item : ${cartItems}">
+          <span class="item-title" dv:text="${item.title}">Item</span>
+          <span class="item-qty" dv:text="${item.quantity}">1</span>
+          <strong class="item-total" dv:text="${item.total}">£0.00</strong>
+        </li>
+      </ul>
+      <p class="cart-subtotal" dv:text="${cartSummary.subtotal}">£0.00</p>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-page">
+      <ul class="line-items">
+        <li dv:each="item : ${lineItems}">
+          <span class="item-title" dv:text="${item.title}">Item</span>
+          <span class="item-qty" dv:text="${item.quantity}">1</span>
+          <strong class="item-total" dv:text="${item.total}">£0.00</strong>
+        </li>
+      </ul>
+      <p class="checkout-total" dv:text="${orderSummary.total}">£0.00</p>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout-confirmation.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-confirmation">
+      <h1 class="order-number" dv:text="${confirmation.orderNumber}">ORD-10042</h1>
+      <ul class="confirmation-lines">
+        <li dv:each="item : ${confirmation.lineItems}">
+          <span class="item-title" dv:text="${item.title}">Item</span>
+          <span class="item-qty" dv:text="${item.quantity}">1</span>
+          <strong class="item-total" dv:text="${item.total}">£0.00</strong>
+        </li>
+      </ul>
+      <p class="next-step" dv:text="${confirmation.nextStep}">Next step</p>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_cookie =
+        cookie_pair_from_response(&cart_bootstrap, "davenda_session").expect("session cookie");
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("sku", "harbor-cap")
+        .append_pair("quantity", "2")
+        .finish();
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(add_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(add_response.headers().get("location").unwrap(), "/cart");
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let cart_body = String::from_utf8(
+        to_bytes(cart_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(cart_body.contains("Harbor Cap"), "{cart_body}");
+    assert!(cart_body.contains("2"), "{cart_body}");
+    assert!(cart_body.contains("£58.00"), "{cart_body}");
+
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        checkout_start.headers().get("location").unwrap(),
+        "/checkout"
+    );
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+    let checkout_body = String::from_utf8(
+        to_bytes(checkout_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(checkout_body.contains("Harbor Cap"), "{checkout_body}");
+    assert!(checkout_body.contains("£58.00"), "{checkout_body}");
+
+    let complete_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("email", "buyer@example.com")
+        .finish();
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(complete_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        complete_response.headers().get("location").unwrap(),
+        "/checkout/confirmation"
+    );
+
+    let confirmation_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout/confirmation")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let confirmation_body = String::from_utf8(
+        to_bytes(confirmation_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert!(
+        confirmation_body.contains("ORD-10042"),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("Harbor Cap"),
+        "{confirmation_body}"
+    );
+    assert!(confirmation_body.contains("2"), "{confirmation_body}");
+    assert!(
+        confirmation_body.contains("fulfillment summary"),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("davenda-storefront-state"),
+        "{confirmation_body}"
+    );
+
+    let order_history = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/account/orders")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let history_body = String::from_utf8(
+        to_bytes(order_history.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        history_body.contains("\"order_id\":\"ORD-10042\""),
+        "{history_body}"
+    );
+    assert!(
+        history_body.contains("\"sku\":\"harbor-cap\""),
+        "{history_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_emits_hreflang_links_for_localized_page_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let customer_namespace = TemplateNamespace::new("customer-app").unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("events.list", HttpMethod::Get, "/events")
+                .unwrap()
+                .localized(),
+        )
+        .with_handler(HandlerDefinition::page("events.list", "events/list").unwrap())
         .with_template(page_template(customer_namespace, "events/list"))
         .build()
         .unwrap();
@@ -1745,233 +2390,4 @@ async fn server_host_rejects_capability_routes_when_live_authorizer_denies() {
             object: davenda_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
         }]
     );
-}
-#[tokio::test]
-async fn server_host_renders_checkout_confirmation_and_account_history_from_sample_order() {
-    let config = config_with_app_name("harbor-shop-runtime-order-flow");
-    let template_root = unique_temp_template_root("order-flow-pages");
-    write_template_file(
-        &template_root,
-        "templates/commerce/checkout.html",
-        r#"<!doctype html>
-<html xmlns:dv="https://davenda.dev">
-  <body>
-    <main class="checkout-page">
-      <h1 dv:text="${page.title}">Checkout</h1>
-      <p class="customer" dv:text="${customer.email}">customer@example.com</p>
-      <ul class="line-items">
-        <li dv:each="item : ${lineItems}">
-          <span class="item-title" dv:text="${item.title}">Item</span>
-          <span class="item-qty" dv:text="${item.quantity}">1</span>
-          <strong class="item-total" dv:text="${item.total}">£0.00</strong>
-        </li>
-      </ul>
-      <p class="grand-total" dv:text="${orderSummary.total}">£0.00</p>
-      <form action="/checkout/complete" method="post">
-        <button type="submit">Place order</button>
-      </form>
-    </main>
-  </body>
-</html>"#,
-    );
-    write_template_file(
-        &template_root,
-        "templates/commerce/checkout-confirmation.html",
-        r#"<!doctype html>
-<html xmlns:dv="https://davenda.dev">
-  <body>
-    <main class="checkout-confirmation">
-      <h1 dv:text="${confirmation.orderNumber}">ORD-10042</h1>
-      <p class="confirmation-email" dv:text="${confirmation.email}">member@example.com</p>
-      <p class="confirmation-next-step" dv:text="${confirmation.nextStep}">
-        A confirmation email and membership activation will follow shortly.
-      </p>
-      <div dv:replace="~{account/summary-panels :: panels}"></div>
-    </main>
-  </body>
-</html>"#,
-    );
-    write_template_file(
-        &template_root,
-        "templates/account/dashboard.html",
-        r#"<!doctype html>
-<html xmlns:dv="https://davenda.dev">
-  <body>
-    <main class="account-dashboard">
-      <h1 dv:text="${customer.displayName}">Account</h1>
-      <p class="principal" dv:text="${principal_id}">member</p>
-      <div dv:replace="~{account/summary-panels :: panels}"></div>
-    </main>
-  </body>
-</html>"#,
-    );
-    write_template_file(
-        &template_root,
-        "templates/account/summary-panels.html",
-        r#"<section class="account-panels" xmlns:dv="https://davenda.dev" dv:fragment="panels">
-  <div class="account-panels__grid">
-    <article class="account-panel">
-      <h2>Recent purchases</h2>
-      <ul class="account-panel__list">
-        <li dv:each="order : ${recentOrders}">
-          <strong dv:text="${order.reference}">ORD-10042</strong>
-          <span dv:text="${order.status}">Paid</span>
-          <span dv:text="${order.total}">£118.00</span>
-        </li>
-      </ul>
-    </article>
-    <article class="account-panel">
-      <h2>Membership</h2>
-      <strong dv:text="${membershipSummary.tierName}">Harbor Circle</strong>
-      <span dv:text="${membershipSummary.status}">Active</span>
-      <p dv:text="${membershipSummary.renewalText}">Renews on 18 April</p>
-    </article>
-  </div>
-</section>"#,
-    );
-
-    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
-        .with_template_root(&template_root)
-        .with_route(
-            RouteDefinition::new("commerce.checkout", HttpMethod::Get, "/checkout")
-                .unwrap()
-                .from_module("commerce"),
-        )
-        .with_handler(HandlerDefinition::page("commerce.checkout", "commerce/checkout").unwrap())
-        .with_route(
-            RouteDefinition::new(
-                "commerce.checkout-confirmation",
-                HttpMethod::Get,
-                "/checkout/confirmation",
-            )
-            .unwrap()
-            .from_module("commerce"),
-        )
-        .with_handler(
-            HandlerDefinition::page(
-                "commerce.checkout-confirmation",
-                "commerce/checkout-confirmation",
-            )
-            .unwrap(),
-        )
-        .with_route(
-            RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
-                .unwrap()
-                .with_area(RouteArea::Account)
-                .requiring_session()
-                .from_module("memberships"),
-        )
-        .with_handler(HandlerDefinition::page("account.dashboard", "account/dashboard").unwrap())
-        .build()
-        .unwrap();
-    let resolver = live_backend_secret_resolver();
-    let server = plan
-        .server_host(
-            &resolver,
-            b"01234567012345670123456701234567",
-            b"76543210765432107654321076543210",
-        )
-        .unwrap();
-    let now = BrowserInstant::from_unix_seconds(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-    );
-    let issued = server
-        .issue_session(
-            SessionIssueRequest::new()
-                .for_principal("member-live-order-1")
-                .unwrap(),
-            now,
-        )
-        .unwrap();
-
-    let checkout_response = server
-        .respond(
-            Request::builder()
-                .method("GET")
-                .uri("/checkout")
-                .header("host", "www.example.com")
-                .header("x-forwarded-proto", "https")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let checkout_body = String::from_utf8(
-        to_bytes(checkout_response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(checkout_body.contains("Harbor Cap"), "{checkout_body}");
-    assert!(checkout_body.contains("Gold Membership"), "{checkout_body}");
-    assert!(checkout_body.contains("£118.00"), "{checkout_body}");
-    assert!(
-        checkout_body.contains("/checkout/complete"),
-        "{checkout_body}"
-    );
-
-    let confirmation_response = server
-        .respond(
-            Request::builder()
-                .method("GET")
-                .uri("/checkout/confirmation")
-                .header("host", "www.example.com")
-                .header("x-forwarded-proto", "https")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let confirmation_body = String::from_utf8(
-        to_bytes(confirmation_response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(
-        confirmation_body.contains("ORD-10042"),
-        "{confirmation_body}"
-    );
-    assert!(
-        confirmation_body.contains("membership activation"),
-        "{confirmation_body}"
-    );
-    assert!(confirmation_body.contains("Paid"), "{confirmation_body}");
-
-    let account_response = server
-        .respond(
-            Request::builder()
-                .method("GET")
-                .uri("/account")
-                .header("host", "www.example.com")
-                .header("x-forwarded-proto", "https")
-                .header("cookie", format!("davenda_session={}", issued.cookie_value))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let account_body = String::from_utf8(
-        to_bytes(account_response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-
-    fs::remove_dir_all(&template_root).unwrap();
-
-    assert!(
-        account_body.contains("member-live-order-1"),
-        "{account_body}"
-    );
-    assert!(account_body.contains("ORD-10042"), "{account_body}");
-    assert!(account_body.contains("Paid"), "{account_body}");
-    assert!(account_body.contains("£118.00"), "{account_body}");
-    assert!(account_body.contains("Harbor Circle"), "{account_body}");
 }

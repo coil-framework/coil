@@ -3,13 +3,31 @@ use super::*;
 use axum::body::{Body, to_bytes};
 use axum::extract::{ConnectInfo, State};
 use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
-use axum::http::{HeaderMap, Method, Request, Response, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
+
+const STOREFRONT_ORDER_HISTORY_PATH: &str = "/account/orders";
+const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
+    "commerce.cart",
+    "commerce.add-to-cart",
+    "commerce.cart-update",
+    "commerce.checkout",
+    "commerce.checkout-start",
+    "commerce.checkout-complete",
+    "commerce.checkout-confirmation",
+];
+const STOREFRONT_CSRF_ACTIONS: &[&str] = &[
+    "commerce.add-to-cart",
+    "commerce.cart-update",
+    "commerce.checkout-start",
+    "commerce.checkout-complete",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveHttpRequest {
@@ -127,7 +145,8 @@ pub(super) async fn execute_live_request(
             .unwrap_or_default()
             .as_secs(),
     );
-    let execution = if request.session_cookie.is_some() || request.flash_cookie.is_some() {
+    let mut native_response_cookies = Vec::new();
+    let mut execution = if request.session_cookie.is_some() || request.flash_cookie.is_some() {
         let resolved = {
             let mut browser = state
                 .browser
@@ -146,6 +165,11 @@ pub(super) async fn execute_live_request(
             request.principal_id = resolved.principal_id.clone();
         }
 
+        native_response_cookies.extend(resolved.response_cookies.clone());
+        prepare_native_storefront_request(state, &mut request, now, &mut native_response_cookies)?;
+        if request.path == STOREFRONT_ORDER_HISTORY_PATH && request.method == HttpMethod::Get {
+            return storefront_order_history_response(state, &request, native_response_cookies);
+        }
         authorize_live_request(state, &mut request).await?;
 
         let mut execution =
@@ -157,16 +181,30 @@ pub(super) async fn execute_live_request(
             execution.principal.principal_id = resolved.principal_id;
         }
         execution.flash_messages = resolved.flash_messages;
-        execution.response_cookies = resolved.response_cookies;
+        execution.response_cookies = native_response_cookies.clone();
         execution
     } else {
+        prepare_native_storefront_request(state, &mut request, now, &mut native_response_cookies)?;
+        if request.path == STOREFRONT_ORDER_HISTORY_PATH && request.method == HttpMethod::Get {
+            return storefront_order_history_response(state, &request, native_response_cookies);
+        }
         authorize_live_request(state, &mut request).await?;
-        state
-            .plan
-            .execute_request(request, &state.cookie_secret, &state.csrf_secret)?
+        let mut execution =
+            state
+                .plan
+                .execute_request(request, &state.cookie_secret, &state.csrf_secret)?;
+        execution.response_cookies = native_response_cookies;
+        execution
     };
 
-    execution_response(&state.plan, &state.wasm_host, execution)
+    let mut storefront_mutation_cookies = Vec::new();
+    apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)?;
+    execution
+        .response_cookies
+        .extend(storefront_mutation_cookies);
+    let augmentation = storefront_response_augmentation(state, &execution)?;
+    let response = execution_response(&state.plan, &state.wasm_host, execution)?;
+    apply_storefront_response_augmentation(response, augmentation).await
 }
 
 fn execution_response(
@@ -180,6 +218,11 @@ fn execution_response(
 
 pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
     match error {
+        RuntimeServerError::Storefront(
+            StorefrontStateError::UnknownSku { .. }
+            | StorefrontStateError::InvalidQuantity
+            | StorefrontStateError::EmptyCart { .. },
+        ) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
         RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
             (StatusCode::NOT_FOUND, "not found").into_response()
         }
@@ -317,6 +360,364 @@ fn parse_request_fields(bytes: &[u8]) -> RequestFieldMap {
         push_request_field(&mut fields, name.into_owned(), value.into_owned());
     }
     fields
+}
+
+fn prepare_native_storefront_request(
+    state: &RuntimeServerState,
+    request: &mut RequestInput,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<(), RuntimeServerError> {
+    let Some(matched) = state.plan.http.resolve_match(
+        &state.plan.config,
+        request.method,
+        &request.host,
+        &request.path,
+    ) else {
+        return Ok(());
+    };
+
+    let route_name = matched.resolved.route_name.as_str();
+    let is_storefront_page = request.method == HttpMethod::Get
+        && matched.route.module.as_deref() == Some("commerce")
+        && matched.route.area != RouteArea::Admin
+        && matched.route.area != RouteArea::Api
+        && matched.route.area != RouteArea::Fragment;
+    let is_native_capability_route = STOREFRONT_NATIVE_CAPABILITY_ROUTES.contains(&route_name);
+    let is_native_mutation_route = matches!(
+        route_name,
+        "commerce.add-to-cart"
+            | "commerce.cart-update"
+            | "commerce.checkout-start"
+            | "commerce.checkout-complete"
+    );
+    if !is_storefront_page && !is_native_mutation_route {
+        return Ok(());
+    }
+
+    ensure_storefront_session(state, request, now, response_cookies)?;
+    if is_native_capability_route {
+        request
+            .granted_capabilities
+            .insert(davenda_auth::Capability::CheckoutSessionCreate);
+    }
+    Ok(())
+}
+
+fn ensure_storefront_session(
+    state: &RuntimeServerState,
+    request: &mut RequestInput,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<String, RuntimeServerError> {
+    if let Some(session_id) = request.session_id.clone() {
+        return Ok(session_id);
+    }
+
+    let issued = {
+        let mut browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        browser
+            .issue_session(SessionIssueRequest::new(), &state.cookie_secret, now)
+            .map_err(RequestExecutionError::from_browser_error)?
+    };
+    request.session_id = Some(issued.record.session_id.clone());
+    response_cookies.push(issued.set_cookie_header);
+    Ok(issued.record.session_id)
+}
+
+fn push_storefront_flash(
+    state: &RuntimeServerState,
+    response_cookies: &mut Vec<String>,
+    level: FlashLevel,
+    text: impl Into<String>,
+) -> Result<(), RuntimeServerError> {
+    let message =
+        FlashMessage::new(level, text.into()).map_err(RequestExecutionError::from_browser_error)?;
+    let cookie = {
+        let browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        browser
+            .issue_flash_cookie(&state.cookie_secret, &[message])
+            .map_err(RequestExecutionError::from_browser_error)?
+    };
+    response_cookies.push(cookie);
+    Ok(())
+}
+
+fn parse_quantity_field(value: Option<&str>) -> Option<u32> {
+    value.and_then(|raw| raw.trim().parse::<u32>().ok())
+}
+
+fn apply_native_storefront_mutations(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<(), RuntimeServerError> {
+    let Some(session_id) = execution.session.session_id.as_deref() else {
+        return Ok(());
+    };
+    match execution.route.route_name.as_str() {
+        "commerce.add-to-cart" => {
+            let quantity =
+                parse_quantity_field(execution_form_field(execution, "quantity")).unwrap_or(1);
+            let sku = storefront_sku_from_execution(execution)?;
+            let snapshot = state.storefront.add_to_cart(
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                sku.as_ref(),
+                quantity,
+                now.as_unix_seconds(),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                format!("Added {} to the cart ({})", sku, snapshot.cart.item_count),
+            )?;
+        }
+        "commerce.cart-update" => {
+            let quantities = cart_quantities_from_execution(execution);
+            let mut snapshot = state
+                .storefront
+                .snapshot(session_id, execution.principal.principal_id.as_deref())?;
+            for (sku, quantity) in quantities {
+                snapshot = state.storefront.update_cart(
+                    session_id,
+                    execution.principal.principal_id.as_deref(),
+                    &sku,
+                    quantity,
+                    now.as_unix_seconds(),
+                )?;
+            }
+            let message = if snapshot.cart.lines.is_empty() {
+                "Your cart is now empty.".to_string()
+            } else {
+                format!("Updated cart with {} line(s).", snapshot.cart.item_count)
+            };
+            push_storefront_flash(state, response_cookies, FlashLevel::Info, message)?;
+        }
+        "commerce.checkout-start" => {
+            let _ = state.storefront.checkout_start(
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                now.as_unix_seconds(),
+            )?;
+        }
+        "commerce.checkout-complete" => {
+            let snapshot = state.storefront.checkout_complete(
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                now.as_unix_seconds(),
+            )?;
+            let message = snapshot
+                .latest_order
+                .as_ref()
+                .map(|order| format!("Order {} is confirmed.", order.order_id))
+                .unwrap_or_else(|| {
+                    "Checkout could not complete because the cart is empty.".to_string()
+                });
+            push_storefront_flash(state, response_cookies, FlashLevel::Success, message)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn execution_form_field<'a>(execution: &'a RequestExecution, name: &str) -> Option<&'a str> {
+    execution
+        .form_fields
+        .get(name)
+        .and_then(|values| values.first().map(String::as_str))
+}
+
+fn storefront_sku_from_execution(
+    execution: &RequestExecution,
+) -> Result<Cow<'_, str>, RuntimeServerError> {
+    execution_form_field(execution, "sku")
+        .or_else(|| execution_form_field(execution, "product_slug"))
+        .or_else(|| execution_form_field(execution, "line_id"))
+        .map(Cow::Borrowed)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownSku {
+                sku: "<missing>".to_string(),
+            })
+        })
+}
+
+fn cart_quantities_from_execution(execution: &RequestExecution) -> BTreeMap<String, u32> {
+    let mut quantities = BTreeMap::new();
+    if let Ok(sku) = storefront_sku_from_execution(execution) {
+        quantities.insert(
+            sku.into_owned(),
+            parse_quantity_field(execution_form_field(execution, "quantity")).unwrap_or(1),
+        );
+    }
+    for (name, values) in &execution.form_fields {
+        let Some(product_slug) = name.strip_prefix("quantity_") else {
+            continue;
+        };
+        let Some(quantity) = values
+            .first()
+            .and_then(|value| parse_quantity_field(Some(value.as_str())))
+        else {
+            continue;
+        };
+        quantities.insert(product_slug.to_string(), quantity);
+    }
+    quantities
+}
+
+fn storefront_response_augmentation(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<Option<StorefrontResponseAugmentation>, RuntimeServerError> {
+    if !should_render_storefront_state(execution) {
+        return Ok(None);
+    }
+    let Some(session_id) = execution.session.session_id.as_deref() else {
+        return Ok(None);
+    };
+    let snapshot = state
+        .storefront
+        .snapshot(session_id, execution.principal.principal_id.as_deref())?;
+    let tokens = issue_storefront_csrf_tokens(state, session_id)?;
+    Ok(Some(state.storefront.build_response_augmentation(
+        execution.route.route_name.as_str(),
+        &snapshot,
+        tokens,
+    )?))
+}
+
+fn should_render_storefront_state(execution: &RequestExecution) -> bool {
+    matches!(execution.response, HandlerResponse::Page(_))
+        && (execution.route.route_name.starts_with("commerce.")
+            || execution.route_area == RouteArea::Account)
+}
+
+fn issue_storefront_csrf_tokens(
+    state: &RuntimeServerState,
+    session_id: &str,
+) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+    let browser = state
+        .browser
+        .lock()
+        .expect("runtime browser mutex poisoned");
+    let mut tokens = BTreeMap::new();
+    for action in STOREFRONT_CSRF_ACTIONS {
+        let token = browser
+            .issue_csrf_token(&state.csrf_secret, session_id, action)
+            .map_err(RequestExecutionError::from_browser_error)?;
+        tokens.insert((*action).to_string(), token);
+    }
+    Ok(tokens)
+}
+
+fn storefront_order_history_response(
+    state: &RuntimeServerState,
+    request: &RequestInput,
+    response_cookies: Vec<String>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let Some(session_id) = request.session_id.as_deref() else {
+        return Err(RuntimeServerError::Execution(
+            RequestExecutionError::SessionRequired {
+                route: "account.orders".to_string(),
+            },
+        ));
+    };
+    let history =
+        state
+            .storefront
+            .order_history(session_id, request.principal_id.as_deref(), 50)?;
+    let body = serde_json::to_string(&history).map_err(|error| {
+        RuntimeServerError::Storefront(StorefrontStateError::Serialization {
+            reason: error.to_string(),
+        })
+    })?;
+    let mut response = Response::new(Body::from(body));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("application/json"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-davenda-storefront-order-count"),
+        HeaderValue::from_str(&history.orders.len().to_string())
+            .expect("order count is a valid header value"),
+    );
+    if let Some(order) = history.orders.first() {
+        response.headers_mut().insert(
+            HeaderName::from_static("x-davenda-storefront-latest-order"),
+            HeaderValue::from_str(order.order_id.as_str())
+                .expect("order id is a valid header value"),
+        );
+    }
+    for cookie in response_cookies {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response
+                .headers_mut()
+                .append(HeaderName::from_static("set-cookie"), value);
+        }
+    }
+    Ok(response)
+}
+
+async fn apply_storefront_response_augmentation(
+    mut response: Response<Body>,
+    augmentation: Option<StorefrontResponseAugmentation>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let Some(augmentation) = augmentation else {
+        return Ok(response);
+    };
+    for (name, value) in augmentation.headers {
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(&value),
+        ) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+    let Some(markup) = augmentation.html_fragment else {
+        return Ok(response);
+    };
+    let is_html = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/html"));
+    if !is_html {
+        return Ok(response);
+    }
+    let (parts, body) = response.into_parts();
+    let bytes = to_bytes(body, usize::MAX)
+        .await
+        .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit: usize::MAX })?;
+    let html = String::from_utf8(bytes.to_vec()).map_err(|error| {
+        RuntimeServerError::Storefront(StorefrontStateError::Serialization {
+            reason: error.to_string(),
+        })
+    })?;
+    Ok(Response::from_parts(
+        parts,
+        Body::from(inject_storefront_markup(html, markup.as_str())),
+    ))
+}
+
+fn inject_storefront_markup(document_html: String, markup: &str) -> String {
+    if markup.is_empty() {
+        return document_html;
+    }
+    if let Some(index) = document_html.find("</body>") {
+        let mut html = document_html;
+        html.insert_str(index, markup);
+        return html;
+    }
+    format!("{document_html}{markup}")
 }
 
 async fn enforce_request_body_limit(

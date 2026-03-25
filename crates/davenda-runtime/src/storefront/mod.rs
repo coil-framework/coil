@@ -1,0 +1,1004 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::Serialize;
+use thiserror::Error;
+
+use super::*;
+
+const DEFAULT_CURRENCY: &str = "GBP";
+const INITIAL_ORDER_SEQUENCE: i64 = 10_042;
+
+#[derive(Debug, Error)]
+pub enum StorefrontStateError {
+    #[error("storefront state store is poisoned")]
+    Poisoned,
+    #[error("unknown storefront sku `{sku}`")]
+    UnknownSku { sku: String },
+    #[error("quantity must be greater than zero")]
+    InvalidQuantity,
+    #[error("cart for session `{session_id}` is empty")]
+    EmptyCart { session_id: String },
+    #[error("failed to serialize storefront state: {reason}")]
+    Serialization { reason: String },
+    #[error("failed to initialize storefront state store `{path}`: {reason}")]
+    Initialization { path: String, reason: String },
+    #[error("storefront state query failed: {reason}")]
+    Query { reason: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct StorefrontStateStore {
+    path: PathBuf,
+    connection: Arc<Mutex<Connection>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontCartLine {
+    pub sku: String,
+    pub title: String,
+    pub variant_title: String,
+    pub product_kind: String,
+    pub entitlement_key: Option<String>,
+    pub quantity: u32,
+    pub unit_price_minor: i64,
+    pub total_minor: i64,
+    pub currency: String,
+    pub total: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontCartSnapshot {
+    pub status: String,
+    pub currency: String,
+    pub item_count: u32,
+    pub subtotal_minor: i64,
+    pub subtotal: String,
+    pub lines: Vec<StorefrontCartLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontOrderLine {
+    pub sku: String,
+    pub title: String,
+    pub variant_title: String,
+    pub product_kind: String,
+    pub entitlement_key: Option<String>,
+    pub quantity: u32,
+    pub unit_price_minor: i64,
+    pub total_minor: i64,
+    pub currency: String,
+    pub total: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontOrderSnapshot {
+    pub order_id: String,
+    pub session_id: String,
+    pub principal_id: Option<String>,
+    pub status: String,
+    pub currency: String,
+    pub line_count: u32,
+    pub subtotal_minor: i64,
+    pub total_minor: i64,
+    pub subtotal: String,
+    pub total: String,
+    pub created_at_unix_seconds: u64,
+    pub lines: Vec<StorefrontOrderLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontStateSnapshot {
+    pub session_id: String,
+    pub principal_id: Option<String>,
+    pub cart: StorefrontCartSnapshot,
+    pub recent_orders: Vec<StorefrontOrderSnapshot>,
+    pub latest_order: Option<StorefrontOrderSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontOrderHistoryResponse {
+    pub session_id: String,
+    pub principal_id: Option<String>,
+    pub orders: Vec<StorefrontOrderSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StorefrontResponseAugmentation {
+    pub html_fragment: Option<String>,
+    pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CatalogItem {
+    sku: &'static str,
+    title: &'static str,
+    variant_title: &'static str,
+    product_kind: &'static str,
+    entitlement_key: Option<&'static str>,
+    unit_price_minor: i64,
+}
+
+impl StorefrontStateStore {
+    pub fn open_for_plan(plan: &RuntimePlan) -> Result<Self, StorefrontStateError> {
+        Self::open_with_root(
+            plan.shared_state_root().clone(),
+            plan.shared_backend_namespace(),
+        )
+    }
+
+    pub fn open_with_root(
+        root: impl Into<PathBuf>,
+        namespace: impl Into<String>,
+    ) -> Result<Self, StorefrontStateError> {
+        let root = root.into();
+        let namespace = namespace.into();
+        let path = database_path(&root, &namespace);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                StorefrontStateError::Initialization {
+                    path: parent.display().to_string(),
+                    reason: error.to_string(),
+                }
+            })?;
+        }
+
+        let connection =
+            Connection::open(&path).map_err(|error| StorefrontStateError::Initialization {
+                path: path.display().to_string(),
+                reason: error.to_string(),
+            })?;
+        connection
+            .execute_batch(
+                r#"
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = FULL;
+                CREATE TABLE IF NOT EXISTS carts (
+                    session_id TEXT PRIMARY KEY,
+                    principal_id TEXT,
+                    status TEXT NOT NULL,
+                    currency TEXT NOT NULL,
+                    updated_at_unix_seconds INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS cart_lines (
+                    session_id TEXT NOT NULL,
+                    sku TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    variant_title TEXT NOT NULL,
+                    product_kind TEXT NOT NULL,
+                    entitlement_key TEXT,
+                    quantity INTEGER NOT NULL,
+                    unit_price_minor INTEGER NOT NULL,
+                    currency TEXT NOT NULL,
+                    PRIMARY KEY (session_id, sku)
+                );
+                CREATE TABLE IF NOT EXISTS storefront_sequences (
+                    name TEXT PRIMARY KEY,
+                    next_value INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS orders (
+                    order_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    principal_id TEXT,
+                    status TEXT NOT NULL,
+                    currency TEXT NOT NULL,
+                    line_count INTEGER NOT NULL,
+                    subtotal_minor INTEGER NOT NULL,
+                    total_minor INTEGER NOT NULL,
+                    created_at_unix_seconds INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS order_lines (
+                    order_id TEXT NOT NULL,
+                    sku TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    variant_title TEXT NOT NULL,
+                    product_kind TEXT NOT NULL,
+                    entitlement_key TEXT,
+                    quantity INTEGER NOT NULL,
+                    unit_price_minor INTEGER NOT NULL,
+                    currency TEXT NOT NULL,
+                    PRIMARY KEY (order_id, sku)
+                );
+                CREATE INDEX IF NOT EXISTS orders_by_session
+                    ON orders (session_id, created_at_unix_seconds DESC);
+                CREATE INDEX IF NOT EXISTS orders_by_principal
+                    ON orders (principal_id, created_at_unix_seconds DESC);
+                INSERT INTO storefront_sequences (name, next_value)
+                VALUES ('order', 10042)
+                ON CONFLICT(name) DO NOTHING;
+                "#,
+            )
+            .map_err(|error| StorefrontStateError::Initialization {
+                path: path.display().to_string(),
+                reason: error.to_string(),
+            })?;
+
+        Ok(Self {
+            path,
+            connection: Arc::new(Mutex::new(connection)),
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        self.path.as_path()
+    }
+
+    pub fn snapshot(
+        &self,
+        session_id: &str,
+        principal_id: Option<&str>,
+    ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!("failed to start storefront snapshot: {error}"))
+        })?;
+        self.ensure_cart(&tx, session_id, principal_id, "active", 0)?;
+        let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
+        tx.commit().map_err(|error| {
+            query_error(format!("failed to commit storefront snapshot: {error}"))
+        })?;
+        Ok(snapshot)
+    }
+
+    pub fn add_to_cart(
+        &self,
+        session_id: &str,
+        principal_id: Option<&str>,
+        sku: &str,
+        quantity: u32,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
+        if quantity == 0 {
+            return Err(StorefrontStateError::InvalidQuantity);
+        }
+
+        let item = catalog_item(sku)?;
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!("failed to start add-to-cart transaction: {error}"))
+        })?;
+        self.ensure_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        tx.execute(
+            r#"
+            INSERT INTO cart_lines (
+                session_id, sku, title, variant_title, product_kind, entitlement_key,
+                quantity, unit_price_minor, currency
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(session_id, sku) DO UPDATE SET
+                quantity = cart_lines.quantity + excluded.quantity,
+                title = excluded.title,
+                variant_title = excluded.variant_title,
+                product_kind = excluded.product_kind,
+                entitlement_key = excluded.entitlement_key,
+                unit_price_minor = excluded.unit_price_minor,
+                currency = excluded.currency
+            "#,
+            params![
+                session_id,
+                item.sku,
+                item.title,
+                item.variant_title,
+                item.product_kind,
+                item.entitlement_key,
+                i64::from(quantity),
+                item.unit_price_minor,
+                DEFAULT_CURRENCY,
+            ],
+        )
+        .map_err(|error| query_error(format!("failed to add storefront cart line: {error}")))?;
+        self.touch_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
+        tx.commit().map_err(|error| {
+            query_error(format!("failed to commit add-to-cart transaction: {error}"))
+        })?;
+        Ok(snapshot)
+    }
+
+    pub fn update_cart(
+        &self,
+        session_id: &str,
+        principal_id: Option<&str>,
+        sku: &str,
+        quantity: u32,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!("failed to start cart update transaction: {error}"))
+        })?;
+        self.ensure_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        if quantity == 0 {
+            tx.execute(
+                "DELETE FROM cart_lines WHERE session_id = ?1 AND sku = ?2",
+                params![session_id, sku],
+            )
+            .map_err(|error| {
+                query_error(format!("failed to remove storefront cart line: {error}"))
+            })?;
+        } else {
+            let item = catalog_item(sku)?;
+            tx.execute(
+                r#"
+                INSERT INTO cart_lines (
+                    session_id, sku, title, variant_title, product_kind, entitlement_key,
+                    quantity, unit_price_minor, currency
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                ON CONFLICT(session_id, sku) DO UPDATE SET
+                    quantity = excluded.quantity,
+                    title = excluded.title,
+                    variant_title = excluded.variant_title,
+                    product_kind = excluded.product_kind,
+                    entitlement_key = excluded.entitlement_key,
+                    unit_price_minor = excluded.unit_price_minor,
+                    currency = excluded.currency
+                "#,
+                params![
+                    session_id,
+                    item.sku,
+                    item.title,
+                    item.variant_title,
+                    item.product_kind,
+                    item.entitlement_key,
+                    i64::from(quantity),
+                    item.unit_price_minor,
+                    DEFAULT_CURRENCY,
+                ],
+            )
+            .map_err(|error| {
+                query_error(format!("failed to update storefront cart line: {error}"))
+            })?;
+        }
+        self.touch_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
+        tx.commit().map_err(|error| {
+            query_error(format!("failed to commit cart update transaction: {error}"))
+        })?;
+        Ok(snapshot)
+    }
+
+    pub fn checkout_start(
+        &self,
+        session_id: &str,
+        principal_id: Option<&str>,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start checkout-start transaction: {error}"
+            ))
+        })?;
+        self.ensure_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        if self.cart_line_count(&tx, session_id)? == 0 {
+            return Err(StorefrontStateError::EmptyCart {
+                session_id: session_id.to_string(),
+            });
+        }
+        self.touch_cart(&tx, session_id, principal_id, "checkout", now_unix_seconds)?;
+        let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit checkout-start transaction: {error}"
+            ))
+        })?;
+        Ok(snapshot)
+    }
+
+    pub fn checkout_complete(
+        &self,
+        session_id: &str,
+        principal_id: Option<&str>,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start checkout-complete transaction: {error}"
+            ))
+        })?;
+        self.ensure_cart(&tx, session_id, principal_id, "checkout", now_unix_seconds)?;
+        let lines = self.load_cart_lines(&tx, session_id)?;
+        if lines.is_empty() {
+            return Err(StorefrontStateError::EmptyCart {
+                session_id: session_id.to_string(),
+            });
+        }
+
+        let subtotal_minor = lines.iter().map(|line| line.total_minor).sum::<i64>();
+        let line_count = lines.iter().map(|line| line.quantity).sum::<u32>();
+        let order_id = next_order_id(&tx)?;
+        tx.execute(
+            r#"
+            INSERT INTO orders (
+                order_id, session_id, principal_id, status, currency,
+                line_count, subtotal_minor, total_minor, created_at_unix_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+            params![
+                order_id,
+                session_id,
+                principal_id,
+                "paid",
+                DEFAULT_CURRENCY,
+                i64::from(line_count),
+                subtotal_minor,
+                subtotal_minor,
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| query_error(format!("failed to create storefront order: {error}")))?;
+        for line in &lines {
+            tx.execute(
+                r#"
+                INSERT INTO order_lines (
+                    order_id, sku, title, variant_title, product_kind,
+                    entitlement_key, quantity, unit_price_minor, currency
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "#,
+                params![
+                    order_id,
+                    line.sku,
+                    line.title,
+                    line.variant_title,
+                    line.product_kind,
+                    line.entitlement_key,
+                    i64::from(line.quantity),
+                    line.unit_price_minor,
+                    line.currency,
+                ],
+            )
+            .map_err(|error| {
+                query_error(format!("failed to persist storefront order line: {error}"))
+            })?;
+        }
+        tx.execute(
+            "DELETE FROM cart_lines WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| query_error(format!("failed to clear storefront cart lines: {error}")))?;
+        self.touch_cart(&tx, session_id, principal_id, "completed", now_unix_seconds)?;
+        let snapshot = self.load_snapshot(&tx, session_id, principal_id, 50)?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit checkout-complete transaction: {error}"
+            ))
+        })?;
+        Ok(snapshot)
+    }
+
+    pub fn order_history(
+        &self,
+        session_id: &str,
+        principal_id: Option<&str>,
+        limit: usize,
+    ) -> Result<StorefrontOrderHistoryResponse, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront order-history transaction: {error}"
+            ))
+        })?;
+        self.ensure_cart(&tx, session_id, principal_id, "active", 0)?;
+        let orders = self.load_orders(&tx, session_id, principal_id, limit)?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront order-history transaction: {error}"
+            ))
+        })?;
+        Ok(StorefrontOrderHistoryResponse {
+            session_id: session_id.to_string(),
+            principal_id: principal_id.map(ToOwned::to_owned),
+            orders,
+        })
+    }
+
+    pub fn build_response_augmentation(
+        &self,
+        route_name: &str,
+        snapshot: &StorefrontStateSnapshot,
+        csrf_tokens: BTreeMap<String, String>,
+    ) -> Result<StorefrontResponseAugmentation, StorefrontStateError> {
+        let payload = serde_json::to_string(&serde_json::json!({
+            "route": route_name,
+            "sessionId": snapshot.session_id,
+            "principalId": snapshot.principal_id,
+            "cart": snapshot.cart,
+            "recentOrders": snapshot.recent_orders,
+            "latestOrder": snapshot.latest_order,
+            "csrf": csrf_tokens,
+        }))
+        .map_err(|error| StorefrontStateError::Serialization {
+            reason: error.to_string(),
+        })?;
+        let escaped = payload.replace("</script", "<\\/script");
+        let html_fragment = Some(format!(
+            r#"<script id="davenda-storefront-state" type="application/json">{escaped}</script>"#
+        ));
+        let mut headers = BTreeMap::new();
+        headers.insert(
+            "x-davenda-storefront-cart-items".to_string(),
+            snapshot.cart.item_count.to_string(),
+        );
+        headers.insert(
+            "x-davenda-storefront-cart-subtotal-minor".to_string(),
+            snapshot.cart.subtotal_minor.to_string(),
+        );
+        headers.insert(
+            "x-davenda-storefront-cart-status".to_string(),
+            snapshot.cart.status.clone(),
+        );
+        headers.insert(
+            "x-davenda-storefront-order-count".to_string(),
+            snapshot.recent_orders.len().to_string(),
+        );
+        if let Some(order) = &snapshot.latest_order {
+            headers.insert(
+                "x-davenda-storefront-latest-order".to_string(),
+                order.order_id.clone(),
+            );
+            headers.insert(
+                "x-davenda-storefront-latest-order-status".to_string(),
+                order.status.clone(),
+            );
+        }
+        for (action, token) in csrf_tokens {
+            headers.insert(
+                format!("x-davenda-storefront-csrf-{}", action.replace('.', "-")),
+                token,
+            );
+        }
+        Ok(StorefrontResponseAugmentation {
+            html_fragment,
+            headers,
+        })
+    }
+
+    fn lock_connection(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Connection>, StorefrontStateError> {
+        self.connection
+            .lock()
+            .map_err(|_| StorefrontStateError::Poisoned)
+    }
+
+    fn ensure_cart(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+        principal_id: Option<&str>,
+        status: &str,
+        now_unix_seconds: u64,
+    ) -> Result<(), StorefrontStateError> {
+        tx.execute(
+            r#"
+            INSERT INTO carts (session_id, principal_id, status, currency, updated_at_unix_seconds)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(session_id) DO UPDATE SET
+                principal_id = COALESCE(excluded.principal_id, carts.principal_id),
+                status = CASE
+                    WHEN carts.status = 'completed' AND excluded.status = 'active' THEN carts.status
+                    ELSE excluded.status
+                END,
+                currency = excluded.currency,
+                updated_at_unix_seconds = MAX(carts.updated_at_unix_seconds, excluded.updated_at_unix_seconds)
+            "#,
+            params![
+                session_id,
+                principal_id,
+                status,
+                DEFAULT_CURRENCY,
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| query_error(format!("failed to ensure storefront cart: {error}")))?;
+        Ok(())
+    }
+
+    fn touch_cart(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+        principal_id: Option<&str>,
+        status: &str,
+        now_unix_seconds: u64,
+    ) -> Result<(), StorefrontStateError> {
+        tx.execute(
+            r#"
+            UPDATE carts
+            SET principal_id = COALESCE(?2, principal_id),
+                status = ?3,
+                updated_at_unix_seconds = ?4
+            WHERE session_id = ?1
+            "#,
+            params![
+                session_id,
+                principal_id,
+                status,
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| query_error(format!("failed to update storefront cart: {error}")))?;
+        Ok(())
+    }
+
+    fn cart_line_count(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+    ) -> Result<usize, StorefrontStateError> {
+        let count: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM cart_lines WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                query_error(format!("failed to count storefront cart lines: {error}"))
+            })?;
+        usize::try_from(count).map_err(|_| query_error("storefront cart count overflowed".into()))
+    }
+
+    fn load_snapshot(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+        principal_id: Option<&str>,
+        order_limit: usize,
+    ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
+        let cart = self.load_cart(tx, session_id)?;
+        let recent_orders = self.load_orders(tx, session_id, principal_id, order_limit)?;
+        let latest_order = recent_orders.first().cloned();
+        let principal = tx
+            .query_row(
+                "SELECT principal_id FROM carts WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| query_error(format!("failed to load storefront principal: {error}")))?
+            .flatten()
+            .or_else(|| principal_id.map(ToOwned::to_owned));
+        Ok(StorefrontStateSnapshot {
+            session_id: session_id.to_string(),
+            principal_id: principal,
+            cart,
+            recent_orders,
+            latest_order,
+        })
+    }
+
+    fn load_cart(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+    ) -> Result<StorefrontCartSnapshot, StorefrontStateError> {
+        let status = tx
+            .query_row(
+                "SELECT status FROM carts WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| {
+                query_error(format!("failed to load storefront cart status: {error}"))
+            })?
+            .unwrap_or_else(|| "active".to_string());
+        let lines = self.load_cart_lines(tx, session_id)?;
+        let item_count = lines.iter().map(|line| line.quantity).sum::<u32>();
+        let subtotal_minor = lines.iter().map(|line| line.total_minor).sum::<i64>();
+        Ok(StorefrontCartSnapshot {
+            status,
+            currency: DEFAULT_CURRENCY.to_string(),
+            item_count,
+            subtotal_minor,
+            subtotal: format_minor_currency(subtotal_minor),
+            lines,
+        })
+    }
+
+    fn load_cart_lines(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+    ) -> Result<Vec<StorefrontCartLine>, StorefrontStateError> {
+        let mut statement = tx
+            .prepare(
+                r#"
+                SELECT
+                    sku, title, variant_title, product_kind, entitlement_key,
+                    quantity, unit_price_minor, currency
+                FROM cart_lines
+                WHERE session_id = ?1
+                ORDER BY sku ASC
+                "#,
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to prepare storefront cart line query: {error}"
+                ))
+            })?;
+        statement
+            .query_map(params![session_id], |row| {
+                let quantity_i64: i64 = row.get(5)?;
+                let quantity = u32::try_from(quantity_i64)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, quantity_i64))?;
+                let unit_price_minor: i64 = row.get(6)?;
+                let total_minor = unit_price_minor.saturating_mul(i64::from(quantity));
+                Ok(StorefrontCartLine {
+                    sku: row.get(0)?,
+                    title: row.get(1)?,
+                    variant_title: row.get(2)?,
+                    product_kind: row.get(3)?,
+                    entitlement_key: row.get(4)?,
+                    quantity,
+                    unit_price_minor,
+                    total_minor,
+                    currency: row.get(7)?,
+                    total: format_minor_currency(total_minor),
+                })
+            })
+            .map_err(|error| {
+                query_error(format!("failed to query storefront cart lines: {error}"))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                query_error(format!("failed to collect storefront cart lines: {error}"))
+            })
+    }
+
+    fn load_orders(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+        principal_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<StorefrontOrderSnapshot>, StorefrontStateError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut statement = if principal_id.is_some() {
+            tx.prepare(
+                r#"
+                SELECT
+                    order_id, session_id, principal_id, status, currency,
+                    line_count, subtotal_minor, total_minor, created_at_unix_seconds
+                FROM orders
+                WHERE session_id = ?1 OR principal_id = ?2
+                ORDER BY created_at_unix_seconds DESC, order_id DESC
+                LIMIT ?3
+                "#,
+            )
+        } else {
+            tx.prepare(
+                r#"
+                SELECT
+                    order_id, session_id, principal_id, status, currency,
+                    line_count, subtotal_minor, total_minor, created_at_unix_seconds
+                FROM orders
+                WHERE session_id = ?1
+                ORDER BY created_at_unix_seconds DESC, order_id DESC
+                LIMIT ?2
+                "#,
+            )
+        }
+        .map_err(|error| {
+            query_error(format!("failed to prepare storefront order query: {error}"))
+        })?;
+
+        let order_headers = if let Some(principal_id) = principal_id {
+            let rows = statement
+                .query_map(
+                    params![session_id, principal_id, saturating_i64(limit as u64)],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, i64>(7)?,
+                            row.get::<_, i64>(8)?,
+                        ))
+                    },
+                )
+                .map_err(|error| {
+                    query_error(format!("failed to query storefront orders: {error}"))
+                })?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                query_error(format!("failed to collect storefront orders: {error}"))
+            })?
+        } else {
+            let rows = statement
+                .query_map(params![session_id, saturating_i64(limit as u64)], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                    ))
+                })
+                .map_err(|error| {
+                    query_error(format!("failed to query storefront orders: {error}"))
+                })?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                query_error(format!("failed to collect storefront orders: {error}"))
+            })?
+        };
+
+        let mut orders = Vec::with_capacity(order_headers.len());
+        for (
+            order_id,
+            order_session_id,
+            order_principal_id,
+            status,
+            currency,
+            line_count_i64,
+            subtotal_minor,
+            total_minor,
+            created_i64,
+        ) in order_headers
+        {
+            let lines = self
+                .load_order_lines(tx, order_id.as_str())
+                .map_err(|error| {
+                    query_error(format!("failed to load storefront order lines: {error}"))
+                })?;
+            orders.push(StorefrontOrderSnapshot {
+                order_id,
+                session_id: order_session_id,
+                principal_id: order_principal_id,
+                status,
+                currency,
+                line_count: u32::try_from(line_count_i64)
+                    .map_err(|_| query_error("storefront order line count overflowed".into()))?,
+                subtotal_minor,
+                total_minor,
+                subtotal: format_minor_currency(subtotal_minor),
+                total: format_minor_currency(total_minor),
+                created_at_unix_seconds: u64::try_from(created_i64)
+                    .map_err(|_| query_error("storefront order timestamp overflowed".into()))?,
+                lines,
+            });
+        }
+        Ok(orders)
+    }
+
+    fn load_order_lines(
+        &self,
+        tx: &Transaction<'_>,
+        order_id: &str,
+    ) -> rusqlite::Result<Vec<StorefrontOrderLine>> {
+        let mut statement = tx.prepare(
+            r#"
+            SELECT
+                sku, title, variant_title, product_kind, entitlement_key,
+                quantity, unit_price_minor, currency
+            FROM order_lines
+            WHERE order_id = ?1
+            ORDER BY sku ASC
+            "#,
+        )?;
+        statement
+            .query_map(params![order_id], |row| {
+                let quantity_i64: i64 = row.get(5)?;
+                let quantity = u32::try_from(quantity_i64)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, quantity_i64))?;
+                let unit_price_minor: i64 = row.get(6)?;
+                let total_minor = unit_price_minor.saturating_mul(i64::from(quantity));
+                Ok(StorefrontOrderLine {
+                    sku: row.get(0)?,
+                    title: row.get(1)?,
+                    variant_title: row.get(2)?,
+                    product_kind: row.get(3)?,
+                    entitlement_key: row.get(4)?,
+                    quantity,
+                    unit_price_minor,
+                    total_minor,
+                    currency: row.get(7)?,
+                    total: format_minor_currency(total_minor),
+                })
+            })?
+            .collect()
+    }
+}
+
+fn next_order_id(tx: &Transaction<'_>) -> Result<String, StorefrontStateError> {
+    let next_value: i64 = tx
+        .query_row(
+            "SELECT next_value FROM storefront_sequences WHERE name = 'order'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| query_error(format!("failed to load storefront order sequence: {error}")))?
+        .unwrap_or(INITIAL_ORDER_SEQUENCE);
+    tx.execute(
+        r#"
+        INSERT INTO storefront_sequences (name, next_value)
+        VALUES ('order', ?1)
+        ON CONFLICT(name) DO UPDATE SET next_value = excluded.next_value
+        "#,
+        params![next_value.saturating_add(1)],
+    )
+    .map_err(|error| {
+        query_error(format!(
+            "failed to advance storefront order sequence: {error}"
+        ))
+    })?;
+    Ok(format!("ORD-{next_value:05}"))
+}
+
+fn query_error(reason: String) -> StorefrontStateError {
+    StorefrontStateError::Query { reason }
+}
+
+fn database_path(root: &Path, namespace: &str) -> PathBuf {
+    root.join("storefront")
+        .join(format!("{}.sqlite3", sanitize_namespace(namespace)))
+}
+
+fn sanitize_namespace(namespace: &str) -> String {
+    namespace
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn catalog_item(sku: &str) -> Result<CatalogItem, StorefrontStateError> {
+    match sku {
+        "harbor-cap" => Ok(CatalogItem {
+            sku: "harbor-cap",
+            title: "Harbor Cap",
+            variant_title: "Standard",
+            product_kind: "physical",
+            entitlement_key: None,
+            unit_price_minor: 2_900,
+        }),
+        "membership-gold" | "gold-membership" => Ok(CatalogItem {
+            sku: "membership-gold",
+            title: "Gold Membership",
+            variant_title: "Annual",
+            product_kind: "membership",
+            entitlement_key: Some("membership.gold"),
+            unit_price_minor: 8_900,
+        }),
+        "harbor-tote" => Ok(CatalogItem {
+            sku: "harbor-tote",
+            title: "Harbor Tote",
+            variant_title: "Standard",
+            product_kind: "physical",
+            entitlement_key: None,
+            unit_price_minor: 4_500,
+        }),
+        _ => Err(StorefrontStateError::UnknownSku {
+            sku: sku.to_string(),
+        }),
+    }
+}
+
+fn saturating_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn format_minor_currency(value: i64) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let absolute = value.saturating_abs();
+    let major = absolute / 100;
+    let minor = absolute % 100;
+    format!("{sign}£{major}.{minor:02}")
+}

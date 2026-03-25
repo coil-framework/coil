@@ -166,14 +166,7 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
         } => {
             // Auth explain is deployment-configured and always goes through the live backend.
             let backend = LiveAuthExplainBackend::from_config_path(&invocation.config_path)?;
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to start the CLI async runtime: {error}"
-                    ))
-                })?;
+            let runtime = build_live_auth_runtime("auth explain")?;
             let explanation = runtime.block_on(async { backend.explain(&invocation).await })?;
             let result = AuthExplainResult {
                 invocation,
@@ -628,12 +621,12 @@ fn build_live_auth_backend(
     ),
     CliRunError,
 > {
-    let runtime = build_cli_async_runtime()?;
+    let runtime = build_live_auth_runtime(operation)?;
     let _runtime_guard = runtime.enter();
     let config = PlatformConfig::from_file(config_path).map_err(|error| {
         CliRunError::execution(format!(
-            "failed to load platform config from `{}`: {error}",
-            config_path.display()
+            "failed to initialize the live {operation} backend: failed to load platform config from `{}`: {error}",
+            config_path.display(),
         ))
     })?;
     let data = DataRuntime::from_config(&config.database).map_err(|error| {
@@ -650,6 +643,14 @@ fn build_live_auth_backend(
     let auth = DavendaAuth::new(engine, config.auth.tenant_id);
 
     Ok((config, auth, runtime))
+}
+
+fn build_live_auth_runtime(operation: &str) -> Result<tokio::runtime::Runtime, CliRunError> {
+    build_cli_async_runtime().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to initialize the live {operation} backend: {error}"
+        ))
+    })
 }
 
 fn build_cli_async_runtime() -> Result<tokio::runtime::Runtime, CliRunError> {
@@ -710,9 +711,20 @@ fn load_configured_auth_package(
     load_auth_package_from_app_root(&app_root, &config.auth.package)
 }
 
+fn load_live_auth_package(
+    config_path: &Path,
+    operation: &str,
+) -> Result<davenda_auth::LoadedAuthModelPackage, CliRunError> {
+    load_configured_auth_package(config_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to initialize the live {operation} backend: {error}"
+        ))
+    })
+}
+
 fn run_auth_check(invocation: &AuthCheckInvocation) -> Result<CommandReport, CliRunError> {
     let (_config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth check")?;
-    let package = load_configured_auth_package(&invocation.config_path)?;
+    let package = load_live_auth_package(&invocation.config_path, "auth check")?;
     let binding = package
         .resolve_binding(invocation.capability, &invocation.resource)
         .map_err(|error| {
@@ -860,7 +872,7 @@ fn run_auth_test_model(invocation: &AuthTestModelInvocation) -> Result<CommandRe
     let document = load_auth_model_test_document(&invocation.spec_path)?;
     let (_config, auth, runtime) =
         build_live_auth_backend(&invocation.config_path, "auth test-model")?;
-    let package = load_configured_auth_package(&invocation.config_path)?;
+    let package = load_live_auth_package(&invocation.config_path, "auth test-model")?;
     let mut report = CommandReport::new(
         ["auth", "test-model"],
         format!(
@@ -947,7 +959,7 @@ fn run_auth_test_model(invocation: &AuthTestModelInvocation) -> Result<CommandRe
 
 fn run_auth_list(invocation: &AuthListInvocation) -> Result<CommandReport, CliRunError> {
     let (_config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth list")?;
-    let package = load_configured_auth_package(&invocation.config_path)?;
+    let package = load_live_auth_package(&invocation.config_path, "auth list")?;
     let mut object_ids = runtime
         .block_on(async {
             auth.list_objects(
@@ -1010,7 +1022,7 @@ fn run_auth_list(invocation: &AuthListInvocation) -> Result<CommandReport, CliRu
 
 fn run_auth_lookup(invocation: &AuthLookupInvocation) -> Result<CommandReport, CliRunError> {
     let (_config, auth, runtime) = build_live_auth_backend(&invocation.config_path, "auth lookup")?;
-    let package = load_configured_auth_package(&invocation.config_path)?;
+    let package = load_live_auth_package(&invocation.config_path, "auth lookup")?;
     let mut subject_ids = runtime
         .block_on(async {
             auth.list_subject_ids(
@@ -12780,6 +12792,37 @@ source_path = "fixtures/media.json"
     }
 
     #[test]
+    fn run_from_args_reports_live_auth_check_config_load_failures_as_backend_initialization_failures()
+    {
+        let config_path = PathBuf::from("/tmp/davenda-cli-missing-auth-check.toml");
+
+        let error = run_from_args([
+            "auth".to_string(),
+            "check".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--subject".to_string(),
+            "user:alice".to_string(),
+            "--capability".to_string(),
+            "cms.page.read".to_string(),
+            "--resource".to_string(),
+            "page:homepage".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 1);
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("failed to initialize the live auth check backend"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("failed to load platform config"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
     fn run_from_args_reports_live_auth_list_backend_initialization_failures() {
         let config_path = PathBuf::from("/tmp/davenda-cli-auth-list.toml");
         fs::write(&config_path, DISABLED_EXPLAIN_CONFIG).unwrap();
@@ -12965,6 +13008,37 @@ expect = true
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 1);
+    }
+
+    #[test]
+    fn run_from_args_reports_live_auth_explain_config_load_failures_as_backend_initialization_failures()
+    {
+        let config_path = PathBuf::from("/tmp/davenda-cli-missing-auth-explain.toml");
+
+        let error = run_from_args([
+            "auth".to_string(),
+            "explain".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--subject".to_string(),
+            "user:alice".to_string(),
+            "--capability".to_string(),
+            "cms.page.read".to_string(),
+            "--resource".to_string(),
+            "page:homepage".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 1);
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("failed to initialize the live auth explain backend"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("failed to load platform config"),
+            "{rendered}"
+        );
     }
 
     #[test]

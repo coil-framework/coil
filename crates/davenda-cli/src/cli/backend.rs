@@ -28,11 +28,16 @@ impl LiveAuthExplainBackend {
     pub(crate) fn from_config_path(config_path: &Path) -> Result<Self, CliRunError> {
         let config = PlatformConfig::from_file(config_path).map_err(|error| {
             CliRunError::execution(format!(
-                "failed to load platform config from `{}`: {error}",
-                config_path.display()
+                "failed to initialize the live auth explain backend: failed to load platform config from `{}`: {error}",
+                config_path.display(),
             ))
         })?;
-        let package = resolve_deployment_configured_auth_package_selection(config_path, &config)?;
+        let package = resolve_deployment_configured_auth_package_selection(config_path, &config)
+            .map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to initialize the live auth explain backend: {error}"
+                ))
+            })?;
         let explainer = LiveAuthExplainHost::from_config(&config, package).map_err(|error| {
             CliRunError::execution(format!(
                 "failed to initialize the live auth explain backend: {error}"

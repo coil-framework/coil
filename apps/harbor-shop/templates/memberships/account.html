@@ -19,14 +19,17 @@
     <main class="site-main memberships-page">
       <section class="memberships-page__intro">
         <p class="memberships-page__eyebrow">Account access</p>
-        <h1>Memberships, renewals, and entitlement visibility in one place.</h1>
-        <p>
+        <h1 dv:text="${customer.displayName}">Memberships, renewals, and entitlement visibility in one place.</h1>
+        <p dv:text="${account.stateSummary}">
           This page gives customers a direct answer to what they have, when it renews, and what
           support or priority access comes with it.
         </p>
+        <p dv:if="${account.hasCustomerEmail}">
+          Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
+        </p>
       </section>
 
-      <section class="memberships-page__summary" dv:if="${membershipSummary}">
+      <section class="memberships-page__summary" dv:if="${account.hasMembership}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
           <h2 dv:text="${membershipSummary.tierName}">Harbor Circle</h2>
@@ -37,11 +40,20 @@
         </article>
       </section>
 
-      <section class="memberships-page__summary" dv:unless="${membershipSummary}">
+      <section class="memberships-page__summary" dv:unless="${account.hasMembership}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
           <h2>Membership not active yet</h2>
-          <p>Join to unlock early access, subscriber-only bundles, and concierge support.</p>
+          <p dv:text="${account.membershipEmptyText}">
+            Join to unlock early access, subscriber-only bundles, and concierge support.
+          </p>
+          <a
+            class="button"
+            href="/shop/collections/memberships"
+            dv:attr="href=${account.membershipCtaUrl}"
+          >
+            Explore memberships
+          </a>
         </article>
       </section>
 

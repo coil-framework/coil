@@ -3,22 +3,30 @@
     <article class="account-panel">
       <p class="account-panel__eyebrow">Orders</p>
       <h2>Recent purchases</h2>
-      <ul class="account-panel__list" dv:if="${recentOrders}">
+      <ul class="account-panel__list" dv:if="${account.hasRecentOrders}">
         <li dv:each="order : ${recentOrders}">
           <strong dv:text="${order.reference}">HS-1048</strong>
           <span dv:text="${order.status}">Packed</span>
           <span dv:text="${order.total}">GBP 84</span>
         </li>
       </ul>
-      <p dv:unless="${recentOrders}">
+      <p dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
         Recent orders will appear here once the customer has completed checkout.
       </p>
+      <a
+        class="button button--secondary"
+        href="/shop"
+        dv:unless="${account.hasRecentOrders}"
+        dv:attr="href=${account.ordersCtaUrl}"
+      >
+        Browse storefront
+      </a>
     </article>
 
     <article class="account-panel">
       <p class="account-panel__eyebrow">Membership</p>
       <h2>Access and renewals</h2>
-      <div dv:if="${membershipSummary}">
+      <div dv:if="${account.hasMembership}">
         <p>
           <strong dv:text="${membershipSummary.tierName}">Harbor Circle</strong>
           <span dv:text="${membershipSummary.status}">Active</span>
@@ -28,15 +36,27 @@
         </p>
         <a class="button" href="/account/memberships">Manage membership</a>
       </div>
-      <p dv:unless="${membershipSummary}">
+      <p dv:unless="${account.hasMembership}" dv:text="${account.membershipEmptyText}">
         No membership is attached yet. Join to unlock early-access drops and concierge support.
       </p>
+      <a
+        class="button"
+        href="/shop/collections/memberships"
+        dv:unless="${account.hasMembership}"
+        dv:attr="href=${account.membershipCtaUrl}"
+      >
+        Explore memberships
+      </a>
     </article>
 
     <article class="account-panel">
       <p class="account-panel__eyebrow">Support</p>
       <h2>Need help with a delivery?</h2>
-      <p>
+      <p dv:if="${account.hasCustomerEmail}">
+        Start with delivery status, billing details, or address changes for
+        <strong dv:text="${customer.email}">member@example.com</strong>.
+      </p>
+      <p dv:unless="${account.hasCustomerEmail}">
         Start with delivery status, billing details, or address changes before your next dispatch.
       </p>
       <ul class="account-panel__list">

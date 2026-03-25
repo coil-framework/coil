@@ -245,22 +245,16 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
             Capability::MembershipTierEdit,
         ]
     );
-    assert!(
-        manifest
-            .optional_capabilities
-            .contains(&Capability::AdminShellAccess)
-    );
-    assert!(
-        manifest
-            .module_dependencies
-            .iter()
-            .any(|dependency| dependency.module == "commerce")
-    );
-    assert!(
-        manifest
-            .core_service_dependencies
-            .contains(&CoreServiceDependency::Jobs)
-    );
+    assert!(manifest
+        .optional_capabilities
+        .contains(&Capability::AdminShellAccess));
+    assert!(manifest
+        .module_dependencies
+        .iter()
+        .any(|dependency| dependency.module == "commerce"));
+    assert!(manifest
+        .core_service_dependencies
+        .contains(&CoreServiceDependency::Jobs));
     assert_eq!(manifest.migrations.len(), 4);
     assert_eq!(manifest.route_surfaces.len(), 4);
     assert_eq!(manifest.http_surfaces.len(), 4);
@@ -269,22 +263,18 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
     assert_eq!(manifest.admin_resources.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 1);
     assert_eq!(manifest.report_definitions.len(), 1);
-    assert!(
-        manifest
-            .route_surfaces
-            .iter()
-            .any(|surface| surface.name == "memberships.account.dashboard"
-                && surface.path == "/account"
-                && surface.capability.is_none())
-    );
-    assert!(
-        manifest
-            .route_surfaces
-            .iter()
-            .any(|surface| surface.name == "memberships.account"
-                && surface.path == "/account/memberships"
-                && surface.capability.is_none())
-    );
+    assert!(manifest
+        .route_surfaces
+        .iter()
+        .any(|surface| surface.name == "memberships.account.dashboard"
+            && surface.path == "/account"
+            && surface.capability.is_none()));
+    assert!(manifest
+        .route_surfaces
+        .iter()
+        .any(|surface| surface.name == "memberships.account"
+            && surface.path == "/account/memberships"
+            && surface.capability.is_none()));
     assert!(manifest.http_surfaces.iter().any(|surface| surface.name
         == "memberships.account.dashboard"
         && surface.area == HttpSurfaceArea::Account
@@ -295,20 +285,18 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
                 if location == "/account/memberships" && *status == 302
         )
         && surface.capability.is_none()));
-    assert!(
-        manifest
-            .http_surfaces
-            .iter()
-            .any(|surface| surface.name == "memberships.account"
-                && surface.area == HttpSurfaceArea::Account
-                && surface.path == "/account/memberships"
-                && matches!(
-                    &surface.response,
-                    HttpResponseContract::Page { template, status }
-                        if template == "memberships/account" && *status == 200
-                )
-                && surface.capability.is_none())
-    );
+    assert!(manifest
+        .http_surfaces
+        .iter()
+        .any(|surface| surface.name == "memberships.account"
+            && surface.area == HttpSurfaceArea::Account
+            && surface.path == "/account/memberships"
+            && matches!(
+                &surface.response,
+                HttpResponseContract::Page { template, status }
+                    if template == "memberships/account" && *status == 200
+            )
+            && surface.capability.is_none()));
     assert_eq!(
         module
             .install_migration_plan()
@@ -321,14 +309,41 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
     let mut registry = ServiceRegistry::new();
     module.register(&mut registry).unwrap();
 
-    assert!(
-        registry
-            .services()
-            .any(|service| service.id == "module.memberships.entitlements")
-    );
-    assert!(
-        registry
-            .services()
-            .any(|service| service.id == "module.memberships.commerce_bridge")
-    );
+    assert!(registry
+        .services()
+        .any(|service| service.id == "module.memberships.entitlements"));
+    assert!(registry
+        .services()
+        .any(|service| service.id == "module.memberships.commerce_bridge"));
+}
+
+#[test]
+fn memberships_module_exposes_private_customer_account_surfaces_without_capability_gates() {
+    let manifest = MembershipsModule::new().manifest();
+
+    let dashboard = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "memberships.account.dashboard")
+        .expect("memberships account dashboard surface");
+    assert_eq!(dashboard.area, HttpSurfaceArea::Account);
+    assert!(dashboard.capability.is_none());
+    assert!(matches!(
+        &dashboard.response,
+        HttpResponseContract::Redirect { location, status }
+            if location == "/account/memberships" && *status == 302
+    ));
+
+    let memberships = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "memberships.account")
+        .expect("memberships account detail surface");
+    assert_eq!(memberships.area, HttpSurfaceArea::Account);
+    assert!(memberships.capability.is_none());
+    assert!(matches!(
+        &memberships.response,
+        HttpResponseContract::Page { template, status }
+            if template == "memberships/account" && *status == 200
+    ));
 }

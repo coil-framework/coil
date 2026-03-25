@@ -20,9 +20,15 @@
       <section class="account-page__intro">
         <p class="account-page__eyebrow">Customer account</p>
         <h1 dv:text="${customer.displayName}">Welcome back to Harbor Shop.</h1>
-        <p>
+        <p dv:text="${account.stateSummary}">
           Use this account hub for orders, membership access, and repeat-purchase shortcuts that
           point straight back into the storefront.
+        </p>
+        <p dv:if="${account.hasCustomerEmail}">
+          Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
+        </p>
+        <p dv:unless="${account.hasCustomerEmail}">
+          This account session is active, but a customer email has not been resolved yet.
         </p>
       </section>
 

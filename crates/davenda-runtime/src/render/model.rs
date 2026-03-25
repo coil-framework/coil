@@ -1,4 +1,8 @@
 use super::*;
+use davenda_commerce::{
+    CheckoutId, CheckoutLine, CheckoutSession, CurrencyCode, EntitlementKey, Money, Order, OrderId,
+    PricingPolicy, ProductId, ProductKind, Sku,
+};
 use davenda_template::{RenderModel, RenderValue, TemplateModelError, TemplateNamespace};
 use std::collections::BTreeMap;
 
@@ -99,7 +103,13 @@ impl RuntimePlan {
             model = model.with_value("fragment_id", RenderValue::text(fragment_id.to_string()))?;
         }
 
-        apply_route_specific_bindings(model, execution.route.route_name.as_str(), &execution.route.params)
+        apply_route_specific_bindings(
+            model,
+            execution.route.route_name.as_str(),
+            &execution.route.params,
+            Some(&execution.session),
+            Some(&execution.principal),
+        )
     }
 }
 
@@ -192,7 +202,9 @@ fn page_model_for_route(
         .with_value("title", RenderValue::text(title))
         .and_then(|model| model.with_value("summary", RenderValue::text(summary)))
         .and_then(|model| model.with_value("template", RenderValue::text(template_name)))
-        .and_then(|model| model.with_value("fragment_mode", RenderValue::bool(fragment_id.is_some())))
+        .and_then(|model| {
+            model.with_value("fragment_mode", RenderValue::bool(fragment_id.is_some()))
+        })
         .expect("page model keys are valid")
 }
 
@@ -200,6 +212,8 @@ fn apply_route_specific_bindings(
     mut model: RenderModel,
     route_name: &str,
     params: &BTreeMap<String, String>,
+    session: Option<&SessionContext>,
+    principal: Option<&PrincipalContext>,
 ) -> Result<RenderModel, TemplateModelError> {
     let fixture = storefront_fixture()?;
 
@@ -240,10 +254,12 @@ fn apply_route_specific_bindings(
             model = model.with_object("confirmation", fixture.confirmation.clone())?;
         }
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
+            let account = account_surface_bindings(&fixture, session, principal)?;
             model = model
-                .with_object("customer", fixture.customer.clone())?
-                .with_list("recentOrders", fixture.recent_orders.clone())?
-                .with_object("membershipSummary", fixture.membership_summary.clone())?;
+                .with_object("account", account.account)?
+                .with_object("customer", account.customer)?
+                .with_list("recentOrders", account.recent_orders)?
+                .with_object("membershipSummary", account.membership_summary)?;
         }
         _ => {}
     }
@@ -268,6 +284,158 @@ fn title_case_handle(handle: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[derive(Clone)]
+struct AccountSurfaceBindings {
+    account: RenderModel,
+    customer: RenderModel,
+    recent_orders: Vec<RenderModel>,
+    membership_summary: RenderModel,
+}
+
+fn account_surface_bindings(
+    fixture: &StorefrontFixture,
+    session: Option<&SessionContext>,
+    principal: Option<&PrincipalContext>,
+) -> Result<AccountSurfaceBindings, TemplateModelError> {
+    let Some(session) = session else {
+        return fixture_account_surface_bindings(fixture);
+    };
+    let Some(principal) = principal else {
+        return fixture_account_surface_bindings(fixture);
+    };
+
+    if session.session_id.is_none() && principal.principal_id.is_none() {
+        return fixture_account_surface_bindings(fixture);
+    }
+
+    live_account_surface_bindings(session, principal)
+}
+
+fn fixture_account_surface_bindings(
+    fixture: &StorefrontFixture,
+) -> Result<AccountSurfaceBindings, TemplateModelError> {
+    Ok(AccountSurfaceBindings {
+        account: RenderModel::new()
+            .with_bool("hasLiveSession", false)?
+            .with_bool("hasPrincipal", false)?
+            .with_bool("hasCustomerEmail", true)?
+            .with_bool("hasRecentOrders", !fixture.recent_orders.is_empty())?
+            .with_bool("hasMembership", true)?
+            .with_value("stateSource", RenderValue::text("fixture-preview"))?
+            .with_value(
+                "stateSummary",
+                RenderValue::text(
+                    "Previewing deterministic account content until a live storefront session is resolved.",
+                ),
+            )?
+            .with_value(
+                "ordersEmptyText",
+                RenderValue::text(
+                    "Recent orders will appear here once the customer has completed checkout.",
+                ),
+            )?
+            .with_value(
+                "membershipEmptyText",
+                RenderValue::text(
+                    "No membership is attached yet. Join to unlock early-access drops and concierge support.",
+                ),
+            )?
+            .with_value("ordersCtaUrl", RenderValue::text("/shop"))?
+            .with_value(
+                "membershipCtaUrl",
+                RenderValue::text("/shop/collections/memberships"),
+            )?,
+        customer: fixture.customer.clone(),
+        recent_orders: fixture.recent_orders.clone(),
+        membership_summary: fixture.membership_summary.clone(),
+    })
+}
+
+fn live_account_surface_bindings(
+    session: &SessionContext,
+    principal: &PrincipalContext,
+) -> Result<AccountSurfaceBindings, TemplateModelError> {
+    let principal_id = principal.principal_id.as_deref();
+    let email = principal_id
+        .filter(|candidate| looks_like_email(candidate))
+        .unwrap_or_default()
+        .to_string();
+    let display_name = principal_id
+        .map(display_name_from_principal_id)
+        .unwrap_or_else(|| "Signed-in Customer".to_string());
+    let state_summary = if principal_id.is_some() {
+        "Using the live storefront session identity for this account view. Order history and membership state will render here when the storefront state path supplies them."
+    } else {
+        "Using a resolved storefront session for this account view. Order history and membership state will render here when the storefront state path supplies them."
+    };
+
+    Ok(AccountSurfaceBindings {
+        account: RenderModel::new()
+            .with_bool("hasLiveSession", session.session_id.is_some())?
+            .with_bool("hasPrincipal", principal_id.is_some())?
+            .with_bool("hasCustomerEmail", !email.is_empty())?
+            .with_bool("hasRecentOrders", false)?
+            .with_bool("hasMembership", false)?
+            .with_value("stateSource", RenderValue::text("storefront-session"))?
+            .with_value("stateSummary", RenderValue::text(state_summary))?
+            .with_value(
+                "ordersEmptyText",
+                RenderValue::text(
+                    "No order history is attached to this signed-in account yet. Completed storefront purchases will appear here once live account history is available.",
+                ),
+            )?
+            .with_value(
+                "membershipEmptyText",
+                RenderValue::text(
+                    "No active membership is attached to this signed-in account yet. Join from the storefront to unlock early access and renewal visibility.",
+                ),
+            )?
+            .with_value("ordersCtaUrl", RenderValue::text("/shop"))?
+            .with_value(
+                "membershipCtaUrl",
+                RenderValue::text("/shop/collections/memberships"),
+            )?,
+        customer: RenderModel::new()
+            .with_value("displayName", RenderValue::text(display_name))?
+            .with_value("email", RenderValue::text(email))?,
+        recent_orders: Vec::new(),
+        membership_summary: empty_membership_summary()?,
+    })
+}
+
+fn looks_like_email(candidate: &str) -> bool {
+    matches!(candidate.split_once('@'), Some((local, domain)) if !local.is_empty() && !domain.is_empty())
+}
+
+fn display_name_from_principal_id(principal_id: &str) -> String {
+    let base = principal_id
+        .split_once('@')
+        .map(|(local, _)| local)
+        .unwrap_or(principal_id);
+    let words = base
+        .split(|ch: char| matches!(ch, '-' | '_' | '.' | '+' | '/'))
+        .filter(|segment| !segment.is_empty())
+        .map(capitalize_token)
+        .collect::<Vec<_>>();
+    if words.is_empty() {
+        "Member Account".to_string()
+    } else {
+        words.join(" ")
+    }
+}
+
+fn capitalize_token(segment: &str) -> String {
+    let mut chars = segment.chars();
+    match chars.next() {
+        Some(first) => {
+            let mut word = first.to_uppercase().collect::<String>();
+            word.push_str(chars.as_str());
+            word
+        }
+        None => String::new(),
+    }
 }
 
 #[derive(Clone)]
@@ -377,7 +545,8 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
             handle: "events",
             title: "Events",
             href: "/shop/collections/events",
-            summary: "Bookable offers and event-linked passes surfaced alongside editorial content.",
+            summary:
+                "Bookable offers and event-linked passes surfaced alongside editorial content.",
             label: "Event-led offer",
         },
     ];
@@ -390,33 +559,36 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
         .map(|collection| collection_detail_model(collection, &products_data))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let cart_items = vec![
-        cart_item("Harbor Cap", "Canvas cap", "1", "£29.00")?,
-        cart_item("Gold Membership", "Annual plan", "1", "£89.00")?,
-    ];
-    let cart_summary = RenderModel::new()
-        .with_value("subtotal", RenderValue::text("£118.00"))?
-        .with_value("shipping", RenderValue::text("£0.00"))?
-        .with_value("total", RenderValue::text("£118.00"))?;
+    let current_order = sample_completed_order();
+    let previous_order = sample_previous_order();
 
-    let confirmation = RenderModel::new()
-        .with_value("orderNumber", RenderValue::text("ORD-10042"))?
-        .with_value("email", RenderValue::text("member@example.com"))?
+    let cart_items = current_order
+        .lines
+        .iter()
+        .map(cart_item_from_line)
+        .collect::<Result<Vec<_>, _>>()?;
+    let cart_summary = RenderModel::new()
         .with_value(
-            "nextStep",
-            RenderValue::text("A confirmation email and membership activation will follow shortly."),
+            "subtotal",
+            RenderValue::text(money_display(&current_order.totals.subtotal)),
+        )?
+        .with_value("shipping", RenderValue::text("£0.00"))?
+        .with_value(
+            "total",
+            RenderValue::text(money_display(&current_order.totals.total)),
         )?;
+
+    let confirmation = confirmation_model(&current_order)?;
 
     let customer = RenderModel::new()
         .with_value("displayName", RenderValue::text("Alex Mariner"))?
         .with_value("email", RenderValue::text("member@example.com"))?;
 
     let recent_orders = vec![
-        account_order("HS-1048", "£118.00", "Packed")?,
-        account_order("HS-0998", "£45.00", "Fulfilled")?,
+        account_order_from_order(&current_order)?,
+        account_order_from_order(&previous_order)?,
     ];
-    let membership_summary =
-        membership_summary("Harbor Circle", "Active", "Renews on 18 April")?;
+    let membership_summary = membership_summary("Harbor Circle", "Active", "Renews on 18 April")?;
 
     Ok(StorefrontFixture {
         catalog_sections,
@@ -430,12 +602,20 @@ fn storefront_fixture() -> Result<StorefrontFixture, TemplateModelError> {
         membership_summary,
         collections: collections
             .into_iter()
-            .zip(collections_data.iter().map(|collection| collection.handle.to_string()))
+            .zip(
+                collections_data
+                    .iter()
+                    .map(|collection| collection.handle.to_string()),
+            )
             .map(|(collection, handle)| (handle, collection))
             .collect(),
         products: product_cards
             .into_iter()
-            .zip(products_data.iter().map(|product| product.handle.to_string()))
+            .zip(
+                products_data
+                    .iter()
+                    .map(|product| product.handle.to_string()),
+            )
             .map(|(product, handle)| (handle, product))
             .collect(),
     })
@@ -533,6 +713,29 @@ fn account_order(
         .with_value("status", RenderValue::text(status))
 }
 
+fn cart_item_from_line(line: &CheckoutLine) -> Result<RenderModel, TemplateModelError> {
+    cart_item(
+        &line.product_title,
+        &line.variant_title,
+        &line.quantity.to_string(),
+        &money_display(&line.subtotal().expect("sample checkout line is valid")),
+    )
+}
+
+fn confirmation_model(order: &Order) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("orderNumber", RenderValue::text(order.id.to_string()))?
+        .with_value("email", RenderValue::text("member@example.com"))?
+        .with_value("nextStep", RenderValue::text(order.confirmation_message()))
+}
+
+fn account_order_from_order(order: &Order) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("reference", RenderValue::text(order.id.to_string()))?
+        .with_value("total", RenderValue::text(order.display_total()))?
+        .with_value("status", RenderValue::text(order.history_status_label()))
+}
+
 fn membership_summary(
     tier_name: &str,
     status: &str,
@@ -544,22 +747,136 @@ fn membership_summary(
         .with_value("renewalText", RenderValue::text(renewal_text))
 }
 
+fn sample_completed_order() -> Order {
+    let currency = CurrencyCode::new("GBP").unwrap();
+    let pricing = PricingPolicy::new(currency.clone());
+    let mut checkout =
+        CheckoutSession::new(CheckoutId::new("chk-10042").unwrap(), currency.clone());
+    checkout
+        .add_line(
+            CheckoutLine::new(
+                ProductId::new("product-harbor-cap").unwrap(),
+                ProductKind::Physical,
+                "Harbor Cap",
+                Sku::new("sku-harbor-cap").unwrap(),
+                "Canvas cap",
+                1,
+                Money::new(currency.clone(), 2_900).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    checkout
+        .add_line(
+            CheckoutLine::new(
+                ProductId::new("product-gold-membership").unwrap(),
+                ProductKind::Membership {
+                    entitlement_key: EntitlementKey::new("membership.gold").unwrap(),
+                },
+                "Gold Membership",
+                Sku::new("sku-gold-membership").unwrap(),
+                "Annual plan",
+                1,
+                Money::new(currency.clone(), 8_900).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    checkout.ready_for_payment().unwrap();
+    checkout.awaiting_payment().unwrap();
+    checkout.mark_paid().unwrap();
+    checkout
+        .finalize(OrderId::new("ORD-10042").unwrap(), &pricing)
+        .unwrap()
+}
+
+fn sample_previous_order() -> Order {
+    let currency = CurrencyCode::new("GBP").unwrap();
+    let pricing = PricingPolicy::new(currency.clone());
+    let mut checkout = CheckoutSession::new(CheckoutId::new("chk-0998").unwrap(), currency.clone());
+    checkout
+        .add_line(
+            CheckoutLine::new(
+                ProductId::new("product-spring-tasting-pass").unwrap(),
+                ProductKind::Service,
+                "Spring Tasting Pass",
+                Sku::new("sku-tasting-pass").unwrap(),
+                "Single event pass",
+                1,
+                Money::new(currency.clone(), 4_500).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    checkout.ready_for_payment().unwrap();
+    checkout.awaiting_payment().unwrap();
+    checkout.mark_paid().unwrap();
+    let mut order = checkout
+        .finalize(OrderId::new("ORD-0998").unwrap(), &pricing)
+        .unwrap();
+    order.fulfill().unwrap();
+    order
+}
+
+fn money_display(money: &Money) -> String {
+    let amount_minor = money.amount_minor();
+    let major = amount_minor / 100;
+    let remainder = amount_minor % 100;
+    match money.currency().as_str() {
+        "GBP" => format!("£{major}.{remainder:02}"),
+        code => format!("{code} {major}.{remainder:02}"),
+    }
+}
+
+fn empty_membership_summary() -> Result<RenderModel, TemplateModelError> {
+    membership_summary(
+        "Membership unavailable",
+        "Not active",
+        "Join from the storefront to manage renewals and entitlements here.",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use davenda_template::{
-        DocumentRenderRequest, TemplateName, TemplateNamespace, TemplateRegistry,
-        TemplateRuntime, TemplateSelector, TemplateSourceParser,
+        DocumentRenderRequest, TemplateName, TemplateNamespace, TemplateRegistry, TemplateRuntime,
+        TemplateSelector, TemplateSourceParser,
     };
+    use std::collections::HashSet;
 
     fn fixture_model(route_name: &str) -> RenderModel {
-        apply_route_specific_bindings(RenderModel::new(), route_name, &BTreeMap::new()).unwrap()
+        apply_route_specific_bindings(RenderModel::new(), route_name, &BTreeMap::new(), None, None)
+            .unwrap()
+    }
+
+    fn live_account_model(principal_id: &str) -> RenderModel {
+        let session = SessionContext {
+            session_id: Some("session-live-123".to_string()),
+            resolved_from_cookie: true,
+        };
+        let principal = PrincipalContext {
+            principal_id: Some(principal_id.to_string()),
+            granted_capabilities: HashSet::new(),
+        };
+        apply_route_specific_bindings(
+            RenderModel::new(),
+            "memberships.account",
+            &BTreeMap::new(),
+            Some(&session),
+            Some(&principal),
+        )
+        .unwrap()
     }
 
     fn render_fixture(route_name: &str, template_body: &str) -> String {
         let namespace = TemplateNamespace::new("customer-app").unwrap();
         let template = TemplateSourceParser::new()
-            .parse_layout(namespace.clone(), TemplateName::new("page").unwrap(), template_body)
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                template_body,
+            )
             .unwrap();
         let mut registry = TemplateRegistry::new();
         registry.register(template).unwrap();
@@ -608,5 +925,50 @@ mod tests {
 
         assert!(html.contains("Alex Mariner"));
         assert!(html.contains("Harbor Circle"));
+    }
+
+    #[test]
+    fn live_account_surface_prefers_session_backed_customer_state() {
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <h1 dv:text="${customer.displayName}">Fallback</h1>
+    <p class="summary" dv:text="${account.stateSummary}">State</p>
+    <p class="email" dv:if="${account.hasCustomerEmail}" dv:text="${customer.email}">Email</p>
+    <p class="orders-empty" dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
+      Orders empty
+    </p>
+    <p class="membership-empty" dv:unless="${account.hasMembership}" dv:text="${account.membershipEmptyText}">
+      Membership empty
+    </p>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    live_account_model("sea.member@example.com"),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains("Sea Member"));
+        assert!(html.contains("sea.member@example.com"));
+        assert!(html.contains("live storefront session identity"));
+        assert!(html.contains("No order history is attached to this signed-in account yet."));
+        assert!(html.contains("No active membership is attached to this signed-in account yet."));
+        assert!(!html.contains("Alex Mariner"));
+        assert!(!html.contains("Harbor Circle"));
     }
 }

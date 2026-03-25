@@ -19,22 +19,41 @@
     <main class="site-main">
       <section class="account-page">
         <div class="account-page__intro">
-          <h1>Your account</h1>
-          <p>
-            Review your membership status, recent orders, and the quickest
-            route back into the storefront when you are ready to browse again.
+          <h1 dv:text="${customer.displayName}">Your account</h1>
+          <p dv:text="${account.stateSummary}">
+            Review your membership status, recent orders, and the quickest route back into the
+            storefront when you are ready to browse again.
+          </p>
+          <p dv:if="${account.hasCustomerEmail}">
+            Account email: <strong dv:text="${customer.email}">member@example.com</strong>
           </p>
         </div>
         <div class="account-page__cards">
           <article class="account-card">
             <h2>Memberships</h2>
-            <p>Check your active tiers, renewals, and entitlement status.</p>
+            <p dv:if="${account.hasMembership}">
+              Check your active tiers, renewals, and entitlement status.
+            </p>
+            <p dv:unless="${account.hasMembership}">
+              No active membership is attached yet. Start from the storefront collection to join.
+            </p>
             <a class="button" href="/account/memberships">View memberships</a>
           </article>
           <article class="account-card">
-            <h2>Storefront</h2>
-            <p>Continue browsing the public catalog and landing content.</p>
-            <a class="button button--secondary" href="/shop">Back to shop</a>
+            <h2>Orders and storefront</h2>
+            <p dv:if="${account.hasRecentOrders}">
+              Review your latest orders, then jump back into the storefront when you are ready.
+            </p>
+            <p dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
+              Continue browsing the public catalog and landing content.
+            </p>
+            <a
+              class="button button--secondary"
+              href="/shop"
+              dv:attr="href=${account.ordersCtaUrl}"
+            >
+              Back to shop
+            </a>
           </article>
         </div>
         <div dv:replace="~{account/summary-panels :: panels}"></div>

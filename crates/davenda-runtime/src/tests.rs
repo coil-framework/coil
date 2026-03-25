@@ -1713,6 +1713,80 @@ fn execute_request_enforces_csrf_for_state_changing_browser_routes() {
 }
 
 #[test]
+fn execute_request_accepts_form_field_csrf_tokens_and_preserves_inputs() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("cart.update", HttpMethod::Post, "/cart")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(
+            HandlerDefinition::json(
+                "cart.update",
+                BTreeMap::from([("status".to_string(), "updated".to_string())]),
+            )
+            .unwrap(),
+        )
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let session_cookie = CookieSigner::new(plan.browser.sessions.session_cookie.clone())
+        .sign(cookie_secret, "session-123")
+        .unwrap();
+    let token = plan
+        .browser
+        .csrf
+        .issue_token(csrf_secret, "session-123", "cart.update")
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Post, "www.example.com", "/cart")
+                .unwrap()
+                .with_session_cookie(session_cookie)
+                .with_query_param("coupon", "SPRING24")
+                .with_query_param("view", "summary")
+                .with_form_field("_csrf", token)
+                .with_form_field("line_id", "sku-1")
+                .with_form_field("quantity", "2"),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    assert_eq!(
+        execution.query_params.get("coupon"),
+        Some(&vec!["SPRING24".to_string()])
+    );
+    assert_eq!(
+        execution.query_params.get("view"),
+        Some(&vec!["summary".to_string()])
+    );
+    assert_eq!(execution.form_fields.get("_csrf").map(Vec::len), Some(1));
+    assert_eq!(
+        execution.form_fields.get("line_id"),
+        Some(&vec!["sku-1".to_string()])
+    );
+    assert_eq!(
+        execution.form_fields.get("quantity"),
+        Some(&vec!["2".to_string()])
+    );
+    assert_eq!(execution.route.route_name, "cart.update");
+    assert_eq!(execution.cache, CacheDisposition::Uncacheable);
+    assert_eq!(
+        execution.response,
+        HandlerResponse::Json(JsonResponse {
+            status: 200,
+            payload: BTreeMap::from([("status".to_string(), "updated".to_string())]),
+        })
+    );
+}
+
+#[test]
 fn execute_request_requires_capability_for_capability_gated_routes() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -2027,7 +2101,7 @@ fn live_http_request_adapter_extracts_runtime_headers_and_cookies() {
         .unwrap();
     let request = Request::builder()
         .method("POST")
-        .uri("/admin/pages/publish")
+        .uri("/admin/pages/publish?view=workflow&tag=launch&tag=featured")
         .header("host", "www.example.com")
         .header("x-forwarded-proto", "https")
         .header("x-request-id", "req-live-1")
@@ -2055,6 +2129,15 @@ fn live_http_request_adapter_extracts_runtime_headers_and_cookies() {
     assert_eq!(live.flash_cookie.as_deref(), Some("v1.flash.sig"));
     assert_eq!(live.csrf_token.as_deref(), Some("csrf-123"));
     assert_eq!(live.maintenance_bypass_token.as_deref(), Some("ops-bypass"));
+    assert_eq!(
+        live.query_params.get("view"),
+        Some(&vec!["workflow".to_string()])
+    );
+    assert_eq!(
+        live.query_params.get("tag"),
+        Some(&vec!["launch".to_string(), "featured".to_string()])
+    );
+    assert!(live.form_fields.is_empty());
 }
 
 #[tokio::test]

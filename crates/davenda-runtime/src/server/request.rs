@@ -2,19 +2,22 @@ use super::auth::authorize_live_request;
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::extract::{ConnectInfo, State};
-use axum::http::header::{CONTENT_LENGTH, COOKIE, HOST};
+use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use url::form_urlencoded;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveHttpRequest {
     pub method: HttpMethod,
     pub host: String,
     pub path: String,
+    pub query_params: RequestFieldMap,
+    pub form_fields: RequestFieldMap,
     pub scheme: String,
     pub forwarded_proto: Option<String>,
     pub request_id: Option<String>,
@@ -49,6 +52,10 @@ impl LiveHttpRequest {
             method: map_http_method(request.method())?,
             host,
             path: request.uri().path().to_string(),
+            query_params: parse_request_fields(
+                request.uri().query().unwrap_or_default().as_bytes(),
+            ),
+            form_fields: RequestFieldMap::new(),
             scheme,
             forwarded_proto,
             request_id,
@@ -60,8 +67,10 @@ impl LiveHttpRequest {
     }
 
     pub fn into_request_input(self) -> Result<RequestInput, RuntimeServerError> {
-        let mut request =
-            RequestInput::new(self.method, self.host, self.path)?.with_scheme(self.scheme);
+        let mut request = RequestInput::new(self.method, self.host, self.path)?
+            .with_query_params(self.query_params)
+            .with_form_fields(self.form_fields)
+            .with_scheme(self.scheme);
 
         if let Some(proto) = self.forwarded_proto {
             request = request.with_forwarded_proto(proto);
@@ -102,15 +111,16 @@ pub(super) async fn execute_live_request(
     request: Request<Body>,
     remote_addr: Option<SocketAddr>,
 ) -> Result<Response<Body>, RuntimeServerError> {
-    let request =
+    let raw_request =
         enforce_request_body_limit(request, state.plan.config.server.max_body_bytes).await?;
-    let mut request = LiveHttpRequest::from_request(
-        &request,
+    let mut live_request = LiveHttpRequest::from_request(
+        &raw_request,
         &state.plan.browser,
         &state.plan.config.server,
         remote_addr,
-    )?
-    .into_request_input()?;
+    )?;
+    live_request.form_fields = parse_form_fields(live_request.method, raw_request).await?;
+    let mut request = live_request.into_request_input()?;
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -255,6 +265,58 @@ fn header_value(
             })?
             .to_string(),
     ))
+}
+
+async fn parse_form_fields(
+    request_method: HttpMethod,
+    request: Request<Body>,
+) -> Result<RequestFieldMap, RuntimeServerError> {
+    if !matches!(
+        request_method,
+        HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch | HttpMethod::Delete
+    ) {
+        return Ok(RequestFieldMap::new());
+    }
+
+    let is_form = request
+        .headers()
+        .get(CONTENT_TYPE)
+        .map(|value| {
+            value
+                .to_str()
+                .map_err(|_| RuntimeServerError::InvalidHeaderValue {
+                    header: "content-type",
+                })
+                .map(|content_type| {
+                    content_type
+                        .split(';')
+                        .next()
+                        .map(str::trim)
+                        .is_some_and(|mime| {
+                            mime.eq_ignore_ascii_case("application/x-www-form-urlencoded")
+                        })
+                })
+        })
+        .transpose()?
+        .unwrap_or(false);
+
+    if !is_form {
+        return Ok(RequestFieldMap::new());
+    }
+
+    let (_, body) = request.into_parts();
+    let bytes = to_bytes(body, usize::MAX)
+        .await
+        .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit: usize::MAX })?;
+    Ok(parse_request_fields(&bytes))
+}
+
+fn parse_request_fields(bytes: &[u8]) -> RequestFieldMap {
+    let mut fields = RequestFieldMap::new();
+    for (name, value) in form_urlencoded::parse(bytes) {
+        push_request_field(&mut fields, name.into_owned(), value.into_owned());
+    }
+    fields
 }
 
 async fn enforce_request_body_limit(

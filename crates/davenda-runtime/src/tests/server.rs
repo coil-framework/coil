@@ -536,13 +536,134 @@ async fn server_host_rejects_request_bodies_over_the_configured_limit_before_han
             Request::builder()
                 .method("POST")
                 .uri("/account")
-                .body(Body::from(vec![b'x'; 16]))
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("quantity=1000"))
                 .unwrap(),
         )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn server_host_accepts_form_body_csrf_tokens_for_state_changing_browser_routes() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("cart.update", HttpMethod::Post, "/cart")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(
+            HandlerDefinition::json(
+                "cart.update",
+                BTreeMap::from([("status".to_string(), "updated".to_string())]),
+            )
+            .unwrap(),
+        )
+        .build()
+        .unwrap();
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(&resolver, cookie_secret, csrf_secret)
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-form")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let token = plan
+        .browser
+        .csrf
+        .issue_token(csrf_secret, &issued.record.session_id, "cart.update")
+        .unwrap();
+    let body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &token)
+        .append_pair("line_id", "sku-1")
+        .append_pair("quantity", "2")
+        .finish();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart?coupon=SPRING24")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
+                .header(
+                    "content-type",
+                    "application/x-www-form-urlencoded; charset=utf-8",
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-davenda-route").unwrap(),
+        "cart.update"
+    );
+}
+
+#[tokio::test]
+async fn server_host_does_not_bypass_session_auth_for_form_posts() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new("cart.update", HttpMethod::Post, "/cart")
+                .unwrap()
+                .with_area(RouteArea::Account)
+                .requiring_session(),
+        )
+        .with_handler(
+            HandlerDefinition::json(
+                "cart.update",
+                BTreeMap::from([("status".to_string(), "updated".to_string())]),
+            )
+            .unwrap(),
+        )
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("_csrf=forged&line_id=sku-1&quantity=2"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

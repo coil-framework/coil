@@ -47,6 +47,11 @@ impl RuntimePlan {
             principal_id: request.principal_id.clone(),
             granted_capabilities: request.granted_capabilities.clone(),
         };
+        let csrf_token = request.csrf_token.clone().or_else(|| {
+            request
+                .form_field(self.browser.csrf.field_name.as_str())
+                .map(str::to_string)
+        });
 
         self.enforce_maintenance_mode(&matched.route, request.method, &request)?;
         self.enforce_feature_flags(&matched.route)?;
@@ -56,7 +61,7 @@ impl RuntimePlan {
             &matched.resolved,
             request.method,
             request.csrf_action.as_deref(),
-            request.csrf_token.as_deref(),
+            csrf_token.as_deref(),
             &session,
             csrf_secret,
         )?;
@@ -84,6 +89,8 @@ impl RuntimePlan {
             method: request.method,
             host: request.host,
             path: request.path,
+            query_params: request.query_params,
+            form_fields: request.form_fields,
             route: matched.resolved.clone(),
             route_area: matched.route.area,
             locale: matched

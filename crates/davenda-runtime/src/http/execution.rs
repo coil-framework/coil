@@ -4,11 +4,15 @@ use davenda_cache::{CacheModelError, CachePlan};
 use std::collections::{BTreeMap, HashSet};
 use thiserror::Error;
 
+pub type RequestFieldMap = BTreeMap<String, Vec<String>>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestInput {
     pub method: HttpMethod,
     pub host: String,
     pub path: String,
+    pub query_params: RequestFieldMap,
+    pub form_fields: RequestFieldMap,
     pub scheme: String,
     pub forwarded_proto: Option<String>,
     pub request_id: Option<String>,
@@ -32,6 +36,8 @@ impl RequestInput {
             method,
             host: validate_host(host.into())?,
             path: validate_route_path(path.into())?,
+            query_params: RequestFieldMap::new(),
+            form_fields: RequestFieldMap::new(),
             scheme: "https".to_string(),
             forwarded_proto: None,
             request_id: None,
@@ -96,10 +102,68 @@ impl RequestInput {
         self
     }
 
+    pub fn with_query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        push_request_field(&mut self.query_params, name.into(), value.into());
+        self
+    }
+
+    pub fn with_form_field(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        push_request_field(&mut self.form_fields, name.into(), value.into());
+        self
+    }
+
+    pub fn with_query_params(mut self, params: RequestFieldMap) -> Self {
+        for (name, values) in params {
+            for value in values {
+                push_request_field(&mut self.query_params, name.clone(), value);
+            }
+        }
+        self
+    }
+
+    pub fn with_form_fields(mut self, fields: RequestFieldMap) -> Self {
+        for (name, values) in fields {
+            for value in values {
+                push_request_field(&mut self.form_fields, name.clone(), value);
+            }
+        }
+        self
+    }
+
+    pub fn query_param(&self, name: &str) -> Option<&str> {
+        self.query_params
+            .get(name)
+            .and_then(|values| values.first().map(String::as_str))
+    }
+
+    pub fn form_field(&self, name: &str) -> Option<&str> {
+        self.form_fields
+            .get(name)
+            .and_then(|values| values.first().map(String::as_str))
+    }
+
     pub fn grant_capability(mut self, capability: davenda_auth::Capability) -> Self {
         self.granted_capabilities.insert(capability);
         self
     }
+}
+
+pub(crate) fn push_request_field(fields: &mut RequestFieldMap, name: String, value: String) {
+    if !request_field_name_is_valid(&name) || !request_field_value_is_valid(&value) {
+        return;
+    }
+
+    fields.entry(name).or_default().push(value);
+}
+
+fn request_field_name_is_valid(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(|ch| ch.is_control())
+}
+
+fn request_field_value_is_valid(value: &str) -> bool {
+    !value
+        .chars()
+        .any(|ch| ch == '\0' || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t')))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +197,8 @@ pub struct RequestExecution {
     pub method: HttpMethod,
     pub host: String,
     pub path: String,
+    pub query_params: RequestFieldMap,
+    pub form_fields: RequestFieldMap,
     pub route: ResolvedRoute,
     pub route_area: RouteArea,
     pub locale: String,

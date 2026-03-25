@@ -44,6 +44,12 @@ pub(crate) struct CacheWarmInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobsStatusInvocation {
+    pub config_path: PathBuf,
+    pub queue: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TlsRenewInvocation {
     pub config_path: PathBuf,
     pub certificate_id: String,
@@ -91,6 +97,10 @@ pub(crate) enum CliInput {
         dry_run: bool,
         invocation: CacheWarmInvocation,
     },
+    JobsStatus {
+        output_mode: OutputMode,
+        invocation: JobsStatusInvocation,
+    },
     TlsStatus {
         output_mode: OutputMode,
         config_path: PathBuf,
@@ -136,6 +146,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut verify_policy = false;
     let mut cache_scope: Option<String> = None;
     let mut cache_routes = Vec::new();
+    let mut jobs_queue: Option<String> = None;
     let mut tls_certificate_id: Option<String> = None;
     let mut tls_replacement_certificate_id: Option<String> = None;
     let mut subject: Option<DefaultSubject> = None;
@@ -164,6 +175,9 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             }
             "--route" => {
                 cache_routes.push(next_value(&mut iter, "--route")?);
+            }
+            "--queue" => {
+                jobs_queue = Some(next_value(&mut iter, "--queue")?);
             }
             "--certificate" => {
                 tls_certificate_id = Some(next_value(&mut iter, "--certificate")?);
@@ -374,6 +388,23 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     config_path,
                     scope,
                     routes: cache_routes,
+                },
+            })
+        }
+        [command, subcommand] if command == "jobs" && subcommand == "status" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`jobs status` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::JobsStatus {
+                output_mode,
+                invocation: JobsStatusInvocation {
+                    config_path,
+                    queue: jobs_queue,
                 },
             })
         }
@@ -812,6 +843,32 @@ mod tests {
 
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(config_path, PathBuf::from("/tmp/platform.toml"));
+    }
+
+    #[test]
+    fn parse_jobs_status_accepts_an_optional_queue_filter() {
+        let input = parse([
+            "jobs".to_string(),
+            "status".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--queue".to_string(),
+            "jobs.work".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsStatus {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected jobs status input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.queue.as_deref(), Some("jobs.work"));
     }
 
     #[test]

@@ -165,6 +165,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
         )?
         .with_dry_run(),
         CommandDescriptor::new(
+            ["jobs", "status"],
+            CommandOwner::Core,
+            "Inspect registered runtime jobs, queue topology, and current queue health",
+        )?,
+        CommandDescriptor::new(
             ["tls", "status"],
             CommandOwner::Core,
             "Inspect TLS mode, provider state, and managed certificate inventory",

@@ -15,11 +15,15 @@ fn baseline_runtime_registers_core_command_families() {
     assert!(paths.contains(&"dev server".to_string()));
     assert!(paths.contains(&"config validate".to_string()));
     assert!(paths.contains(&"auth explain".to_string()));
+    assert!(paths.contains(&"auth package validate".to_string()));
     assert!(paths.contains(&"module list".to_string()));
     assert!(paths.contains(&"migrate plan".to_string()));
     assert!(paths.contains(&"migrate apply".to_string()));
     assert!(paths.contains(&"release doctor".to_string()));
     assert!(paths.contains(&"cache warm".to_string()));
+    assert!(paths.contains(&"jobs status".to_string()));
+    assert!(paths.contains(&"tls status".to_string()));
+    assert!(paths.contains(&"tls renew".to_string()));
     assert!(paths.contains(&"storage verify".to_string()));
     assert!(paths.contains(&"assets publish".to_string()));
     assert!(paths.contains(&"import run".to_string()));

@@ -1,7 +1,7 @@
 use crate::CliModelError;
 use crate::cli::args::{
     AssetsPublishInvocation, AuthPackageValidateInvocation, CacheWarmInvocation, CliInput,
-    DevServerInvocation, MigrateApplyInvocation, TlsRenewInvocation, parse,
+    DevServerInvocation, JobsStatusInvocation, MigrateApplyInvocation, TlsRenewInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -260,6 +260,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_cache_warm(&invocation, dry_run)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::JobsStatus {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_jobs_status(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::TlsStatus {
             output_mode,
             config_path,
@@ -336,6 +343,7 @@ fn usage() -> String {
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
         "  platform cache warm [--config <path>] --scope public --route <path> [--route <path> ...] [--dry-run] [--json]",
+        "  platform jobs status [--config <path>] [--queue <name>] [--json]",
         "  platform tls status [--config <path>] [--json]",
         "  platform tls renew [--config <path>] --certificate <id> --replacement <id> [--dry-run] [--yes] [--json]",
         "  platform storage verify [--config <path>] [--policy] [--json]",
@@ -354,6 +362,7 @@ fn usage() -> String {
         "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
         "  platform cache warm --config config/platform.toml --scope public --route /en-GB/home",
+        "  platform jobs status --config config/platform.toml",
         "  platform tls status --config config/platform.toml",
         "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
         "  platform storage verify --config config/platform.toml --policy",
@@ -693,6 +702,174 @@ fn run_cache_warm(
 ) -> Result<CommandReport, CliRunError> {
     let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
     warm_cache_routes(&built, &invocation.routes, &invocation.scope, dry_run)
+}
+
+fn run_jobs_status(invocation: &JobsStatusInvocation) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    let queue_filter = invocation.queue.as_deref();
+    let topology = built.runtime_plan.runtime.jobs.describe().clone();
+    let mut report = CommandReport::new(
+        ["jobs", "status"],
+        format!("Jobs status for customer app `{}`", built.manifest.id),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "queue",
+        "kind",
+        "ready",
+        "scheduled",
+        "in_flight",
+        "dead_letters",
+        "registered_jobs",
+    ])
+    .map_err(report_build_error)?;
+
+    let database_url = std::env::var("DATABASE_URL").ok();
+    let jobs_host = if database_url.is_some() {
+        Some(
+            built
+                .runtime_plan
+                .runtime
+                .jobs_host("platform-jobs-status")
+                .map_err(|error| {
+                    CliRunError::execution(format!(
+                        "failed to build jobs status host for `{}`: {error}",
+                        built.manifest.id
+                    ))
+                })?,
+        )
+    } else {
+        None
+    };
+    let coordinator_state = jobs_host.as_ref().map(|host| {
+        let coordinator = host.coordinator();
+        (
+            coordinator.ready_jobs().to_vec(),
+            coordinator.scheduled_jobs().to_vec(),
+            coordinator.in_flight_jobs().to_vec(),
+            coordinator.dead_letters().to_vec(),
+            host.registered_jobs.clone(),
+            host.registered_event_subscriptions.clone(),
+            host.coordinator().leadership().cloned(),
+        )
+    });
+
+    for queue in &topology.queues {
+        if queue_filter.is_some_and(|filter| filter != queue.name.as_str()) {
+            continue;
+        }
+        let (ready, scheduled, in_flight, dead_letters, registered_jobs) = if let Some((
+            ready_jobs,
+            scheduled_jobs,
+            in_flight_jobs,
+            dead_letter_jobs,
+            definitions,
+            _,
+            _,
+        )) =
+            coordinator_state.as_ref()
+        {
+            (
+                ready_jobs
+                    .iter()
+                    .filter(|record| record.spec.queue == queue.name)
+                    .count(),
+                scheduled_jobs
+                    .iter()
+                    .filter(|record| record.spec.queue == queue.name)
+                    .count(),
+                in_flight_jobs
+                    .iter()
+                    .filter(|lease| lease.record.spec.queue == queue.name)
+                    .count(),
+                dead_letter_jobs
+                    .iter()
+                    .filter(|dead| dead.queue == queue.name)
+                    .count(),
+                definitions
+                    .iter()
+                    .filter(|definition| definition.queue == queue.name)
+                    .count(),
+            )
+        } else {
+            (0, 0, 0, 0, 0)
+        };
+        let row_status = if dead_letters > 0 {
+            report = report.with_status(ReportStatus::Unsafe);
+            "unsafe"
+        } else if ready > 0 || scheduled > 0 || in_flight > 0 {
+            if report.status == ReportStatus::Ok {
+                report = report.with_status(ReportStatus::Warning);
+            }
+            "active"
+        } else {
+            "idle"
+        };
+        report.push_row(
+            ReportRow::new()
+                .with_cell("queue", queue.name.to_string())
+                .map_err(report_build_error)?
+                .with_cell("kind", queue.kind.to_string())
+                .map_err(report_build_error)?
+                .with_cell("ready", ready.to_string())
+                .map_err(report_build_error)?
+                .with_cell("scheduled", scheduled.to_string())
+                .map_err(report_build_error)?
+                .with_cell("in_flight", in_flight.to_string())
+                .map_err(report_build_error)?
+                .with_cell("dead_letters", dead_letters.to_string())
+                .map_err(report_build_error)?
+                .with_cell(
+                    "registered_jobs",
+                    format!("{registered_jobs} ({row_status})"),
+                )
+                .map_err(report_build_error)?,
+        );
+    }
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "jobs.topology",
+        format!(
+            "backend={:?} work_queue={} scheduled_queue={} domain_events_queue={} dead_letter_queue={} default_retry_limit={}",
+            built.runtime_plan.runtime.jobs.backend,
+            topology.work_queue,
+            topology.scheduled_queue,
+            topology.domain_events_queue,
+            topology.dead_letter_queue,
+            built.runtime_plan.runtime.jobs.default_retry_limit
+        ),
+    )?;
+    if let Some(host) = jobs_host {
+        let leadership = host.coordinator().leadership().cloned();
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "jobs.runtime",
+            format!(
+                "registered_jobs={} registered_event_subscriptions={} leadership={}",
+                host.registered_jobs.len(),
+                host.registered_event_subscriptions.len(),
+                leadership
+                    .map(|value| format!("{} until {}", value.node_id, value.lease_until))
+                    .unwrap_or_else(|| "none".to_string())
+            ),
+        )?;
+    } else {
+        report = report.with_status(ReportStatus::Warning);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "jobs.runtime.unavailable",
+            format!(
+                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to inspect distributed queue health; showing queue topology only",
+                built.manifest.id
+            ),
+        )?;
+    }
+
+    Ok(report)
 }
 
 fn run_tls_status(config_path: &Path) -> Result<CommandReport, CliRunError> {
@@ -5681,6 +5858,25 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("tls status"));
         assert!(rendered.contains("showcase-events"));
         assert!(rendered.contains("externally terminated"));
+    }
+
+    #[test]
+    fn run_from_args_renders_jobs_status_for_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "jobs".to_string(),
+            "status".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("jobs status"));
+        assert!(rendered.contains("showcase-events"));
+        assert!(rendered.contains("jobs.work"));
+        assert!(rendered.contains("registered_jobs"));
+        assert!(rendered.contains("DATABASE_URL"));
     }
 
     #[test]

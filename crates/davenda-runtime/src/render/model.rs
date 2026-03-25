@@ -275,12 +275,31 @@ fn apply_route_specific_bindings(
             }
         }
         "commerce.checkout-confirmation" => {
-            if let Some(order) = live_storefront_latest_order(plan, session, principal)? {
-                model = model
-                    .with_object("confirmation", confirmation_from_storefront(&order)?)?
-                    .with_object("customer", checkout_customer(principal)?)?
-                    .with_list("recentOrders", vec![account_order_from_storefront(&order)?])?
-                    .with_object("membershipSummary", empty_membership_summary()?)?;
+            if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
+                if let Some(order) = snapshot.latest_order.as_ref() {
+                    model = model
+                        .with_object("confirmation", confirmation_from_storefront(order)?)?
+                        .with_object("customer", checkout_customer(principal)?)?
+                        .with_list(
+                            "recentOrders",
+                            snapshot
+                                .recent_orders
+                                .iter()
+                                .map(account_order_from_storefront)
+                                .collect::<Result<Vec<_>, _>>()?,
+                        )?
+                        .with_object(
+                            "membershipSummary",
+                            membership_summary_from_storefront(Some(&snapshot))?
+                                .unwrap_or(empty_membership_summary()?),
+                        )?;
+                } else {
+                    model = model
+                        .with_object("confirmation", fixture.confirmation.clone())?
+                        .with_object("customer", fixture.customer.clone())?
+                        .with_list("recentOrders", fixture.recent_orders.clone())?
+                        .with_object("membershipSummary", fixture.membership_summary.clone())?;
+                }
             } else {
                 model = model
                     .with_object("confirmation", fixture.confirmation.clone())?
@@ -360,12 +379,18 @@ fn cart_summary_from_storefront(
 fn confirmation_from_storefront(
     order: &StorefrontOrderSnapshot,
 ) -> Result<RenderModel, TemplateModelError> {
+    let next_step = if order.lines.iter().any(|line| line.product_kind == "membership") {
+        "A confirmation email and membership activation will follow shortly."
+    } else {
+        "A confirmation email and fulfillment summary are on the way."
+    };
     RenderModel::new()
         .with_value("orderNumber", RenderValue::text(order.order_id.clone()))?
         .with_value(
-            "nextStep",
-            RenderValue::text("A confirmation email and fulfillment summary are on the way."),
+            "email",
+            RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
         )?
+        .with_value("nextStep", RenderValue::text(next_step))?
         .with_list("lineItems", confirmation_line_items_from_storefront(order)?)
 }
 
@@ -375,7 +400,7 @@ fn account_order_from_storefront(
     RenderModel::new()
         .with_value("reference", RenderValue::text(order.order_id.clone()))?
         .with_value("total", RenderValue::text(order.total.clone()))?
-        .with_value("status", RenderValue::text(order.status.clone()))
+        .with_value("status", RenderValue::text(display_status_label(&order.status)))
 }
 
 fn cart_item_from_storefront(line: &StorefrontCartLine) -> Result<RenderModel, TemplateModelError> {
@@ -533,10 +558,19 @@ fn live_account_surface_bindings(
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
     let snapshot = live_storefront_state(plan, Some(session), Some(principal))?;
     let principal_id = principal.principal_id.as_deref();
+    let recent_orders = recent_orders_from_storefront(snapshot.as_ref())?;
+    let latest_order = snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.recent_orders.first().cloned());
     let email = principal_id
         .filter(|candidate| looks_like_email(candidate))
-        .unwrap_or_default()
-        .to_string();
+        .map(str::to_string)
+        .or_else(|| {
+            latest_order
+                .as_ref()
+                .and_then(|order| order.payment.checkout_email.clone())
+        })
+        .unwrap_or_default();
     let display_name = principal_id
         .map(display_name_from_principal_id)
         .unwrap_or_else(|| "Signed-in Customer".to_string());
@@ -545,10 +579,6 @@ fn live_account_surface_bindings(
     } else {
         "Using a resolved storefront session for this account view. Order history and membership state will render here when the storefront state path supplies them."
     };
-    let recent_orders = recent_orders_from_storefront(snapshot.as_ref())?;
-    let latest_order = snapshot
-        .as_ref()
-        .and_then(|snapshot| snapshot.recent_orders.first().cloned());
     let membership_summary = membership_summary_from_storefront(snapshot.as_ref())?;
     let latest_order_reference = latest_order
         .as_ref()
@@ -556,7 +586,7 @@ fn live_account_surface_bindings(
         .unwrap_or_default();
     let latest_order_status = latest_order
         .as_ref()
-        .map(|order| order.status.clone())
+        .map(|order| display_status_label(&order.status))
         .unwrap_or_default();
     let state_summary = account_state_summary(state_summary, latest_order.as_ref());
 
@@ -648,10 +678,20 @@ fn account_state_summary(base: &str, latest_order: Option<&StorefrontOrderSnapsh
     match latest_order {
         Some(order) => format!(
             "{base} Latest order {} is currently {}.",
-            order.order_id, order.status
+            order.order_id,
+            display_status_label(&order.status)
         ),
         None => base.to_string(),
     }
+}
+
+fn display_status_label(status: &str) -> String {
+    status
+        .split(|ch: char| matches!(ch, '-' | '_' | ' '))
+        .filter(|segment| !segment.is_empty())
+        .map(capitalize_token)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn looks_like_email(candidate: &str) -> bool {

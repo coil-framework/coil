@@ -1221,7 +1221,8 @@ async fn server_host_loads_customer_account_templates_from_template_roots() {
 
 #[tokio::test]
 async fn server_host_renders_checkout_confirmation_and_account_history_from_sample_order() {
-    let config = config_with_app_name("harbor-shop-runtime-order-flow");
+    let app_name = unique_app_name("harbor-shop-runtime-order-flow");
+    let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("order-flow-pages");
     write_template_file(
         &template_root,
@@ -1359,6 +1360,36 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
             now,
         )
         .unwrap();
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some("member-live-order-1"),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some("member-live-order-1"),
+            "membership-gold",
+            1,
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some("member-live-order-1"), 102)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some("member-live-order-1"),
+            &StorefrontPaymentInput::card("member-live-order-1@example.com", "4242").unwrap(),
+            103,
+        )
+        .unwrap();
 
     let checkout_response = server
         .respond(
@@ -1367,6 +1398,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
                 .uri("/checkout")
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1394,6 +1426,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
                 .uri("/checkout/confirmation")
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
+                .header("cookie", format!("davenda_session={}", issued.cookie_value))
                 .body(Body::empty())
                 .unwrap(),
         )

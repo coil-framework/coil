@@ -1513,7 +1513,7 @@ fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
     store
         .add_to_cart(
             "session-account-live",
-            Some("member-live@example.com"),
+            Some("member-live"),
             "harbor-cap",
             1,
             100,
@@ -1522,19 +1522,19 @@ fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
     store
         .add_to_cart(
             "session-account-live",
-            Some("member-live@example.com"),
+            Some("member-live"),
             "membership-gold",
             1,
             101,
         )
         .unwrap();
     store
-        .checkout_start("session-account-live", Some("member-live@example.com"), 102)
+        .checkout_start("session-account-live", Some("member-live"), 102)
         .unwrap();
     store
         .checkout_complete(
             "session-account-live",
-            Some("member-live@example.com"),
+            Some("member-live"),
             &StorefrontPaymentInput::card("member-live@example.com", "4242").unwrap(),
             103,
         )
@@ -1545,7 +1545,7 @@ fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
             RequestInput::new(HttpMethod::Get, "www.example.com", "/account")
                 .unwrap()
                 .with_session_id("session-account-live")
-                .with_principal("member-live@example.com"),
+                .with_principal("member-live"),
             b"01234567012345670123456701234567",
             b"76543210765432107654321076543210",
         )

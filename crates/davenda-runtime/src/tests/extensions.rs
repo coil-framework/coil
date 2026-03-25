@@ -513,4 +513,19 @@ fn wasm_host_rejects_unverified_webhook_execution() {
             handler_id: "payment-authorized".to_string(),
         }
     );
+    let snapshot = plan.wasm_host().webhook_observation_snapshot(10).unwrap();
+    assert!(snapshot.status_counts.verification_failed >= 1);
+    assert!(!snapshot.recent_events.is_empty());
+    assert_eq!(
+        snapshot.recent_events[0].source,
+        "commerce.payment-provider".to_string()
+    );
+    assert_eq!(
+        snapshot.recent_events[0].event,
+        "payment.authorized".to_string()
+    );
+    assert_eq!(
+        snapshot.recent_events[0].status,
+        WebhookObservationStatus::VerificationFailed
+    );
 }

@@ -245,6 +245,10 @@ pub enum CutoverExecutionState {
     Planned,
     FreezeConfirmed,
     Prepared,
+    SwitchConfirmed,
+    Observing,
+    ObservationPassed,
+    RollbackRequired,
     Failed,
 }
 
@@ -254,6 +258,10 @@ impl CutoverExecutionState {
             Self::Planned => "planned",
             Self::FreezeConfirmed => "freeze_confirmed",
             Self::Prepared => "prepared",
+            Self::SwitchConfirmed => "switch_confirmed",
+            Self::Observing => "observing",
+            Self::ObservationPassed => "observation_passed",
+            Self::RollbackRequired => "rollback_required",
             Self::Failed => "failed",
         }
     }
@@ -305,6 +313,16 @@ pub struct CutoverExecutionJournal {
     customer_app_id: String,
     pub state: CutoverExecutionState,
     #[serde(default)]
+    pub switch_confirmed_at_unix_seconds: Option<u64>,
+    #[serde(default)]
+    pub observation_started_at_unix_seconds: Option<u64>,
+    #[serde(default)]
+    pub observation_base_url: Option<String>,
+    #[serde(default)]
+    pub last_probe_at_unix_seconds: Option<u64>,
+    #[serde(default)]
+    pub last_probe_failures: Vec<String>,
+    #[serde(default)]
     pub steps: Vec<CutoverStepRecord>,
 }
 
@@ -314,6 +332,11 @@ impl CutoverExecutionJournal {
             run_id: run_id.to_string(),
             customer_app_id: customer_app_id.to_string(),
             state: CutoverExecutionState::Planned,
+            switch_confirmed_at_unix_seconds: None,
+            observation_started_at_unix_seconds: None,
+            observation_base_url: None,
+            last_probe_at_unix_seconds: None,
+            last_probe_failures: Vec::new(),
             steps,
         }
     }
@@ -427,6 +450,45 @@ impl CutoverExecutionJournal {
         self.state = CutoverExecutionState::Prepared;
     }
 
+    pub fn confirm_switch(&mut self, base_url: impl Into<String>, at_unix_seconds: u64) {
+        self.switch_confirmed_at_unix_seconds = Some(at_unix_seconds);
+        self.observation_base_url = Some(base_url.into());
+        if self.state == CutoverExecutionState::Prepared {
+            self.state = CutoverExecutionState::SwitchConfirmed;
+        }
+    }
+
+    pub fn begin_observation(&mut self, base_url: impl Into<String>, at_unix_seconds: u64) {
+        self.confirm_switch(base_url.into(), at_unix_seconds);
+        if self.observation_started_at_unix_seconds.is_none() {
+            self.observation_started_at_unix_seconds = Some(at_unix_seconds);
+        }
+        self.last_probe_at_unix_seconds = Some(at_unix_seconds);
+        self.last_probe_failures.clear();
+        self.state = CutoverExecutionState::Observing;
+    }
+
+    pub fn mark_observation_passed(&mut self, at_unix_seconds: u64) {
+        self.last_probe_at_unix_seconds = Some(at_unix_seconds);
+        self.last_probe_failures.clear();
+        self.state = CutoverExecutionState::ObservationPassed;
+    }
+
+    pub fn mark_rollback_required(
+        &mut self,
+        base_url: impl Into<String>,
+        at_unix_seconds: u64,
+        failures: Vec<String>,
+    ) {
+        self.confirm_switch(base_url.into(), at_unix_seconds);
+        if self.observation_started_at_unix_seconds.is_none() {
+            self.observation_started_at_unix_seconds = Some(at_unix_seconds);
+        }
+        self.last_probe_at_unix_seconds = Some(at_unix_seconds);
+        self.last_probe_failures = failures;
+        self.state = CutoverExecutionState::RollbackRequired;
+    }
+
     pub fn command_report(&self) -> Result<CommandReport, ImportModelError> {
         let mut report = CommandReport::new(
             ["import", "cutover"],
@@ -438,11 +500,16 @@ impl CutoverExecutionJournal {
         )?
         .with_columns(["step", "status", "description", "detail"])?;
         report = report.with_status(match self.state {
-            CutoverExecutionState::Prepared => ReportStatus::Ok,
-            CutoverExecutionState::Failed => ReportStatus::Unsafe,
-            CutoverExecutionState::Planned | CutoverExecutionState::FreezeConfirmed => {
-                ReportStatus::Warning
+            CutoverExecutionState::Prepared | CutoverExecutionState::ObservationPassed => {
+                ReportStatus::Ok
             }
+            CutoverExecutionState::RollbackRequired | CutoverExecutionState::Failed => {
+                ReportStatus::Unsafe
+            }
+            CutoverExecutionState::Planned
+            | CutoverExecutionState::FreezeConfirmed
+            | CutoverExecutionState::SwitchConfirmed
+            | CutoverExecutionState::Observing => ReportStatus::Warning,
         });
 
         for step in &self.steps {

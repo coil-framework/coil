@@ -104,6 +104,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
     let mut dry_run = false;
     let mut confirmed = false;
     let mut apply_cutover = false;
+    let mut observe_cutover = false;
+    let mut cutover_base_url: Option<String> = None;
     let mut legacy_freeze_confirmed = false;
     let mut verify_policy = false;
     let mut cache_scope: Option<String> = None;
@@ -123,6 +125,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             "--dry-run" => dry_run = true,
             "--yes" => confirmed = true,
             "--apply" => apply_cutover = true,
+            "--observe" => observe_cutover = true,
+            "--base-url" => {
+                cutover_base_url = Some(next_value(&mut iter, "--base-url")?);
+            }
             "--legacy-freeze-confirmed" => legacy_freeze_confirmed = true,
             "--policy" => verify_policy = true,
             "--scope" => {
@@ -369,6 +375,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 invocation: ImportCutoverInvocation {
                     manifest_path: PathBuf::from(manifest_path),
                     apply: apply_cutover,
+                    observe: observe_cutover,
+                    base_url: cutover_base_url,
                     confirmed,
                     legacy_freeze_confirmed,
                 },
@@ -595,6 +603,43 @@ mod tests {
         assert!(invocation.apply);
         assert!(invocation.confirmed);
         assert!(invocation.legacy_freeze_confirmed);
+        assert!(!invocation.observe);
+        assert_eq!(invocation.base_url, None);
+    }
+
+    #[test]
+    fn parse_import_cutover_accepts_observation_inputs() {
+        let input = parse([
+            "import".to_string(),
+            "cutover".to_string(),
+            "imports/wordpress-events.toml".to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            "https://shop.example.com".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ImportCutover {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected import cutover input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Human);
+        assert_eq!(
+            invocation.manifest_path,
+            PathBuf::from("imports/wordpress-events.toml")
+        );
+        assert!(!invocation.apply);
+        assert!(invocation.observe);
+        assert_eq!(
+            invocation.base_url.as_deref(),
+            Some("https://shop.example.com")
+        );
+        assert!(invocation.confirmed);
     }
 
     #[test]

@@ -18,6 +18,7 @@ use davenda_auth::{
     configured_auth_model_package,
 };
 use davenda_cache::CacheInstant;
+use davenda_commerce::EntitlementKey;
 use davenda_config::{PlatformConfig, StorageClass};
 use davenda_data::{
     DataValue, MigrationPlan, MigrationRegistry, MutationAction, MutationSpec, PostgresDataClient,
@@ -26,6 +27,10 @@ use davenda_import::{
     CutoverCheck, CutoverExecutionJournal, CutoverPlan, CutoverStepRecord, ImportManifest,
     ImportModelError, PublicationMode, RollbackTrigger,
 };
+use davenda_memberships::{
+    BillingInterval, MemberAccountId, MembershipTierId, SubscriptionId, SubscriptionStatus,
+    TierVisibility,
+};
 use davenda_runtime::{
     CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod, RequestInput,
     RuntimeBuilder, StorageHost,
@@ -33,11 +38,14 @@ use davenda_runtime::{
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
+use reqwest::Url;
+use reqwest::blocking::Client as BlockingHttpClient;
+use reqwest::redirect::Policy as RedirectPolicy;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliApplication {
@@ -307,6 +315,7 @@ fn usage() -> String {
         "  platform assets publish [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform import run <manifest-path> [--dry-run] [--json]",
         "  platform import cutover <manifest-path> [--apply] [--yes] [--legacy-freeze-confirmed] [--json]",
+        "  platform import cutover <manifest-path> --observe --base-url <url> --yes [--json]",
         "",
         "Examples:",
         "  platform dev server --config config/platform.toml",
@@ -323,6 +332,7 @@ fn usage() -> String {
         "  platform import run imports/wordpress-events.toml --dry-run",
         "  platform import cutover imports/wordpress-events.toml",
         "  platform import cutover imports/wordpress-events.toml --apply --yes --legacy-freeze-confirmed",
+        "  platform import cutover imports/wordpress-events.toml --observe --base-url https://shop.example.com --yes",
         "",
         "Environment:",
         "  DAVENDA_COOKIE_SECRET and DAVENDA_CSRF_SECRET are required for `dev server`",
@@ -348,6 +358,7 @@ struct BuiltImportRuntimeContext {
 struct LiveImportAuthContext {
     auth: DavendaAuth<zanzibar::postgres::PostgresRebacEngine>,
     site_id: Option<String>,
+    storefront_id: String,
 }
 
 fn run_migrate_apply(
@@ -993,7 +1004,12 @@ fn run_import_manifest(
                 .ordered_importers
                 .iter()
                 .any(|importer| matches!(importer.resource_kind.as_str(), "user" | "subscription"));
-        if requires_live_auth && manifest.site.is_none() {
+        let requires_live_site_auth = publish_validated
+            && plan
+                .ordered_importers
+                .iter()
+                .any(|importer| importer.resource_kind == "user");
+        if requires_live_site_auth && manifest.site.is_none() {
             return Err(CliRunError::execution(format!(
                 "publish-validated import manifest `{}` requires `site` to materialize live auth state",
                 invocation.manifest_path.display()
@@ -1136,6 +1152,14 @@ struct EvaluatedImportCutover {
 
 fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandReport, CliRunError> {
     let evaluated = evaluate_import_cutover(invocation)?;
+    if invocation.apply && invocation.observe {
+        return Err(CliRunError::usage(
+            "`import cutover` accepts either `--apply` or `--observe`, not both",
+        ));
+    }
+    if invocation.observe {
+        return observe_import_cutover(invocation, &evaluated);
+    }
     if !invocation.apply {
         return Ok(evaluated.report);
     }
@@ -1327,6 +1351,202 @@ fn run_import_cutover(invocation: &ImportCutoverInvocation) -> Result<CommandRep
         "Cutover preparation for import run `{}` into customer app `{}` is prepared",
         evaluated.manifest.run_id, evaluated.manifest.customer_app_id
     );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.journal",
+        format!("cutover journal persisted at `{}`", journal_path.display()),
+    )?;
+    Ok(report)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObservedCutoverRoute {
+    route: String,
+    status_code: u16,
+    outcome: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CutoverObservationProbe {
+    health_status: String,
+    readiness_status: String,
+    maintenance_enabled: bool,
+    routes: Vec<ObservedCutoverRoute>,
+    failures: Vec<String>,
+}
+
+fn observe_import_cutover(
+    invocation: &ImportCutoverInvocation,
+    evaluated: &EvaluatedImportCutover,
+) -> Result<CommandReport, CliRunError> {
+    if !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`import cutover --observe` requires `--yes`",
+        ));
+    }
+    let base_url = invocation.base_url.as_ref().ok_or_else(|| {
+        CliRunError::usage("`import cutover --observe` requires `--base-url <url>`")
+    })?;
+    let observation_window_minutes = evaluated
+        .cutover
+        .observation_window_minutes
+        .unwrap_or_default();
+    let sample_routes = evaluated
+        .manifest
+        .verification
+        .as_ref()
+        .map(|verification| verification.sample_routes.clone())
+        .unwrap_or_default();
+    if sample_routes.is_empty() {
+        return Err(CliRunError::execution(
+            "cutover observation requires `[verification].sample_routes` so live public routes can be probed"
+                .to_string(),
+        ));
+    }
+
+    let journal_path = cutover_journal_path(&invocation.manifest_path, &evaluated.manifest.run_id);
+    let expected_steps = cutover_steps(&evaluated.cutover)?;
+    let mut journal = CutoverExecutionJournal::load(
+        &journal_path,
+        &evaluated.manifest.run_id,
+        evaluated.manifest.customer_app_id.as_str(),
+        expected_steps,
+    )
+    .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load cutover journal for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+
+    match journal.state {
+        davenda_import::CutoverExecutionState::Prepared
+        | davenda_import::CutoverExecutionState::SwitchConfirmed
+        | davenda_import::CutoverExecutionState::Observing
+        | davenda_import::CutoverExecutionState::ObservationPassed
+        | davenda_import::CutoverExecutionState::RollbackRequired => {}
+        _ => {
+            return Err(CliRunError::execution(format!(
+                "cutover `{}` must be prepared with `platform import cutover {} --apply --yes` before observation can start",
+                evaluated.manifest.run_id,
+                invocation.manifest_path.display()
+            )));
+        }
+    }
+
+    let probe_time = unix_timestamp_now()?;
+    run_cutover_step(
+        &mut journal,
+        &journal_path,
+        &evaluated.manifest.run_id,
+        "switch.confirmed",
+        || Ok(format!("operator confirmed live switch to `{base_url}`")),
+    )?;
+    journal.begin_observation(base_url.clone(), probe_time);
+    save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
+
+    let client = build_cutover_probe_client()?;
+    let probe = execute_cutover_observation_probe(&client, base_url, &sample_routes)?;
+
+    if !probe.failures.is_empty() {
+        journal
+            .mark_step_failed(
+                "cutover.observe",
+                format!(
+                    "live observation failed against `{base_url}`: {}",
+                    probe.failures.join("; ")
+                ),
+            )
+            .map_err(import_model_error)?;
+        journal.mark_rollback_required(base_url.clone(), probe_time, probe.failures.clone());
+        save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
+        return Err(CliRunError::execution(format!(
+            "cutover `{}` requires rollback review: {}",
+            evaluated.manifest.run_id,
+            probe.failures.join("; ")
+        )));
+    }
+
+    let observation_started_at = journal
+        .observation_started_at_unix_seconds
+        .unwrap_or(probe_time);
+    let elapsed_seconds = probe_time.saturating_sub(observation_started_at);
+    let required_seconds = observation_window_minutes.saturating_mul(60) as u64;
+    let window_elapsed = elapsed_seconds >= required_seconds;
+    if window_elapsed {
+        journal.mark_observation_passed(probe_time);
+        journal
+            .mark_step_completed(
+                "cutover.observe",
+                format!(
+                    "live observation stayed green for {} minute(s) against `{base_url}`",
+                    observation_window_minutes
+                ),
+            )
+            .map_err(import_model_error)?;
+    } else {
+        journal.begin_observation(base_url.clone(), probe_time);
+    }
+    save_cutover_journal(&journal, &journal_path, &evaluated.manifest.run_id)?;
+
+    let mut report = journal.command_report().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to render cutover observation report for `{}`: {error}",
+            evaluated.manifest.run_id
+        ))
+    })?;
+    report.summary = if window_elapsed {
+        format!(
+            "Cutover observation for import run `{}` passed against `{}`",
+            evaluated.manifest.run_id, base_url
+        )
+    } else {
+        format!(
+            "Cutover observation for import run `{}` remains in progress with {} second(s) remaining against `{}`",
+            evaluated.manifest.run_id,
+            required_seconds.saturating_sub(elapsed_seconds),
+            base_url
+        )
+    };
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.observe.base_url",
+        format!("observing live traffic through `{base_url}`"),
+    )?;
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "cutover.observe.health",
+        format!(
+            "health=`{}`, readiness=`{}`, maintenance_enabled={}",
+            probe.health_status, probe.readiness_status, probe.maintenance_enabled
+        ),
+    )?;
+    for route in &probe.routes {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "cutover.observe.route",
+            format!(
+                "route `{}` returned {} ({})",
+                route.route, route.status_code, route.outcome
+            ),
+        )?;
+    }
+    if !window_elapsed {
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "cutover.observe.window",
+            format!(
+                "observation window started at {} and still has {} second(s) remaining",
+                observation_started_at,
+                required_seconds.saturating_sub(elapsed_seconds)
+            ),
+        )?;
+    }
     push_report_diagnostic(
         &mut report,
         DiagnosticSeverity::Info,
@@ -1630,6 +1850,20 @@ fn cutover_steps(
         )
         .map_err(import_model_error)?,
     );
+    steps.push(
+        CutoverStepRecord::new(
+            "switch.confirmed",
+            "The operator confirmed that live routing or edge traffic now targets the new platform",
+        )
+        .map_err(import_model_error)?,
+    );
+    steps.push(
+        CutoverStepRecord::new(
+            "cutover.observe",
+            "The live system remained healthy across the declared post-switch observation window",
+        )
+        .map_err(import_model_error)?,
+    );
     Ok(steps)
 }
 
@@ -1673,6 +1907,134 @@ fn save_cutover_journal(
         CliRunError::execution(format!(
             "failed to persist cutover journal for `{run_id}`: {error}"
         ))
+    })
+}
+
+fn build_cutover_probe_client() -> Result<BlockingHttpClient, CliRunError> {
+    BlockingHttpClient::builder()
+        .timeout(Duration::from_secs(5))
+        .redirect(RedirectPolicy::limited(5))
+        .build()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build HTTP client for cutover observation: {error}"
+            ))
+        })
+}
+
+fn execute_cutover_observation_probe(
+    client: &BlockingHttpClient,
+    base_url: &str,
+    sample_routes: &[String],
+) -> Result<CutoverObservationProbe, CliRunError> {
+    let base = Url::parse(base_url).map_err(|error| {
+        CliRunError::execution(format!(
+            "cutover observation base URL `{base_url}` is invalid: {error}"
+        ))
+    })?;
+    let ready = execute_observation_json_probe(client, &base, "/ready")?;
+    let health = execute_observation_json_probe(client, &base, "/health")?;
+    let maintenance_enabled = health
+        .body
+        .get("maintenance")
+        .and_then(|value| value.get("enabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut failures = Vec::new();
+    if ready.status_code != 200 || ready.status != "healthy" {
+        failures.push(format!(
+            "`/ready` returned {} with status `{}`",
+            ready.status_code, ready.status
+        ));
+    }
+    if health.status_code != 200 || health.status != "healthy" {
+        failures.push(format!(
+            "`/health` returned {} with status `{}`",
+            health.status_code, health.status
+        ));
+    }
+    if maintenance_enabled {
+        failures.push("maintenance mode is unexpectedly enabled during observation".to_string());
+    }
+
+    let mut routes = Vec::new();
+    for route in sample_routes {
+        let url = base.join(route).map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to resolve cutover observation route `{route}` against `{base_url}`: {error}"
+            ))
+        })?;
+        let response = client.get(url.clone()).send().map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to probe cutover route `{}` at `{}`: {error}",
+                route, url
+            ))
+        })?;
+        let status_code = response.status().as_u16();
+        let outcome = if (200..400).contains(&status_code) {
+            "healthy".to_string()
+        } else {
+            failures.push(format!(
+                "route `{route}` returned unexpected status {} during live observation",
+                status_code
+            ));
+            "unexpected_status".to_string()
+        };
+        routes.push(ObservedCutoverRoute {
+            route: route.clone(),
+            status_code,
+            outcome,
+        });
+    }
+
+    Ok(CutoverObservationProbe {
+        health_status: health.status,
+        readiness_status: ready.status,
+        maintenance_enabled,
+        routes,
+        failures,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObservationJsonProbe {
+    status_code: u16,
+    status: String,
+    body: Value,
+}
+
+fn execute_observation_json_probe(
+    client: &BlockingHttpClient,
+    base: &Url,
+    path: &str,
+) -> Result<ObservationJsonProbe, CliRunError> {
+    let url = base.join(path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to resolve cutover observation endpoint `{path}`: {error}"
+        ))
+    })?;
+    let response = client.get(url.clone()).send().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to probe cutover endpoint `{}`: {error}",
+            url
+        ))
+    })?;
+    let status_code = response.status().as_u16();
+    let body = response.json::<Value>().map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to parse JSON response from cutover endpoint `{}`: {error}",
+            url
+        ))
+    })?;
+    let status = body
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    Ok(ObservationJsonProbe {
+        status_code,
+        status,
+        body,
     })
 }
 
@@ -2113,6 +2475,13 @@ fn read_runtime_secret(var: &str) -> Result<String, CliRunError> {
     })
 }
 
+fn unix_timestamp_now() -> Result<u64, CliRunError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|error| CliRunError::execution(format!("failed to calculate timestamp: {error}")))
+}
+
 fn import_journal_path(manifest_path: &Path, run_id: &impl std::fmt::Display) -> PathBuf {
     let parent = manifest_path
         .parent()
@@ -2276,6 +2645,7 @@ fn build_import_auth_context(
     Ok(LiveImportAuthContext {
         auth,
         site_id: manifest.site.clone(),
+        storefront_id: runtime.built.manifest.id.to_string(),
     })
 }
 
@@ -2807,7 +3177,8 @@ fn materialize_subscription_record(
     auth_context: &LiveImportAuthContext,
     staged_record: &mut Value,
 ) -> Result<(), ImportModelError> {
-    let (mutations, auth_updates, persisted) = subscription_import_persistence(staged_record)?;
+    let (mutations, auth_updates, persisted) =
+        subscription_import_persistence(staged_record, &auth_context.storefront_id)?;
     for mutation in mutations {
         let statement = mutation.compile(1).map_err(import_data_model_error)?;
         tokio_runtime
@@ -3060,7 +3431,12 @@ fn event_import_mutation(staged_record: &Value) -> Result<(MutationSpec, Value),
 fn membership_tier_import_mutation(
     staged_record: &Value,
 ) -> Result<(MutationSpec, Value), ImportModelError> {
+    let source_system = required_staged_string(staged_record, "source_system")?;
+    let source_key = required_staged_string(staged_record, "source_key")?;
     let target_id = required_staged_string(staged_record, "target_id")?;
+    MembershipTierId::new(target_id.clone()).map_err(import_membership_model_error)?;
+    let batch_id = required_staged_string(staged_record, "checksum")?;
+    let fingerprint = required_staged_string(staged_record, "checksum")?;
     let normalized = staged_record
         .get("normalized")
         .and_then(Value::as_object)
@@ -3069,12 +3445,47 @@ fn membership_tier_import_mutation(
                 .to_string(),
         })?;
     let title = required_normalized_string(normalized, "title")?;
+    let entitlement_key =
+        EntitlementKey::new(required_normalized_string(normalized, "entitlement_key")?).map_err(
+            |error| ImportModelError::ManifestParse {
+                message: error.to_string(),
+            },
+        )?;
+    let rank = optional_normalized_u64(normalized, "rank")?.unwrap_or_default();
+    let interval = parse_billing_interval(required_normalized_string(normalized, "interval")?)?;
+    let grace_period_days =
+        optional_normalized_u64(normalized, "grace_period_days")?.unwrap_or_default();
+    let visibility = parse_tier_visibility(required_normalized_string(normalized, "visibility")?)?;
     let status = required_normalized_string(normalized, "status")?;
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to calculate membership tier update timestamp: {error}"),
+        })?
+        .as_secs();
 
     let mutation = MutationSpec::new("membership_tiers", MutationAction::Upsert)
         .and_then(|mutation| mutation.with_assignment("id", target_id.clone()))
         .and_then(|mutation| mutation.with_assignment("name", title))
+        .and_then(|mutation| {
+            mutation.with_assignment("entitlement_key", entitlement_key.to_string())
+        })
+        .and_then(|mutation| mutation.with_assignment("rank", DataValue::UInt(rank)))
+        .and_then(|mutation| {
+            mutation.with_assignment("interval", render_billing_interval(interval))
+        })
+        .and_then(|mutation| {
+            mutation.with_assignment("grace_period_days", DataValue::UInt(grace_period_days))
+        })
+        .and_then(|mutation| {
+            mutation.with_assignment("visibility", render_tier_visibility(visibility))
+        })
         .and_then(|mutation| mutation.with_assignment("status", status.clone()))
+        .and_then(|mutation| mutation.with_assignment("source_system", source_system))
+        .and_then(|mutation| mutation.with_assignment("source_key", source_key))
+        .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id))
+        .and_then(|mutation| mutation.with_assignment("fingerprint", fingerprint))
+        .and_then(|mutation| mutation.with_assignment("updated_at", DataValue::UInt(updated_at)))
         .and_then(|mutation| mutation.on_conflict_field("id"))
         .map_err(import_data_model_error)?;
 
@@ -3084,14 +3495,21 @@ fn membership_tier_import_mutation(
             "table": "membership_tiers",
             "tier_id": target_id,
             "status": status,
+            "updated_at": updated_at,
         }),
     ))
 }
 
 fn subscription_import_persistence(
     staged_record: &Value,
+    storefront_id: &str,
 ) -> Result<(Vec<MutationSpec>, Vec<DefaultTupleUpdate>, Value), ImportModelError> {
+    let source_system = required_staged_string(staged_record, "source_system")?;
+    let source_key = required_staged_string(staged_record, "source_key")?;
     let target_id = required_staged_string(staged_record, "target_id")?;
+    SubscriptionId::new(target_id.clone()).map_err(import_membership_model_error)?;
+    let batch_id = required_staged_string(staged_record, "checksum")?;
+    let fingerprint = required_staged_string(staged_record, "checksum")?;
     let normalized = staged_record
         .get("normalized")
         .and_then(Value::as_object)
@@ -3099,40 +3517,88 @@ fn subscription_import_persistence(
             message: "staged subscription record is missing `normalized` object data".to_string(),
         })?;
     let tier_id = required_normalized_string(normalized, "tier_id")?;
+    MembershipTierId::new(tier_id.clone()).map_err(import_membership_model_error)?;
     let principal_id = required_normalized_string(normalized, "principal_id")?;
-    let status = required_normalized_string(normalized, "status")?;
-    let entitlement_key = required_normalized_string(normalized, "entitlement_key")?;
+    MemberAccountId::new(principal_id.clone()).map_err(import_membership_model_error)?;
+    let status = parse_subscription_status(required_normalized_string(normalized, "status")?)?;
+    let entitlement_key =
+        EntitlementKey::new(required_normalized_string(normalized, "entitlement_key")?).map_err(
+            |error| ImportModelError::ManifestParse {
+                message: error.to_string(),
+            },
+        )?;
     let entitlement_id = required_normalized_string(normalized, "entitlement_id")?;
-    let active = normalized
-        .get("active")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| ImportModelError::ManifestParse {
-            message: "staged subscription record is missing `normalized.active`".to_string(),
-        })?;
-    let renews_at = optional_normalized_u64(normalized, "renews_at")?;
+    let active = required_normalized_bool(normalized, "active")?;
+    let renews_at = required_normalized_u64(normalized, "renews_at")?;
+    let grace_period_ends_at = optional_normalized_u64(normalized, "grace_period_ends_at")?;
+    if matches!(status, SubscriptionStatus::InGracePeriod) && grace_period_ends_at.is_none() {
+        return Err(ImportModelError::ManifestParse {
+            message:
+                "staged subscription record in grace period requires `normalized.grace_period_ends_at`"
+                    .to_string(),
+        });
+    }
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ImportModelError::ManifestParse {
+            message: format!("failed to calculate subscription update timestamp: {error}"),
+        })?
+        .as_secs();
 
     let subscription_mutation =
         MutationSpec::new("membership_subscriptions", MutationAction::Upsert)
             .and_then(|mutation| mutation.with_assignment("id", target_id.clone()))
+            .and_then(|mutation| mutation.with_assignment("member_id", principal_id.clone()))
             .and_then(|mutation| mutation.with_assignment("tier_id", tier_id.clone()))
-            .and_then(|mutation| mutation.with_assignment("status", status.clone()))
+            .and_then(|mutation| mutation.with_assignment("status", status.to_string()))
             .and_then(|mutation| {
-                mutation.with_assignment("renews_at", renews_at.unwrap_or_default())
+                mutation.with_assignment("entitlement_key", entitlement_key.to_string())
+            })
+            .and_then(|mutation| mutation.with_assignment("renews_at", DataValue::UInt(renews_at)))
+            .and_then(|mutation| {
+                mutation.with_assignment(
+                    "grace_period_ends_at",
+                    DataValue::UInt(grace_period_ends_at.unwrap_or_default()),
+                )
+            })
+            .and_then(|mutation| {
+                mutation.with_assignment("cancel_at_period_end", DataValue::Bool(false))
+            })
+            .and_then(|mutation| mutation.with_assignment("source_system", source_system.clone()))
+            .and_then(|mutation| mutation.with_assignment("source_key", source_key.clone()))
+            .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id.clone()))
+            .and_then(|mutation| mutation.with_assignment("fingerprint", fingerprint.clone()))
+            .and_then(|mutation| {
+                mutation.with_assignment("updated_at", DataValue::UInt(updated_at))
             })
             .and_then(|mutation| mutation.on_conflict_field("id"))
             .map_err(import_data_model_error)?;
     let entitlement_mutation = MutationSpec::new("membership_entitlements", MutationAction::Upsert)
         .and_then(|mutation| mutation.with_assignment("id", entitlement_id.clone()))
         .and_then(|mutation| mutation.with_assignment("subscription_id", target_id.clone()))
-        .and_then(|mutation| mutation.with_assignment("entitlement_key", entitlement_key.clone()))
-        .and_then(|mutation| mutation.with_assignment("active", active))
+        .and_then(|mutation| {
+            mutation.with_assignment("entitlement_key", entitlement_key.to_string())
+        })
+        .and_then(|mutation| mutation.with_assignment("active", DataValue::Bool(active)))
+        .and_then(|mutation| mutation.with_assignment("source_system", source_system))
+        .and_then(|mutation| mutation.with_assignment("source_key", source_key))
+        .and_then(|mutation| mutation.with_assignment("import_batch_id", batch_id))
+        .and_then(|mutation| mutation.with_assignment("updated_at", DataValue::UInt(updated_at)))
         .and_then(|mutation| mutation.on_conflict_field("id"))
         .map_err(import_data_model_error)?;
-    let auth_updates = vec![DefaultTupleUpdate::Write(DefaultTuple::new(
-        Entity::subscription(target_id.clone()),
-        Relation::Owner,
-        DefaultSubject::entity(Entity::user(principal_id.clone())),
-    ))];
+    let auth_updates = vec![
+        DefaultTupleUpdate::Write(DefaultTuple::new(
+            Entity::subscription(target_id.clone()),
+            Relation::Storefront,
+            DefaultSubject::entity(Entity::storefront(storefront_id.to_string())),
+        )),
+        DefaultTupleUpdate::Write(DefaultTuple::new(
+            Entity::subscription(target_id.clone()),
+            Relation::Owner,
+            DefaultSubject::entity(Entity::user(principal_id.clone())),
+        )),
+    ];
+    let auth_write_count = auth_updates.len();
 
     Ok((
         vec![subscription_mutation, entitlement_mutation],
@@ -3142,21 +3608,24 @@ fn subscription_import_persistence(
                 "table": "membership_subscriptions",
                 "subscription_id": target_id,
                 "tier_id": tier_id,
-                "status": status,
+                "status": status.to_string(),
                 "renews_at": renews_at,
+                "grace_period_ends_at": grace_period_ends_at,
+                "updated_at": updated_at,
             },
             {
                 "table": "membership_entitlements",
                 "entitlement_id": entitlement_id,
                 "subscription_id": target_id,
-                "entitlement_key": entitlement_key,
+                "entitlement_key": entitlement_key.to_string(),
                 "active": active,
+                "updated_at": updated_at,
             },
             {
                 "table": "auth_tuples",
                 "principal_id": principal_id,
                 "subscription_id": target_id,
-                "writes": 1,
+                "writes": auth_write_count,
             }
         ]),
     ))
@@ -3230,6 +3699,27 @@ fn optional_normalized_u64(
     }
 }
 
+fn required_normalized_u64(
+    record: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<u64, ImportModelError> {
+    optional_normalized_u64(record, field)?.ok_or_else(|| ImportModelError::ManifestParse {
+        message: format!("staged import record is missing `normalized.{field}`"),
+    })
+}
+
+fn required_normalized_bool(
+    record: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<bool, ImportModelError> {
+    record
+        .get(field)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ImportModelError::ManifestParse {
+            message: format!("staged import record is missing `normalized.{field}`"),
+        })
+}
+
 fn optional_object_string(
     object: &serde_json::Map<String, Value>,
     field: &str,
@@ -3249,6 +3739,73 @@ fn optional_object_string(
 fn import_data_model_error(error: davenda_data::DataModelError) -> ImportModelError {
     ImportModelError::ManifestParse {
         message: error.to_string(),
+    }
+}
+
+fn import_membership_model_error(
+    error: davenda_memberships::MembershipModelError,
+) -> ImportModelError {
+    ImportModelError::ManifestParse {
+        message: error.to_string(),
+    }
+}
+
+fn parse_billing_interval(value: String) -> Result<BillingInterval, ImportModelError> {
+    match value.as_str() {
+        "monthly" => Ok(BillingInterval::Monthly),
+        "quarterly" => Ok(BillingInterval::Quarterly),
+        "annual" => Ok(BillingInterval::Annual),
+        _ => value
+            .strip_prefix("custom_days:")
+            .and_then(|days| days.parse::<u16>().ok())
+            .map(BillingInterval::CustomDays)
+            .ok_or_else(|| ImportModelError::ManifestParse {
+                message: format!(
+                    "membership tier interval `{value}` must be `monthly`, `quarterly`, `annual`, or `custom_days:<days>`"
+                ),
+            }),
+    }
+}
+
+fn render_billing_interval(interval: BillingInterval) -> String {
+    match interval {
+        BillingInterval::Monthly => "monthly".to_string(),
+        BillingInterval::Quarterly => "quarterly".to_string(),
+        BillingInterval::Annual => "annual".to_string(),
+        BillingInterval::CustomDays(days) => format!("custom_days:{days}"),
+    }
+}
+
+fn parse_tier_visibility(value: String) -> Result<TierVisibility, ImportModelError> {
+    match value.as_str() {
+        "public" => Ok(TierVisibility::Public),
+        "invite_only" => Ok(TierVisibility::InviteOnly),
+        "staff_managed" => Ok(TierVisibility::StaffManaged),
+        _ => Err(ImportModelError::ManifestParse {
+            message: format!(
+                "membership tier visibility `{value}` must be `public`, `invite_only`, or `staff_managed`"
+            ),
+        }),
+    }
+}
+
+fn render_tier_visibility(visibility: TierVisibility) -> &'static str {
+    match visibility {
+        TierVisibility::Public => "public",
+        TierVisibility::InviteOnly => "invite_only",
+        TierVisibility::StaffManaged => "staff_managed",
+    }
+}
+
+fn parse_subscription_status(value: String) -> Result<SubscriptionStatus, ImportModelError> {
+    match value.as_str() {
+        "active" => Ok(SubscriptionStatus::Active),
+        "in_grace_period" => Ok(SubscriptionStatus::InGracePeriod),
+        _ => Err(ImportModelError::ManifestParse {
+            message: format!(
+                "subscription status `{value}` is not supported by the current live import path"
+            ),
+        }),
     }
 }
 
@@ -3380,6 +3937,68 @@ mod tests {
         }
     }
 
+    struct LiveProbeTestServer {
+        base_url: String,
+        stop: Arc<AtomicBool>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl LiveProbeTestServer {
+        fn spawn(
+            health_status: &'static str,
+            readiness_status: &'static str,
+            maintenance_enabled: bool,
+            routes: BTreeMap<String, u16>,
+        ) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let stop = Arc::new(AtomicBool::new(false));
+            let routes = Arc::new(routes);
+            let stop_thread = Arc::clone(&stop);
+            let routes_thread = Arc::clone(&routes);
+            let handle = thread::spawn(move || {
+                loop {
+                    if stop_thread.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    match listener.accept() {
+                        Ok((stream, _)) => handle_live_probe_request(
+                            stream,
+                            health_status,
+                            readiness_status,
+                            maintenance_enabled,
+                            &routes_thread,
+                        ),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("live probe test server failed: {error}"),
+                    }
+                }
+            });
+
+            Self {
+                base_url,
+                stop,
+                handle: Some(handle),
+            }
+        }
+
+        fn base_url(&self) -> &str {
+            &self.base_url
+        }
+    }
+
+    impl Drop for LiveProbeTestServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
     struct CustomerAppAssetFixture {
         config_path: PathBuf,
         _server: ObjectStoreTestServer,
@@ -3453,6 +4072,68 @@ mod tests {
         };
         let response = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{etag_header}Connection: close\r\n\r\n",
+            response_body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+        if !response_body.is_empty() {
+            stream.write_all(&response_body).unwrap();
+        }
+    }
+
+    fn handle_live_probe_request(
+        mut stream: std::net::TcpStream,
+        health_status: &str,
+        readiness_status: &str,
+        maintenance_enabled: bool,
+        routes: &BTreeMap<String, u16>,
+    ) {
+        stream.set_nonblocking(false).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        let path = request_line
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or("/")
+            .split('?')
+            .next()
+            .unwrap_or("/");
+
+        let (status, content_type, response_body) = match path {
+            "/health" => (
+                "200 OK",
+                "application/json",
+                serde_json::json!({
+                    "status": health_status,
+                    "maintenance": { "enabled": maintenance_enabled }
+                })
+                .to_string()
+                .into_bytes(),
+            ),
+            "/ready" | "/readiness" => (
+                "200 OK",
+                "application/json",
+                serde_json::json!({ "status": readiness_status })
+                    .to_string()
+                    .into_bytes(),
+            ),
+            route => {
+                let status = match routes.get(route).copied().unwrap_or(404) {
+                    200 => "200 OK",
+                    302 => "302 Found",
+                    500 => "500 Internal Server Error",
+                    _ => "404 Not Found",
+                };
+                (
+                    status,
+                    "text/html; charset=utf-8",
+                    format!("<html><body>{route}</body></html>").into_bytes(),
+                )
+            }
+        };
+
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             response_body.len()
         );
         stream.write_all(response.as_bytes()).unwrap();
@@ -3833,6 +4514,59 @@ dependencies = ["users", "media"]
             _server: object_store_server,
             object_store_env_var,
         }
+    }
+
+    fn write_cutover_observe_manifest(
+        fixture: &ImportFixture,
+        name: &str,
+        observation_window_minutes: u32,
+    ) -> PathBuf {
+        let manifest_path = fixture.root.join("imports").join(name);
+        write_test_file(
+            &manifest_path,
+            &format!(
+                r#"
+run_id = "wordpress-events"
+source_system = "wordpress"
+snapshot_at = "2026-03-19T00:00:00Z"
+customer_app_id = "showcase-events"
+modules = ["media"]
+publication_mode = "publish_validated"
+asset_storage_default = "public_upload"
+
+[target]
+app_manifest = "../apps/showcase-events/app.toml"
+platform_config = "../config/platform.toml"
+expected_modules = ["media"]
+
+[verification]
+required = ["record_counts"]
+sample_routes = ["/", "/events"]
+
+[cutover]
+freeze_legacy_writes = false
+switch_method = "dns"
+hostnames = ["shop.example.com"]
+requires_assets_publish = false
+requires_migrate_apply = false
+requires_storage_validation = false
+requires_cache_warm = false
+observation_window_minutes = {observation_window_minutes}
+
+[[cutover.rollback_triggers]]
+id = "auth-failure"
+description = "Auth failure"
+
+[[importers]]
+id = "media"
+phase = 20
+resource_kind = "asset"
+description = "Import media"
+source_path = "fixtures/media.json"
+"#
+            ),
+        );
+        manifest_path
     }
 
     fn customer_app_fixture_with_assets(publish_manifest: bool) -> CustomerAppAssetFixture {
@@ -4237,6 +4971,126 @@ dependencies = ["users", "media"]
     }
 
     #[test]
+    fn run_from_args_observes_a_prepared_cutover_until_it_passes() {
+        let fixture = import_fixture();
+        let config_path = fixture.root.join("config").join("platform.toml");
+        let app_manifest_path = fixture
+            .root
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&config_path, config).unwrap();
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+        let cutover_manifest =
+            write_cutover_observe_manifest(&fixture, "cutover-observe-pass.toml", 0);
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn(
+            "healthy",
+            "healthy",
+            false,
+            BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 200_u16)]),
+        );
+        let rendered = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("passed against"));
+        assert!(rendered.contains("switch.confirmed"));
+        assert!(rendered.contains("cutover.observe"));
+
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"observation_passed\""));
+        assert!(journal.contains("\"switch_confirmed_at_unix_seconds\""));
+        assert!(journal.contains(probe_server.base_url()));
+    }
+
+    #[test]
+    fn run_from_args_marks_cutover_observation_failures_for_rollback_review() {
+        let fixture = import_fixture();
+        let config_path = fixture.root.join("config").join("platform.toml");
+        let app_manifest_path = fixture
+            .root
+            .join("apps")
+            .join("showcase-events")
+            .join("app.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&config_path, config).unwrap();
+        let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
+            "enabled = [\"cms\", \"media\", \"events\"]",
+            "enabled = [\"cms\", \"media\", \"events\", \"admin\", \"ops\"]",
+        );
+        fs::write(&app_manifest_path, app_manifest).unwrap();
+        let cutover_manifest =
+            write_cutover_observe_manifest(&fixture, "cutover-observe-fail.toml", 0);
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let probe_server = LiveProbeTestServer::spawn(
+            "healthy",
+            "healthy",
+            false,
+            BTreeMap::from([("/".to_string(), 200_u16), ("/events".to_string(), 500_u16)]),
+        );
+        let error = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--observe".to_string(),
+            "--base-url".to_string(),
+            probe_server.base_url().to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("requires rollback review"));
+        let journal_path = cutover_journal_path(
+            &cutover_manifest,
+            &davenda_import::ImportRunId::new("wordpress-events").unwrap(),
+        );
+        let journal = fs::read_to_string(journal_path).unwrap();
+        assert!(journal.contains("\"state\": \"rollback_required\""));
+        assert!(journal.contains("unexpected status 500"));
+    }
+
+    #[test]
     fn run_from_args_requires_legacy_freeze_confirmation_for_cutover_apply() {
         let fixture = import_fixture();
         let cutover_manifest = fixture.root.join("imports").join("cutover-apply.toml");
@@ -4638,9 +5492,15 @@ dependencies = ["users", "media"]
     #[test]
     fn membership_tier_import_mutation_targets_live_membership_tiers_table() {
         let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:tier:gold",
             "target_id": "tier-gold",
+            "checksum": "tier-gold-v1",
             "normalized": {
                 "title": "Gold",
+                "entitlement_key": "membership.gold",
+                "interval": "monthly",
+                "visibility": "public",
                 "status": "active"
             }
         });
@@ -4662,7 +5522,10 @@ dependencies = ["users", "media"]
     #[test]
     fn subscription_import_persistence_targets_membership_tables_and_owner_tuples() {
         let staged = serde_json::json!({
+            "source_system": "wordpress",
+            "source_key": "wp:subscription:gold",
             "target_id": "sub-gold",
+            "checksum": "subscription-gold-v1",
             "normalized": {
                 "tier_id": "tier-gold",
                 "principal_id": "alice",
@@ -4674,7 +5537,8 @@ dependencies = ["users", "media"]
             }
         });
 
-        let (mutations, updates, persisted) = subscription_import_persistence(&staged).unwrap();
+        let (mutations, updates, persisted) =
+            subscription_import_persistence(&staged, "showcase-events").unwrap();
 
         assert_eq!(mutations.len(), 2);
         let compiled_subscription = mutations[0].compile(1).unwrap();
@@ -4689,12 +5553,19 @@ dependencies = ["users", "media"]
                 .sql
                 .contains("\"membership_entitlements\"")
         );
-        assert_eq!(updates.len(), 1);
+        assert_eq!(updates.len(), 2);
         assert!(
             updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
                 Entity::subscription("sub-gold"),
                 Relation::Owner,
                 DefaultSubject::entity(Entity::user("alice")),
+            )))
+        );
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::subscription("sub-gold"),
+                Relation::Storefront,
+                DefaultSubject::entity(Entity::storefront("showcase-events")),
             )))
         );
         assert_eq!(persisted.as_array().unwrap().len(), 3);

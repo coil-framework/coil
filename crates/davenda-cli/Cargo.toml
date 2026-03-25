@@ -24,6 +24,7 @@ davenda-ops = { path = "../davenda-ops" }
 davenda-report = { path = "../davenda-report" }
 davenda-runtime = { path = "../davenda-runtime" }
 davenda-storage = { path = "../davenda-storage" }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde_json = "1.0"
 thiserror = "1.0"
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread"] }

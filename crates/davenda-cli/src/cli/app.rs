@@ -6293,6 +6293,7 @@ fn user_import_updates(
     let site = Entity::site(site_id.to_string());
     let mut updates = Vec::new();
     let mut effective_roles = Vec::new();
+    let mut manual_review_roles = Vec::new();
 
     for role in legacy_roles {
         let role = role
@@ -6325,12 +6326,31 @@ fn user_import_updates(
                 )));
                 effective_roles.push(role.to_string());
             }
-            unsupported => {
-                return Err(ImportModelError::ManifestParse {
-                    message: format!(
-                        "legacy role `{unsupported}` cannot be mapped safely into the shipped auth model yet"
-                    ),
-                });
+            "subscriber" | "customer" => {
+                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
+                    site.clone(),
+                    Relation::Viewer,
+                    DefaultSubject::userset(group, Relation::Member),
+                )));
+                effective_roles.push(role.to_string());
+            }
+            "author" | "contributor" => {
+                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
+                    site.clone(),
+                    Relation::Viewer,
+                    DefaultSubject::userset(group, Relation::Member),
+                )));
+                effective_roles.push(format!("viewer:{role}"));
+                manual_review_roles.push(role.to_string());
+            }
+            other => {
+                updates.push(DefaultTupleUpdate::Write(DefaultTuple::new(
+                    site.clone(),
+                    Relation::Viewer,
+                    DefaultSubject::userset(group, Relation::Member),
+                )));
+                effective_roles.push(format!("viewer:{other}"));
+                manual_review_roles.push(other.to_string());
             }
         }
     }
@@ -6342,6 +6362,8 @@ fn user_import_updates(
             "principal_id": principal_id,
             "site_id": site_id,
             "roles": effective_roles,
+            "manual_review_roles": manual_review_roles,
+            "manual_review_required": !manual_review_roles.is_empty(),
             "writes": updates.len(),
         }),
     ))
@@ -9970,7 +9992,32 @@ expect = true
     }
 
     #[test]
-    fn user_import_updates_reject_unsupported_legacy_roles() {
+    fn user_import_updates_map_subscribers_into_site_viewer_tuples() {
+        let staged = serde_json::json!({
+            "normalized": {
+                "principal_id": "alice",
+                "legacy_roles": ["subscriber"]
+            }
+        });
+
+        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
+
+        assert_eq!(persisted["roles"], serde_json::json!(["subscriber"]));
+        assert_eq!(
+            persisted["manual_review_required"],
+            serde_json::json!(false)
+        );
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::site("main"),
+                Relation::Viewer,
+                DefaultSubject::userset(Entity::group("legacy-role:subscriber"), Relation::Member),
+            )))
+        );
+    }
+
+    #[test]
+    fn user_import_updates_flag_unknown_legacy_roles_for_manual_review_without_failing() {
         let staged = serde_json::json!({
             "normalized": {
                 "principal_id": "alice",
@@ -9978,8 +10025,27 @@ expect = true
             }
         });
 
-        let error = user_import_updates(&staged, Some("main")).unwrap_err();
-        assert!(error.to_string().contains("cannot be mapped safely"));
+        let (updates, persisted) = user_import_updates(&staged, Some("main")).unwrap();
+
+        assert_eq!(persisted["manual_review_required"], serde_json::json!(true));
+        assert_eq!(
+            persisted["manual_review_roles"],
+            serde_json::json!(["shop_manager"])
+        );
+        assert_eq!(
+            persisted["roles"],
+            serde_json::json!(["viewer:shop_manager"])
+        );
+        assert!(
+            updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
+                Entity::site("main"),
+                Relation::Viewer,
+                DefaultSubject::userset(
+                    Entity::group("legacy-role:shop_manager"),
+                    Relation::Member
+                ),
+            )))
+        );
     }
 
     #[test]

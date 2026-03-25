@@ -170,6 +170,10 @@ pub(crate) enum CliInput {
         output_mode: OutputMode,
         config_path: PathBuf,
     },
+    ReleasePlan {
+        output_mode: OutputMode,
+        config_path: PathBuf,
+    },
     CacheWarm {
         output_mode: OutputMode,
         dry_run: bool,
@@ -613,6 +617,20 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                 })?;
 
             Ok(CliInput::ReleaseDoctor {
+                output_mode,
+                config_path,
+            })
+        }
+        [command, subcommand] if command == "release" && subcommand == "plan" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`release plan` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::ReleasePlan {
                 output_mode,
                 config_path,
             })
@@ -1159,6 +1177,29 @@ mod tests {
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.module, "cms");
+    }
+
+    #[test]
+    fn parse_release_plan_uses_explicit_config_path() {
+        let input = parse([
+            "release".to_string(),
+            "plan".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::ReleasePlan {
+            output_mode,
+            config_path,
+        } = input
+        else {
+            panic!("expected release plan input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(config_path, PathBuf::from("/tmp/platform.toml"));
     }
 
     #[test]

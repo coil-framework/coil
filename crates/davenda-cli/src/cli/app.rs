@@ -14,7 +14,9 @@ use crate::cli::import::{ImportCutoverInvocation, ImportRunInvocation};
 use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
-use davenda_app::{CustomerAppManifest, CustomerAppRuntimePlan};
+use davenda_app::{
+    CustomerAppManifest, CustomerAppRuntimePlan, MigrationPlanOwner, ReleaseDoctorSeverity,
+};
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::{
     AuthModelPackage, DavendaAuth, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity,
@@ -274,29 +276,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             output_mode,
             config_path,
         } => {
-            let context = load_customer_app_context(&config_path)?;
-            let auth_package = configured_auth_model_package(context.config.auth.package.clone());
-            let report = context
-                .manifest
-                .release_doctor_with_extensions(
-                    &auth_package,
-                    &context.module_manifests,
-                    &[],
-                    Some(&context.config),
-                )
-                .map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to build release doctor report for `{}`: {error}",
-                        config_path.display()
-                    ))
-                })?
-                .command_report()
-                .map_err(|error| {
-                    CliRunError::execution(format!(
-                        "failed to render release doctor report for `{}`: {error}",
-                        config_path.display()
-                    ))
-                })?;
+            let report = run_release_doctor(&config_path)?;
+            render_command_report(&report, output_mode)
+        }
+        CliInput::ReleasePlan {
+            output_mode,
+            config_path,
+        } => {
+            let report = run_release_plan(&config_path)?;
             render_command_report(&report, output_mode)
         }
         CliInput::CacheWarm {
@@ -409,6 +396,7 @@ fn usage() -> String {
         "  platform migrate plan [--config <path>] [--json]",
         "  platform migrate apply [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform release doctor [--config <path>] [--json]",
+        "  platform release plan [--config <path>] [--json]",
         "  platform cache warm [--config <path>] --scope public --route <path> [--route <path> ...] [--dry-run] [--json]",
         "  platform jobs status [--config <path>] [--queue <name>] [--json]",
         "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
@@ -438,6 +426,7 @@ fn usage() -> String {
         "  platform migrate plan --config config/platform.toml",
         "  platform migrate apply --config config/platform.toml --dry-run",
         "  platform release doctor --config config/platform.toml",
+        "  platform release plan --config config/platform.toml",
         "  platform cache warm --config config/platform.toml --scope public --route /en-GB/home",
         "  platform jobs status --config config/platform.toml",
         "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
@@ -1455,6 +1444,151 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
             ),
         )?;
     }
+
+    Ok(report)
+}
+
+fn run_release_doctor(config_path: &Path) -> Result<CommandReport, CliRunError> {
+    let context = load_customer_app_context(config_path)?;
+    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    context
+        .manifest
+        .release_doctor_with_extensions(
+            &auth_package,
+            &context.module_manifests,
+            &[],
+            Some(&context.config),
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build release doctor report for `{}`: {error}",
+                config_path.display()
+            ))
+        })?
+        .command_report()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to render release doctor report for `{}`: {error}",
+                config_path.display()
+            ))
+        })
+}
+
+fn run_release_plan(config_path: &Path) -> Result<CommandReport, CliRunError> {
+    let context = load_customer_app_context(config_path)?;
+    let auth_package = configured_auth_model_package(context.config.auth.package.clone());
+    let migration_summary = context
+        .manifest
+        .migration_summary(auth_package, &context.modules);
+    let doctor = context
+        .manifest
+        .release_doctor_with_extensions(
+            &configured_auth_model_package(context.config.auth.package.clone()),
+            &context.module_manifests,
+            &[],
+            Some(&context.config),
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build release plan for `{}`: {error}",
+                config_path.display()
+            ))
+        })?;
+
+    let mut report = CommandReport::new(
+        ["release", "plan"],
+        format!(
+            "Composed release plan for customer app `{}`",
+            context.manifest.id
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns(["phase", "owner", "status", "detail"])
+    .map_err(report_build_error)?;
+
+    for entry in migration_summary.entries() {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("phase", "migration")
+                .map_err(report_build_error)?
+                .with_cell("owner", release_plan_owner_label(&entry.owner))
+                .map_err(report_build_error)?
+                .with_cell(
+                    "status",
+                    if entry.online_safe {
+                        "online_safe"
+                    } else {
+                        "manual_review"
+                    },
+                )
+                .map_err(report_build_error)?
+                .with_cell(
+                    "detail",
+                    match &entry.step_id {
+                        Some(step_id) => format!("{step_id}: {}", entry.description),
+                        None => entry.description.clone(),
+                    },
+                )
+                .map_err(report_build_error)?,
+        );
+    }
+
+    for finding in &doctor.findings {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("phase", "compatibility")
+                .map_err(report_build_error)?
+                .with_cell("owner", "release_doctor")
+                .map_err(report_build_error)?
+                .with_cell("status", release_plan_severity_label(finding.severity))
+                .map_err(report_build_error)?
+                .with_cell("detail", format!("{}: {}", finding.code, finding.message))
+                .map_err(report_build_error)?,
+        );
+    }
+
+    report = report.with_status(
+        if doctor
+            .findings
+            .iter()
+            .any(|finding| finding.severity == ReleaseDoctorSeverity::Blocking)
+        {
+            ReportStatus::Unsafe
+        } else if doctor
+            .findings
+            .iter()
+            .any(|finding| finding.severity == ReleaseDoctorSeverity::Warning)
+            || migration_summary
+                .entries()
+                .iter()
+                .any(|entry| !entry.online_safe)
+        {
+            ReportStatus::Warning
+        } else {
+            ReportStatus::Ok
+        },
+    );
+
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "release.plan.summary",
+        format!(
+            "migrations={} compatibility_findings={} blocking={} warnings={}",
+            migration_summary.entries().len(),
+            doctor.findings.len(),
+            doctor
+                .findings
+                .iter()
+                .filter(|finding| finding.severity == ReleaseDoctorSeverity::Blocking)
+                .count(),
+            doctor
+                .findings
+                .iter()
+                .filter(|finding| finding.severity == ReleaseDoctorSeverity::Warning)
+                .count()
+        ),
+    )?;
 
     Ok(report)
 }
@@ -6240,6 +6374,22 @@ fn render_subject(subject: &DefaultSubject) -> String {
     }
 }
 
+fn release_plan_owner_label(owner: &MigrationPlanOwner) -> String {
+    match owner {
+        MigrationPlanOwner::Module(module) => format!("module:{module}"),
+        MigrationPlanOwner::AuthPackage(package) => format!("auth:{package}"),
+        MigrationPlanOwner::CustomerApp(app_id) => format!("customer_app:{app_id}"),
+    }
+}
+
+fn release_plan_severity_label(severity: ReleaseDoctorSeverity) -> &'static str {
+    match severity {
+        ReleaseDoctorSeverity::Info => "info",
+        ReleaseDoctorSeverity::Warning => "warning",
+        ReleaseDoctorSeverity::Blocking => "blocking",
+    }
+}
+
 fn environment_label(environment: davenda_config::Environment) -> &'static str {
     match environment {
         davenda_config::Environment::Development => "development",
@@ -7150,6 +7300,7 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("platform migrate plan [--config <path>]"));
         assert!(rendered.contains("platform migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("platform release doctor [--config <path>]"));
+        assert!(rendered.contains("platform release plan [--config <path>]"));
         assert!(
             rendered
                 .contains("platform cache warm [--config <path>] --scope public --route <path>")
@@ -8229,6 +8380,23 @@ expect = true
 
         assert!(rendered.contains("release doctor"));
         assert!(rendered.contains("showcase-events"));
+    }
+
+    #[test]
+    fn run_from_args_renders_release_plan_from_a_customer_app_runtime_plan() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "release".to_string(),
+            "plan".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("release plan"));
+        assert!(rendered.contains("compatibility"));
+        assert!(rendered.contains("migration"));
     }
 
     #[test]

@@ -26,6 +26,7 @@ fn baseline_runtime_registers_core_command_families() {
     assert!(paths.contains(&"migrate plan".to_string()));
     assert!(paths.contains(&"migrate apply".to_string()));
     assert!(paths.contains(&"release doctor".to_string()));
+    assert!(paths.contains(&"release plan".to_string()));
     assert!(paths.contains(&"cache warm".to_string()));
     assert!(paths.contains(&"jobs status".to_string()));
     assert!(paths.contains(&"tls status".to_string()));

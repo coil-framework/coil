@@ -189,6 +189,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Check release compatibility for the active customer app",
         )?,
         CommandDescriptor::new(
+            ["release", "plan"],
+            CommandOwner::Core,
+            "Compose the current upgrade plan from migrations, auth validation, and compatibility findings",
+        )?,
+        CommandDescriptor::new(
             ["cache", "warm"],
             CommandOwner::Core,
             "Warm public application cache entries for explicit customer-app routes",

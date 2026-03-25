@@ -2,6 +2,7 @@ use super::super::*;
 use super::errors::RuntimeJobsError;
 use super::request::{DomainEventDispatchRequest, JobDispatchRequest};
 use super::types::{DomainEventDispatch, RuntimeEventSubscriptionDefinition, RuntimeJobDefinition};
+use davenda_jobs::DeadLetterId;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,17 @@ impl JobsHost {
         let job_id = spec.job_id.clone();
         self.coordinator.enqueue(spec, now)?;
         Ok(job_id)
+    }
+
+    pub fn retry_dead_letter(
+        &mut self,
+        dead_letter_id: impl Into<String>,
+        now_unix_seconds: u64,
+    ) -> Result<JobId, RuntimeJobsError> {
+        let dead_letter_id = DeadLetterId::new(dead_letter_id.into())?;
+        let now = JobInstant::from_unix_seconds(now_unix_seconds);
+        let record = self.coordinator.retry_dead_letter(&dead_letter_id, now)?;
+        Ok(record.spec.job_id)
     }
 
     pub fn enqueue_job(

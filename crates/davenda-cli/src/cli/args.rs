@@ -113,6 +113,13 @@ pub(crate) struct JobsDeadLettersInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobsRetryInvocation {
+    pub config_path: PathBuf,
+    pub dead_letter_id: String,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TlsRenewInvocation {
     pub config_path: PathBuf,
     pub certificate_id: String,
@@ -210,6 +217,11 @@ pub(crate) enum CliInput {
     JobsDeadLetters {
         output_mode: OutputMode,
         invocation: JobsDeadLettersInvocation,
+    },
+    JobsRetry {
+        output_mode: OutputMode,
+        dry_run: bool,
+        invocation: JobsRetryInvocation,
     },
     TlsStatus {
         output_mode: OutputMode,
@@ -759,6 +771,25 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
                     config_path,
                     queue: jobs_queue,
                     limit: jobs_limit.unwrap_or(50),
+                },
+            })
+        }
+        [command, subcommand, dead_letter_id] if command == "jobs" && subcommand == "retry" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`jobs retry` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::JobsRetry {
+                output_mode,
+                dry_run,
+                invocation: JobsRetryInvocation {
+                    config_path,
+                    dead_letter_id: dead_letter_id.to_string(),
+                    confirmed,
                 },
             })
         }
@@ -1574,6 +1605,36 @@ mod tests {
         assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
         assert_eq!(invocation.queue.as_deref(), Some("jobs.dead-letter"));
         assert_eq!(invocation.limit, 25);
+    }
+
+    #[test]
+    fn parse_jobs_retry_accepts_dead_letter_id_and_confirmation_flags() {
+        let input = parse([
+            "jobs".to_string(),
+            "retry".to_string(),
+            "dead-letter:job-retry".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--dry-run".to_string(),
+            "--yes".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::JobsRetry {
+            output_mode,
+            dry_run,
+            invocation,
+        } = input
+        else {
+            panic!("expected jobs retry input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert!(dry_run);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
+        assert_eq!(invocation.dead_letter_id, "dead-letter:job-retry");
+        assert!(invocation.confirmed);
     }
 
     #[test]

@@ -224,6 +224,13 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Inspect dead-lettered jobs, failure reasons, and retry exhaustion outcomes",
         )?,
         CommandDescriptor::new(
+            ["jobs", "retry"],
+            CommandOwner::Core,
+            "Retry a dead-lettered job by requeueing its original execution contract",
+        )?
+        .with_dry_run()
+        .requiring_confirmation(),
+        CommandDescriptor::new(
             ["tls", "status"],
             CommandOwner::Core,
             "Inspect TLS mode, provider state, and managed certificate inventory",
@@ -294,5 +301,16 @@ mod tests {
             .expect("module disable descriptor should exist");
         assert!(disable.supports_dry_run);
         assert!(disable.requires_confirmation);
+    }
+
+    #[test]
+    fn baseline_commands_include_jobs_retry() {
+        let commands = baseline_commands("harbor-shop").unwrap();
+        let retry = commands
+            .iter()
+            .find(|descriptor| descriptor.path == vec!["jobs".to_string(), "retry".to_string()])
+            .expect("jobs retry descriptor should exist");
+        assert!(retry.supports_dry_run);
+        assert!(retry.requires_confirmation);
     }
 }

@@ -46,6 +46,14 @@ impl JobsCoordinationRuntime for SharedJobsRuntimeHarness {
         self.runtime.enqueue(spec, now)
     }
 
+    fn retry_dead_letter(
+        &self,
+        dead_letter_id: &DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError> {
+        self.runtime.retry_dead_letter(dead_letter_id, now)
+    }
+
     fn acquire_scheduler_leadership(
         &self,
         node_id: String,
@@ -383,6 +391,70 @@ fn failed_jobs_retry_then_dead_letter_after_exhaustion() {
     ));
     assert_eq!(coordinator.dead_letters().len(), 1);
     assert_eq!(coordinator.dead_letters()[0].job_id.as_str(), "job-retry");
+}
+
+#[test]
+fn retry_dead_letter_requeues_the_original_job_spec() {
+    let runtime = JobsRuntime::from_config(&config(JobBackend::Valkey)).unwrap();
+    let mut coordinator = runtime.coordinator_for_testing();
+    coordinator
+        .enqueue(
+            JobSpec::new(
+                JobId::new("job-retry").unwrap(),
+                JobName::new("certificate-renewal").unwrap(),
+                runtime.describe().work_queue.clone(),
+                "renew certificate",
+            )
+            .unwrap()
+            .with_retry_policy(
+                RetryPolicy::new(1, Duration::from_secs(0), Duration::from_secs(0))
+                    .unwrap()
+                    .with_dead_letter_queue(runtime.describe().dead_letter_queue.clone()),
+            )
+            .with_idempotency_key(IdempotencyKey::new("certificate-renewal:v1").unwrap()),
+            JobInstant::from_unix_seconds(100),
+        )
+        .unwrap();
+
+    let lease = coordinator
+        .lease_ready_jobs(
+            &runtime.describe().work_queue,
+            "worker-a",
+            JobInstant::from_unix_seconds(100),
+            Duration::from_secs(30),
+            1,
+        )
+        .unwrap()
+        .remove(0);
+    let dead_letter = match coordinator
+        .acknowledge_failed(
+            &lease,
+            JobInstant::from_unix_seconds(105),
+            DeadLetterReason::ExhaustedRetries,
+            "permanent failure",
+        )
+        .unwrap()
+    {
+        JobFailureDisposition::DeadLettered(outcome) => outcome,
+        other => panic!("expected dead-letter outcome, got {other:?}"),
+    };
+
+    let retried = coordinator
+        .retry_dead_letter(
+            &dead_letter.dead_letter_id,
+            JobInstant::from_unix_seconds(130),
+        )
+        .unwrap();
+    assert_eq!(retried.spec.job_id.as_str(), "job-retry");
+    assert_eq!(retried.spec.queue.as_str(), "jobs.work");
+    assert_eq!(retried.attempts, 0);
+    assert!(retried.spec.scheduled_for.is_none());
+    assert_eq!(coordinator.dead_letters().len(), 0);
+    assert_eq!(coordinator.ready_jobs().len(), 1);
+    assert_eq!(
+        coordinator.ready_jobs()[0].spec.job_id.as_str(),
+        "job-retry"
+    );
 }
 
 #[test]

@@ -10,7 +10,7 @@ use crate::backend::{JobFailureDisposition, JobLease, SchedulerLeadership};
 #[cfg(not(test))]
 use crate::error::JobsModelError;
 #[cfg(not(test))]
-use crate::identifiers::{JobId, JobQueueName};
+use crate::identifiers::{DeadLetterId, JobId, JobQueueName};
 #[cfg(not(test))]
 use crate::model::{DeadLetterReason, JobInstant};
 #[cfg(not(test))]
@@ -72,6 +72,16 @@ impl JobsCoordinationRuntime for ProductionPostgresSharedJobsCoordinationRuntime
         self.store.with_state_mut(&self.runtime, |state| {
             state.enqueue(spec, now)?;
             Ok(())
+        })
+    }
+
+    fn retry_dead_letter(
+        &self,
+        dead_letter_id: &DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError> {
+        self.store.with_state_mut(&self.runtime, |state| {
+            state.retry_dead_letter(dead_letter_id, now)
         })
     }
 

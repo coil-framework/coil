@@ -82,6 +82,16 @@ impl JobsCoordinator {
         Ok(())
     }
 
+    pub fn retry_dead_letter(
+        &mut self,
+        dead_letter_id: &crate::identifiers::DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError> {
+        let record = self.backend.retry_dead_letter(dead_letter_id, now)?;
+        self.refresh();
+        Ok(record)
+    }
+
     pub fn acquire_scheduler_leadership(
         &mut self,
         node_id: impl Into<String>,

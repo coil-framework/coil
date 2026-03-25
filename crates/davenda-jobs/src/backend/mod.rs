@@ -73,6 +73,11 @@ pub struct JobsCoordinatorSnapshot {
 pub trait JobsCoordinationRuntime: Send + Sync + 'static {
     fn snapshot(&self) -> JobsCoordinatorSnapshot;
     fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError>;
+    fn retry_dead_letter(
+        &self,
+        dead_letter_id: &DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError>;
     fn acquire_scheduler_leadership(
         &self,
         node_id: String,
@@ -223,6 +228,14 @@ impl JobsBackendAdapter {
 
     pub(crate) fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
         self.runtime.enqueue(spec, now)
+    }
+
+    pub(crate) fn retry_dead_letter(
+        &self,
+        dead_letter_id: &DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError> {
+        self.runtime.retry_dead_letter(dead_letter_id, now)
     }
 
     pub(crate) fn acquire_scheduler_leadership(

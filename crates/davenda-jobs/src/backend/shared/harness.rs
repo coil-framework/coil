@@ -1,7 +1,7 @@
 use super::*;
-use crate::backend::{JobFailureDisposition, JobLease, SchedulerLeadership};
+use crate::backend::{JobFailureDisposition, JobLease, QueuedJobRecord, SchedulerLeadership};
 use crate::error::JobsModelError;
-use crate::identifiers::{JobId, JobQueueName};
+use crate::identifiers::{DeadLetterId, JobId, JobQueueName};
 use crate::model::{DeadLetterReason, JobInstant};
 use crate::runtime::JobSpec;
 use std::sync::Arc;
@@ -25,6 +25,14 @@ impl JobsCoordinationRuntime for SharedJobsRuntimeHarness {
 
     fn enqueue(&self, spec: JobSpec, now: JobInstant) -> Result<(), JobsModelError> {
         self.runtime.enqueue(spec, now)
+    }
+
+    fn retry_dead_letter(
+        &self,
+        dead_letter_id: &DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError> {
+        self.runtime.retry_dead_letter(dead_letter_id, now)
     }
 
     fn acquire_scheduler_leadership(

@@ -186,6 +186,7 @@ impl JobsBackendState {
                 DeadLetterId::new(format!("dead-letter:{}", record.spec.job_id.as_str()))?,
                 record.spec.job_id.clone(),
                 record.spec.queue.clone(),
+                record.spec.clone(),
                 reason,
                 record.attempts,
                 error_message,
@@ -194,6 +195,31 @@ impl JobsBackendState {
             self.snapshot.dead_letters.push(outcome.clone());
             Ok(JobFailureDisposition::DeadLettered(outcome))
         }
+    }
+
+    pub(super) fn retry_dead_letter(
+        &mut self,
+        dead_letter_id: &DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError> {
+        let index = self
+            .snapshot
+            .dead_letters
+            .iter()
+            .position(|outcome| &outcome.dead_letter_id == dead_letter_id)
+            .ok_or_else(|| JobsModelError::UnknownDeadLetter {
+                dead_letter_id: dead_letter_id.to_string(),
+            })?;
+        let outcome = self.snapshot.dead_letters.remove(index);
+        let mut spec = outcome.job_spec;
+        spec.scheduled_for = None;
+        let record = QueuedJobRecord {
+            spec,
+            attempts: 0,
+            enqueued_at: now,
+        };
+        self.snapshot.ready.push(record.clone());
+        Ok(record)
     }
 
     fn require_active_leadership(

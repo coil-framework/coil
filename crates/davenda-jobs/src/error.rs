@@ -57,6 +57,9 @@ pub enum JobsModelError {
         lease_until: JobInstant,
         now: JobInstant,
     },
+    UnknownDeadLetter {
+        dead_letter_id: String,
+    },
     MissingEventHandler {
         handler_id: String,
     },
@@ -125,6 +128,9 @@ impl fmt::Display for JobsModelError {
                 f,
                 "lease for job `{job_id}` expired at `{lease_until}`, current time is `{now}`"
             ),
+            Self::UnknownDeadLetter { dead_letter_id } => {
+                write!(f, "dead-letter record `{dead_letter_id}` does not exist")
+            }
             Self::MissingEventHandler { handler_id } => {
                 write!(f, "event handler `{handler_id}` is not registered")
             }

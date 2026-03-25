@@ -1,5 +1,6 @@
 use crate::error::JobsModelError;
 use crate::identifiers::{DeadLetterId, JobQueueName};
+use crate::runtime::JobSpec;
 use crate::validation::require_non_empty;
 use davenda_config::JobBackend;
 use serde::{Deserialize, Serialize};
@@ -156,6 +157,7 @@ pub struct DeadLetterOutcome {
     pub dead_letter_id: DeadLetterId,
     pub job_id: crate::identifiers::JobId,
     pub queue: JobQueueName,
+    pub job_spec: JobSpec,
     pub reason: DeadLetterReason,
     pub failed_attempts: u32,
     pub error_message: String,
@@ -167,6 +169,7 @@ impl DeadLetterOutcome {
         dead_letter_id: DeadLetterId,
         job_id: crate::identifiers::JobId,
         queue: JobQueueName,
+        job_spec: JobSpec,
         reason: DeadLetterReason,
         failed_attempts: u32,
         error_message: impl Into<String>,
@@ -176,6 +179,7 @@ impl DeadLetterOutcome {
             dead_letter_id,
             job_id,
             queue,
+            job_spec,
             reason,
             failed_attempts,
             error_message: require_non_empty("dead_letter_error_message", error_message.into())?,

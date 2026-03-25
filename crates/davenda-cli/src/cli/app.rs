@@ -3,7 +3,7 @@ use crate::cli::args::{
     AssetsPublishInvocation, AuthBindingsInspectInvocation, AuthCheckInvocation,
     AuthListInvocation, AuthLookupInvocation, AuthPackageValidateInvocation,
     AuthTestModelInvocation, CacheWarmInvocation, CliInput, DevServerInvocation,
-    JobsDeadLettersInvocation, JobsStatusInvocation, MigrateApplyInvocation,
+    JobsDeadLettersInvocation, JobsRetryInvocation, JobsStatusInvocation, MigrateApplyInvocation,
     ModuleDisableInvocation, ModuleEnableInvocation, ModuleInspectInvocation,
     StorageInspectInvocation, TlsRenewInvocation, parse,
 };
@@ -325,6 +325,14 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_jobs_dead_letters(&invocation)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::JobsRetry {
+            output_mode,
+            dry_run,
+            invocation,
+        } => {
+            let report = run_jobs_retry(&invocation, dry_run)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::TlsStatus {
             output_mode,
             config_path,
@@ -419,6 +427,7 @@ fn usage() -> String {
         "  platform cache warm [--config <path>] --scope public --route <path> [--route <path> ...] [--dry-run] [--json]",
         "  platform jobs status [--config <path>] [--queue <name>] [--json]",
         "  platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>] [--json]",
+        "  platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform tls status [--config <path>] [--json]",
         "  platform tls renew [--config <path>] --certificate <id> --replacement <id> [--dry-run] [--yes] [--json]",
         "  platform storage inspect [--config <path>] [--json]",
@@ -451,6 +460,7 @@ fn usage() -> String {
         "  platform cache warm --config config/platform.toml --scope public --route /en-GB/home",
         "  platform jobs status --config config/platform.toml",
         "  platform jobs dead-letters --config config/platform.toml --queue jobs.dead-letter --limit 25",
+        "  platform jobs retry dead-letter:job-retry --config config/platform.toml --dry-run",
         "  platform tls status --config config/platform.toml",
         "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
         "  platform storage inspect --config config/platform.toml",
@@ -2454,6 +2464,141 @@ fn run_jobs_dead_letters(
             topology.domain_events_queue,
             topology.dead_letter_queue,
             built.runtime_plan.runtime.jobs.default_retry_limit
+        ),
+    )?;
+
+    Ok(report)
+}
+
+fn run_jobs_retry(
+    invocation: &JobsRetryInvocation,
+    dry_run: bool,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    if !dry_run && !invocation.confirmed {
+        return Err(CliRunError::usage(
+            "`jobs retry` requires `--yes` unless `--dry-run` is used",
+        ));
+    }
+
+    let database_url = std::env::var("DATABASE_URL").ok();
+    let mut report = CommandReport::new(
+        ["jobs", "retry"],
+        if dry_run {
+            format!(
+                "Planned retry of dead-letter `{}` for customer app `{}`",
+                invocation.dead_letter_id, built.manifest.id
+            )
+        } else {
+            format!(
+                "Retried dead-letter `{}` for customer app `{}`",
+                invocation.dead_letter_id, built.manifest.id
+            )
+        },
+    )
+    .map_err(report_build_error)?
+    .with_columns(["dead_letter_id", "job_id", "queue", "status", "detail"])
+    .map_err(report_build_error)?;
+
+    let Some(_database_url) = database_url else {
+        report = report.with_status(ReportStatus::Warning);
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Warning,
+            "jobs.runtime.unavailable",
+            format!(
+                "live jobs coordinator state is unavailable for `{}`: set DATABASE_URL to retry dead-lettered jobs",
+                built.manifest.id
+            ),
+        )?;
+        return Ok(report);
+    };
+
+    let mut host = built
+        .runtime_plan
+        .runtime
+        .jobs_host("platform-jobs-retry")
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to build jobs retry host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+    let dead_letter = host
+        .coordinator()
+        .dead_letters()
+        .iter()
+        .find(|outcome| outcome.dead_letter_id.as_str() == invocation.dead_letter_id)
+        .cloned()
+        .ok_or_else(|| {
+            CliRunError::execution(format!(
+                "dead-letter `{}` does not exist for customer app `{}`",
+                invocation.dead_letter_id, built.manifest.id
+            ))
+        })?;
+
+    let planned_job_id = dead_letter.job_id.to_string();
+    let planned_queue = dead_letter.queue.to_string();
+    if dry_run {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("dead_letter_id", dead_letter.dead_letter_id.to_string())
+                .map_err(report_build_error)?
+                .with_cell("job_id", planned_job_id)
+                .map_err(report_build_error)?
+                .with_cell("queue", planned_queue)
+                .map_err(report_build_error)?
+                .with_cell("status", "planned")
+                .map_err(report_build_error)?
+                .with_cell(
+                    "detail",
+                    "dead-letter record will be requeued onto the ready work set",
+                )
+                .map_err(report_build_error)?,
+        );
+        push_report_diagnostic(
+            &mut report,
+            DiagnosticSeverity::Info,
+            "jobs.retry.plan",
+            format!(
+                "dead-letter `{}` would be retried immediately from queue `{}`",
+                dead_letter.dead_letter_id, dead_letter.queue
+            ),
+        )?;
+        return Ok(report);
+    }
+
+    let retried_job_id = host
+        .retry_dead_letter(invocation.dead_letter_id.clone(), unix_timestamp_now()?)
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to retry dead-letter `{}` for `{}`: {error}",
+                invocation.dead_letter_id, built.manifest.id
+            ))
+        })?;
+    report.push_row(
+        ReportRow::new()
+            .with_cell("dead_letter_id", dead_letter.dead_letter_id.to_string())
+            .map_err(report_build_error)?
+            .with_cell("job_id", retried_job_id.to_string())
+            .map_err(report_build_error)?
+            .with_cell("queue", planned_queue)
+            .map_err(report_build_error)?
+            .with_cell("status", "retried")
+            .map_err(report_build_error)?
+            .with_cell(
+                "detail",
+                "dead-letter record was removed and requeued for immediate execution",
+            )
+            .map_err(report_build_error)?,
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "jobs.retry.result",
+        format!(
+            "retried dead-letter `{}` as job `{}`",
+            dead_letter.dead_letter_id, retried_job_id
         ),
     )?;
 
@@ -7699,6 +7844,9 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains(
             "platform jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>]"
         ));
+        assert!(rendered.contains(
+            "platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes]"
+        ));
         assert!(rendered.contains("platform storage inspect [--config <path>]"));
         assert!(rendered.contains("platform storage verify [--config <path>] [--policy]"));
         assert!(rendered.contains("platform assets publish [--config <path>] [--dry-run] [--yes]"));
@@ -9002,6 +9150,46 @@ expect = true
         assert!(rendered.contains("jobs dead-letters"));
         assert!(rendered.contains("showcase-events"));
         assert!(rendered.contains("dead_letter_id"));
+        assert!(rendered.contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn run_from_args_requires_confirmation_for_jobs_retry() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "jobs".to_string(),
+            "retry".to_string(),
+            "dead-letter:job-retry".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.exit_code(), 2);
+        assert!(
+            error
+                .to_string()
+                .contains("`jobs retry` requires `--yes` unless `--dry-run` is used")
+        );
+    }
+
+    #[test]
+    fn run_from_args_warns_when_jobs_retry_cannot_access_live_state() {
+        let config_path = customer_app_fixture();
+
+        let rendered = run_from_args([
+            "jobs".to_string(),
+            "retry".to_string(),
+            "dead-letter:job-retry".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--dry-run".to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("jobs retry"));
+        assert!(rendered.contains("dead-letter:job-retry"));
         assert!(rendered.contains("DATABASE_URL"));
     }
 

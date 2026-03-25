@@ -25,6 +25,15 @@ impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
         guard.enqueue(spec, now)
     }
 
+    fn retry_dead_letter(
+        &self,
+        dead_letter_id: &DeadLetterId,
+        now: JobInstant,
+    ) -> Result<QueuedJobRecord, JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.retry_dead_letter(dead_letter_id, now)
+    }
+
     fn acquire_scheduler_leadership(
         &self,
         node_id: String,

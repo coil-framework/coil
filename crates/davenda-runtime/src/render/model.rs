@@ -378,7 +378,8 @@ fn apply_route_specific_bindings(
             }
         }
         "commerce.checkout-confirmation" => {
-            let account = account_surface_bindings(plan, &fixture, locale, session, principal)?;
+            let account =
+                account_surface_bindings(plan, &fixture, locale, session, principal, true)?;
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
                 let confirmation = snapshot
                     .latest_order
@@ -417,7 +418,15 @@ fn apply_route_specific_bindings(
         | "memberships.account"
         | "memberships.account.dashboard"
         | "account.dashboard" => {
-            let account = account_surface_bindings(plan, &fixture, locale, session, principal)?;
+            let include_pending_membership = route_name == "memberships.account";
+            let account = account_surface_bindings(
+                plan,
+                &fixture,
+                locale,
+                session,
+                principal,
+                include_pending_membership,
+            )?;
             model = model
                 .with_object("account", account.account)?
                 .with_object("customer", account.customer)?
@@ -1115,6 +1124,7 @@ fn account_surface_bindings(
     locale: &str,
     session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
+    include_pending_membership: bool,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
     let Some(session) = session else {
         return fixture_account_surface_bindings(fixture, locale);
@@ -1123,7 +1133,7 @@ fn account_surface_bindings(
         return fixture_account_surface_bindings(fixture, locale);
     }
 
-    live_account_surface_bindings(plan, locale, session, principal)
+    live_account_surface_bindings(plan, locale, session, principal, include_pending_membership)
 }
 
 fn fixture_account_surface_bindings(
@@ -1194,6 +1204,7 @@ fn live_account_surface_bindings(
     locale: &str,
     session: &SessionContext,
     principal: Option<&PrincipalContext>,
+    include_pending_membership: bool,
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
     let snapshot = live_storefront_state(plan, Some(session), principal)?;
     let principal_id = principal.and_then(|principal| principal.principal_id.as_deref());
@@ -1221,7 +1232,8 @@ fn live_account_surface_bindings(
             }
         })
         .unwrap_or_else(|| "Current Browser Session".to_string());
-    let membership_summary = membership_summary_from_storefront(snapshot.as_ref())?;
+    let membership_summary =
+        membership_summary_from_storefront(snapshot.as_ref(), include_pending_membership)?;
     let latest_order_reference = latest_order
         .as_ref()
         .map(|order| order.order_id.clone())
@@ -1314,12 +1326,13 @@ fn recent_orders_from_storefront(
 
 fn membership_summary_from_storefront(
     snapshot: Option<&StorefrontStateSnapshot>,
+    include_pending_membership: bool,
 ) -> Result<Option<RenderModel>, TemplateModelError> {
     let Some(snapshot) = snapshot else {
         return Ok(None);
     };
 
-    let Some(projected) = projected_membership_state(snapshot)? else {
+    let Some(projected) = projected_membership_state(snapshot, include_pending_membership)? else {
         return Ok(None);
     };
 
@@ -1353,13 +1366,18 @@ impl ProjectedMembershipState {
 
 fn projected_membership_state(
     snapshot: &StorefrontStateSnapshot,
+    include_pending_membership: bool,
 ) -> Result<Option<ProjectedMembershipState>, TemplateModelError> {
     if let Some(active) = projected_membership_state_for_statuses(snapshot, &["paid", "fulfilled"])?
     {
         return Ok(Some(active));
     }
 
-    projected_membership_state_for_statuses(snapshot, &["pending_payment"])
+    if include_pending_membership {
+        return projected_membership_state_for_statuses(snapshot, &["pending_payment"]);
+    }
+
+    Ok(None)
 }
 
 fn projected_membership_state_for_statuses(

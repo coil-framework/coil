@@ -25,7 +25,16 @@ fn model() -> RenderModel {
             RenderValue::trusted_html(
                 TrustedHtml::new("<strong class=\"badge\">Live</strong>").unwrap(),
             ),
-    )
+        )
+        .unwrap()
+}
+
+fn model_with_assets() -> RenderModel {
+    model()
+        .with_asset_path(
+            "theme/assets/site.css",
+            "https://cdn.example.com/theme/assets/site.abc123.css",
+        )
         .unwrap()
 }
 
@@ -209,6 +218,40 @@ fn render_values_support_bool_and_list_types() {
             .len(),
         1
     );
+}
+
+#[test]
+fn asset_expressions_resolve_through_the_render_model_manifest_map() {
+    let mut registry = TemplateRegistry::new();
+    registry
+        .register(TemplateDefinition::layout(
+            TemplateNamespace::new("core").unwrap(),
+            TemplateName::new("shell").unwrap(),
+            vec![Node::Element(
+                ElementNode::new("link", Vec::new())
+                    .unwrap()
+                    .with_attribute(AttributeNode::static_value("rel", "stylesheet").unwrap())
+                    .with_attribute(
+                        AttributeNode::dynamic_expression(
+                            "href",
+                            TemplateExpression::AssetPath("theme/assets/site.css".to_string()),
+                        )
+                        .unwrap(),
+                    ),
+            )],
+        ))
+        .unwrap();
+
+    let html = TemplateRuntime::new(registry)
+        .render_document(
+            &[TemplateNamespace::new("core").unwrap()],
+            DocumentRenderRequest::new(selector("shell"), model_with_assets()),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains("https://cdn.example.com/theme/assets/site.abc123.css"));
+    assert!(!html.contains("href=\"theme/assets/site.css\""));
 }
 
 #[test]
@@ -652,7 +695,10 @@ fn template_source_parser_handles_thymeleaf_style_fragments_layouts_slots_and_di
     let runtime = TemplateRuntime::new(registry);
     let output = runtime
         .render_document(
-            &[TemplateNamespace::new("core").unwrap(), TemplateNamespace::new("events").unwrap()],
+            &[
+                TemplateNamespace::new("core").unwrap(),
+                TemplateNamespace::new("events").unwrap(),
+            ],
             DocumentRenderRequest::new(
                 selector("storefront.layout"),
                 RenderModel::new()
@@ -660,13 +706,21 @@ fn template_source_parser_handles_thymeleaf_style_fragments_layouts_slots_and_di
                     .unwrap()
                     .with_value("nav_featured", RenderValue::text("Featured"))
                     .unwrap()
-                    .with_value("nav_featured_href", RenderValue::text("/collections/featured"))
+                    .with_value(
+                        "nav_featured_href",
+                        RenderValue::text("/collections/featured"),
+                    )
                     .unwrap()
                     .with_value("nav_events", RenderValue::text("Events"))
                     .unwrap()
                     .with_value("nav_events_href", RenderValue::text("/events"))
                     .unwrap()
-                    .with_value("trusted_badge", RenderValue::trusted_html(TrustedHtml::new("<strong>Live</strong>").unwrap()))
+                    .with_value(
+                        "trusted_badge",
+                        RenderValue::trusted_html(
+                            TrustedHtml::new("<strong>Live</strong>").unwrap(),
+                        ),
+                    )
                     .unwrap()
                     .with_value("featured_href", RenderValue::text("/collections/featured"))
                     .unwrap()
@@ -686,7 +740,11 @@ fn template_source_parser_handles_thymeleaf_style_fragments_layouts_slots_and_di
     assert!(output.html.contains("<ul class=\"nav\">"));
     assert!(output.html.contains("<h1>Branded Hero</h1>"));
     assert!(output.html.contains("<p>"));
-    assert!(output.html.contains("<a href=\"/collections/featured\" class=\"primary\">Shop featured</a>"));
+    assert!(
+        output
+            .html
+            .contains("<a href=\"/collections/featured\" class=\"primary\">Shop featured</a>")
+    );
     assert!(!output.html.contains("dv:block"));
 }
 
@@ -743,7 +801,11 @@ fn template_source_parser_escapes_by_default_and_renders_each_with_nested_object
         )
         .unwrap();
 
-    assert!(output.html.contains("<h2>Featured &lt;Collections&gt;</h2>"));
+    assert!(
+        output
+            .html
+            .contains("<h2>Featured &lt;Collections&gt;</h2>")
+    );
     assert!(output.html.contains("Spring &amp; Summer"));
     assert!(output.html.contains("Autumn &lt;New&gt;"));
     assert!(output.html.contains("href=\"/collections/spring\""));

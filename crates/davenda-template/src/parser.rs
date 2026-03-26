@@ -81,10 +81,11 @@ impl TemplateSourceParser {
     {
         let root = root.as_ref();
         let path = path.as_ref();
-        let source = fs::read_to_string(path).map_err(|error| TemplateModelError::TemplateRead {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        })?;
+        let source =
+            fs::read_to_string(path).map_err(|error| TemplateModelError::TemplateRead {
+                path: path.display().to_string(),
+                message: error.to_string(),
+            })?;
 
         let kind = template_kind_for_path(root, path);
         self.parse_source(root, path, &source, namespace, kind)
@@ -277,8 +278,12 @@ fn render_element<'a>(
                 "fragment" => {}
                 "text" => text_key = Some(parse_render_key(&value)),
                 "utext" => raw_text_key = Some(parse_render_key(&value)),
-                "replace" => include_selector = Some(IncludeTarget::Replace(parse_selector_ref(&value)?)),
-                "include" => include_selector = Some(IncludeTarget::Insert(parse_selector_ref(&value)?)),
+                "replace" => {
+                    include_selector = Some(IncludeTarget::Replace(parse_selector_ref(&value)?))
+                }
+                "include" => {
+                    include_selector = Some(IncludeTarget::Insert(parse_selector_ref(&value)?))
+                }
                 "insert" => {
                     let selector = parse_selector_ref(&value)?;
                     if selector.template.is_none() {
@@ -295,12 +300,10 @@ fn render_element<'a>(
                 "if" => condition = Some((parse_condition(&value)?, false)),
                 "unless" => condition = Some((parse_condition(&value)?, true)),
                 "each" => each_binding = Some(parse_each_expression(&value)?),
-                other => {
-                    dynamic_attrs.push(AttributeNode::dynamic_expression(
-                        other,
-                        parse_template_expression(&value)?,
-                    )?)
-                }
+                other => dynamic_attrs.push(AttributeNode::dynamic_expression(
+                    other,
+                    parse_template_expression(&value)?,
+                )?),
             }
             continue;
         }
@@ -355,9 +358,7 @@ fn render_element<'a>(
             (ConditionExpression::Key(key), false) => Node::conditional(key, nodes)?,
             (ConditionExpression::Key(key), true) => Node::conditional_not(key, nodes)?,
             (ConditionExpression::Literal(value), false) => Node::conditional_literal(value, nodes),
-            (ConditionExpression::Literal(value), true) => {
-                Node::conditional_literal(!value, nodes)
-            }
+            (ConditionExpression::Literal(value), true) => Node::conditional_literal(!value, nodes),
         }];
     }
 
@@ -390,7 +391,9 @@ fn build_element_node(
 }
 
 fn push_attribute(attributes: &mut Vec<AttributeNode>, attribute: AttributeNode) {
-    if let Some(existing) = attributes.iter_mut().find(|existing| existing.name == attribute.name)
+    if let Some(existing) = attributes
+        .iter_mut()
+        .find(|existing| existing.name == attribute.name)
     {
         *existing = attribute;
         return;
@@ -461,8 +464,16 @@ fn parse_render_key(value: &str) -> String {
     trimmed
         .strip_prefix("${")
         .and_then(|value| value.strip_suffix('}'))
-        .or_else(|| trimmed.strip_prefix("#{").and_then(|value| value.strip_suffix('}')))
-        .or_else(|| trimmed.strip_prefix("*{").and_then(|value| value.strip_suffix('}')))
+        .or_else(|| {
+            trimmed
+                .strip_prefix("#{")
+                .and_then(|value| value.strip_suffix('}'))
+        })
+        .or_else(|| {
+            trimmed
+                .strip_prefix("*{")
+                .and_then(|value| value.strip_suffix('}'))
+        })
         .unwrap_or(trimmed)
         .trim()
         .to_string()
@@ -488,12 +499,18 @@ fn parse_condition(value: &str) -> Result<ConditionExpression, TemplateModelErro
 }
 
 fn parse_each_expression(value: &str) -> Result<(String, String), TemplateModelError> {
-    let (item, collection) = value.split_once(':').ok_or_else(|| TemplateModelError::ParseError {
-        line: 0,
-        column: 0,
-        message: format!("invalid dv:each expression `{value}`"),
-    })?;
-    Ok((validate_token("render_key", item.trim().to_string())?, parse_render_key(collection)))
+    let (item, collection) =
+        value
+            .split_once(':')
+            .ok_or_else(|| TemplateModelError::ParseError {
+                line: 0,
+                column: 0,
+                message: format!("invalid dv:each expression `{value}`"),
+            })?;
+    Ok((
+        validate_token("render_key", item.trim().to_string())?,
+        parse_render_key(collection),
+    ))
 }
 
 fn parse_with_bindings(value: &str) -> Result<Vec<TemplateBinding>, TemplateModelError> {
@@ -504,11 +521,14 @@ fn parse_with_bindings(value: &str) -> Result<Vec<TemplateBinding>, TemplateMode
             continue;
         }
 
-        let (key, raw_value) = assignment.split_once('=').ok_or_else(|| TemplateModelError::ParseError {
-            line: 0,
-            column: 0,
-            message: format!("invalid dv:with binding `{assignment}`"),
-        })?;
+        let (key, raw_value) =
+            assignment
+                .split_once('=')
+                .ok_or_else(|| TemplateModelError::ParseError {
+                    line: 0,
+                    column: 0,
+                    message: format!("invalid dv:with binding `{assignment}`"),
+                })?;
         bindings.push(TemplateBinding::new(
             key.trim(),
             parse_template_expression(raw_value.trim())?,
@@ -525,11 +545,14 @@ fn parse_attr_bindings(value: &str) -> Result<Vec<AttributeNode>, TemplateModelE
             continue;
         }
 
-        let (name, raw_value) = assignment.split_once('=').ok_or_else(|| TemplateModelError::ParseError {
-            line: 0,
-            column: 0,
-            message: format!("invalid dv:attr binding `{assignment}`"),
-        })?;
+        let (name, raw_value) =
+            assignment
+                .split_once('=')
+                .ok_or_else(|| TemplateModelError::ParseError {
+                    line: 0,
+                    column: 0,
+                    message: format!("invalid dv:attr binding `{assignment}`"),
+                })?;
         attributes.push(AttributeNode::dynamic_expression(
             name.trim(),
             parse_template_expression(raw_value.trim())?,
@@ -544,8 +567,16 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
     if let Some(inner) = trimmed
         .strip_prefix("${")
         .and_then(|value| value.strip_suffix('}'))
-        .or_else(|| trimmed.strip_prefix("#{").and_then(|value| value.strip_suffix('}')))
-        .or_else(|| trimmed.strip_prefix("*{").and_then(|value| value.strip_suffix('}')))
+        .or_else(|| {
+            trimmed
+                .strip_prefix("#{")
+                .and_then(|value| value.strip_suffix('}'))
+        })
+        .or_else(|| {
+            trimmed
+                .strip_prefix("*{")
+                .and_then(|value| value.strip_suffix('}'))
+        })
     {
         return Ok(TemplateExpression::ModelKey(inner.trim().to_string()));
     }
@@ -573,10 +604,16 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
         return Ok(TemplateExpression::AssetPath(inner.trim().to_string()));
     }
 
-    if let Some(inner) = trimmed.strip_prefix('"').and_then(|value| value.strip_suffix('"')) {
+    if let Some(inner) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
         return Ok(TemplateExpression::LiteralText(inner.to_string()));
     }
-    if let Some(inner) = trimmed.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')) {
+    if let Some(inner) = trimmed
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
         return Ok(TemplateExpression::LiteralText(inner.to_string()));
     }
 
@@ -628,15 +665,21 @@ mod tests {
 
         let namespace = TemplateNamespace::new("customer-app").unwrap();
         let parser = TemplateSourceParser::new();
-        let templates = parser.load_directory(root.join("templates"), namespace).unwrap();
+        let templates = parser
+            .load_directory(root.join("templates"), namespace)
+            .unwrap();
 
         assert_eq!(templates.len(), 2);
-        assert!(templates
-            .iter()
-            .any(|template| template.key.name.as_str() == "layouts/base"));
-        assert!(templates
-            .iter()
-            .any(|template| template.key.name.as_str() == "components/hero"));
+        assert!(
+            templates
+                .iter()
+                .any(|template| template.key.name.as_str() == "layouts/base")
+        );
+        assert!(
+            templates
+                .iter()
+                .any(|template| template.key.name.as_str() == "components/hero")
+        );
     }
 
     #[test]
@@ -662,7 +705,11 @@ mod tests {
 
         let parser = TemplateSourceParser::new();
         let template = parser
-            .parse_file(root.join("templates"), &path, TemplateNamespace::new("customer-app").unwrap())
+            .parse_file(
+                root.join("templates"),
+                &path,
+                TemplateNamespace::new("customer-app").unwrap(),
+            )
             .unwrap();
 
         assert_eq!(template.kind, TemplateKind::Layout);

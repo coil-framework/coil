@@ -30,9 +30,10 @@ impl AttributeNode {
     ) -> Result<Self, TemplateModelError> {
         Ok(Self {
             name: validate_attribute_name(name.into())?,
-            value: AttributeValue::DynamicExpression(TemplateExpression::ModelKey(
-                validate_token("render_key", key.into())?,
-            )),
+            value: AttributeValue::DynamicExpression(TemplateExpression::ModelKey(validate_token(
+                "render_key",
+                key.into(),
+            )?)),
         })
     }
 
@@ -171,10 +172,7 @@ impl Node {
         children: Vec<Node>,
     ) -> Result<Self, TemplateModelError> {
         Ok(Self::Conditional {
-            condition: ConditionExpression::Key(validate_token(
-                "render_key",
-                condition.into(),
-            )?),
+            condition: ConditionExpression::Key(validate_token("render_key", condition.into())?),
             negated: false,
             children,
         })
@@ -193,10 +191,7 @@ impl Node {
         children: Vec<Node>,
     ) -> Result<Self, TemplateModelError> {
         Ok(Self::Conditional {
-            condition: ConditionExpression::Key(validate_token(
-                "render_key",
-                condition.into(),
-            )?),
+            condition: ConditionExpression::Key(validate_token("render_key", condition.into())?),
             negated: true,
             children,
         })

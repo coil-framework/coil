@@ -3,13 +3,13 @@ use std::error::Error;
 use std::fmt;
 
 mod model;
-mod registry;
 mod parser;
+mod registry;
 mod runtime;
 
 pub use model::*;
-pub use registry::*;
 pub use parser::TemplateSourceParser;
+pub use registry::*;
 pub use runtime::*;
 
 pub(crate) use runtime::{

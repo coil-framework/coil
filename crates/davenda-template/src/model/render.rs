@@ -70,12 +70,12 @@ impl RenderValue {
     pub(crate) fn as_bool(&self, key: &str) -> Result<bool, TemplateModelError> {
         match self {
             Self::Bool(value) => Ok(*value),
-            Self::Text(_) | Self::TrustedHtml(_) | Self::List(_) | Self::Object(_) => Err(
-                TemplateModelError::ValueTypeMismatch {
+            Self::Text(_) | Self::TrustedHtml(_) | Self::List(_) | Self::Object(_) => {
+                Err(TemplateModelError::ValueTypeMismatch {
                     key: key.to_string(),
                     expected: "bool",
-                },
-            ),
+                })
+            }
         }
     }
 
@@ -118,6 +118,7 @@ impl RenderValue {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RenderModel {
     values: BTreeMap<String, RenderValue>,
+    asset_paths: BTreeMap<String, String>,
 }
 
 impl RenderModel {
@@ -135,7 +136,11 @@ impl RenderModel {
         Ok(self)
     }
 
-    pub fn with_bool(self, key: impl Into<String>, value: bool) -> Result<Self, TemplateModelError> {
+    pub fn with_bool(
+        self,
+        key: impl Into<String>,
+        value: bool,
+    ) -> Result<Self, TemplateModelError> {
         self.with_value(key, RenderValue::bool(value))
     }
 
@@ -155,6 +160,17 @@ impl RenderModel {
         self.with_value(key, RenderValue::object(value))
     }
 
+    pub fn with_asset_path(
+        mut self,
+        logical_path: impl Into<String>,
+        public_url: impl Into<String>,
+    ) -> Result<Self, TemplateModelError> {
+        let logical_path = validate_token("asset_logical_path", logical_path.into())?;
+        let public_url = require_non_empty("asset_public_url", public_url.into())?;
+        self.asset_paths.insert(logical_path, public_url);
+        Ok(self)
+    }
+
     pub(crate) fn get(&self, key: &str) -> Option<&RenderValue> {
         if let Some(value) = self.values.get(key) {
             return Some(value);
@@ -169,12 +185,17 @@ impl RenderModel {
         self.get(path)
     }
 
+    pub(crate) fn get_asset_path(&self, logical_path: &str) -> Option<&str> {
+        self.asset_paths.get(logical_path).map(String::as_str)
+    }
+
     pub(crate) fn merged_with(&self, overlay: &RenderModel) -> RenderModel {
         let mut values = self.values.clone();
         values.extend(overlay.values.clone());
-        RenderModel { values }
+        let mut asset_paths = self.asset_paths.clone();
+        asset_paths.extend(overlay.asset_paths.clone());
+        RenderModel { values, asset_paths }
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

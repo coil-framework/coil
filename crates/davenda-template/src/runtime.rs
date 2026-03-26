@@ -130,7 +130,8 @@ impl TemplateRuntime {
                                         rendered.push_str(&escape_html_attribute(value.as_str()));
                                     }
                                     RenderValue::Bool(value) => {
-                                        rendered.push_str(&escape_html_attribute(&value.to_string()));
+                                        rendered
+                                            .push_str(&escape_html_attribute(&value.to_string()));
                                     }
                                     RenderValue::List(_) | RenderValue::Object(_) => {
                                         return Err(TemplateModelError::ValueTypeMismatch {
@@ -151,9 +152,9 @@ impl TemplateRuntime {
                         &element.children,
                         surface,
                     )?);
-                        rendered.push_str("</");
-                        rendered.push_str(&element.tag);
-                        rendered.push('>');
+                    rendered.push_str("</");
+                    rendered.push_str(&element.tag);
+                    rendered.push('>');
                 }
                 Node::Slot(slot) => {
                     if let Some(fill) = slots.get(&slot.name) {
@@ -175,13 +176,9 @@ impl TemplateRuntime {
                         let value = self.evaluate_expression(model, &binding.expression)?;
                         extended = extended.with_value(binding.key.clone(), value)?;
                     }
-                    rendered.push_str(&self.render_nodes(
-                        namespaces,
-                        &extended,
-                        slots,
-                        children,
-                        surface,
-                    )?);
+                    rendered.push_str(
+                        &self.render_nodes(namespaces, &extended, slots, children, surface)?,
+                    );
                 }
                 Node::Conditional {
                     condition,
@@ -192,13 +189,9 @@ impl TemplateRuntime {
                     let enabled = if *negated { !enabled } else { enabled };
 
                     if enabled {
-                        rendered.push_str(&self.render_nodes(
-                            namespaces,
-                            model,
-                            slots,
-                            children,
-                            surface,
-                        )?);
+                        rendered.push_str(
+                            &self.render_nodes(namespaces, model, slots, children, surface)?,
+                        );
                     }
                 }
                 Node::Each {
@@ -206,11 +199,11 @@ impl TemplateRuntime {
                     collection,
                     children,
                 } => {
-                    let value = model
-                        .get_path(collection)
-                        .ok_or_else(|| TemplateModelError::MissingValue {
+                    let value = model.get_path(collection).ok_or_else(|| {
+                        TemplateModelError::MissingValue {
                             key: collection.clone(),
-                        })?;
+                        }
+                    })?;
                     for entry in value.as_list(collection)? {
                         let loop_model = model
                             .merged_with(entry)
@@ -292,7 +285,12 @@ impl TemplateRuntime {
                 .ok_or_else(|| TemplateModelError::MissingValue { key: key.clone() }),
             TemplateExpression::LiteralText(value) => Ok(RenderValue::text(value.clone())),
             TemplateExpression::LiteralBool(value) => Ok(RenderValue::bool(*value)),
-            TemplateExpression::AssetPath(value) => Ok(RenderValue::text(value.clone())),
+            TemplateExpression::AssetPath(value) => Ok(RenderValue::text(
+                model
+                    .get_asset_path(value)
+                    .unwrap_or(value.as_str())
+                    .to_string(),
+            )),
         }
     }
 

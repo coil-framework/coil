@@ -20,83 +20,71 @@
       <section class="admin-page__intro">
         <p class="admin-page__eyebrow">Content operations</p>
         <h1 dv:text="${page.title}">Redirects</h1>
-        <p dv:text="${page.summary}">
-          Redirect rules and route handoff records.
-        </p>
+        <p dv:text="${page.summary}">Redirect rules and route handoff records.</p>
         <p>
-          Use this surface as an explicit migration and SEO checklist. It is not yet a persisted
-          redirect administration console.
+          Saving this form updates the redirect inventory used for unmatched live requests, so it
+          can carry legacy WordPress URLs into the current Harbor Shop storefront.
         </p>
-        <div class="admin-page__actions">
-          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
-            Review pages
-          </a>
-          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
-            Review navigation
-          </a>
-        </div>
       </section>
 
-      <section class="admin-panel" dv:if="${hasRedirects}">
-        <p class="admin-panel__eyebrow">Redirect rules</p>
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th scope="col">From</th>
-              <th scope="col">To</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr dv:each="redirect : ${redirects}">
-              <td>
-                <code dv:text="${redirect.from}">/legacy/home</code>
-              </td>
-              <td>
-                <code dv:text="${redirect.to}">/</code>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="admin-card-grid">
-          <article class="admin-card">
-            <h3>Launch check</h3>
-            <p>Confirm that high-value legacy routes land on the correct live destinations before traffic is moved off the old site.</p>
-          </article>
-          <article class="admin-card">
-            <h3>Escalation boundary</h3>
-            <p>This view confirms redirect inventory only. It does not yet provide a back-office workflow for creating or approving redirect rules.</p>
-          </article>
-        </div>
+      <section class="admin-panel" dv:if="${hasFlashMessages}">
+        <ul class="flash-list">
+          <li dv:each="message : ${flashMessages}" dv:text="${message.text}">Saved.</li>
+        </ul>
       </section>
 
-      <section class="admin-panel" dv:unless="${hasRedirects}">
+      <section class="admin-panel" dv:if="${hasErrors}">
+        <h2>Redirect errors</h2>
+        <p dv:text="${errorSummary}">Update the redirect rules and save again.</p>
+        <ul class="flash-list">
+          <li dv:each="error : ${errors}" dv:text="${error.message}">Error</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
         <p class="admin-panel__eyebrow">Redirect rules</p>
-        <h2>No redirect rules configured</h2>
-        <p dv:text="${redirectsEmptyText}">
-          Redirect rules are not configured yet in the sample app.
-        </p>
-        <div class="admin-card-grid">
-          <article class="admin-card">
-            <h3>Migration readiness</h3>
-            <p>Import or map legacy URLs before customer traffic is switched from the old site.</p>
-          </article>
-          <article class="admin-card">
-            <h3>SEO protection</h3>
-            <p>Preserve canonical paths and top landing pages so cutover does not drop search traffic.</p>
-          </article>
-          <article class="admin-card">
-            <h3>Operator check</h3>
-            <p>Keep a tested redirect inventory alongside launch and rollback plans, even if persistence is not wired yet.</p>
-          </article>
-        </div>
-        <div class="admin-page__actions">
-          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
-            Review pages
-          </a>
-          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
-            Review navigation
-          </a>
-        </div>
+        <form action="/admin/redirects/save" method="post">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">From</th>
+                <th scope="col">To</th>
+                <th scope="col">Permanent</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr dv:each="redirect : ${redirects}">
+                <td>
+                  <input type="text" dv:attr="name=${redirect.fromField},value=${redirect.from}" />
+                </td>
+                <td>
+                  <input type="text" dv:attr="name=${redirect.toField},value=${redirect.to}" />
+                </td>
+                <td>
+                  <input type="checkbox" value="yes" dv:attr="name=${redirect.permanentField}" dv:if="${redirect.permanent}" checked="checked" />
+                  <input type="checkbox" value="yes" dv:attr="name=${redirect.permanentField}" dv:unless="${redirect.permanent}" />
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <input type="text" name="new_redirect_from" placeholder="/legacy/home" />
+                </td>
+                <td>
+                  <input type="text" name="new_redirect_to" placeholder="/" />
+                </td>
+                <td>
+                  <input type="checkbox" name="new_redirect_permanent" value="yes" checked="checked" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="admin-page__actions">
+            <button class="button" type="submit">Save redirects</button>
+            <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+              Back to pages
+            </a>
+          </div>
+        </form>
       </section>
     </main>
     <footer class="site-footer">

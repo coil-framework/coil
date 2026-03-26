@@ -20,79 +20,63 @@
       <section class="admin-page__intro">
         <p class="admin-page__eyebrow">Content operations</p>
         <h1 dv:text="${page.title}">Navigation</h1>
-        <p dv:text="${page.summary}">
-          Navigation trees and top-level route links.
-        </p>
+        <p dv:text="${page.summary}">Navigation trees and top-level route links.</p>
         <p>
-          This is the current live route set, not a drag-and-drop navigation editor. Use it to
-          confirm what customers can reach from primary navigation today.
+          Saving this form updates the live primary navigation rendered in the Harbor Shop public
+          shell.
         </p>
-        <div class="admin-page__actions">
-          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
-            Review page inventory
-          </a>
-          <a class="button button--secondary" href="/admin/redirects" dv:attr="href=${links.adminRedirects}">
-            Review redirects
-          </a>
-        </div>
       </section>
 
-      <section class="admin-panel" dv:if="${hasNavigationItems}">
-        <p class="admin-panel__eyebrow">Primary navigation</p>
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th scope="col">Label</th>
-              <th scope="col">Href</th>
-              <th scope="col">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr dv:each="item : ${navigationItems}">
-              <td>
-                <strong dv:text="${item.label}">Home</strong>
-              </td>
-              <td>
-                <code dv:text="${item.href}">/</code>
-              </td>
-              <td>
-                <a class="button button--secondary" href="/" dv:attr="href=${item.href}">
-                  Open route
-                </a>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="admin-card-grid">
-          <article class="admin-card">
-            <h3>Launch check</h3>
-            <p>Confirm that top-selling and support-critical routes are reachable from primary navigation or intentionally omitted.</p>
-          </article>
-          <article class="admin-card">
-            <h3>Escalation boundary</h3>
-            <p>Ordering, nesting, and menu editing are not wired here yet, so use this as a visibility check rather than a navigation editor.</p>
-          </article>
-        </div>
+      <section class="admin-panel" dv:if="${hasFlashMessages}">
+        <ul class="flash-list">
+          <li dv:each="message : ${flashMessages}" dv:text="${message.text}">Saved.</li>
+        </ul>
       </section>
 
-      <section class="admin-panel" dv:unless="${hasNavigationItems}">
+      <section class="admin-panel" dv:if="${hasErrors}">
+        <h2>Navigation errors</h2>
+        <p dv:text="${errorSummary}">Update the navigation items and save again.</p>
+        <ul class="flash-list">
+          <li dv:each="error : ${errors}" dv:text="${error.message}">Error</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
         <p class="admin-panel__eyebrow">Primary navigation</p>
-        <h2>No navigation items yet</h2>
-        <p dv:text="${navigationEmptyText}">
-          Primary navigation is not configured yet.
-        </p>
-        <p>
-          Operators should not launch until the public storefront paths customers rely on are
-          reachable from this primary navigation set or intentionally excluded.
-        </p>
-        <div class="admin-page__actions">
-          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
-            Review pages
-          </a>
-          <a class="button button--secondary" href="/admin/redirects" dv:attr="href=${links.adminRedirects}">
-            Review redirects
-          </a>
-        </div>
+        <form action="/admin/navigation/save" method="post">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">Label</th>
+                <th scope="col">Href</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr dv:each="item : ${navigationItems}">
+                <td>
+                  <input type="text" dv:attr="name=${item.labelField},value=${item.label}" />
+                </td>
+                <td>
+                  <input type="text" dv:attr="name=${item.hrefField},value=${item.href}" />
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <input type="text" name="new_nav_label" placeholder="New label" />
+                </td>
+                <td>
+                  <input type="text" name="new_nav_href" placeholder="/pages/visit-harbor" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="admin-page__actions">
+            <button class="button" type="submit">Save navigation</button>
+            <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+              Back to pages
+            </a>
+          </div>
+        </form>
       </section>
     </main>
     <footer class="site-footer">

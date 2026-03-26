@@ -107,6 +107,36 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                     "/admin/redirects",
                 )
                 .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
+                    "cms.pages.save-draft",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/draft",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
+                    "cms.pages.publish",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/publish",
+                )
+                .gated_by(Capability::CmsPagePublish),
+                RouteSurface::new(
+                    "cms.pages.unpublish",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/unpublish",
+                )
+                .gated_by(Capability::CmsPagePublish),
+                RouteSurface::new(
+                    "cms.navigation.save",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/navigation/save",
+                )
+                .gated_by(Capability::CmsNavigationEdit),
+                RouteSurface::new(
+                    "cms.redirects.save",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/redirects/save",
+                )
+                .gated_by(Capability::CmsPageEdit),
             ])
             .with_jobs(vec![
                 JobContract::new(
@@ -286,6 +316,51 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                     HttpSurfaceArea::Admin,
                     "/admin/redirects",
                     "cms/redirects",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.pages.save-draft",
+                    davenda_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/draft",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.pages.publish",
+                    davenda_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/publish",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPagePublish),
+                HttpSurfaceContribution::redirect(
+                    "cms.pages.unpublish",
+                    davenda_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/unpublish",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPagePublish),
+                HttpSurfaceContribution::redirect(
+                    "cms.navigation.save",
+                    davenda_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/navigation/save",
+                    "/admin/navigation",
+                    303,
+                )
+                .gated_by(Capability::CmsNavigationEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.redirects.save",
+                    davenda_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/redirects/save",
+                    "/admin/redirects",
+                    303,
                 )
                 .gated_by(Capability::CmsPageEdit),
             ])

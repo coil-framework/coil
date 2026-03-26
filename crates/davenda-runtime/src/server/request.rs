@@ -839,6 +839,17 @@ fn cms_page_form_state_from_execution(
     state
 }
 
+fn order_refund_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.order-detail", summary.into());
+    for field in ["order_id", "reason"] {
+        state = state.with_field_value(field, storefront_form_field_value(execution, field));
+    }
+    state
+}
+
 fn cms_navigation_form_state_from_execution(
     execution: &RequestExecution,
     summary: impl Into<String>,
@@ -1768,17 +1779,40 @@ async fn apply_native_storefront_mutations(
                     )?;
                     return Ok(Some(format!("/admin/orders/{}", order.order_id)));
                 }
-                Err(
-                    error @ (StorefrontStateError::MissingRefundReason
-                    | StorefrontStateError::UnknownOrder { .. }
-                    | StorefrontStateError::RefundNotAllowed { .. }),
-                ) => {
-                    push_storefront_flash(
-                        state,
-                        response_cookies,
-                        FlashLevel::Error,
-                        error.to_string(),
-                    )?;
+                Err(StorefrontStateError::MissingRefundReason) => {
+                    let form_state = order_refund_form_state_from_execution(
+                        execution,
+                        "Review the refund request and add a reason before trying again.",
+                    )
+                    .with_field_error("reason", "refund reason is required");
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error @ StorefrontStateError::RefundNotAllowed { .. }) => {
+                    let form_state = order_refund_form_state_from_execution(
+                        execution,
+                        "This order cannot be refunded from the checked-in admin workflow right now.",
+                    )
+                    .with_field_error("reason", error.to_string());
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error @ StorefrontStateError::UnknownOrder { .. }) => {
+                    if order_id.trim().is_empty() {
+                        push_storefront_flash(
+                            state,
+                            response_cookies,
+                            FlashLevel::Error,
+                            error.to_string(),
+                        )?;
+                    } else {
+                        let form_state = order_refund_form_state_from_execution(
+                            execution,
+                            "Refresh the order queue and reopen the detail view before retrying this refund.",
+                        )
+                        .with_field_error("order_id", error.to_string());
+                        push_storefront_form_state(state, response_cookies, &form_state)?;
+                    }
                     return Ok(Some(redirect_location));
                 }
                 Err(error) => return Err(RuntimeServerError::Storefront(error)),

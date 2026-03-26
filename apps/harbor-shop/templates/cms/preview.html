@@ -1,0 +1,8 @@
+<section xmlns:dv="https://davenda.dev" id="preview-pane" class="admin-card">
+  <p class="admin-panel__eyebrow">Preview</p>
+  <h2 dv:text="${selectedContentPage.title}">Draft title</h2>
+  <p dv:text="${selectedContentPage.summary}">Draft summary</p>
+  <div dv:utext="${selectedContentPage.bodyHtml}">
+    <p>Draft body.</p>
+  </div>
+</section>

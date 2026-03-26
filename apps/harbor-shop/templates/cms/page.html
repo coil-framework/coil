@@ -18,10 +18,13 @@
     <main class="site-main">
       <article class="page-shell">
         <p class="catalog-section__eyebrow">CMS Page</p>
-        <h1 dv:text="${page.title}">Harbor Shop</h1>
-        <p dv:text="${page.summary}">
-          Server-rendered storefront and account surface.
+        <h1 dv:text="${cmsPage.title}">Harbor Shop</h1>
+        <p dv:text="${cmsPage.summary}">
+          Server-rendered CMS page.
         </p>
+        <div dv:utext="${cmsPage.bodyHtml}">
+          <p>Page body.</p>
+        </div>
         <div class="checkout-actions">
           <a class="button" href="/" dv:attr="href=${links.home}">Return home</a>
           <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">

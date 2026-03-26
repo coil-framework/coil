@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use object_store::ObjectStoreExt;
+use object_store::{Attribute, Attributes, ObjectStore, PutOptions};
 use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::path::Path as ObjectPath;
 use object_store::signer::Signer;
@@ -30,11 +31,24 @@ impl S3CompatibleObjectStoreClient {
         }
     }
 
-    pub fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError> {
+    pub fn put(
+        &self,
+        object_key: &str,
+        bytes: &[u8],
+        content_type: Option<&str>,
+    ) -> Result<PathBuf, StorageExecutionError> {
         let path = object_path(object_key)?;
         let store = self.ready_store()?.clone();
         let payload = Bytes::copy_from_slice(bytes);
-        run_object_store_future(async move { store.put(&path, payload.into()).await }).map_err(
+        let mut attributes = Attributes::new();
+        if let Some(content_type) = content_type {
+            attributes.insert(Attribute::ContentType, content_type.to_string().into());
+        }
+        let options = PutOptions {
+            attributes,
+            ..Default::default()
+        };
+        run_object_store_future(async move { store.put_opts(&path, payload.into(), options).await }).map_err(
             |message| StorageExecutionError::WriteFailed {
                 path: object_key.to_string(),
                 message,

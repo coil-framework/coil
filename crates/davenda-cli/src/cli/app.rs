@@ -9918,7 +9918,7 @@ fn materialize_asset_record(
             message: error.to_string(),
         })?;
     let write = storage_host
-        .execute_write(revision.storage_plan(), &bytes)
+        .execute_write_with_content_type(revision.storage_plan(), &bytes, Some(content_type))
         .map_err(|error| ImportModelError::ManifestParse {
             message: error.to_string(),
         })?;

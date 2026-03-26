@@ -120,7 +120,11 @@ impl ThemeAssetPublicationPlan {
                     message: error.to_string(),
                 }
             })?;
-            let write = executor.execute_write(published.delivery().storage_plan(), &bytes)?;
+            let write = executor.execute_write_with_content_type(
+                published.delivery().storage_plan(),
+                &bytes,
+                Some(source.artifact().content_type()),
+            )?;
             writes.push(write);
         }
 

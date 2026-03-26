@@ -65,6 +65,17 @@ impl StorageHost {
         Ok(self.executor.execute_write(plan, bytes)?)
     }
 
+    pub fn execute_write_with_content_type(
+        &self,
+        plan: &StoragePlan,
+        bytes: impl AsRef<[u8]>,
+        content_type: Option<&str>,
+    ) -> Result<StorageWriteReceipt, RuntimeStorageError> {
+        Ok(self
+            .executor
+            .execute_write_with_content_type(plan, bytes, content_type)?)
+    }
+
     pub fn execute_read(
         &self,
         plan: &StoragePlan,

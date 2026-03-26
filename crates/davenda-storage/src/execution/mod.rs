@@ -51,14 +51,24 @@ pub struct StorageReadReceipt {
 }
 
 pub trait ObjectStoreClient: fmt::Debug + Send + Sync {
-    fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError>;
+    fn put(
+        &self,
+        object_key: &str,
+        bytes: &[u8],
+        content_type: Option<&str>,
+    ) -> Result<PathBuf, StorageExecutionError>;
     fn get(&self, object_key: &str) -> Result<(PathBuf, Vec<u8>), StorageExecutionError>;
     fn signed_get_url(&self, object_key: &str) -> Result<SignedObjectUrl, StorageExecutionError>;
 }
 
 impl ObjectStoreClient for S3CompatibleObjectStoreClient {
-    fn put(&self, object_key: &str, bytes: &[u8]) -> Result<PathBuf, StorageExecutionError> {
-        self.put(object_key, bytes)
+    fn put(
+        &self,
+        object_key: &str,
+        bytes: &[u8],
+        content_type: Option<&str>,
+    ) -> Result<PathBuf, StorageExecutionError> {
+        self.put(object_key, bytes, content_type)
     }
 
     fn get(&self, object_key: &str) -> Result<(PathBuf, Vec<u8>), StorageExecutionError> {
@@ -105,6 +115,15 @@ impl StorageExecutor {
         plan: &StoragePlan,
         bytes: impl AsRef<[u8]>,
     ) -> Result<StorageWriteReceipt, StorageExecutionError> {
+        self.execute_write_with_content_type(plan, bytes, None)
+    }
+
+    pub fn execute_write_with_content_type(
+        &self,
+        plan: &StoragePlan,
+        bytes: impl AsRef<[u8]>,
+        content_type: Option<&str>,
+    ) -> Result<StorageWriteReceipt, StorageExecutionError> {
         let bytes = bytes.as_ref();
         let target = plan.primary_write_target().cloned().ok_or_else(|| {
             StorageExecutionError::MissingPrimaryWriteTarget {
@@ -128,7 +147,7 @@ impl StorageExecutor {
                     }
                 })?;
                 self.object_store_client(&plan.logical_path)?
-                    .put(object_key, bytes)?
+                    .put(object_key, bytes, content_type)?
             }
         };
 

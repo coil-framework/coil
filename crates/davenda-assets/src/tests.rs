@@ -17,8 +17,15 @@ use std::time::Duration;
 
 struct ObjectStoreTestServer {
     endpoint: String,
+    store: Arc<Mutex<BTreeMap<String, StoredObject>>>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StoredObject {
+    bytes: Vec<u8>,
+    content_type: Option<String>,
 }
 
 impl ObjectStoreTestServer {
@@ -27,7 +34,7 @@ impl ObjectStoreTestServer {
         listener.set_nonblocking(true).unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let stop = Arc::new(AtomicBool::new(false));
-        let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
+        let store = Arc::new(Mutex::new(BTreeMap::<String, StoredObject>::new()));
         let stop_thread = Arc::clone(&stop);
         let store_thread = Arc::clone(&store);
         let handle = thread::spawn(move || {
@@ -50,6 +57,7 @@ impl ObjectStoreTestServer {
 
         Self {
             endpoint,
+            store,
             stop,
             handle: Some(handle),
         }
@@ -57,6 +65,10 @@ impl ObjectStoreTestServer {
 
     fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    fn stored_object(&self, path: &str) -> Option<StoredObject> {
+        self.store.lock().unwrap().get(path).cloned()
     }
 }
 
@@ -78,7 +90,10 @@ impl Drop for ObjectStoreTestServer {
     }
 }
 
-fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
+fn handle_request(
+    mut stream: std::net::TcpStream,
+    store: &Arc<Mutex<BTreeMap<String, StoredObject>>>,
+) {
     stream.set_nonblocking(false).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut request_line = String::new();
@@ -88,10 +103,15 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
     let path = parts
         .next()
         .unwrap_or("/")
+        .split('?')
+        .next()
+        .unwrap_or("/")
         .trim_start_matches('/')
+        .trim_start_matches("runtime/")
         .to_string();
 
     let mut content_length = 0usize;
+    let mut content_type = None;
     loop {
         let mut header = String::new();
         reader.read_line(&mut header).unwrap();
@@ -102,6 +122,8 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
         if let Some((name, value)) = trimmed.split_once(':') {
             if name.eq_ignore_ascii_case("content-length") {
                 content_length = value.trim().parse().unwrap_or(0);
+            } else if name.eq_ignore_ascii_case("content-type") {
+                content_type = Some(value.trim().to_string());
             }
         }
     }
@@ -113,11 +135,17 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
 
     let (status, response_body) = match method {
         "PUT" => {
-            store.lock().unwrap().insert(path, body);
+            store.lock().unwrap().insert(
+                path,
+                StoredObject {
+                    bytes: body,
+                    content_type,
+                },
+            );
             ("200 OK", Vec::new())
         }
         "GET" => match store.lock().unwrap().get(&path).cloned() {
-            Some(bytes) => ("200 OK", bytes),
+            Some(object) => ("200 OK", object.bytes),
             None => ("404 Not Found", b"not found".to_vec()),
         },
         _ => ("405 Method Not Allowed", b"method not allowed".to_vec()),
@@ -305,6 +333,17 @@ fn theme_asset_publication_plan_publishes_and_syncs_source_roots() {
                 && object_key.starts_with("deploy/theme/assets/site.")
                 && object_key.ends_with(".css")
     ));
+    let css_object_key = match css.delivery().target() {
+        AssetDeliveryTarget::Cdn { object_key, .. } => object_key,
+        other => panic!("expected CDN delivery target, got {other:?}"),
+    };
+    assert_eq!(
+        server
+            .stored_object(css_object_key)
+            .expect("uploaded css object should be stored")
+            .content_type,
+        Some("text/css".to_string())
+    );
     let read_back = executor
         .execute_read(css.delivery().storage_plan())
         .unwrap();

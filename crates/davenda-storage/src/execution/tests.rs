@@ -12,8 +12,15 @@ use std::time::Duration;
 
 struct ObjectStoreTestServer {
     endpoint: String,
+    store: Arc<Mutex<BTreeMap<String, StoredObject>>>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StoredObject {
+    bytes: Vec<u8>,
+    content_type: Option<String>,
 }
 
 impl ObjectStoreTestServer {
@@ -22,7 +29,7 @@ impl ObjectStoreTestServer {
         listener.set_nonblocking(true).unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let stop = Arc::new(AtomicBool::new(false));
-        let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
+        let store = Arc::new(Mutex::new(BTreeMap::<String, StoredObject>::new()));
         let stop_thread = Arc::clone(&stop);
         let store_thread = Arc::clone(&store);
         let handle = thread::spawn(move || {
@@ -45,6 +52,7 @@ impl ObjectStoreTestServer {
 
         Self {
             endpoint,
+            store,
             stop,
             handle: Some(handle),
         }
@@ -52,6 +60,10 @@ impl ObjectStoreTestServer {
 
     fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    fn stored_object(&self, path: &str) -> Option<StoredObject> {
+        self.store.lock().unwrap().get(path).cloned()
     }
 }
 
@@ -64,7 +76,10 @@ impl Drop for ObjectStoreTestServer {
     }
 }
 
-fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
+fn handle_request(
+    mut stream: std::net::TcpStream,
+    store: &Arc<Mutex<BTreeMap<String, StoredObject>>>,
+) {
     stream.set_nonblocking(false).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut request_line = String::new();
@@ -82,6 +97,7 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
         .to_string();
 
     let mut content_length = 0usize;
+    let mut content_type = None;
     loop {
         let mut header = String::new();
         reader.read_line(&mut header).unwrap();
@@ -92,6 +108,8 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
         if let Some((name, value)) = trimmed.split_once(':') {
             if name.eq_ignore_ascii_case("content-length") {
                 content_length = value.trim().parse().unwrap_or(0);
+            } else if name.eq_ignore_ascii_case("content-type") {
+                content_type = Some(value.trim().to_string());
             }
         }
     }
@@ -103,11 +121,17 @@ fn handle_request(mut stream: std::net::TcpStream, store: &Arc<Mutex<BTreeMap<St
 
     let (status, response_body) = match method {
         "PUT" => {
-            store.lock().unwrap().insert(path, body);
+            store.lock().unwrap().insert(
+                path,
+                StoredObject {
+                    bytes: body,
+                    content_type,
+                },
+            );
             ("200 OK", Vec::new())
         }
         "GET" => match store.lock().unwrap().get(&path).cloned() {
-            Some(bytes) => ("200 OK", bytes),
+            Some(object) => ("200 OK", object.bytes),
             None => ("404 Not Found", b"not found".to_vec()),
         },
         _ => ("405 Method Not Allowed", b"method not allowed".to_vec()),
@@ -255,6 +279,13 @@ fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
     assert_eq!(receipt.target.backend, StorageBackendKind::S3Compatible);
     assert!(receipt.path.ends_with(object_key));
     assert_eq!(
+        server
+            .stored_object(object_key)
+            .expect("uploaded object should be stored")
+            .content_type,
+        None
+    );
+    assert_eq!(
         executor.execute_read(&public_plan).unwrap().bytes,
         b"hero-bytes"
     );
@@ -289,6 +320,39 @@ fn object_store_execution_writes_reads_and_resolves_delivery_locations() {
         }
         other => panic!("expected signed delivery, got {other:?}"),
     }
+}
+
+#[test]
+fn object_store_execution_sets_content_type_when_provided() {
+    let server = ObjectStoreTestServer::spawn();
+    let planner = planner();
+    let object_store = ObjectStoreClientConfig::new("runtime", "us-east-1")
+        .unwrap()
+        .with_endpoint_url(server.endpoint())
+        .unwrap()
+        .with_static_credentials("runtime-access", "runtime-secret")
+        .unwrap();
+    let executor =
+        StorageExecutor::from_topology_and_object_store(planner.topology(), Some(object_store));
+    let public_plan = planner
+        .plan_scalable_write(
+            StoragePlanRequest::new("uploads/marketing/site.css")
+                .with_storage_class(StorageClass::PublicUpload),
+        )
+        .unwrap();
+
+    executor
+        .execute_write_with_content_type(&public_plan, b"body { color: #111; }", Some("text/css"))
+        .unwrap();
+
+    let object_key = public_plan.object_key.as_deref().unwrap();
+    assert_eq!(
+        server
+            .stored_object(object_key)
+            .expect("uploaded object should be stored")
+            .content_type,
+        Some("text/css".to_string())
+    );
 }
 
 #[test]

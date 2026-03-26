@@ -117,6 +117,10 @@ impl CustomerAppManifest {
 
         let runtime = builder.build()?;
         let theme_publication = self.publish_theme_assets(&config, &runtime, app_root)?;
+        let mut runtime = runtime;
+        runtime.theme_asset_manifest = theme_publication
+            .as_ref()
+            .map(|publication| publication.manifest().clone());
 
         Ok(CustomerAppRuntimePlan {
             composition,
@@ -246,10 +250,7 @@ impl CustomerAppManifest {
 fn validate_customer_app_root(app_root: &Path) -> Result<(), AppModelError> {
     if !app_root.exists() {
         return Err(AppModelError::RuntimeBuild {
-            message: format!(
-                "customer app root `{}` does not exist",
-                app_root.display()
-            ),
+            message: format!("customer app root `{}` does not exist", app_root.display()),
         });
     }
     if !app_root.is_dir() {

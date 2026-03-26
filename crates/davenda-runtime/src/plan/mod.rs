@@ -1,4 +1,5 @@
 use super::*;
+use davenda_assets::ActiveAssetManifest;
 use davenda_storage::execution::ObjectStoreClientConfig;
 use std::fmt;
 use std::path::PathBuf;
@@ -75,6 +76,7 @@ pub struct RuntimePlan {
     pub handlers: BTreeMap<String, HandlerDefinition>,
     pub storage_planner: StoragePlanner,
     pub storefront_catalog: StorefrontCatalog,
+    pub theme_asset_manifest: Option<ActiveAssetManifest>,
     pub template: TemplateRuntimeServices,
     pub tls: TlsRuntimeServices,
     pub wasm: WasmRuntimeServices,

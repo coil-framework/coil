@@ -820,6 +820,16 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
         .expect("theme assets should be published when manifest publishing is enabled");
     assert_eq!(theme_publication.manifest().entries().count(), 2);
     assert_eq!(theme_publication.writes().len(), 2);
+    assert_eq!(
+        runtime
+            .runtime
+            .theme_asset_manifest
+            .as_ref()
+            .expect("runtime should retain the active theme asset manifest")
+            .entries()
+            .count(),
+        theme_publication.manifest().entries().count()
+    );
     assert!(!runtime.release_doctor.is_compatible());
     assert!(
         runtime

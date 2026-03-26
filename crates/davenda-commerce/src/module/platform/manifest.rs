@@ -244,7 +244,7 @@ fn integration_points() -> Vec<IntegrationPoint> {
         IntegrationPoint::new(
             IntegrationKind::FrontendRendering,
             "storefront.catalog",
-            "Provides collection listing/detail, product detail, add-to-cart, cart update, checkout start, and order confirmation surfaces for customer storefronts",
+            "Provides the customer browse loop from catalog and collection listing through collection detail, product detail, cart, checkout, and confirmation surfaces for server-rendered storefronts",
         ),
         IntegrationPoint::new(
             IntegrationKind::SearchIndex,

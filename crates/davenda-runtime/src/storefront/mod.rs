@@ -54,6 +54,7 @@ pub enum StorefrontStateError {
 pub struct StorefrontStateStore {
     path: PathBuf,
     connection: Arc<Mutex<Connection>>,
+    catalog: Arc<StorefrontCatalog>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -260,25 +261,267 @@ impl StorefrontFormState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CatalogItem {
-    sku: &'static str,
-    title: &'static str,
-    variant_title: &'static str,
-    product_kind: &'static str,
-    entitlement_key: Option<&'static str>,
+    sku: String,
+    title: String,
+    variant_title: String,
+    product_kind: String,
+    entitlement_key: Option<String>,
     unit_price_minor: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct StorefrontCatalog {
+    pub collections: Vec<StorefrontCollectionDefinition>,
+    pub products: Vec<StorefrontProductDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct StorefrontCollectionDefinition {
+    pub handle: String,
+    pub title: String,
+    pub label: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct StorefrontProductDefinition {
+    pub sku: String,
+    pub handle: String,
+    pub title: String,
+    pub summary: String,
+    pub price_minor: i64,
+    #[serde(default = "default_currency")]
+    pub currency: String,
+    pub collection_handle: String,
+    #[serde(default = "default_variant_title")]
+    pub variant_title: String,
+    #[serde(default = "default_product_kind")]
+    pub product_kind: String,
+    pub entitlement_key: Option<String>,
+}
+
+impl StorefrontCatalog {
+    pub fn default_sample() -> Self {
+        Self {
+            collections: vec![
+                StorefrontCollectionDefinition {
+                    handle: "featured".to_string(),
+                    title: "Featured".to_string(),
+                    label: "Featured edit".to_string(),
+                    summary:
+                        "Current campaign picks spanning merch, memberships, and event offers."
+                            .to_string(),
+                },
+                StorefrontCollectionDefinition {
+                    handle: "memberships".to_string(),
+                    title: "Memberships".to_string(),
+                    label: "Recurring value".to_string(),
+                    summary:
+                        "Recurring and premium access products that unlock customer benefits."
+                            .to_string(),
+                },
+                StorefrontCollectionDefinition {
+                    handle: "events".to_string(),
+                    title: "Events".to_string(),
+                    label: "Event-led offer".to_string(),
+                    summary:
+                        "Bookable offers and event-linked passes surfaced alongside editorial content."
+                            .to_string(),
+                },
+            ],
+            products: vec![
+                StorefrontProductDefinition {
+                    sku: "harbor-cap".to_string(),
+                    handle: "harbor-cap".to_string(),
+                    title: "Harbor Cap".to_string(),
+                    summary: "A classic canvas cap with embroidered harbor mark.".to_string(),
+                    price_minor: 2_900,
+                    currency: default_currency(),
+                    collection_handle: "featured".to_string(),
+                    variant_title: "Standard".to_string(),
+                    product_kind: "physical".to_string(),
+                    entitlement_key: None,
+                },
+                StorefrontProductDefinition {
+                    sku: "membership-gold".to_string(),
+                    handle: "gold-membership".to_string(),
+                    title: "Gold Membership".to_string(),
+                    summary:
+                        "Priority event booking, exclusive offers, and member-only access."
+                            .to_string(),
+                    price_minor: 8_900,
+                    currency: default_currency(),
+                    collection_handle: "memberships".to_string(),
+                    variant_title: "Annual".to_string(),
+                    product_kind: "membership".to_string(),
+                    entitlement_key: Some("membership.gold".to_string()),
+                },
+                StorefrontProductDefinition {
+                    sku: "tasting-pass".to_string(),
+                    handle: "tasting-pass".to_string(),
+                    title: "Spring Tasting Pass".to_string(),
+                    summary:
+                        "An event-linked pass for the next seasonal tasting series.".to_string(),
+                    price_minor: 4_500,
+                    currency: default_currency(),
+                    collection_handle: "events".to_string(),
+                    variant_title: "Single pass".to_string(),
+                    product_kind: "physical".to_string(),
+                    entitlement_key: None,
+                },
+            ],
+        }
+    }
+
+    pub(crate) fn load_from_roots(roots: &[PathBuf]) -> Result<Self, RuntimeBuildError> {
+        for root in roots {
+            let path = root.join("catalog.toml");
+            if !path.exists() {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).map_err(|error| {
+                RuntimeBuildError::StorefrontCatalogRead {
+                    path: path.display().to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            let catalog = toml::from_str::<Self>(&source).map_err(|error| {
+                RuntimeBuildError::StorefrontCatalogParse {
+                    path: path.display().to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            catalog.validate(&path)?;
+            return Ok(catalog);
+        }
+        Ok(Self::default_sample())
+    }
+
+    fn validate(&self, path: &Path) -> Result<(), RuntimeBuildError> {
+        if self.collections.is_empty() {
+            return Err(RuntimeBuildError::StorefrontCatalogValidation {
+                path: path.display().to_string(),
+                message: "at least one collection is required".to_string(),
+            });
+        }
+        if self.products.is_empty() {
+            return Err(RuntimeBuildError::StorefrontCatalogValidation {
+                path: path.display().to_string(),
+                message: "at least one product is required".to_string(),
+            });
+        }
+        let collection_handles = self
+            .collections
+            .iter()
+            .map(|collection| collection.handle.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        for product in &self.products {
+            if !collection_handles.contains(product.collection_handle.as_str()) {
+                return Err(RuntimeBuildError::StorefrontCatalogValidation {
+                    path: path.display().to_string(),
+                    message: format!(
+                        "product `{}` references unknown collection `{}`",
+                        product.handle, product.collection_handle
+                    ),
+                });
+            }
+            if product.price_minor <= 0 {
+                return Err(RuntimeBuildError::StorefrontCatalogValidation {
+                    path: path.display().to_string(),
+                    message: format!(
+                        "product `{}` must declare a positive `price_minor`",
+                        product.handle
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn collection(&self, handle: &str) -> Option<&StorefrontCollectionDefinition> {
+        self.collections
+            .iter()
+            .find(|collection| collection.handle == handle)
+    }
+
+    pub fn product(&self, handle: &str) -> Option<&StorefrontProductDefinition> {
+        self.products
+            .iter()
+            .find(|product| product.handle == handle)
+    }
+
+    pub fn product_by_sku_or_handle(&self, value: &str) -> Option<&StorefrontProductDefinition> {
+        self.products
+            .iter()
+            .find(|product| product.sku == value || product.handle == value)
+    }
+
+    pub fn products_for_collection(&self, handle: &str) -> Vec<&StorefrontProductDefinition> {
+        self.products
+            .iter()
+            .filter(|product| product.collection_handle == handle || handle == "featured")
+            .collect()
+    }
+
+    pub fn related_products_for_product(&self, handle: &str) -> Vec<&StorefrontProductDefinition> {
+        let Some(product) = self.product(handle) else {
+            return self.products.iter().collect();
+        };
+        self.products_for_collection(&product.collection_handle)
+            .into_iter()
+            .filter(|candidate| candidate.handle != product.handle)
+            .collect()
+    }
+
+    fn catalog_item(&self, sku: &str) -> Option<CatalogItem> {
+        let product = self.product_by_sku_or_handle(sku)?;
+        Some(CatalogItem {
+            sku: product.sku.clone(),
+            title: product.title.clone(),
+            variant_title: product.variant_title.clone(),
+            product_kind: product.product_kind.clone(),
+            entitlement_key: product.entitlement_key.clone(),
+            unit_price_minor: product.price_minor,
+        })
+    }
+}
+
+fn default_currency() -> String {
+    DEFAULT_CURRENCY.to_string()
+}
+
+fn default_product_kind() -> String {
+    "physical".to_string()
+}
+
+fn default_variant_title() -> String {
+    "Standard".to_string()
 }
 
 impl StorefrontStateStore {
     pub fn open_for_plan(plan: &RuntimePlan) -> Result<Self, StorefrontStateError> {
-        Self::open_with_root(
+        Self::open_with_catalog(
             plan.shared_state_root().clone(),
             plan.shared_backend_namespace(),
+            Arc::new(plan.storefront_catalog.clone()),
         )
     }
 
     pub fn open_with_root(
         root: impl Into<PathBuf>,
         namespace: impl Into<String>,
+    ) -> Result<Self, StorefrontStateError> {
+        Self::open_with_catalog(
+            root,
+            namespace,
+            Arc::new(StorefrontCatalog::default_sample()),
+        )
+    }
+
+    fn open_with_catalog(
+        root: impl Into<PathBuf>,
+        namespace: impl Into<String>,
+        catalog: Arc<StorefrontCatalog>,
     ) -> Result<Self, StorefrontStateError> {
         let root = root.into();
         let namespace = namespace.into();
@@ -380,6 +623,7 @@ impl StorefrontStateStore {
         Ok(Self {
             path,
             connection: Arc::new(Mutex::new(connection)),
+            catalog,
         })
     }
 
@@ -416,7 +660,7 @@ impl StorefrontStateStore {
             return Err(StorefrontStateError::InvalidQuantity);
         }
 
-        let item = catalog_item(sku)?;
+        let item = self.catalog_item(sku)?;
         let mut connection = self.lock_connection()?;
         let tx = connection.transaction().map_err(|error| {
             query_error(format!("failed to start add-to-cart transaction: {error}"))
@@ -481,7 +725,7 @@ impl StorefrontStateStore {
                 query_error(format!("failed to remove storefront cart line: {error}"))
             })?;
         } else {
-            let item = catalog_item(sku)?;
+            let item = self.catalog_item(sku)?;
             tx.execute(
                 r#"
                 INSERT INTO cart_lines (
@@ -520,6 +764,14 @@ impl StorefrontStateStore {
             query_error(format!("failed to commit cart update transaction: {error}"))
         })?;
         Ok(snapshot)
+    }
+
+    fn catalog_item(&self, sku: &str) -> Result<CatalogItem, StorefrontStateError> {
+        self.catalog
+            .catalog_item(sku)
+            .ok_or_else(|| StorefrontStateError::UnknownSku {
+                sku: sku.to_string(),
+            })
     }
 
     pub fn checkout_start(
@@ -1827,46 +2079,6 @@ fn sanitize_namespace(namespace: &str) -> String {
             }
         })
         .collect()
-}
-
-fn catalog_item(sku: &str) -> Result<CatalogItem, StorefrontStateError> {
-    match sku {
-        "harbor-cap" => Ok(CatalogItem {
-            sku: "harbor-cap",
-            title: "Harbor Cap",
-            variant_title: "Standard",
-            product_kind: "physical",
-            entitlement_key: None,
-            unit_price_minor: 2_900,
-        }),
-        "membership-gold" | "gold-membership" => Ok(CatalogItem {
-            sku: "membership-gold",
-            title: "Gold Membership",
-            variant_title: "Annual",
-            product_kind: "membership",
-            entitlement_key: Some("membership.gold"),
-            unit_price_minor: 8_900,
-        }),
-        "harbor-tote" => Ok(CatalogItem {
-            sku: "harbor-tote",
-            title: "Harbor Tote",
-            variant_title: "Standard",
-            product_kind: "physical",
-            entitlement_key: None,
-            unit_price_minor: 4_500,
-        }),
-        "tasting-pass" => Ok(CatalogItem {
-            sku: "tasting-pass",
-            title: "Spring Tasting Pass",
-            variant_title: "Single pass",
-            product_kind: "physical",
-            entitlement_key: None,
-            unit_price_minor: 4_500,
-        }),
-        _ => Err(StorefrontStateError::UnknownSku {
-            sku: sku.to_string(),
-        }),
-    }
 }
 
 fn cart_lines_match_order(

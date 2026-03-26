@@ -1,0 +1,51 @@
+[[collections]]
+handle = "featured"
+title = "Featured"
+label = "Featured edit"
+summary = "Current campaign picks spanning merch, memberships, and event offers."
+
+[[collections]]
+handle = "memberships"
+title = "Memberships"
+label = "Recurring value"
+summary = "Recurring and premium access products that unlock customer benefits."
+
+[[collections]]
+handle = "events"
+title = "Events"
+label = "Event-led offer"
+summary = "Bookable offers and event-linked passes surfaced alongside editorial content."
+
+[[products]]
+sku = "harbor-cap"
+handle = "harbor-cap"
+title = "Harbor Cap"
+summary = "A classic canvas cap with embroidered harbor mark."
+price_minor = 2900
+currency = "GBP"
+collection_handle = "featured"
+variant_title = "Standard"
+product_kind = "physical"
+
+[[products]]
+sku = "membership-gold"
+handle = "gold-membership"
+title = "Gold Membership"
+summary = "Priority event booking, exclusive offers, and member-only access."
+price_minor = 8900
+currency = "GBP"
+collection_handle = "memberships"
+variant_title = "Annual"
+product_kind = "membership"
+entitlement_key = "membership.gold"
+
+[[products]]
+sku = "tasting-pass"
+handle = "tasting-pass"
+title = "Spring Tasting Pass"
+summary = "An event-linked pass for the next seasonal tasting series."
+price_minor = 4500
+currency = "GBP"
+collection_handle = "events"
+variant_title = "Single pass"
+product_kind = "physical"

@@ -78,8 +78,8 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             .contains(&Capability::AssetRead)
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 14);
-    assert_eq!(manifest.http_surfaces.len(), 14);
+    assert_eq!(manifest.route_surfaces.len(), 16);
+    assert_eq!(manifest.http_surfaces.len(), 16);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 2);
@@ -517,6 +517,87 @@ fn commerce_module_public_action_surfaces_stay_in_lockstep_between_route_and_htt
             }
         );
     }
+}
+
+#[test]
+fn commerce_module_public_browse_pages_form_a_coherent_catalog_loop() {
+    let module = CommerceModule::new();
+    let manifest = module.manifest();
+
+    let expected = [
+        ("commerce.catalog", "/shop", "commerce/catalog", true),
+        (
+            "commerce.collections",
+            "/shop/collections",
+            "commerce/collections",
+            true,
+        ),
+        (
+            "commerce.collection-detail",
+            "/shop/collections/{collection_slug}",
+            "commerce/collection-detail",
+            true,
+        ),
+        (
+            "commerce.product-detail",
+            "/shop/products/{product_slug}",
+            "commerce/product-detail",
+            true,
+        ),
+        ("commerce.cart", "/cart", "commerce/cart", false),
+    ];
+
+    for (name, path, template, localized) in expected {
+        let route_surface = manifest
+            .route_surfaces
+            .iter()
+            .find(|surface| surface.name == name)
+            .unwrap_or_else(|| panic!("route surface {name} should exist"));
+        assert_eq!(route_surface.kind, RouteSurfaceKind::FrontendPage);
+        assert_eq!(route_surface.path, path);
+        assert_eq!(route_surface.localized, localized);
+        assert_eq!(route_surface.capability, None);
+
+        let http_surface = manifest
+            .http_surfaces
+            .iter()
+            .find(|surface| surface.name == name)
+            .unwrap_or_else(|| panic!("http surface {name} should exist"));
+        assert_eq!(http_surface.area, HttpSurfaceArea::Public);
+        assert_eq!(http_surface.path, path);
+        assert_eq!(http_surface.localized, localized);
+        assert_eq!(http_surface.capability, None);
+        assert_eq!(
+            http_surface.response,
+            HttpResponseContract::Page {
+                template: template.to_string(),
+                status: 200,
+            }
+        );
+    }
+}
+
+#[test]
+fn commerce_module_storefront_integration_point_describes_the_customer_browse_loop() {
+    let module = CommerceModule::new();
+    let manifest = module.manifest();
+
+    let storefront_catalog = manifest
+        .integration_points
+        .iter()
+        .find(|point| point.surface == "storefront.catalog")
+        .expect("storefront catalog integration point should exist");
+
+    assert!(
+        storefront_catalog
+            .description
+            .contains("collection listing")
+    );
+    assert!(storefront_catalog.description.contains("collection detail"));
+    assert!(storefront_catalog.description.contains("product detail"));
+    assert!(storefront_catalog.description.contains("cart"));
+    assert!(storefront_catalog.description.contains("checkout"));
+    assert!(storefront_catalog.description.contains("confirmation"));
 }
 
 #[test]

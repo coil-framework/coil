@@ -222,6 +222,7 @@ where
 
     let shared_backend_scope = next_runtime_plan_scope();
     let shared_state_root = shared_state_root(&config);
+    let storefront_catalog = StorefrontCatalog::load_from_roots(&template_roots)?;
 
     let app_name = config.app.name.clone();
 
@@ -244,6 +245,7 @@ where
         http,
         handlers,
         storage_planner,
+        storefront_catalog,
         template,
         tls: bootstrap.tls,
         wasm: bootstrap.wasm,

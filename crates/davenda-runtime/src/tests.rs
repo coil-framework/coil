@@ -1704,6 +1704,102 @@ fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
 }
 
 #[test]
+fn render_page_response_uses_customer_app_catalog_for_storefront_product_routes() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let app_name = format!("showcase-catalog-surface-{unique}");
+    let config = config_with_app_name(&app_name);
+    let template_root = unique_temp_template_root("catalog-backed-storefront");
+    fs::create_dir_all(&template_root).unwrap();
+    fs::write(
+        template_root.join("catalog.toml"),
+        r#"[[collections]]
+handle = "featured"
+title = "Featured"
+label = "Harbor essentials"
+summary = "A small live catalog wired from the customer app."
+
+[[products]]
+sku = "dock-mug"
+handle = "dock-mug"
+title = "Dock Mug"
+summary = "A customer-app-backed product rendered from catalog.toml."
+price_minor = 1900
+currency = "GBP"
+collection_handle = "featured"
+variant_title = "Standard"
+product_kind = "physical"
+"#,
+    )
+    .unwrap();
+    write_template_file(
+        &template_root,
+        "templates/commerce/product-detail.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="product">
+      <h1 dv:text="${product.name}">Fallback</h1>
+      <p class="price" dv:text="${product.price}">GBP 0.00</p>
+      <p class="summary" dv:text="${product.summary}">Summary</p>
+      <p class="collection" dv:text="${product.collectionName}">Collection</p>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(
+            RouteDefinition::new(
+                "commerce.product-detail",
+                HttpMethod::Get,
+                "/shop/products/{product_slug}",
+            )
+            .unwrap(),
+        )
+        .with_handler(
+            HandlerDefinition::page("commerce.product-detail", "commerce/product-detail").unwrap(),
+        )
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    let snapshot = store
+        .add_to_cart("session-catalog-live", None, "dock-mug", 1, 100)
+        .unwrap();
+    let execution = plan
+        .execute_request(
+            RequestInput::new(
+                HttpMethod::Get,
+                "www.example.com",
+                "/shop/products/dock-mug",
+            )
+            .unwrap()
+            .with_session_id("session-catalog-live"),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let page = match &execution.response {
+        HandlerResponse::Page(page) => page,
+        _ => panic!("expected page response"),
+    };
+    let html = plan.render_page_response(&execution, page, None).unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert_eq!(snapshot.cart.lines[0].title, "Dock Mug");
+    assert_eq!(snapshot.cart.lines[0].total, "£19.00");
+    assert!(html.contains("Dock Mug"), "{html}");
+    assert!(html.contains("£19.00"), "{html}");
+    assert!(html.contains("customer-app-backed product"), "{html}");
+    assert!(!html.contains("Harbor Cap"), "{html}");
+}
+
+#[test]
 fn browser_host_shares_distributed_sessions_when_reusing_an_explicit_client() {
     let services = plan_browser_services();
     let client = DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Redis);

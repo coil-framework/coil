@@ -299,7 +299,11 @@ fn apply_route_specific_bindings(
     session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
 ) -> Result<RenderModel, TemplateModelError> {
-    let fixture = storefront_fixture(locale)?;
+    let default_catalog = StorefrontCatalog::default_sample();
+    let catalog = plan
+        .map(|runtime| &runtime.storefront_catalog)
+        .unwrap_or(&default_catalog);
+    let fixture = storefront_fixture(locale, catalog)?;
 
     match route_name {
         "home" | "commerce.catalog" | "commerce.collections" => {
@@ -1649,7 +1653,7 @@ impl StorefrontFixture {
 
 fn product_cards_by_collection(
     locale: &str,
-    products: &[ProductFixture<'_>],
+    products: &[ProductFixture],
 ) -> Result<BTreeMap<String, Vec<RenderModel>>, TemplateModelError> {
     let mut grouped: BTreeMap<String, Vec<RenderModel>> = BTreeMap::new();
     for product in products {
@@ -1661,33 +1665,25 @@ fn product_cards_by_collection(
     Ok(grouped)
 }
 
-fn storefront_fixture(locale: &str) -> Result<StorefrontFixture, TemplateModelError> {
-    let products_data = vec![
-        ProductFixture {
-            handle: "harbor-cap",
-            title: "Harbor Cap",
-            summary: "A classic canvas cap with embroidered harbor mark.",
-            price: "£29.00",
-            collection_handle: "featured",
-            collection_name: "Featured",
-        },
-        ProductFixture {
-            handle: "gold-membership",
-            title: "Gold Membership",
-            summary: "Priority event booking, exclusive offers, and member-only access.",
-            price: "£89.00",
-            collection_handle: "memberships",
-            collection_name: "Memberships",
-        },
-        ProductFixture {
-            handle: "tasting-pass",
-            title: "Spring Tasting Pass",
-            summary: "An event-linked pass for the next seasonal tasting series.",
-            price: "£45.00",
-            collection_handle: "events",
-            collection_name: "Events",
-        },
-    ];
+fn storefront_fixture(
+    locale: &str,
+    catalog: &StorefrontCatalog,
+) -> Result<StorefrontFixture, TemplateModelError> {
+    let products_data = catalog
+        .products
+        .iter()
+        .map(|product| ProductFixture {
+            handle: product.handle.clone(),
+            title: product.title.clone(),
+            summary: product.summary.clone(),
+            price: money_display_minor(product.price_minor, &product.currency),
+            collection_handle: product.collection_handle.clone(),
+            collection_name: catalog
+                .collection(&product.collection_handle)
+                .map(|collection| collection.title.clone())
+                .unwrap_or_else(|| "Collection".to_string()),
+        })
+        .collect::<Vec<_>>();
     let product_cards = products_data
         .iter()
         .map(|product| product_model_for_locale(locale, product))
@@ -1703,29 +1699,17 @@ fn storefront_fixture(locale: &str) -> Result<StorefrontFixture, TemplateModelEr
         })
         .collect();
 
-    let collections_data = [
-        CollectionFixture {
-            handle: "featured",
-            title: "Featured",
-            href: "/shop/collections/featured",
-            summary: "Current campaign picks spanning merch, memberships, and event offers.",
-            label: "Featured edit",
-        },
-        CollectionFixture {
-            handle: "memberships",
-            title: "Memberships",
-            href: "/shop/collections/memberships",
-            summary: "Recurring and premium access products that unlock customer benefits.",
-            label: "Recurring value",
-        },
-        CollectionFixture {
-            handle: "events",
-            title: "Events",
-            href: "/shop/collections/events",
-            summary: "Bookable offers and event-linked passes surfaced alongside editorial content.",
-            label: "Event-led offer",
-        },
-    ];
+    let collections_data = catalog
+        .collections
+        .iter()
+        .map(|collection| CollectionFixture {
+            handle: collection.handle.clone(),
+            title: collection.title.clone(),
+            href: localized_collection_path(locale, &collection.handle),
+            summary: collection.summary.clone(),
+            label: collection.label.clone(),
+        })
+        .collect::<Vec<_>>();
     let catalog_sections = collections_data
         .iter()
         .map(|collection| collection_section_model(locale, collection))
@@ -1822,41 +1806,44 @@ fn storefront_fixture(locale: &str) -> Result<StorefrontFixture, TemplateModelEr
     })
 }
 
-struct CollectionFixture<'a> {
-    handle: &'a str,
-    title: &'a str,
-    href: &'a str,
-    summary: &'a str,
-    label: &'a str,
+struct CollectionFixture {
+    handle: String,
+    title: String,
+    href: String,
+    summary: String,
+    label: String,
 }
 
-struct ProductFixture<'a> {
-    handle: &'a str,
-    title: &'a str,
-    summary: &'a str,
-    price: &'a str,
-    collection_handle: &'a str,
-    collection_name: &'a str,
+struct ProductFixture {
+    handle: String,
+    title: String,
+    summary: String,
+    price: String,
+    collection_handle: String,
+    collection_name: String,
 }
 
 fn collection_section_model(
     locale: &str,
-    collection: &CollectionFixture<'_>,
+    collection: &CollectionFixture,
 ) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
-        .with_value("label", RenderValue::text(collection.label))?
-        .with_value("title", RenderValue::text(collection.title))?
-        .with_value("summary", RenderValue::text(collection.summary))?
+        .with_value("label", RenderValue::text(collection.label.as_str()))?
+        .with_value("title", RenderValue::text(collection.title.as_str()))?
+        .with_value("summary", RenderValue::text(collection.summary.as_str()))?
         .with_value(
             "url",
-            RenderValue::text(localized_collection_path(locale, collection.handle)),
+            RenderValue::text(localized_collection_path(
+                locale,
+                collection.handle.as_str(),
+            )),
         )
 }
 
 fn collection_detail_model(
     locale: &str,
-    collection: &CollectionFixture<'_>,
-    products: &[ProductFixture<'_>],
+    collection: &CollectionFixture,
+    products: &[ProductFixture],
 ) -> Result<RenderModel, TemplateModelError> {
     let filtered_products = products
         .iter()
@@ -1870,48 +1857,54 @@ fn collection_detail_model(
         .collect::<Result<Vec<_>, _>>()?;
 
     RenderModel::new()
-        .with_value("title", RenderValue::text(collection.title))?
-        .with_value("summary", RenderValue::text(collection.summary))?
+        .with_value("title", RenderValue::text(collection.title.as_str()))?
+        .with_value("summary", RenderValue::text(collection.summary.as_str()))?
         .with_value(
             "url",
-            RenderValue::text(localized_collection_path(locale, collection.handle)),
+            RenderValue::text(localized_collection_path(
+                locale,
+                collection.handle.as_str(),
+            )),
         )?
         .with_list("products", filtered_products)
 }
 
-fn product_model(product: &ProductFixture<'_>) -> Result<RenderModel, TemplateModelError> {
+fn product_model(product: &ProductFixture) -> Result<RenderModel, TemplateModelError> {
     product_model_for_locale("en-GB", product)
 }
 
 fn product_model_for_locale(
     locale: &str,
-    product: &ProductFixture<'_>,
+    product: &ProductFixture,
 ) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
-        .with_value("handle", RenderValue::text(product.handle))?
-        .with_value("slug", RenderValue::text(product.handle))?
-        .with_value("sku", RenderValue::text(product.handle))?
-        .with_value("name", RenderValue::text(product.title))?
-        .with_value("summary", RenderValue::text(product.summary))?
-        .with_value("price", RenderValue::text(product.price))?
+        .with_value("handle", RenderValue::text(product.handle.as_str()))?
+        .with_value("slug", RenderValue::text(product.handle.as_str()))?
+        .with_value("sku", RenderValue::text(product.handle.as_str()))?
+        .with_value("name", RenderValue::text(product.title.as_str()))?
+        .with_value("summary", RenderValue::text(product.summary.as_str()))?
+        .with_value("price", RenderValue::text(product.price.as_str()))?
         .with_value(
             "url",
-            RenderValue::text(localized_product_path(locale, product.handle)),
+            RenderValue::text(localized_product_path(locale, product.handle.as_str())),
         )?
         .with_value("addToCartUrl", RenderValue::text("/cart/items"))?
         .with_value("imageUrl", RenderValue::text("/theme/assets/logo.svg"))?
-        .with_value("imageAlt", RenderValue::text(product.title))?
+        .with_value("imageAlt", RenderValue::text(product.title.as_str()))?
         .with_value(
             "collectionHandle",
-            RenderValue::text(product.collection_handle.to_string()),
+            RenderValue::text(product.collection_handle.as_str()),
         )?
         .with_value(
             "collectionUrl",
-            RenderValue::text(localized_collection_path(locale, product.collection_handle)),
+            RenderValue::text(localized_collection_path(
+                locale,
+                product.collection_handle.as_str(),
+            )),
         )?
         .with_value(
             "collectionName",
-            RenderValue::text(product.collection_name.to_string()),
+            RenderValue::text(product.collection_name.as_str()),
         )
 }
 
@@ -2116,10 +2109,13 @@ fn sample_previous_order() -> Order {
 }
 
 fn money_display(money: &Money) -> String {
-    let amount_minor = money.amount_minor();
+    money_display_minor(money.amount_minor(), money.currency().as_str())
+}
+
+fn money_display_minor(amount_minor: i64, currency: &str) -> String {
     let major = amount_minor / 100;
     let remainder = amount_minor % 100;
-    match money.currency().as_str() {
+    match currency {
         "GBP" => format!("£{major}.{remainder:02}"),
         code => format!("{code} {major}.{remainder:02}"),
     }

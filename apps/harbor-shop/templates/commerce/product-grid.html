@@ -1,10 +1,10 @@
 <section class="product-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
   <header class="product-grid__header">
-    <p class="product-grid__eyebrow">Storefront</p>
-    <h2>Popular right now</h2>
+    <p class="product-grid__eyebrow">Products</p>
+    <h2>Jump straight to a product when the customer already knows the item</h2>
     <p>
-      A mix of pantry staples, travel pieces, and limited-run gifts that move quickly once the
-      weekend market opens.
+      Product detail is where customers confirm the item, quantity, and price before the cart
+      handoff.
     </p>
   </header>
 
@@ -20,7 +20,15 @@
           />
         </a>
         <div class="product-card__body">
-          <p class="product-card__eyebrow" dv:text="${product.collectionName}">Harbor pantry</p>
+          <p class="product-card__eyebrow">
+            <a
+              href="/shop/collections/featured"
+              dv:href="${product.collectionUrl}"
+              dv:text="${product.collectionName}"
+            >
+              Harbor pantry
+            </a>
+          </p>
           <h3>
             <a href="/shop/products/harbor-cap" dv:href="${product.url}" dv:text="${product.name}">
               Harbor tin
@@ -31,6 +39,9 @@
           </p>
           <div class="product-card__meta">
             <span class="product-card__price" dv:text="${product.price}">GBP 28</span>
+            <a class="button" href="/shop/products/harbor-cap" dv:href="${product.url}">
+              View product
+            </a>
             <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
               <input
                 type="hidden"
@@ -39,17 +50,7 @@
                 dv:attr="value=${product.slug}"
               />
               <input type="hidden" name="quantity" value="1" />
-              <button class="button" type="submit">Add to cart</button>
-            </form>
-            <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
-              <input
-                type="hidden"
-                name="product_slug"
-                value="harbor-cap"
-                dv:attr="value=${product.slug}"
-              />
-              <input type="hidden" name="quantity" value="1" />
-              <button class="button button--secondary" type="submit">Buy now</button>
+              <button class="button button--secondary" type="submit">Add to cart</button>
             </form>
           </div>
         </div>
@@ -60,22 +61,36 @@
   <div class="product-grid__fallback" dv:unless="${hasProductCards}">
     <article class="product-card">
       <div class="product-card__body">
-        <p class="product-card__eyebrow">Harbor pantry</p>
-        <h3>Signature provisions set</h3>
+        <p class="product-card__eyebrow">Featured</p>
+        <h3><a href="/en-GB/shop/products/harbor-cap">Harbor Cap</a></h3>
         <p class="product-card__summary">
-          A compact edit of pantry staples, customer favorites, and travel-ready extras.
+          A fast-moving staple with a direct route into product detail, cart, and checkout.
         </p>
         <div class="product-card__meta">
-          <span class="product-card__price">GBP 28</span>
+          <span class="product-card__price">GBP 29</span>
+          <a class="button" href="/en-GB/shop/products/harbor-cap">View product</a>
           <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
             <input type="hidden" name="product_slug" value="harbor-cap" />
             <input type="hidden" name="quantity" value="1" />
-            <button class="button" type="submit">Add to cart</button>
+            <button class="button button--secondary" type="submit">Add to cart</button>
           </form>
-          <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
-            <input type="hidden" name="product_slug" value="harbor-cap" />
+        </div>
+      </div>
+    </article>
+    <article class="product-card">
+      <div class="product-card__body">
+        <p class="product-card__eyebrow">Memberships</p>
+        <h3><a href="/en-GB/shop/products/gold-membership">Gold Membership</a></h3>
+        <p class="product-card__summary">
+          A recurring product with account follow-up, confirmation, and renewal value.
+        </p>
+        <div class="product-card__meta">
+          <span class="product-card__price">GBP 100</span>
+          <a class="button" href="/en-GB/shop/products/gold-membership">View product</a>
+          <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
+            <input type="hidden" name="product_slug" value="gold-membership" />
             <input type="hidden" name="quantity" value="1" />
-            <button class="button button--secondary" type="submit">Buy now</button>
+            <button class="button button--secondary" type="submit">Add to cart</button>
           </form>
         </div>
       </div>

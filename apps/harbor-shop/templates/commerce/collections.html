@@ -26,7 +26,8 @@
         </p>
         <h1 dv:text="${page.title}">Shop Collections</h1>
         <p dv:text="${page.summary}">
-          Browse curated collection landings before moving into product detail and checkout.
+          Choose a collection first, then move into product detail and cart from a tighter,
+          easier-to-shop edit.
         </p>
         <div class="checkout-actions">
           <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">Browse full catalog</a>
@@ -37,6 +38,17 @@
       </section>
 
       <div dv:replace="~{commerce/collection-grid :: grid}"></div>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>What changes on collection detail</h2>
+          <p>
+            Each collection page narrows the customer to the products in that edit, so the next
+            click is product detail instead of a generic catalog jump.
+          </p>
+        </article>
+      </section>
+
       <div dv:replace="~{commerce/product-grid :: grid}"></div>
       <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
     </main>

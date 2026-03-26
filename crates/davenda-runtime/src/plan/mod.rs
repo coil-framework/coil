@@ -74,6 +74,7 @@ pub struct RuntimePlan {
     pub http: HttpRuntimePlan,
     pub handlers: BTreeMap<String, HandlerDefinition>,
     pub storage_planner: StoragePlanner,
+    pub storefront_catalog: StorefrontCatalog,
     pub template: TemplateRuntimeServices,
     pub tls: TlsRuntimeServices,
     pub wasm: WasmRuntimeServices,

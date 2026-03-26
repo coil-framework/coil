@@ -29,6 +29,12 @@ pub enum RuntimeBuildError {
     TemplateSourceRead { path: String, message: String },
     #[error("failed to parse template source `{path}`: {message}")]
     TemplateSourceParse { path: String, message: String },
+    #[error("failed to read storefront catalog `{path}`: {message}")]
+    StorefrontCatalogRead { path: String, message: String },
+    #[error("failed to parse storefront catalog `{path}`: {message}")]
+    StorefrontCatalogParse { path: String, message: String },
+    #[error("storefront catalog `{path}` is invalid: {message}")]
+    StorefrontCatalogValidation { path: String, message: String },
     #[error("template source `{path}` uses unsupported directive `{directive}`")]
     TemplateSourceUnsupportedDirective { path: String, directive: String },
     #[error("customer app root `{path}` does not exist")]

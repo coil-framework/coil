@@ -1,27 +1,47 @@
 <section class="collection-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
-  <h2>Featured collections</h2>
-  <p class="collection-grid__intro">
-    Browse the current storefront collections, then carry the basket through to
-    checkout and account follow-up.
-  </p>
+  <header class="collection-grid__header">
+    <p class="collection-grid__eyebrow">Collections</p>
+    <h2>Start with the collection that matches intent</h2>
+    <p class="collection-grid__intro">
+      Each collection is a customer-facing landing page that narrows the browse path before
+      product detail and cart.
+    </p>
+  </header>
   <div class="collection-grid__list" dv:if="${hasCatalogSections}">
     <article class="catalog-section collection-grid__item" dv:each="section : ${catalogSections}">
       <p class="catalog-section__eyebrow" dv:text="${section.label}">Featured edit</p>
-      <h3 dv:text="${section.title}">Featured</h3>
+      <h3>
+        <a href="/shop/collections/featured" dv:href="${section.url}" dv:text="${section.title}">
+          Featured
+        </a>
+      </h3>
       <p dv:text="${section.summary}">
-        Seasonal landing pages that help customers start from a clear merchandising promise.
+        Start here for the collection promise, then open a product page for price, quantity, and
+        cart actions.
       </p>
       <a class="button" href="/shop/collections/featured" dv:href="${section.url}">
-        Open collection
+        View collection
       </a>
     </article>
   </div>
   <div class="collection-grid__list" dv:unless="${hasCatalogSections}">
     <article class="catalog-section collection-grid__item">
-      <p class="catalog-section__eyebrow">Featured edit</p>
+      <p class="catalog-section__eyebrow">Featured</p>
       <h3>Featured</h3>
-      <p>Start with the current harbor edit, then move directly into products and checkout.</p>
-      <a class="button" href="/shop/collections/featured">Open collection</a>
+      <p>Start with the broad Harbor Shop edit before narrowing into individual product detail pages.</p>
+      <a class="button" href="/en-GB/shop/collections/featured">View collection</a>
+    </article>
+    <article class="catalog-section collection-grid__item">
+      <p class="catalog-section__eyebrow">Memberships</p>
+      <h3>Memberships</h3>
+      <p>Lead customers directly into recurring products and their account-linked benefits.</p>
+      <a class="button" href="/en-GB/shop/collections/memberships">View collection</a>
+    </article>
+    <article class="catalog-section collection-grid__item">
+      <p class="catalog-section__eyebrow">Events</p>
+      <h3>Events</h3>
+      <p>Use a tighter event-focused collection when the customer is shopping for attendance or passes.</p>
+      <a class="button" href="/en-GB/shop/collections/events">View collection</a>
     </article>
   </div>
 </section>

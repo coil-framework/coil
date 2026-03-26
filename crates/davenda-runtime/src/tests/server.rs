@@ -5529,7 +5529,7 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
                 assert!(body.contains("navigation editor"), "{route}: {body}");
             }
             "/admin/redirects" => {
-                assert!(body.contains("redirect inventory only"), "{route}: {body}");
+                assert!(body.contains("tested redirect inventory"), "{route}: {body}");
             }
             _ => {}
         }

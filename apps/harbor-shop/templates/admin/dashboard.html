@@ -62,8 +62,8 @@
           <article class="admin-card">
             <h2>Review storefront orders</h2>
             <p>
-              Check whether checkout is producing the expected order queue, payment references, and
-              receipt emails before staff handle customer issues.
+              Check whether checkout is producing a visible order queue with the same reference,
+              status, and total that customers see in the storefront account area.
             </p>
             <a class="button" href="/admin/orders" dv:attr="href=${links.adminOrders}">
               Open orders
@@ -88,6 +88,33 @@
             <a class="button" href="/admin/pages" dv:attr="href=${links.adminPages}">
               Open content
             </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Launch sign-off</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Browse and merchandising</h2>
+            <p>
+              Use the catalog screen to confirm products and collections are linked to the exact
+              storefront routes customers can browse today.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Order support baseline</h2>
+            <p>
+              Use the orders screen to confirm that the store can prove reference, status, and
+              total for completed checkout output before launch support starts.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Cutover content checks</h2>
+            <p>
+              Use pages, navigation, and redirects to confirm that live routes are present and
+              legacy URL protection is accounted for before traffic switch.
+            </p>
           </article>
         </div>
       </section>

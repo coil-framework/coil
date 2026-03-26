@@ -53,6 +53,24 @@
         </div>
       </section>
 
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Launch sign-off</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Customer-visible consistency</h2>
+            <p>Confirm that the order reference, status, and total shown here match the storefront confirmation and account history before staff take live support cases.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Settlement boundary</h2>
+            <p>Payment provider settlement, capture, refund, and webhook reconciliation still need external diagnostics or deeper operator tooling.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Escalation path</h2>
+            <p>If checkout succeeds for the customer but the order does not appear here, escalate to runtime logs and payment/provider diagnostics immediately.</p>
+          </article>
+        </div>
+      </section>
+
       <section class="admin-panel" dv:if="${hasRecentOrders}">
         <p class="admin-panel__eyebrow">Recent orders</p>
         <table class="admin-table">

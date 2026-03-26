@@ -14502,6 +14502,11 @@ expect = true
         let dns = configure_dns_cutover_for_import_fixture(&fixture);
         let cutover_manifest =
             write_cutover_observe_manifest(&fixture, "cutover-observe-fail.toml", 0);
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -14519,7 +14524,7 @@ expect = true
             BTreeMap::from([
                 (
                     "/".to_string(),
-                    LiveProbeResponse::html(200, "<html><body>/</body></html>"),
+                    cache_probe_response(&runtime.built, "/", "<html><body>/</body></html>"),
                 ),
                 (
                     "/events".to_string(),
@@ -14587,8 +14592,9 @@ expect = true
             BTreeMap::from([
                 (
                     "/".to_string(),
-                    LiveProbeResponse::html(
-                        200,
+                    cache_probe_response(
+                        &runtime.built,
+                        "/",
                         r#"<html><head><link rel="canonical" href="/" /></head><body><img src="/media/home.jpg" /></body></html>"#,
                     ),
                 ),
@@ -14665,8 +14671,9 @@ expect = true
             BTreeMap::from([
                 (
                     "/".to_string(),
-                    LiveProbeResponse::html(
-                        200,
+                    cache_probe_response(
+                        &runtime.built,
+                        "/",
                         r#"<html><head><link rel="canonical" href="/" /></head><body><img src="/media/home.jpg" /></body></html>"#,
                     ),
                 ),
@@ -14743,7 +14750,7 @@ expect = true
             BTreeMap::from([
                 (
                     "/".to_string(),
-                    LiveProbeResponse::html(200, "<html><body>home</body></html>"),
+                    cache_probe_response(&runtime.built, "/", "<html><body>home</body></html>"),
                 ),
                 (
                     "/events".to_string(),
@@ -14891,6 +14898,11 @@ expect = true
             &["record_counts", "transactional_journey_errors"],
             &["/", "/events/festival"],
         );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -14908,11 +14920,15 @@ expect = true
             BTreeMap::from([
                 (
                     "/".to_string(),
-                    LiveProbeResponse::html(200, "<html><body>home</body></html>"),
+                    cache_probe_response(&runtime.built, "/", "<html><body>home</body></html>"),
                 ),
                 (
                     "/events/festival".to_string(),
-                    LiveProbeResponse::html(200, "<html><body>festival</body></html>"),
+                    cache_probe_response(
+                        &runtime.built,
+                        "/events/festival",
+                        "<html><body>festival</body></html>",
+                    ),
                 ),
                 (
                     "/events/festival/book".to_string(),
@@ -14950,6 +14966,11 @@ expect = true
             &["record_counts", "transactional_journey_errors"],
             &["/", "/events/festival"],
         );
+        let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
+        let manifest_root = cutover_manifest.parent().unwrap();
+        let runtime = build_import_runtime_context(manifest_root, &manifest)
+            .unwrap()
+            .unwrap();
 
         run_from_args([
             "import".to_string(),
@@ -14967,11 +14988,15 @@ expect = true
             BTreeMap::from([
                 (
                     "/".to_string(),
-                    LiveProbeResponse::html(200, "<html><body>home</body></html>"),
+                    cache_probe_response(&runtime.built, "/", "<html><body>home</body></html>"),
                 ),
                 (
                     "/events/festival".to_string(),
-                    LiveProbeResponse::html(200, "<html><body>festival</body></html>"),
+                    cache_probe_response(
+                        &runtime.built,
+                        "/events/festival",
+                        "<html><body>festival</body></html>",
+                    ),
                 ),
                 (
                     "/events/festival/book".to_string(),

@@ -80,6 +80,7 @@ pub(crate) struct RuntimeServerState {
     cookie_secret: Vec<u8>,
     csrf_secret: Vec<u8>,
     payment_webhook_secret: Option<String>,
+    payment_provider_api_key: Option<String>,
     backends: SharedBackendClients,
     route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
     auth_explainer: Option<Arc<dyn auth::LiveAuthExplainer>>,
@@ -121,6 +122,8 @@ impl HttpServerHost {
             backends.clone(),
             plan.shared_state_root().clone(),
         );
+        let payment_provider_api_key = configured_commerce_payment_provider(&plan.config)
+            .and_then(|provider| provider.api_key_from_runtime_secrets(&wasm_secrets));
         let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
             Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
                 plan.data.clone(),
@@ -154,6 +157,7 @@ impl HttpServerHost {
             storefront,
             backends,
             payment_webhook_secret,
+            payment_provider_api_key,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -184,6 +188,7 @@ impl HttpServerHost {
             wasm_host,
             storefront,
             backends,
+            None,
             None,
             cookie_secret,
             csrf_secret,
@@ -237,6 +242,7 @@ impl HttpServerHost {
             storefront,
             backends,
             None,
+            None,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -251,6 +257,7 @@ impl HttpServerHost {
         storefront: StorefrontStateStore,
         backends: SharedBackendClients,
         payment_webhook_secret: Option<String>,
+        payment_provider_api_key: Option<String>,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
         route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
@@ -264,6 +271,7 @@ impl HttpServerHost {
             cookie_secret,
             csrf_secret,
             payment_webhook_secret,
+            payment_provider_api_key,
             backends,
             route_authorizer,
             auth_explainer,
@@ -418,6 +426,26 @@ fn resolve_module_payment_webhook_secret<R: SecretResolver>(
 }
 
 impl CommercePaymentProviderConfig {
+    pub(crate) fn uses_hosted_checkout(&self) -> bool {
+        matches!(
+            self.checkout_mode.as_str(),
+            "hosted-checkout" | "hosted_checkout" | "stripe-hosted-checkout"
+        )
+    }
+
+    pub(crate) fn api_key_from_runtime_secrets(
+        &self,
+        runtime_secrets: &BTreeMap<String, String>,
+    ) -> Option<String> {
+        self.api_key_secret_candidates()
+            .iter()
+            .find_map(|candidate| runtime_secrets.get(*candidate))
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    }
+
     pub(crate) fn module_config_key(&self) -> String {
         match self.code.as_str() {
             "stripe" => "commerce-payments-stripe".to_string(),
@@ -427,8 +455,12 @@ impl CommercePaymentProviderConfig {
 
     pub(crate) fn label(&self) -> String {
         match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", _) if self.uses_hosted_checkout() => "Stripe hosted checkout".to_string(),
             ("stripe", "webhook-confirmation") => "Stripe webhook confirmation".to_string(),
             ("stripe", _) => "Stripe payment provider".to_string(),
+            (other, _) if self.uses_hosted_checkout() => {
+                format!("{} hosted checkout", display_payment_provider_name(other))
+            }
             (other, "webhook-confirmation") => {
                 format!(
                     "{} webhook confirmation",
@@ -441,8 +473,13 @@ impl CommercePaymentProviderConfig {
 
     pub(crate) fn summary(&self) -> String {
         match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", _) if self.uses_hosted_checkout() => "This checkout reserves the order in Davenda, then redirects the customer to Stripe Checkout for payment collection. Davenda still waits for the signed Stripe webhook before treating the order as paid.".to_string(),
             ("stripe", "webhook-confirmation") => "This checkout uses the installed Stripe payment provider. The order stays visible until the signed Stripe webhook confirms the payment result.".to_string(),
             ("stripe", _) => "This checkout uses the installed Stripe payment provider for payment confirmation.".to_string(),
+            (other, _) if self.uses_hosted_checkout() => format!(
+                "This checkout reserves the order in Davenda, then redirects the customer to the installed {} hosted checkout. Davenda still waits for the signed webhook before treating the order as paid.",
+                display_payment_provider_name(other)
+            ),
             (other, "webhook-confirmation") => format!(
                 "This checkout uses the installed {} payment provider. The order stays visible until its signed webhook confirms the payment result.",
                 display_payment_provider_name(other)
@@ -456,8 +493,12 @@ impl CommercePaymentProviderConfig {
 
     pub(crate) fn submit_label(&self) -> String {
         match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", _) if self.uses_hosted_checkout() => "Continue to Stripe".to_string(),
             ("stripe", "webhook-confirmation") => {
                 "Place order and wait for Stripe confirmation".to_string()
+            }
+            (other, _) if self.uses_hosted_checkout() => {
+                format!("Continue to {}", display_payment_provider_name(other))
             }
             (_, "webhook-confirmation") => {
                 format!(
@@ -471,9 +512,16 @@ impl CommercePaymentProviderConfig {
 
     pub(crate) fn pending_confirmation_summary(&self, order_id: &str) -> String {
         match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", _) if self.uses_hosted_checkout() => format!(
+                "Order {order_id} was reserved and handed off to Stripe Checkout. Stripe still needs to confirm payment."
+            ),
             ("stripe", "webhook-confirmation") => {
                 format!("Order {order_id} was received. Stripe still needs to confirm payment.")
             }
+            (_, _) if self.uses_hosted_checkout() => format!(
+                "Order {order_id} was reserved and handed off to {}. The provider still needs to confirm payment.",
+                display_payment_provider_name(&self.code)
+            ),
             (_, "webhook-confirmation") => format!(
                 "Order {order_id} was received. {} still needs to confirm payment.",
                 display_payment_provider_name(&self.code)
@@ -484,14 +532,33 @@ impl CommercePaymentProviderConfig {
 
     pub(crate) fn pending_next_step(&self) -> String {
         match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", _) if self.uses_hosted_checkout() => {
+                "Stripe Checkout has not confirmed this payment yet. The order will move forward after the hosted Stripe session finishes and the signed Stripe webhook arrives.".to_string()
+            }
             ("stripe", "webhook-confirmation") => {
                 "Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives.".to_string()
             }
+            (_, _) if self.uses_hosted_checkout() => format!(
+                "{} has not confirmed this payment yet. The order will move forward after the hosted checkout finishes and the provider webhook arrives.",
+                display_payment_provider_name(&self.code)
+            ),
             (_, "webhook-confirmation") => format!(
                 "{} has not confirmed this payment yet. The order will move forward after its signed webhook arrives.",
                 display_payment_provider_name(&self.code)
             ),
             _ => "Payment confirmation is pending. The order will move forward after the provider callback arrives.".to_string(),
+        }
+    }
+
+    fn api_key_secret_candidates(&self) -> &'static [&'static str] {
+        match self.code.as_str() {
+            "stripe" => &[
+                "commerce_payments_stripe_secret_key",
+                "commerce_payments_stripe_api_key",
+                "stripe_secret_key",
+                "stripe_api_key",
+            ],
+            _ => &[],
         }
     }
 }

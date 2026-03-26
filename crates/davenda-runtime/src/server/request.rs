@@ -6,6 +6,7 @@ use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
 use hmac::{Hmac, Mac};
+use serde::Deserialize;
 use sha2::Sha256;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -54,6 +55,12 @@ type HmacSha256 = Hmac<Sha256>;
 struct VerifiedPaymentWebhook {
     event: String,
     payment_reference: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StripeCheckoutSessionResponse {
+    id: String,
+    url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,7 +237,8 @@ pub(super) async fn execute_live_request(
 
     let mut storefront_mutation_cookies = Vec::new();
     if let Some(location) =
-        apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)?
+        apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)
+            .await?
     {
         execution
             .response_cookies
@@ -247,12 +255,18 @@ pub(super) async fn execute_live_request(
     let method = execution.method;
     let session_id = execution.session.session_id.clone();
     let principal_id = execution.principal.principal_id.clone();
+    let provider_result = execution_query_field(&execution, "provider_result").map(str::to_string);
+    let payment_reference =
+        execution_query_field(&execution, "payment_reference").map(str::to_string);
     if let Some(location) = redirect_failed_checkout_confirmation(
         state,
         route_name.as_str(),
         method,
         session_id.as_deref(),
         principal_id.as_deref(),
+        provider_result.as_deref(),
+        payment_reference.as_deref(),
+        now,
         &mut execution.response_cookies,
     )? {
         return Ok(storefront_redirect_response(
@@ -889,7 +903,7 @@ fn storefront_payment_input_from_execution(
     .map_err(RuntimeServerError::Storefront)
 }
 
-fn apply_native_storefront_mutations(
+async fn apply_native_storefront_mutations(
     state: &RuntimeServerState,
     execution: &RequestExecution,
     now: BrowserInstant,
@@ -1040,20 +1054,17 @@ fn apply_native_storefront_mutations(
                 }
                 Err(error) => return Err(RuntimeServerError::Storefront(error)),
             };
-            let message = snapshot
-                .latest_order
-                .as_ref()
-                .map(|order| match configured_commerce_payment_provider(&state.plan.config) {
-                    Some(provider) => provider.pending_confirmation_summary(&order.order_id),
-                    None => format!(
-                        "Order {} was received. Payment is still awaiting provider confirmation.",
-                        order.order_id
-                    ),
-                })
-                .unwrap_or_else(|| {
-                    "Checkout could not complete because the cart is empty.".to_string()
-                });
-            push_storefront_flash(state, response_cookies, FlashLevel::Success, message)?;
+            if let Some(location) = finalize_storefront_checkout_completion(
+                state,
+                execution,
+                &snapshot,
+                now,
+                response_cookies,
+            )
+            .await?
+            {
+                return Ok(Some(location));
+            }
         }
         "commerce.account-session-end" => {
             revoke_storefront_session(state, session_id, now, response_cookies)?;
@@ -1070,16 +1081,257 @@ fn apply_native_storefront_mutations(
     Ok(None)
 }
 
+async fn finalize_storefront_checkout_completion(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    snapshot: &StorefrontStateSnapshot,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    let Some(order) = snapshot.latest_order.as_ref() else {
+        push_storefront_flash(
+            state,
+            response_cookies,
+            FlashLevel::Error,
+            "Checkout could not complete because the cart is empty.",
+        )?;
+        return Ok(None);
+    };
+
+    let Some(provider) = configured_commerce_payment_provider(&state.plan.config) else {
+        push_storefront_flash(
+            state,
+            response_cookies,
+            FlashLevel::Success,
+            format!(
+                "Order {} was received. Payment is still awaiting provider confirmation.",
+                order.order_id
+            ),
+        )?;
+        return Ok(None);
+    };
+
+    if provider.code == "stripe" && provider.uses_hosted_checkout() {
+        match launch_stripe_checkout_handoff(state, execution, order).await {
+            Ok(handoff_url) => return Ok(Some(handoff_url)),
+            Err(_) => {
+                return restore_checkout_after_provider_handoff_failure(
+                    state,
+                    order,
+                    now,
+                    response_cookies,
+                    "Stripe checkout could not start. Your basket has been restored so you can review it and try again.",
+                )
+                .map(Some);
+            }
+        }
+    }
+
+    push_storefront_flash(
+        state,
+        response_cookies,
+        FlashLevel::Success,
+        provider.pending_confirmation_summary(&order.order_id),
+    )?;
+    Ok(None)
+}
+
+async fn launch_stripe_checkout_handoff(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    order: &StorefrontOrderSnapshot,
+) -> Result<String, String> {
+    let api_key = state
+        .payment_provider_api_key
+        .as_deref()
+        .ok_or_else(|| "stripe hosted checkout api key is not configured".to_string())?
+        .to_string();
+    let request_body = stripe_checkout_session_request_body(execution, order)?;
+    let idempotency_key = format!("davenda-order-{}", order.order_id);
+    let response = tokio::task::spawn_blocking(move || {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout_read(std::time::Duration::from_secs(10))
+            .build();
+        let request = agent
+            .post("https://api.stripe.com/v1/checkout/sessions")
+            .set("authorization", &format!("Bearer {api_key}"))
+            .set("content-type", "application/x-www-form-urlencoded")
+            .set("idempotency-key", &idempotency_key);
+        match request.send_string(&request_body) {
+            Ok(response) => {
+                let body = response
+                    .into_string()
+                    .map_err(|error| format!("failed to read Stripe Checkout response: {error}"))?;
+                serde_json::from_str::<StripeCheckoutSessionResponse>(&body)
+                    .map_err(|error| format!("failed to decode Stripe Checkout response: {error}"))
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                Err(format!(
+                    "Stripe Checkout session creation failed with HTTP {code}: {body}"
+                ))
+            }
+            Err(ureq::Error::Transport(error)) => {
+                Err(format!("Stripe Checkout handoff request failed: {error}"))
+            }
+        }
+    })
+    .await
+    .map_err(|error| format!("failed to join Stripe Checkout handoff task: {error}"))??;
+
+    if response.id.trim().is_empty() || response.url.trim().is_empty() {
+        return Err("Stripe Checkout response was missing the hosted session URL".to_string());
+    }
+    Ok(response.url)
+}
+
+fn stripe_checkout_session_request_body(
+    execution: &RequestExecution,
+    order: &StorefrontOrderSnapshot,
+) -> Result<String, String> {
+    let payment_reference = order
+        .payment
+        .reference
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("order {} is missing a payment reference", order.order_id))?;
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("mode", "payment");
+    serializer.append_pair(
+        "success_url",
+        &provider_checkout_return_url(execution, payment_reference, "return"),
+    );
+    serializer.append_pair(
+        "cancel_url",
+        &provider_checkout_return_url(execution, payment_reference, "cancel"),
+    );
+    serializer.append_pair("client_reference_id", payment_reference);
+    if let Some(email) = order.payment.checkout_email.as_deref() {
+        let trimmed = email.trim();
+        if !trimmed.is_empty() {
+            serializer.append_pair("customer_email", trimmed);
+        }
+    }
+    serializer.append_pair("payment_intent_data[metadata][order_id]", &order.order_id);
+    serializer.append_pair(
+        "payment_intent_data[metadata][payment_reference]",
+        payment_reference,
+    );
+    serializer.append_pair("metadata[order_id]", &order.order_id);
+    serializer.append_pair("metadata[payment_reference]", payment_reference);
+
+    for (index, line) in order.lines.iter().enumerate() {
+        if line.quantity == 0 {
+            return Err(format!(
+                "order {} contains a zero-quantity line for {}",
+                order.order_id, line.sku
+            ));
+        }
+        if line.unit_price_minor <= 0 {
+            return Err(format!(
+                "order {} contains a non-positive unit amount for {}",
+                order.order_id, line.sku
+            ));
+        }
+
+        let prefix = format!("line_items[{index}]");
+        serializer.append_pair(
+            &format!("{prefix}[price_data][currency]"),
+            &line.currency.to_ascii_lowercase(),
+        );
+        serializer.append_pair(
+            &format!("{prefix}[price_data][unit_amount]"),
+            &line.unit_price_minor.to_string(),
+        );
+        serializer.append_pair(
+            &format!("{prefix}[price_data][product_data][name]"),
+            stripe_line_item_name(line).as_str(),
+        );
+        serializer.append_pair(&format!("{prefix}[quantity]"), &line.quantity.to_string());
+    }
+
+    Ok(serializer.finish())
+}
+
+fn stripe_line_item_name(line: &StorefrontOrderLine) -> String {
+    let variant = line.variant_title.trim();
+    if variant.is_empty() || variant.eq_ignore_ascii_case("standard") {
+        return line.title.clone();
+    }
+    format!("{} ({variant})", line.title)
+}
+
+fn provider_checkout_return_url(
+    execution: &RequestExecution,
+    payment_reference: &str,
+    provider_result: &str,
+) -> String {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("provider_result", provider_result);
+    serializer.append_pair("payment_reference", payment_reference);
+    format!(
+        "{}://{}/checkout/confirmation?{}",
+        execution.trace.transport_scheme,
+        execution.host,
+        serializer.finish()
+    )
+}
+
+fn restore_checkout_after_provider_handoff_failure(
+    state: &RuntimeServerState,
+    order: &StorefrontOrderSnapshot,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+    message: &str,
+) -> Result<String, RuntimeServerError> {
+    if let Some(payment_reference) = order.payment.reference.as_deref() {
+        let _ = state.storefront.apply_payment_webhook(
+            payment_reference,
+            "payment.failed",
+            now.as_unix_seconds(),
+        )?;
+    }
+    push_storefront_flash(state, response_cookies, FlashLevel::Error, message)?;
+    Ok("/cart".to_string())
+}
+
 fn redirect_failed_checkout_confirmation(
     state: &RuntimeServerState,
     route_name: &str,
     method: HttpMethod,
     session_id: Option<&str>,
     principal_id: Option<&str>,
+    provider_result: Option<&str>,
+    payment_reference: Option<&str>,
+    now: BrowserInstant,
     response_cookies: &mut Vec<String>,
 ) -> Result<Option<String>, RuntimeServerError> {
     if route_name != "commerce.checkout-confirmation" || method != HttpMethod::Get {
         return Ok(None);
+    }
+    if provider_result == Some("cancel") {
+        if let Some(payment_reference) = payment_reference {
+            match state.storefront.apply_payment_webhook(
+                payment_reference,
+                "payment.failed",
+                now.as_unix_seconds(),
+            ) {
+                Ok(receipt) => {
+                    if receipt.order.payment.status == "failed" {
+                        push_storefront_flash(
+                            state,
+                            response_cookies,
+                            FlashLevel::Error,
+                            "Stripe checkout was cancelled. Your basket has been restored so you can review it and start checkout again.",
+                        )?;
+                        return Ok(Some("/cart".to_string()));
+                    }
+                }
+                Err(StorefrontStateError::UnknownPaymentReference { .. }) => {}
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
+        }
     }
     let Some(session_id) = session_id else {
         return Ok(None);
@@ -1129,6 +1381,13 @@ fn dispatch_paid_order_event(
 fn execution_form_field<'a>(execution: &'a RequestExecution, name: &str) -> Option<&'a str> {
     execution
         .form_fields
+        .get(name)
+        .and_then(|values| values.first().map(String::as_str))
+}
+
+fn execution_query_field<'a>(execution: &'a RequestExecution, name: &str) -> Option<&'a str> {
+    execution
+        .query_params
         .get(name)
         .and_then(|values| values.first().map(String::as_str))
 }

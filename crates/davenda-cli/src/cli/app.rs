@@ -48,10 +48,10 @@ use davenda_memberships::{
     TierVisibility,
 };
 use davenda_runtime::{
-    BrowserInstant, CacheDisposition, EnvironmentSecretResolver, HandlerResponse, HttpMethod,
-    JobsHost, RequestExecutionError, RequestInput, RouteArea, RouteAuthGate, RuntimeBuilder,
-    SecretResolver, SessionIssueRequest, StorageHost, WebhookObservationEvent,
-    WebhookObservationSnapshot, WebhookObservationStatus,
+    BrowserInstant, CacheDisposition, EnvironmentSecretResolver, HandlerDefinition,
+    HandlerResponse, HttpMethod, JobsHost, RequestExecutionError, RequestInput, RouteArea,
+    RouteAuthGate, RouteDefinition, SecretResolver, SessionIssueRequest, StorageHost,
+    WebhookObservationEvent, WebhookObservationSnapshot, WebhookObservationStatus,
 };
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
@@ -8900,29 +8900,32 @@ fn build_customer_app_runtime_context(
 fn build_dev_server_runtime_plan(
     config_path: &Path,
 ) -> Result<davenda_runtime::RuntimePlan, CliRunError> {
-    let config = PlatformConfig::from_file(config_path).map_err(|error| {
-        CliRunError::execution(format!(
-            "failed to load platform config from `{}`: {error}",
-            config_path.display()
-        ))
-    })?;
-    let app_root = resolve_customer_app_root(config_path, &config.app.name)?;
-    let auth_package = load_auth_package_from_app_root(&app_root, &config.auth.package)?;
-    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
-    let runtime_guard = tokio_runtime.enter();
-    let modules = load_official_modules(&config)?;
-    let mut builder = RuntimeBuilder::new(config, auth_package).with_template_root(&app_root);
-    for module in modules {
-        builder = builder.with_boxed_module(module);
-    }
-    let plan = builder
-        .build()
-        .map_err(|error| CliRunError::execution(format!("failed to build runtime plan: {error}")))?;
-    drop(runtime_guard);
+    let built = build_customer_app_runtime_context(config_path, false)?;
+    let mut plan = built.runtime_plan.runtime;
+    ensure_dev_server_home_route(&mut plan, &built.app_root)?;
     Ok(plan)
+}
+
+fn ensure_dev_server_home_route(
+    plan: &mut davenda_runtime::RuntimePlan,
+    app_root: &Path,
+) -> Result<(), CliRunError> {
+    if plan.http.routes.iter().any(|route| route.path == "/") {
+        return Ok(());
+    }
+
+    if !app_root.join("templates/pages/home.html").exists() {
+        return Ok(());
+    }
+
+    let route = RouteDefinition::new("home", HttpMethod::Get, "/")
+        .map_err(|error| CliRunError::execution(format!("failed to add home route: {error}")))?;
+    let handler = HandlerDefinition::page("home", "pages/home")
+        .map_err(|error| CliRunError::execution(format!("failed to add home handler: {error}")))?;
+
+    plan.http.routes.push(route);
+    plan.handlers.insert("home".to_string(), handler);
+    Ok(())
 }
 
 fn evaluate_cutover_migration_readiness(
@@ -15621,6 +15624,23 @@ expect = true
         let rendered = format!("{:?}", plan.template.registry);
 
         assert!(rendered.contains("pages/home"));
+        assert!(plan.http.routes.iter().any(|route| route.path == "/"));
+        assert!(plan.handlers.contains_key("home"));
+    }
+
+    #[test]
+    fn build_dev_server_runtime_plan_carries_theme_asset_manifest() {
+        let fixture = customer_app_fixture_with_assets(true);
+
+        let plan = build_dev_server_runtime_plan(&fixture.config_path).unwrap();
+        let manifest = plan
+            .theme_asset_manifest
+            .as_ref()
+            .expect("dev server plan should include published theme assets");
+
+        assert!(manifest
+            .entries()
+            .any(|(logical_path, _)| logical_path == "theme/assets/site.css"));
     }
 
     #[test]

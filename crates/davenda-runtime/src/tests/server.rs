@@ -4016,7 +4016,9 @@ async fn server_host_injects_hidden_csrf_inputs_into_checked_in_storefront_forms
             .unwrap_or_default()
             .as_secs(),
     );
-    let issued = server.issue_session(SessionIssueRequest::new(), now).unwrap();
+    let issued = server
+        .issue_session(SessionIssueRequest::new(), now)
+        .unwrap();
     let session_cookie = format!("davenda_session={}", issued.cookie_value);
 
     let product_response = server
@@ -4142,7 +4144,9 @@ async fn server_host_injects_hidden_csrf_inputs_into_checked_in_storefront_forms
     let checkout_complete_token =
         storefront_csrf_token_from_body(&checkout_body, "commerce.checkout-complete");
     assert!(
-        checkout_body.contains(&format!(r#"name="_csrf" value="{checkout_complete_token}""#)),
+        checkout_body.contains(&format!(
+            r#"name="_csrf" value="{checkout_complete_token}""#
+        )),
         "{checkout_body}"
     );
 }
@@ -4583,6 +4587,303 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         admin_orders_body.contains("Pending Payment"),
         "{admin_orders_body}"
     );
+}
+
+#[tokio::test]
+async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
+    let app_name = unique_app_name("harbor-shop-runtime-french-customer-journey");
+    let config = config_with_app_name(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let mut config = config;
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(SessionIssueRequest::new(), now)
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let collection_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/fr-FR/shop/collections/memberships")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let collection_body = String::from_utf8(
+        to_bytes(collection_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        collection_body.contains("lang=\"fr-FR\""),
+        "{collection_body}"
+    );
+    assert!(
+        collection_body.contains("/fr-FR/shop/products/gold-membership"),
+        "{collection_body}"
+    );
+    assert!(
+        collection_body.contains("Gold Membership"),
+        "{collection_body}"
+    );
+
+    let product_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/fr-FR/shop/products/gold-membership")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let product_body = String::from_utf8(
+        to_bytes(product_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(product_body.contains("lang=\"fr-FR\""), "{product_body}");
+    assert!(
+        product_body.contains("value=\"gold-membership\""),
+        "{product_body}"
+    );
+    assert!(product_body.contains("Add to cart"), "{product_body}");
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "gold-membership")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&add_response, "location"), "/cart");
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let cart_body = String::from_utf8(
+        to_bytes(cart_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(cart_body.contains("Gold Membership"), "{cart_body}");
+    assert!(cart_body.contains("£89.00"), "{cart_body}");
+
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&checkout_start, "location"), "/checkout");
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+    let checkout_body = String::from_utf8(
+        to_bytes(checkout_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(checkout_body.contains("Gold Membership"), "{checkout_body}");
+    assert!(checkout_body.contains("PAY-50001"), "{checkout_body}");
+
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("payment_last4", "4242")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&complete_response, "location"),
+        "/checkout/confirmation"
+    );
+
+    let confirmation_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout/confirmation")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let confirmation_body = String::from_utf8(
+        to_bytes(confirmation_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        confirmation_body.contains("ORD-10042"),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("Pending Payment"),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("Card ending 4242"),
+        "{confirmation_body}"
+    );
+
+    let account_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/account")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let account_body = String::from_utf8(
+        to_bytes(account_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        account_body.contains("No active membership is attached to this account view yet."),
+        "{account_body}"
+    );
+    assert!(account_body.contains("Pending Payment"), "{account_body}");
+    assert!(account_body.contains("buyer@example.com"), "{account_body}");
 }
 
 #[tokio::test]
@@ -5195,6 +5496,43 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
 
         assert_eq!(status, StatusCode::OK, "{route}");
         assert!(body.contains(expected), "{route}: {body}");
+
+        match route {
+            "/admin" => {
+                assert!(body.contains("Launch sign-off"), "{route}: {body}");
+                assert!(body.contains("Order support baseline"), "{route}: {body}");
+                assert!(body.contains("Cutover content checks"), "{route}: {body}");
+            }
+            "/admin/orders" => {
+                assert!(body.contains("Settlement boundary"), "{route}: {body}");
+                assert!(
+                    body.contains("does not yet expose payment references"),
+                    "{route}: {body}"
+                );
+                assert!(
+                    body.contains("Customer-visible consistency"),
+                    "{route}: {body}"
+                );
+            }
+            "/admin/catalog/products" => {
+                assert!(body.contains("Sellable truth"), "{route}: {body}");
+                assert!(
+                    body.contains("Inventory mutation, product editing, and publish workflows"),
+                    "{route}: {body}"
+                );
+            }
+            "/admin/pages" => {
+                assert!(body.contains("Launch check"), "{route}: {body}");
+                assert!(body.contains("route truth only"), "{route}: {body}");
+            }
+            "/admin/navigation" => {
+                assert!(body.contains("navigation editor"), "{route}: {body}");
+            }
+            "/admin/redirects" => {
+                assert!(body.contains("redirect inventory only"), "{route}: {body}");
+            }
+            _ => {}
+        }
     }
 }
 

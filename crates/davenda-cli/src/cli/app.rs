@@ -2100,6 +2100,7 @@ fn validate_supported_official_module(module: &str) -> Result<(), CliRunError> {
         "admin",
         "cms",
         "commerce",
+        "commerce-payments-stripe",
         "events",
         "media",
         "memberships",
@@ -2123,6 +2124,9 @@ fn supported_official_module_manifest(
         "admin" => Box::new(davenda_admin::AdminModule::new()),
         "cms" => Box::new(davenda_cms::CmsModule::new()),
         "commerce" => Box::new(davenda_commerce::CommerceModule::new()),
+        "commerce-payments-stripe" => {
+            Box::new(davenda_commerce::CommercePaymentsStripeModule::new())
+        }
         "events" => Box::new(davenda_events::EventsModule::new()),
         "media" => Box::new(davenda_media::MediaModule::new()),
         "memberships" => Box::new(davenda_memberships::MembershipsModule::new()),

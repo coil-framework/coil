@@ -60,7 +60,11 @@ explain_api = false
 tenant_id = 101
 
 [modules]
-enabled = ["cms", "commerce", "media", "events", "admin", "ops"]
+enabled = ["cms", "commerce", "commerce-payments-stripe", "media", "events", "admin", "ops"]
+
+[modules."commerce-payments-stripe"]
+provider = "stripe"
+checkout_mode = "webhook-confirmation"
 
 [wasm]
 directory = "extensions"

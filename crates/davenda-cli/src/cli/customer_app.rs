@@ -2,7 +2,7 @@ use crate::CliRunError;
 use davenda_admin::AdminModule;
 use davenda_app::CustomerAppManifest;
 use davenda_cms::CmsModule;
-use davenda_commerce::CommerceModule;
+use davenda_commerce::{CommerceModule, CommercePaymentsStripeModule};
 use davenda_config::PlatformConfig;
 use davenda_core::{ModuleManifest, PlatformModule};
 use davenda_events::EventsModule;
@@ -71,6 +71,7 @@ pub(crate) fn load_official_modules(
         let module: Box<dyn PlatformModule> = match module_name.as_str() {
             "admin" => Box::new(AdminModule::new()),
             "commerce" => Box::new(CommerceModule::new()),
+            "commerce-payments-stripe" => Box::new(CommercePaymentsStripeModule::new()),
             "cms" => Box::new(CmsModule::new()),
             "events" => Box::new(EventsModule::new()),
             "media" => Box::new(MediaModule::new()),

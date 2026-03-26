@@ -111,6 +111,42 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
 }
 
 #[test]
+fn commerce_payments_stripe_module_declares_concrete_provider_installation_shape() {
+    let module = CommercePaymentsStripeModule::new();
+    let manifest = module.manifest();
+    let mut registry = ServiceRegistry::new();
+
+    module.register(&mut registry).unwrap();
+
+    assert_eq!(manifest.name, "commerce-payments-stripe");
+    assert_eq!(
+        manifest.config_namespace.as_deref(),
+        Some("commerce_payments_stripe")
+    );
+    assert!(
+        manifest
+            .module_dependencies
+            .iter()
+            .any(|dependency| dependency.module == "commerce")
+    );
+    assert!(
+        manifest
+            .core_service_dependencies
+            .contains(&CoreServiceDependency::Observability)
+    );
+    assert!(
+        manifest
+            .behaviors
+            .contains(&davenda_core::ModuleBehavior::AsyncJobs)
+    );
+    assert!(
+        registry
+            .services()
+            .any(|service| service.id == "module.commerce.payments.stripe")
+    );
+}
+
+#[test]
 fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_completion_surfaces() {
     let module = CommerceModule::new();
     let manifest = module.manifest();

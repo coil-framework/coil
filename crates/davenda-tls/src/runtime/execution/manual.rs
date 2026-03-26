@@ -74,4 +74,11 @@ impl TlsCertificateExecutor for ManualImportTlsCertificateExecutor {
                 other => other,
             })
     }
+
+    fn validate_issuance_plan(
+        &self,
+        _plan: &IssuancePlan,
+    ) -> Result<super::ChallengeValidation, TlsModelError> {
+        Err(TlsModelError::ManualModeRequiresImportedCertificate)
+    }
 }

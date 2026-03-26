@@ -182,6 +182,11 @@ pub(crate) struct TlsRenewInvocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TlsValidateChallengeInvocation {
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StorageInspectInvocation {
     pub config_path: PathBuf,
 }
@@ -316,6 +321,10 @@ pub(crate) enum CliInput {
     TlsStatus {
         output_mode: OutputMode,
         config_path: PathBuf,
+    },
+    TlsValidateChallenge {
+        output_mode: OutputMode,
+        invocation: TlsValidateChallengeInvocation,
     },
     TlsRenew {
         output_mode: OutputMode,
@@ -1085,6 +1094,20 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<CliInput, 
             Ok(CliInput::TlsStatus {
                 output_mode,
                 config_path,
+            })
+        }
+        [command, subcommand] if command == "tls" && subcommand == "validate-challenge" => {
+            let config_path = config_path
+                .or_else(discover_default_config_path)
+                .ok_or_else(|| {
+                    CliRunError::usage(
+                        "`tls validate-challenge` requires `--config <path>`, `DAVENDA_CONFIG`, or a default config file",
+                    )
+                })?;
+
+            Ok(CliInput::TlsValidateChallenge {
+                output_mode,
+                invocation: TlsValidateChallengeInvocation { config_path },
             })
         }
         [command, subcommand] if command == "tls" && subcommand == "renew" => {
@@ -2070,6 +2093,29 @@ mod tests {
 
         assert_eq!(output_mode, OutputMode::Json);
         assert_eq!(config_path, PathBuf::from("/tmp/platform.toml"));
+    }
+
+    #[test]
+    fn parse_tls_validate_challenge_uses_explicit_config_path() {
+        let input = parse([
+            "tls".to_string(),
+            "validate-challenge".to_string(),
+            "--config".to_string(),
+            "/tmp/platform.toml".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+
+        let CliInput::TlsValidateChallenge {
+            output_mode,
+            invocation,
+        } = input
+        else {
+            panic!("expected tls validate-challenge input");
+        };
+
+        assert_eq!(output_mode, OutputMode::Json);
+        assert_eq!(invocation.config_path, PathBuf::from("/tmp/platform.toml"));
     }
 
     #[test]

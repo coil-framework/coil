@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use openssl::{pkey::PKey, rsa::Rsa};
+
 use super::*;
 use davenda_config::{
     AcmeChallenge, DatabaseConfig, DatabaseDriver, SecretRef, TlsConfig, TlsMode, TlsProvider,
@@ -279,6 +281,129 @@ fn exported_cloudflare_executor_uses_real_provider_path_in_test_builds() {
             TlsInstant::from_unix_seconds(1_700_000_000),
         )
         .unwrap_err();
+
+    assert_eq!(
+        error,
+        TlsModelError::UnsupportedProviderChallenge {
+            provider: CertificateProviderKind::CloudflareDns.to_string(),
+            challenge: ChallengeStrategy::Http01.to_string(),
+        }
+    );
+}
+
+#[test]
+fn acme_executor_validates_tls_alpn_prerequisites_without_issuing() {
+    let runtime = TlsRuntime::from_config(&TlsConfig {
+        mode: TlsMode::Acme,
+        challenge: Some(AcmeChallenge::TlsAlpn01),
+        provider: None,
+        account_secret: None,
+    });
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
+    let executor = AcmeTlsCertificateExecutor::new(
+        control_plane,
+        TlsMaterialProtector::from_seed("real-acme-validation-test").unwrap(),
+        Some(
+            r#"{"account_key_pem":"-----BEGIN PRIVATE KEY-----\ninvalid\n-----END PRIVATE KEY-----\n","tls_alpn_bind_address":"not-a-socket-address"}"#.to_string(),
+        ),
+    );
+    let plan = runtime
+        .planner()
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )])
+        .unwrap();
+
+    let error = executor.validate_issuance_plan(&plan).unwrap_err();
+
+    assert!(matches!(
+        error,
+        TlsModelError::ProviderRequestFailed {
+            provider,
+            operation,
+            ..
+        } if provider == CertificateProviderKind::Acme.to_string()
+            && operation == "parse_account_key"
+    ));
+}
+
+#[test]
+fn cloudflare_origin_executor_validates_provider_headers_without_issuing() {
+    let runtime = TlsRuntime::from_config(&TlsConfig {
+        mode: TlsMode::CloudflareOrigin,
+        challenge: None,
+        provider: Some(TlsProvider::CloudflareOriginCa),
+        account_secret: None,
+    });
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
+    let executor = CloudflareTlsCertificateExecutor::new(
+        CertificateProviderKind::CloudflareOriginCa,
+        control_plane,
+        TlsMaterialProtector::from_seed("real-cloudflare-origin-validation-test").unwrap(),
+        Some(r#"{"cloudflare_api_token":"origin-token"}"#.to_string()),
+    );
+    let plan = runtime
+        .planner()
+        .issue_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("origin.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )])
+        .unwrap();
+
+    let validation = executor.validate_issuance_plan(&plan).unwrap();
+
+    assert_eq!(
+        validation.provider,
+        CertificateProviderKind::CloudflareOriginCa
+    );
+    assert_eq!(validation.effective_challenge, None);
+    assert_eq!(validation.checks.len(), 1);
+    assert_eq!(validation.checks[0].name, "cloudflare_headers");
+    assert!(validation.checks[0].ok);
+}
+
+#[test]
+fn cloudflare_dns_validation_rejects_unsupported_http_challenge_without_issuing() {
+    let runtime = TlsRuntime::from_config(&acme_config(
+        AcmeChallenge::Dns01,
+        Some(TlsProvider::CloudflareDns),
+    ));
+    let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime);
+    let executor = CloudflareTlsCertificateExecutor::new(
+        CertificateProviderKind::CloudflareDns,
+        control_plane,
+        TlsMaterialProtector::from_seed("real-cloudflare-validation-test").unwrap(),
+        Some(format!(
+            r#"{{"account_key_pem":{}}}"#,
+            serde_json::to_string(
+                &String::from_utf8(
+                    PKey::from_rsa(Rsa::generate(2048).unwrap())
+                        .unwrap()
+                        .private_key_to_pem_pkcs8()
+                        .unwrap(),
+                )
+                .unwrap()
+            )
+            .unwrap()
+        )),
+    );
+    let plan = IssuancePlan {
+        edge_mode: EdgeMode::DirectTermination,
+        provider: CertificateProviderKind::CloudflareDns,
+        challenge: Some(ChallengeStrategy::Http01),
+        state_store: CertificateStateStore::SharedSecrets,
+        bindings: vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("storefront").unwrap(),
+        )],
+        shared_across_nodes: false,
+        requires_hot_reload: true,
+        account_secret: Some("{}".to_string()),
+        cloudflare_mode: None,
+    };
+
+    let error = executor.validate_issuance_plan(&plan).unwrap_err();
 
     assert_eq!(
         error,

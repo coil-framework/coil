@@ -5,6 +5,8 @@ use super::common::{
 };
 use crate::TlsCertificateExecutor;
 use crate::material::{CertificateMaterial, TlsMaterialProtector};
+use crate::runtime::execution::{ChallengeValidation, ChallengeValidationCheck};
+use crate::runtime::planning::IssuancePlan;
 use crate::{
     CertificateId, CertificateProviderKind, CertificateRecord, CloudflareEncryptionMode,
     HostnameBinding, TlsInstant, TlsModelError,
@@ -148,6 +150,43 @@ impl TlsCertificateExecutor for CloudflareTlsCertificateExecutor {
         certificate_id: &CertificateId,
     ) -> Result<CertificateMaterial, TlsModelError> {
         super::common::decrypt_material(&self.control_plane, &self.protector, certificate_id)
+    }
+
+    fn validate_issuance_plan(
+        &self,
+        plan: &IssuancePlan,
+    ) -> Result<ChallengeValidation, TlsModelError> {
+        match self.provider {
+            CertificateProviderKind::CloudflareOriginCa => {
+                let secret =
+                    ProviderSecret::resolve(self.provider, self.account_secret_ref.as_deref())?;
+                secret.cloudflare_headers()?;
+                Ok(ChallengeValidation {
+                    provider: self.provider,
+                    configured_challenge: plan.challenge,
+                    effective_challenge: None,
+                    shared_across_nodes: plan.shared_across_nodes,
+                    requires_hot_reload: plan.requires_hot_reload,
+                    checks: vec![ChallengeValidationCheck {
+                        name: "cloudflare_headers",
+                        ok: true,
+                        detail:
+                            "cloudflare origin-ca credentials resolved into authenticated API headers"
+                                .to_string(),
+                    }],
+                })
+            }
+            CertificateProviderKind::CloudflareDns | CertificateProviderKind::Acme => {
+                super::acme::validate_acme_issuance_plan(
+                    self.provider,
+                    self.account_secret_ref.as_deref(),
+                    plan,
+                )
+            }
+            CertificateProviderKind::ManualImport => {
+                Err(TlsModelError::ManualModeRequiresImportedCertificate)
+            }
+        }
     }
 }
 

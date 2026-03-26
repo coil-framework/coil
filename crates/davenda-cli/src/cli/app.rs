@@ -7,7 +7,8 @@ use crate::cli::args::{
     JobsDeadLettersInvocation, JobsInFlightInvocation, JobsPromoteInvocation, JobsReadyInvocation,
     JobsRetryInvocation, JobsRunInvocation, JobsStatusInvocation, MigrateApplyInvocation,
     ModuleDisableInvocation, ModuleEnableInvocation, ModuleInspectInvocation,
-    ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation, parse,
+    ModuleInstallInvocation, StorageInspectInvocation, TlsRenewInvocation,
+    TlsValidateChallengeInvocation, parse,
 };
 use crate::cli::auth::AuthExplainResult;
 use crate::cli::backend::{AuthExplainBackend, LiveAuthExplainBackend};
@@ -20,7 +21,8 @@ use crate::cli::render::{render_auth_explain, render_command_report};
 use crate::registry::CliRuntime;
 use crate::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
 use davenda_app::{
-    CustomerAppManifest, CustomerAppRuntimePlan, MigrationPlanOwner, ReleaseDoctorSeverity,
+    CustomerAppManifest, CustomerAppRuntimePlan, MigrationPlanEntry, MigrationPlanOwner,
+    ReleaseDoctorSeverity,
 };
 use davenda_assets::{AssetDeliveryTarget, ContentFingerprint, FingerprintAlgorithm, RevisionId};
 use davenda_auth::{
@@ -56,7 +58,9 @@ use davenda_runtime::{
 use davenda_storage::{
     StorageDeliveryLocation, StoragePlanRequest, StoragePolicy, StoragePolicyOverride,
 };
-use davenda_tls::{CertificateId, CertificateStatus, TlsInstant};
+use davenda_tls::{
+    CertificateId, CertificateStatus, CustomerAppId, Hostname, HostnameBinding, TlsInstant,
+};
 use reqwest::Url;
 use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
@@ -400,6 +404,13 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Result<String, C
             let report = run_tls_status(&config_path)?;
             render_command_report(&report, output_mode)
         }
+        CliInput::TlsValidateChallenge {
+            output_mode,
+            invocation,
+        } => {
+            let report = run_tls_validate_challenge(&invocation)?;
+            render_command_report(&report, output_mode)
+        }
         CliInput::TlsRenew {
             output_mode,
             dry_run,
@@ -499,6 +510,7 @@ fn usage() -> String {
         "  platform jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform jobs promote [--config <path>] [--dry-run] [--yes] [--json]",
         "  platform tls status [--config <path>] [--json]",
+        "  platform tls validate-challenge [--config <path>] [--json]",
         "  platform tls renew [--config <path>] --certificate <id> --replacement <id> [--dry-run] [--yes] [--json]",
         "  platform storage inspect [--config <path>] [--json]",
         "  platform storage verify [--config <path>] [--policy] [--json]",
@@ -540,6 +552,7 @@ fn usage() -> String {
         "  platform jobs retry dead-letter:job-retry --config config/platform.toml --dry-run",
         "  platform jobs promote --config config/platform.toml --dry-run",
         "  platform tls status --config config/platform.toml",
+        "  platform tls validate-challenge --config config/platform.toml",
         "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
         "  platform storage inspect --config config/platform.toml",
         "  platform storage verify --config config/platform.toml --policy",
@@ -670,6 +683,19 @@ fn build_cli_async_runtime() -> Result<tokio::runtime::Runtime, CliRunError> {
         .build()
         .map_err(|error| {
             CliRunError::execution(format!("failed to start the CLI async runtime: {error}"))
+        })
+}
+
+fn build_dev_server_async_runtime() -> Result<tokio::runtime::Runtime, CliRunError> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("davenda-dev-server")
+        .enable_all()
+        .build()
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to start the dev server async runtime: {error}"
+            ))
         })
 }
 
@@ -2357,7 +2383,7 @@ fn run_migrate_apply(
 
     let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
     let executable_plan = &built.runtime_plan.runtime.install_migrations;
-    let advisory_migration_entries = count_advisory_migration_entries(&built.runtime_plan);
+    let manual_customer_migration_entries = manual_customer_migration_entries(&built.runtime_plan);
 
     if dry_run {
         return build_migrate_apply_report(
@@ -2365,9 +2391,19 @@ fn run_migrate_apply(
             executable_plan,
             None,
             None,
-            advisory_migration_entries,
+            &manual_customer_migration_entries,
             true,
         );
+    }
+
+    let auth_package_report = run_auth_package_validate(&AuthPackageValidateInvocation {
+        config_path: invocation.config_path.clone(),
+    })?;
+    if auth_package_report.status == ReportStatus::Unsafe {
+        return Err(CliRunError::execution(format!(
+            "auth package validation for `{}` is not green",
+            built.manifest.id
+        )));
     }
 
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
@@ -2432,7 +2468,7 @@ fn run_migrate_apply(
         executable_plan,
         Some(&applied_keys),
         executed_statements,
-        advisory_migration_entries,
+        &manual_customer_migration_entries,
         false,
     )
 }
@@ -3948,7 +3984,11 @@ fn run_tls_status(config_path: &Path) -> Result<CommandReport, CliRunError> {
         )?;
         return Ok(report);
     }
-    let host = built.runtime_plan.runtime.tls_host().map_err(|error| {
+    let host = built
+        .runtime_plan
+        .runtime
+        .tls_validation_host_with_secret_resolver(&EnvironmentSecretResolver)
+        .map_err(|error| {
         CliRunError::execution(format!(
             "failed to build TLS host for `{}`: {error}",
             built.manifest.id
@@ -4028,6 +4068,185 @@ fn run_tls_status(config_path: &Path) -> Result<CommandReport, CliRunError> {
             DiagnosticSeverity::Warning,
             "tls.inventory.empty",
             "no managed TLS certificates are currently present in the platform control plane",
+        )?;
+    }
+
+    Ok(report)
+}
+
+fn run_tls_validate_challenge(
+    invocation: &TlsValidateChallengeInvocation,
+) -> Result<CommandReport, CliRunError> {
+    run_tls_validate_challenge_impl(invocation)
+}
+
+fn customer_app_tls_bindings(
+    built: &BuiltCustomerAppContext,
+) -> Result<Vec<HostnameBinding>, CliRunError> {
+    if built.manifest.domains.is_empty() {
+        return Err(CliRunError::execution(format!(
+            "customer app `{}` does not declare any TLS hostnames to validate",
+            built.manifest.id
+        )));
+    }
+
+    let customer_app_id = CustomerAppId::new(built.manifest.id.to_string()).map_err(|error| {
+        CliRunError::execution(format!(
+            "customer app `{}` has an invalid TLS customer-app id: {error}",
+            built.manifest.id
+        ))
+    })?;
+
+    built
+        .manifest
+        .domains
+        .iter()
+        .map(|domain| {
+            let hostname = Hostname::new(domain.hostname.clone()).map_err(|error| {
+                CliRunError::execution(format!(
+                    "customer app `{}` has an invalid TLS hostname `{}`: {error}",
+                    built.manifest.id, domain.hostname
+                ))
+            })?;
+            Ok(HostnameBinding::new(hostname, customer_app_id.clone()))
+        })
+        .collect()
+}
+
+fn run_tls_validate_challenge_impl(
+    invocation: &TlsValidateChallengeInvocation,
+) -> Result<CommandReport, CliRunError> {
+    let built = build_customer_app_runtime_context(&invocation.config_path, true)?;
+    match built.runtime_plan.runtime.tls.mode {
+        davenda_config::TlsMode::External => {
+            return Err(CliRunError::execution(format!(
+                "tls validate-challenge is unavailable for customer app `{}` because tls.mode is `external`",
+                built.manifest.id
+            )));
+        }
+        davenda_config::TlsMode::Manual => {
+            return Err(CliRunError::execution(format!(
+                "tls validate-challenge is unavailable for customer app `{}` because tls.mode is `manual`",
+                built.manifest.id
+            )));
+        }
+        _ => {}
+    }
+
+    let host = built
+        .runtime_plan
+        .runtime
+        .tls_validation_host_with_secret_resolver(&EnvironmentSecretResolver)
+        .map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to build TLS host for `{}`: {error}",
+            built.manifest.id
+        ))
+    })?;
+    let bindings = customer_app_tls_bindings(&built)?;
+    let validation = host
+        .validate_challenge_for_bindings(bindings.clone())
+        .map_err(|error| {
+            CliRunError::execution(format!(
+                "failed to validate TLS challenge setup for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
+
+    let mut report = CommandReport::new(
+        ["tls", "validate-challenge"],
+        format!(
+            "Validated TLS challenge setup for customer app `{}`",
+            built.manifest.id
+        ),
+    )
+    .map_err(report_build_error)?
+    .with_columns([
+        "provider",
+        "configured_challenge",
+        "effective_challenge",
+        "shared",
+        "hot_reload",
+        "hostnames",
+    ])
+    .map_err(report_build_error)?;
+    report.push_row(
+        ReportRow::new()
+            .with_cell("provider", validation.provider.to_string())
+            .map_err(report_build_error)?
+            .with_cell(
+                "configured_challenge",
+                validation
+                    .configured_challenge
+                    .map(|challenge| challenge.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "effective_challenge",
+                validation
+                    .effective_challenge
+                    .map(|challenge| challenge.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "shared",
+                if validation.shared_across_nodes {
+                    "yes"
+                } else {
+                    "no"
+                },
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "hot_reload",
+                if validation.requires_hot_reload {
+                    "required"
+                } else {
+                    "not_required"
+                },
+            )
+            .map_err(report_build_error)?
+            .with_cell(
+                "hostnames",
+                bindings
+                    .iter()
+                    .map(|binding| binding.hostname.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+            .map_err(report_build_error)?,
+    );
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        "tls.validate.mode",
+        format!(
+            "mode={:?} provider={} configured_challenge={} effective_challenge={}",
+            built.runtime_plan.runtime.tls.mode,
+            validation.provider,
+            validation
+                .configured_challenge
+                .map(|challenge| challenge.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            validation
+                .effective_challenge
+                .map(|challenge| challenge.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+    )?;
+    for check in &validation.checks {
+        let code = format!("tls.validate.{}", check.name);
+        push_report_diagnostic(
+            &mut report,
+            if check.ok {
+                DiagnosticSeverity::Info
+            } else {
+                DiagnosticSeverity::Error
+            },
+            &code,
+            check.detail.clone(),
         )?;
     }
 
@@ -7171,7 +7390,7 @@ fn evaluate_import_cutover(
 
     if cutover.requires_migrate_apply {
         let (migrations_ready, migrations_detail) =
-            evaluate_cutover_migration_readiness(&runtime.built)?;
+            evaluate_cutover_migration_readiness(&config_path, &runtime.built)?;
         cutover_plan = cutover_plan.with_check(build_cutover_check(
             "migrate.apply",
             migrations_detail,
@@ -7179,6 +7398,24 @@ fn evaluate_import_cutover(
             migrations_ready,
         )?);
     }
+
+    let (auth_ready, auth_detail) = evaluate_auth_package_validation_readiness(&config_path);
+    cutover_plan = cutover_plan.with_check(build_cutover_check(
+        "auth.package.validate",
+        if auth_ready {
+            format!(
+                "auth package `{}` capability bindings validate against the target customer app",
+                runtime.built.manifest.auth.package_name
+            )
+        } else {
+            format!(
+                "auth package `{}` validation must succeed before traffic moves: {}",
+                runtime.built.manifest.auth.package_name, auth_detail
+            )
+        },
+        true,
+        auth_ready,
+    )?);
 
     if cutover.requires_cache_warm {
         let (cache_ready, cache_detail) = match manifest.verification.as_ref() {
@@ -7275,9 +7512,11 @@ fn cutover_preflight_ready(plan: &CutoverPlan) -> bool {
             return true;
         }
         match check.id.as_str() {
-            "import.package" | "target.runtime" | "final.import.mode" | "release.doctor" => {
-                check.satisfied
-            }
+            "import.package"
+            | "target.runtime"
+            | "final.import.mode"
+            | "release.doctor"
+            | "auth.package.validate" => check.satisfied,
             _ => true,
         }
     })
@@ -7315,7 +7554,7 @@ fn cutover_steps(
         steps.push(
             CutoverStepRecord::new(
                 "migrate.apply",
-                "Pending executable migrations were applied to the target runtime",
+                "Pending executable migrations were applied and auth package validation completed against the target runtime",
             )
             .map_err(import_model_error)?,
         );
@@ -8929,10 +9168,11 @@ fn ensure_dev_server_home_route(
 }
 
 fn evaluate_cutover_migration_readiness(
+    config_path: &Path,
     built: &BuiltCustomerAppContext,
 ) -> Result<(bool, String), CliRunError> {
     let executable_plan = &built.runtime_plan.runtime.install_migrations;
-    let advisory = count_advisory_migration_entries(&built.runtime_plan);
+    let manual_customer_entries = manual_customer_migration_entries(&built.runtime_plan);
     let client = match built.runtime_plan.runtime.data.connect_lazy_postgres() {
         Ok(client) => client,
         Err(error) => {
@@ -8959,16 +9199,24 @@ fn evaluate_cutover_migration_readiness(
         })?;
     let pending_plan = pending_migration_plan(executable_plan, &applied_keys)?;
     let pending_steps = pending_plan.ordered_steps().len();
-    let ready = pending_steps == 0 && advisory == 0;
+    let (auth_ready, auth_detail) = evaluate_auth_package_validation_readiness(config_path);
+    let ready = pending_steps == 0 && auth_ready && manual_customer_entries.is_empty();
     let detail = if ready {
         format!(
-            "no pending executable or advisory migration work remains for `{}`",
+            "no pending executable migrations remain, auth package bindings are green, and no manual customer-app migration runbook items remain for `{}`",
             built.manifest.id
         )
     } else {
         format!(
-            "{} pending executable migration steps and {} advisory migration entries remain for `{}`",
-            pending_steps, advisory, built.manifest.id
+            "{} pending executable migration steps, auth package validation is {}, and {} manual customer-app migration runbook item(s) remain for `{}`",
+            pending_steps,
+            if auth_ready {
+                "green"
+            } else {
+                auth_detail.as_str()
+            },
+            manual_customer_entries.len(),
+            built.manifest.id
         )
     };
     Ok((ready, detail))
@@ -9009,7 +9257,7 @@ fn build_migrate_apply_report(
     executable_plan: &MigrationPlan,
     applied_keys: Option<&BTreeSet<(String, String)>>,
     executed_statements: Option<usize>,
-    advisory_migration_entries: usize,
+    manual_customer_migration_entries: &[MigrationPlanEntry],
     dry_run: bool,
 ) -> Result<CommandReport, CliRunError> {
     let pending_steps = executable_plan
@@ -9112,6 +9360,74 @@ fn build_migrate_apply_report(
         );
     }
 
+    let validation_status = if dry_run { "planned" } else { "validated" };
+    report.push_row(
+        ReportRow::new()
+            .with_cell("owner", format!("auth:{}", manifest.auth.package_name))
+            .map_err(report_build_error)?
+            .with_cell("step", "validate")
+            .map_err(report_build_error)?
+            .with_cell("order", "0")
+            .map_err(report_build_error)?
+            .with_cell("online_safe", "true")
+            .map_err(report_build_error)?
+            .with_cell("sql_statements", "0")
+            .map_err(report_build_error)?
+            .with_cell("status", validation_status)
+            .map_err(report_build_error)?
+            .with_cell(
+                "description",
+                format!(
+                    "validate auth package `{}` schema, model, and capability bindings against the installed modules",
+                    manifest.auth.package_name
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+    report.push_row(
+        ReportRow::new()
+            .with_cell("owner", format!("customer_app:{}", manifest.id))
+            .map_err(report_build_error)?
+            .with_cell("step", "validate")
+            .map_err(report_build_error)?
+            .with_cell("order", "0")
+            .map_err(report_build_error)?
+            .with_cell("online_safe", "true")
+            .map_err(report_build_error)?
+            .with_cell("sql_statements", "0")
+            .map_err(report_build_error)?
+            .with_cell("status", validation_status)
+            .map_err(report_build_error)?
+            .with_cell(
+                "description",
+                format!(
+                    "validate customer app `{}` root, manifest/config alignment, and runtime composition before release",
+                    manifest.id
+                ),
+            )
+            .map_err(report_build_error)?,
+    );
+
+    for entry in manual_customer_migration_entries {
+        report.push_row(
+            ReportRow::new()
+                .with_cell("owner", release_plan_owner_label(&entry.owner))
+                .map_err(report_build_error)?
+                .with_cell("step", "manual-runbook")
+                .map_err(report_build_error)?
+                .with_cell("order", entry.order.to_string())
+                .map_err(report_build_error)?
+                .with_cell("online_safe", entry.online_safe.to_string())
+                .map_err(report_build_error)?
+                .with_cell("sql_statements", "0")
+                .map_err(report_build_error)?
+                .with_cell("status", "manual")
+                .map_err(report_build_error)?
+                .with_cell("description", entry.description.clone())
+                .map_err(report_build_error)?,
+        );
+    }
+
     if already_applied > 0 {
         push_report_diagnostic(
             &mut report,
@@ -9123,14 +9439,52 @@ fn build_migrate_apply_report(
             ),
         )?;
     }
-    if advisory_migration_entries > 0 {
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        if dry_run {
+            "migrate.auth_package.validation.planned"
+        } else {
+            "migrate.auth_package.validation"
+        },
+        format!(
+            "{} auth package `{}` schema, model, and capability bindings {}",
+            if dry_run { "planned" } else { "validated" },
+            manifest.auth.package_name,
+            if dry_run {
+                "before applying the target release"
+            } else {
+                "as part of migrate apply"
+            }
+        ),
+    )?;
+    push_report_diagnostic(
+        &mut report,
+        DiagnosticSeverity::Info,
+        if dry_run {
+            "migrate.customer_app.validation.planned"
+        } else {
+            "migrate.customer_app.validation"
+        },
+        format!(
+            "{} customer app `{}` root, manifest/config alignment, and runtime composition {}",
+            if dry_run { "planned" } else { "validated" },
+            manifest.id,
+            if dry_run {
+                "before the release is applied"
+            } else {
+                "during migrate apply"
+            }
+        ),
+    )?;
+    if !manual_customer_migration_entries.is_empty() {
         push_report_diagnostic(
             &mut report,
             DiagnosticSeverity::Warning,
-            "migrate.steps.advisory_only",
+            "migrate.customer_app.manual_runbook",
             format!(
-                "{} auth-package or customer-app migration steps remain advisory only because they do not yet compile into executable SQL batches",
-                advisory_migration_entries
+                "{} customer-app migration runbook step(s) remain manual because they do not compile into executable SQL or built-in validation steps",
+                manual_customer_migration_entries.len()
             ),
         )?;
     }
@@ -9212,13 +9566,28 @@ fn build_assets_publish_report(
     Ok(report)
 }
 
-fn count_advisory_migration_entries(runtime_plan: &CustomerAppRuntimePlan) -> usize {
+fn manual_customer_migration_entries(
+    runtime_plan: &CustomerAppRuntimePlan,
+) -> Vec<MigrationPlanEntry> {
     runtime_plan
         .migration_summary
         .entries()
         .iter()
-        .filter(|entry| entry.step_id.is_none())
-        .count()
+        .filter(|entry| {
+            entry.step_id.is_none() && matches!(entry.owner, MigrationPlanOwner::CustomerApp(_))
+        })
+        .cloned()
+        .collect()
+}
+
+fn evaluate_auth_package_validation_readiness(config_path: &Path) -> (bool, String) {
+    match run_auth_package_validate(&AuthPackageValidateInvocation {
+        config_path: config_path.to_path_buf(),
+    }) {
+        Ok(report) if report.status != ReportStatus::Unsafe => (true, "green".to_string()),
+        Ok(report) => (false, report.summary),
+        Err(error) => (false, error.to_string()),
+    }
 }
 
 fn format_asset_delivery_target(target: &AssetDeliveryTarget) -> String {
@@ -9271,10 +9640,7 @@ fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
     let csrf_secret = read_runtime_secret("DAVENDA_CSRF_SECRET")?;
     let plan = build_dev_server_runtime_plan(&invocation.config_path)?;
     let bind = plan.config.server.bind.clone();
-    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let tokio_runtime = build_dev_server_async_runtime()?;
     let runtime_guard = tokio_runtime.enter();
     let server = plan
         .server_host(
@@ -12352,7 +12718,21 @@ enabled = ["cms"]
         customer_app_fixture_with_modules(&["cms"])
     }
 
+    fn customer_app_fixture_with_tls_config(tls_config: &str) -> PathBuf {
+        customer_app_fixture_with_rendered_config(
+            DISABLED_EXPLAIN_CONFIG.replace("[tls]\nmode = \"external\"", tls_config),
+            &["cms"],
+        )
+    }
+
     fn customer_app_fixture_with_modules(modules: &[&str]) -> PathBuf {
+        customer_app_fixture_with_rendered_config(DISABLED_EXPLAIN_CONFIG.to_string(), modules)
+    }
+
+    fn customer_app_fixture_with_rendered_config(
+        config_contents: String,
+        modules: &[&str],
+    ) -> PathBuf {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -12368,7 +12748,7 @@ enabled = ["cms"]
         fs::create_dir_all(&templates_root).unwrap();
         fs::write(
             config_dir.join("platform.toml"),
-            render_fixture_modules(DISABLED_EXPLAIN_CONFIG, modules),
+            render_fixture_modules(&config_contents, modules),
         )
         .unwrap();
         fs::write(
@@ -13839,8 +14219,33 @@ expect = true
         assert!(rendered.contains("import cutover"));
         assert!(rendered.contains("Cutover readiness for import run `wordpress-events`"));
         assert!(rendered.contains("release.doctor"));
+        assert!(rendered.contains("auth.package.validate"));
         assert!(rendered.contains("storage.verify"));
         assert!(rendered.contains("legacy writes must be frozen"));
+    }
+
+    #[test]
+    fn run_from_args_reports_migration_gated_cutover_auth_and_manual_customer_work() {
+        let fixture = import_fixture();
+        let cutover_manifest = fixture.root.join("imports").join("cutover-migrate.toml");
+        let manifest = fs::read_to_string(&fixture.manifest_path).unwrap();
+        fs::write(
+            &cutover_manifest,
+            format!(
+                "{manifest}\n[verification]\nrequired = [\"record_counts\"]\n[cutover]\nfreeze_legacy_writes = true\nswitch_method = \"dns\"\nhostnames = [\"shop.example.com\"]\nrequires_assets_publish = false\nrequires_migrate_apply = true\nrequires_storage_validation = false\nrequires_cache_warm = false\nobservation_window_minutes = 60\n\n[[cutover.rollback_triggers]]\nid = \"auth-failure\"\ndescription = \"Auth failure\"\n"
+            ),
+        )
+        .unwrap();
+
+        let rendered = run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(rendered.contains("migrate.apply"));
+        assert!(rendered.contains("auth.package.validate"));
     }
 
     #[test]
@@ -15600,6 +16005,9 @@ expect = true
         assert!(rendered.contains("migrate apply"));
         assert!(rendered.contains("module:cms"));
         assert!(rendered.contains("status: planned"));
+        assert!(rendered.contains("auth:platform-default-auth"));
+        assert!(rendered.contains("customer_app:showcase-events"));
+        assert!(rendered.contains("manual-runbook"));
     }
 
     #[test]
@@ -15670,6 +16078,16 @@ expect = true
             manifest
                 .entries()
                 .any(|(logical_path, _)| logical_path == "theme/assets/site.css")
+        );
+    }
+
+    #[test]
+    fn build_dev_server_async_runtime_uses_the_multithread_tokio_flavor() {
+        let runtime = build_dev_server_async_runtime().unwrap();
+
+        assert_eq!(
+            runtime.handle().runtime_flavor(),
+            tokio::runtime::RuntimeFlavor::MultiThread
         );
     }
 
@@ -16335,6 +16753,62 @@ expect = true
             "{}",
             error
         );
+    }
+
+    #[test]
+    fn run_from_args_rejects_tls_validate_challenge_for_external_termination() {
+        let config_path = customer_app_fixture();
+
+        let error = run_from_args([
+            "tls".to_string(),
+            "validate-challenge".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("tls validate-challenge is unavailable"),
+            "{}",
+            error
+        );
+    }
+
+    #[test]
+    fn run_from_args_renders_tls_validate_challenge_for_cloudflare_origin_customer_app() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
+        let config_path = customer_app_fixture_with_tls_config(
+            "[tls]\nmode = \"cloudflare-origin\"\nprovider = \"cloudflare-origin-ca\"\naccount_secret = { kind = \"env\", var = \"DAVENDA_TLS_VALIDATE_CHALLENGE_SECRET\" }",
+        );
+        unsafe {
+            std::env::set_var(
+                "DAVENDA_TLS_VALIDATE_CHALLENGE_SECRET",
+                r#"{"cloudflare_api_token":"test-origin-token"}"#,
+            );
+            std::env::set_var(
+                "DAVENDA_TLS_MATERIAL_KEY",
+                "tls-validate-challenge-material-key",
+            );
+        }
+
+        let rendered = run_from_args([
+            "tls".to_string(),
+            "validate-challenge".to_string(),
+            "--config".to_string(),
+            config_path.display().to_string(),
+        ])
+        .unwrap();
+
+        unsafe {
+            std::env::remove_var("DAVENDA_TLS_VALIDATE_CHALLENGE_SECRET");
+            std::env::remove_var("DAVENDA_TLS_MATERIAL_KEY");
+        }
+
+        assert!(rendered.contains("tls validate-challenge"));
+        assert!(rendered.contains("cloudflare_origin_ca"));
+        assert!(rendered.contains("cloudflare origin-ca credentials resolved"));
     }
 
     #[test]

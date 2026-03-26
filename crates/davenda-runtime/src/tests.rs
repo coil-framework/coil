@@ -1479,6 +1479,7 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
                 title: "Harbor Essentials".to_string(),
                 label: "Live catalog".to_string(),
                 summary: "Everyday storefront staples for the checked-in Harbor Shop.".to_string(),
+                is_visible: false,
             },
             100,
         )
@@ -1489,6 +1490,12 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
             .map(|collection| collection.title.as_str()),
         Some("Harbor Essentials")
     );
+    assert_eq!(
+        updated
+            .collection("featured")
+            .map(|collection| collection.is_visible),
+        Some(false)
+    );
 
     let updated = store
         .update_catalog_product(
@@ -1498,6 +1505,7 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
                 summary: "Updated live from the Harbor Shop admin workflow.".to_string(),
                 price_minor: 3_100,
                 collection_handle: "memberships".to_string(),
+                is_visible: false,
             },
             101,
         )
@@ -1510,6 +1518,7 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
     );
     assert_eq!(product.price_minor, 3_100);
     assert_eq!(product.collection_handle, "memberships");
+    assert!(!product.is_visible);
 
     let reopened = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
     let catalog = reopened.catalog().unwrap();
@@ -1519,6 +1528,12 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
             .map(|collection| collection.title.as_str()),
         Some("Harbor Essentials")
     );
+    assert_eq!(
+        catalog
+            .collection("featured")
+            .map(|collection| collection.is_visible),
+        Some(false)
+    );
     let product = catalog.product("harbor-cap").unwrap();
     assert_eq!(product.title, "Dockside Cap");
     assert_eq!(
@@ -1527,13 +1542,11 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
     );
     assert_eq!(product.price_minor, 3_100);
     assert_eq!(product.collection_handle, "memberships");
-
-    let snapshot = reopened
-        .add_to_cart("session-catalog-1", None, "harbor-cap", 1, 102)
-        .unwrap();
-    assert_eq!(snapshot.cart.item_count, 1);
-    assert_eq!(snapshot.cart.subtotal_minor, 3_100);
-    assert_eq!(snapshot.cart.lines[0].title, "Dockside Cap");
+    assert!(!product.is_visible);
+    assert!(matches!(
+        reopened.add_to_cart("session-catalog-1", None, "harbor-cap", 1, 102),
+        Err(StorefrontStateError::UnknownSku { .. })
+    ));
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -3645,4 +3658,43 @@ fn tls_host_uses_runtime_secret_resolvers_for_provider_credentials() {
             provider: CertificateProviderKind::CloudflareDns.to_string(),
         })
     );
+}
+
+#[test]
+fn tls_host_validates_challenge_setup_with_runtime_secret_resolution() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.tls.account_secret = Some(davenda_config::SecretRef::SecretManager {
+        provider: "vault".to_string(),
+        key: "tls/cloudflare".to_string(),
+    });
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    let resolver = StaticSecretResolver::new()
+        .with_secret(
+            davenda_config::SecretRef::SecretManager {
+                provider: "vault".to_string(),
+                key: "tls/cloudflare".to_string(),
+            },
+            r#"{"account_key_pem":"-----BEGIN PRIVATE KEY-----\ninvalid\n-----END PRIVATE KEY-----\n","cloudflare_api_token":"token"}"#,
+        )
+        .unwrap();
+    let host = plan.tls_host_with_secret_resolver(&resolver).unwrap();
+
+    let error = host
+        .validate_challenge_for_bindings(vec![HostnameBinding::new(
+            Hostname::new("www.example.com").unwrap(),
+            CustomerAppId::new("showcase-events").unwrap(),
+        )])
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeTlsError::Tls(TlsModelError::ProviderRequestFailed {
+            provider,
+            operation,
+            ..
+        }) if provider == CertificateProviderKind::CloudflareDns.to_string()
+            && operation == "parse_account_key"
+    ));
 }

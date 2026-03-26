@@ -4,6 +4,8 @@ use super::common::{
 use super::solvers::{FilesystemHttp01Solver, start_tls_alpn_solver};
 use crate::TlsCertificateExecutor;
 use crate::material::{CertificateMaterial, TlsMaterialProtector};
+use crate::runtime::execution::{ChallengeValidation, ChallengeValidationCheck};
+use crate::runtime::planning::IssuancePlan;
 use crate::{
     CertificateId, CertificateProviderKind, CertificateRecord, CertificateStateStore,
     ChallengeStrategy, CloudflareEncryptionMode, HostnameBinding, TlsInstant, TlsModelError,
@@ -101,6 +103,17 @@ impl TlsCertificateExecutor for AcmeTlsCertificateExecutor {
         certificate_id: &CertificateId,
     ) -> Result<CertificateMaterial, TlsModelError> {
         super::common::decrypt_material(&self.control_plane, &self.protector, certificate_id)
+    }
+
+    fn validate_issuance_plan(
+        &self,
+        plan: &IssuancePlan,
+    ) -> Result<ChallengeValidation, TlsModelError> {
+        validate_acme_issuance_plan(
+            CertificateProviderKind::Acme,
+            self.account_secret_ref.as_deref(),
+            plan,
+        )
     }
 }
 
@@ -246,7 +259,70 @@ async fn issue_with_directory(
     )
 }
 
-fn resolve_challenge(
+pub(crate) fn validate_acme_issuance_plan(
+    provider: CertificateProviderKind,
+    account_secret_ref: Option<&str>,
+    plan: &IssuancePlan,
+) -> Result<ChallengeValidation, TlsModelError> {
+    let secret = ProviderSecret::resolve(provider, account_secret_ref)?;
+    secret.account_key_pem()?;
+    let effective_challenge = resolve_challenge(provider, &secret, plan.challenge)?;
+    let mut checks = vec![ChallengeValidationCheck {
+        name: "account_key",
+        ok: true,
+        detail: "account credentials resolved for the active provider".to_string(),
+    }];
+
+    match effective_challenge {
+        ChallengeStrategy::Dns01 => {
+            secret.cloudflare_dns_solver()?;
+            checks.push(ChallengeValidationCheck {
+                name: "dns_solver",
+                ok: true,
+                detail: "cloudflare dns-01 solver credentials are present and parse correctly"
+                    .to_string(),
+            });
+        }
+        ChallengeStrategy::Http01 => {
+            let directory = secret.http_challenge_directory().ok_or_else(|| {
+                TlsModelError::MissingProviderCredential {
+                    provider: provider.to_string(),
+                }
+            })?;
+            checks.push(ChallengeValidationCheck {
+                name: "http_challenge_directory",
+                ok: true,
+                detail: format!(
+                    "http-01 challenge files will be written under `{}`",
+                    directory.display()
+                ),
+            });
+        }
+        ChallengeStrategy::TlsAlpn01 => {
+            let address = secret.tls_alpn_bind_address()?.ok_or_else(|| {
+                TlsModelError::MissingProviderCredential {
+                    provider: provider.to_string(),
+                }
+            })?;
+            checks.push(ChallengeValidationCheck {
+                name: "tls_alpn_bind_address",
+                ok: true,
+                detail: format!("tls-alpn-01 solver will bind to `{address}`"),
+            });
+        }
+    }
+
+    Ok(ChallengeValidation {
+        provider,
+        configured_challenge: plan.challenge,
+        effective_challenge: Some(effective_challenge),
+        shared_across_nodes: plan.shared_across_nodes,
+        requires_hot_reload: plan.requires_hot_reload,
+        checks,
+    })
+}
+
+pub(crate) fn resolve_challenge(
     provider: CertificateProviderKind,
     secret: &ProviderSecret,
     requested: Option<ChallengeStrategy>,

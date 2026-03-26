@@ -1,9 +1,9 @@
 use super::*;
 use crate::server::SecretResolutionError;
 use davenda_tls::{
-    AcmeTlsCertificateExecutor, CertificateMaterial, CloudflareTlsCertificateExecutor,
-    ManualCertificateBundle, ManualImportTlsCertificateExecutor, TlsCertificateExecutor,
-    TlsMaterialProtector,
+    AcmeTlsCertificateExecutor, CertificateMaterial, ChallengeValidation,
+    CloudflareTlsCertificateExecutor, HostnameBinding, ManualCertificateBundle,
+    ManualImportTlsCertificateExecutor, TlsCertificateExecutor, TlsMaterialProtector,
 };
 use std::sync::Arc;
 
@@ -42,29 +42,14 @@ pub struct TlsHost {
 }
 
 impl TlsHost {
-    pub(crate) fn new(
-        customer_app: String,
-        runtime: TlsRuntimeServices,
-        _data_runtime: DataRuntimeServices,
-        shared_backend_namespace: String,
+    fn build_executor(
+        customer_app: &str,
+        shared_backend_namespace: &str,
+        runtime: &TlsRuntimeServices,
+        control_plane: TlsControlPlaneRuntime,
         account_secret: Option<String>,
+        material_protector: TlsMaterialProtector,
     ) -> Result<Self, RuntimeTlsError> {
-        #[cfg(test)]
-        let material_protector = TlsMaterialProtector::from_seed(format!(
-            "test-tls-material:{}:{}",
-            customer_app, shared_backend_namespace
-        ))?;
-        #[cfg(not(test))]
-        let material_protector = runtime_material_protector()?;
-        #[cfg(test)]
-        let control_plane =
-            TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
-        #[cfg(not(test))]
-        let control_plane = TlsControlPlaneRuntime::with_distributed_postgres_control_plane(
-            runtime.clone(),
-            &_data_runtime,
-            format!("customer-app:{}:{}", customer_app, shared_backend_namespace),
-        )?;
         let certificate_executor: Arc<dyn TlsCertificateExecutor> = match runtime.provider {
             Some(davenda_tls::CertificateProviderKind::Acme) => {
                 Arc::new(AcmeTlsCertificateExecutor::new(
@@ -89,11 +74,67 @@ impl TlsHost {
             ),
         };
         Ok(Self {
-            customer_app,
-            runtime,
+            customer_app: customer_app.to_string(),
+            runtime: runtime.clone(),
             control_plane,
             certificate_executor,
         })
+    }
+
+    pub(crate) fn new(
+        customer_app: String,
+        runtime: TlsRuntimeServices,
+        _data_runtime: DataRuntimeServices,
+        shared_backend_namespace: String,
+        account_secret: Option<String>,
+    ) -> Result<Self, RuntimeTlsError> {
+        #[cfg(test)]
+        let material_protector = TlsMaterialProtector::from_seed(format!(
+            "test-tls-material:{}:{}",
+            customer_app, shared_backend_namespace
+        ))?;
+        #[cfg(not(test))]
+        let material_protector = runtime_material_protector()?;
+        #[cfg(test)]
+        let control_plane =
+            TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
+        #[cfg(not(test))]
+        let control_plane = TlsControlPlaneRuntime::with_distributed_postgres_control_plane(
+            runtime.clone(),
+            &_data_runtime,
+            format!("customer-app:{}:{}", customer_app, shared_backend_namespace),
+        )?;
+        Self::build_executor(
+            &customer_app,
+            &shared_backend_namespace,
+            &runtime,
+            control_plane,
+            account_secret,
+            material_protector,
+        )
+    }
+
+    pub(crate) fn new_for_validation(
+        customer_app: String,
+        runtime: TlsRuntimeServices,
+        shared_backend_namespace: String,
+        account_secret: Option<String>,
+    ) -> Result<Self, RuntimeTlsError> {
+        let material_protector = TlsMaterialProtector::from_seed(format!(
+            "tls-validation:{}:{}",
+            customer_app, shared_backend_namespace
+        ))?;
+        let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(
+            runtime.clone(),
+        );
+        Self::build_executor(
+            &customer_app,
+            &shared_backend_namespace,
+            &runtime,
+            control_plane,
+            account_secret,
+            material_protector,
+        )
     }
 
     pub fn status(&self) -> TlsStatusSnapshot {
@@ -115,6 +156,14 @@ impl TlsHost {
         bindings: Vec<HostnameBinding>,
     ) -> Result<IssuancePlan, RuntimeTlsError> {
         Ok(self.runtime.planner().issue_for_bindings(bindings)?)
+    }
+
+    pub fn validate_challenge_for_bindings(
+        &self,
+        bindings: Vec<HostnameBinding>,
+    ) -> Result<ChallengeValidation, RuntimeTlsError> {
+        let plan = self.issue_for_bindings(bindings)?;
+        Ok(self.certificate_executor.validate_issuance_plan(&plan)?)
     }
 
     pub fn import_certificate(&mut self, record: CertificateRecord) -> Result<(), RuntimeTlsError> {

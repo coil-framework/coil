@@ -277,6 +277,25 @@ impl RuntimePlan {
         )
     }
 
+    pub fn tls_validation_host_with_secret_resolver<R: crate::server::SecretResolver>(
+        &self,
+        resolver: &R,
+    ) -> Result<TlsHost, RuntimeTlsError> {
+        let account_secret = self
+            .config
+            .tls
+            .account_secret
+            .as_ref()
+            .map(|secret| resolver.resolve(secret))
+            .transpose()?;
+        TlsHost::new_for_validation(
+            self.config.app.name.clone(),
+            self.tls.clone(),
+            self.shared_backend_scope.clone(),
+            account_secret,
+        )
+    }
+
     pub fn storage_host(&self) -> StorageHost {
         self.storage_host_with_object_store(None)
     }

@@ -283,6 +283,11 @@ pub fn baseline_commands(_customer_app: &str) -> Result<Vec<CommandDescriptor>, 
             "Inspect TLS mode, provider state, and managed certificate inventory",
         )?,
         CommandDescriptor::new(
+            ["tls", "validate-challenge"],
+            CommandOwner::Core,
+            "Validate managed TLS challenge setup and provider prerequisites for the active customer app",
+        )?,
+        CommandDescriptor::new(
             ["tls", "renew"],
             CommandOwner::Core,
             "Renew a managed TLS certificate by issuing and activating a replacement",

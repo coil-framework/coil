@@ -18,8 +18,8 @@ pub use model::{
     TlsInstant,
 };
 pub use runtime::{
-    AcmeTlsCertificateExecutor, CertificateInventory, ChallengeTicket,
-    CloudflareTlsCertificateExecutor, HotReloadEvent, IssuancePlan,
+    AcmeTlsCertificateExecutor, CertificateInventory, ChallengeTicket, ChallengeValidation,
+    ChallengeValidationCheck, CloudflareTlsCertificateExecutor, HotReloadEvent, IssuancePlan,
     ManualImportTlsCertificateExecutor, PostgresTlsControlPlaneStore, RenewalPlan,
     TlsCertificateExecutor, TlsControlPlaneRuntime, TlsControlPlaneState, TlsControlPlaneStore,
     TlsPlanner, TlsRuntime,

@@ -1,6 +1,6 @@
 use super::super::control_plane::TlsControlPlaneRuntime;
 use super::super::planning::{IssuancePlan, RenewalPlan};
-use super::TlsCertificateExecutor;
+use super::{ChallengeValidation, TlsCertificateExecutor};
 use crate::material::{CertificateMaterial, TlsMaterialProtector};
 use crate::{
     CertificateFingerprint, CertificateId, CertificateProviderKind, CertificateRecord,
@@ -164,6 +164,20 @@ impl TlsCertificateExecutor for IssuedCertificateExecutor {
                 other => other,
             })
     }
+
+    fn validate_issuance_plan(
+        &self,
+        plan: &IssuancePlan,
+    ) -> Result<ChallengeValidation, TlsModelError> {
+        Ok(ChallengeValidation {
+            provider: plan.provider,
+            configured_challenge: plan.challenge,
+            effective_challenge: plan.challenge,
+            shared_across_nodes: plan.shared_across_nodes,
+            requires_hot_reload: plan.requires_hot_reload,
+            checks: Vec::new(),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -218,6 +232,13 @@ impl TlsCertificateExecutor for AcmeTlsCertificateExecutor {
     ) -> Result<CertificateMaterial, TlsModelError> {
         self.inner.certificate_material(certificate_id)
     }
+
+    fn validate_issuance_plan(
+        &self,
+        plan: &IssuancePlan,
+    ) -> Result<ChallengeValidation, TlsModelError> {
+        self.inner.validate_issuance_plan(plan)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -271,6 +292,13 @@ impl TlsCertificateExecutor for CloudflareTlsCertificateExecutor {
         certificate_id: &CertificateId,
     ) -> Result<CertificateMaterial, TlsModelError> {
         self.inner.certificate_material(certificate_id)
+    }
+
+    fn validate_issuance_plan(
+        &self,
+        plan: &IssuancePlan,
+    ) -> Result<ChallengeValidation, TlsModelError> {
+        self.inner.validate_issuance_plan(plan)
     }
 }
 

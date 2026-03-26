@@ -12,6 +12,13 @@ It is not the platform itself. It is an example deployable product built on top 
 
 If you are new to the repo, start here.
 
+For local development, Harbor Shop is intentionally turnkey for the full public and authenticated
+journey without requiring a pre-seeded database user or live Stripe credentials:
+
+- authenticated routes are bootstrapped through the built-in `__dev` login shortcuts
+- checkout uses the built-in local hosted-checkout stub until you supply real Stripe test keys
+- the default stack is meant to let a new developer browse, sign in, add to cart, check out, and inspect admin surfaces on first run
+
 ## What Is In This Folder
 
 `app.toml`
@@ -80,7 +87,9 @@ Then open:
 - `http://localhost:8080/`
 - `http://localhost:8080/__dev`
 
-The `__dev` page gives you one-click local login shortcuts for the checked-in customer and admin paths.
+The `__dev` page gives you one-click local login shortcuts for the checked-in customer and admin
+paths. This is the local bootstrap mechanism for authenticated walkthroughs; Harbor Shop does not
+depend on a seeded admin password for first-run development.
 
 ## What To Expect During Startup
 
@@ -136,11 +145,19 @@ The intended first-run path is:
 7. use the dev login shortcut and inspect `/account`
 8. use the admin shortcut and inspect `/admin`
 
+That is a complete local walkthrough. You do not need a seeded SQL user to exercise account or
+admin routes in the default development stack.
+
 ## Local Stripe Testing
 
 The default `.env.example` values keep Harbor Shop bootable without real Stripe credentials.
 
-That is good enough for local UI development, account flows, catalog work, CMS work, and most template/theme changes.
+That default path is not a crippled mock. Harbor Shop falls back to the built-in local hosted
+checkout stub so you can still exercise the checkout, confirmation, and account-order loop without
+live Stripe credentials.
+
+That is good enough for local UI development, account flows, catalog work, CMS work, and most
+template/theme changes.
 
 If you want real Stripe test-mode webhook behavior:
 
@@ -153,6 +170,9 @@ stripe listen --forward-to http://localhost:8080/webhooks/commerce/payment-provi
 ```
 
 Then update `.env` with the webhook secret that Stripe CLI gives you and restart the stack.
+
+Use real Stripe test credentials only when you specifically want to validate third-party provider
+handoff behavior. They are not required for the default end-to-end local customer journey.
 
 ## Working On The Storefront
 

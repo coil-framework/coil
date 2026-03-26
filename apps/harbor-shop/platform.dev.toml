@@ -46,7 +46,7 @@ default_class = "public_upload"
 deployment = "distributed"
 object_store = "s3"
 object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
-local_root = "/var/lib/davenda/harbor-shop"
+local_root = ".davenda"
 
 [cache]
 l1 = "moka"

@@ -1281,4 +1281,10 @@ fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
         migrations.ordered_steps()[0].owner,
         MigrationOwner::Module("commerce".to_string())
     );
+    assert!(
+        migrations
+            .ordered_steps()
+            .iter()
+            .all(|step| !step.statements.is_empty())
+    );
 }

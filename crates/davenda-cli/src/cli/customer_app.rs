@@ -94,22 +94,33 @@ pub(crate) fn resolve_customer_app_root(
     app_name: &str,
 ) -> Result<PathBuf, CliRunError> {
     let mut candidates = Vec::new();
+    let current_dir = std::env::current_dir().ok();
     if let Some(parent) = config_path.parent() {
-        candidates.push(parent.to_path_buf());
+        let parent = if parent.as_os_str().is_empty() {
+            current_dir.clone().unwrap_or_else(|| PathBuf::from("."))
+        } else {
+            parent.to_path_buf()
+        };
+        candidates.push(parent.clone());
         if let Some(repo_root) = parent.parent() {
             candidates.push(repo_root.join("apps").join(app_name));
             candidates.push(repo_root.to_path_buf());
         }
         candidates.push(parent.join("apps").join(app_name));
     }
-    if let Ok(current_dir) = std::env::current_dir() {
+    if let Some(current_dir) = current_dir {
         candidates.push(current_dir.join("apps").join(app_name));
         candidates.push(current_dir);
     }
 
     for candidate in candidates {
         if candidate.join("app.toml").is_file() {
-            return Ok(candidate);
+            return candidate.canonicalize().map_err(|error| {
+                CliRunError::execution(format!(
+                    "failed to canonicalize customer app root `{}`: {error}",
+                    candidate.display()
+                ))
+            });
         }
     }
 
@@ -117,4 +128,35 @@ pub(crate) fn resolve_customer_app_root(
         "failed to resolve customer app root for `{app_name}` from `{}`; expected a directory containing `app.toml` under one of the checked locations",
         config_path.display()
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_customer_app_root;
+    use std::fs;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn resolve_customer_app_root_uses_current_directory_for_relative_config_in_app_root() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!("davenda-cli-customer-app-{unique}"));
+        let app_root = temp_root.join("apps").join("harbor-shop");
+        fs::create_dir_all(&app_root).unwrap();
+        fs::write(app_root.join("app.toml"), "id = \"harbor-shop\"\n").unwrap();
+        fs::write(app_root.join("platform.dev.toml"), "[app]\nname = \"harbor-shop\"\n").unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&app_root).unwrap();
+        let resolved = resolve_customer_app_root(Path::new("platform.dev.toml"), "harbor-shop")
+            .unwrap();
+        std::env::set_current_dir(original_dir).unwrap();
+        let expected = app_root.canonicalize().unwrap();
+        let _ = fs::remove_dir_all(&temp_root);
+
+        assert_eq!(resolved, expected);
+    }
 }

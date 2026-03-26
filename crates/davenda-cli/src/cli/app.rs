@@ -2374,6 +2374,7 @@ fn run_migrate_apply(
         .enable_all()
         .build()
         .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let _runtime_guard = tokio_runtime.enter();
     let client = built
         .runtime_plan
         .runtime
@@ -9251,33 +9252,36 @@ fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
         .enable_all()
         .build()
         .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let runtime_guard = tokio_runtime.enter();
+    let modules = load_official_modules(&config)?;
+    let builder = RuntimeBuilder::new(config.clone(), auth_package);
+    let mut builder = builder;
+    for module in modules {
+        builder = builder.with_boxed_module(module);
+    }
+    let plan = builder
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to build runtime plan: {error}")))?;
+    let server = plan
+        .server_host(
+            &EnvironmentSecretResolver,
+            cookie_secret.as_bytes(),
+            csrf_secret.as_bytes(),
+        )
+        .map_err(|error| {
+            CliRunError::execution(format!("failed to build dev server host: {error}"))
+        })?;
+    drop(runtime_guard);
+    let app_name = plan.config.app.name.clone();
 
     tokio_runtime.block_on(async move {
-        let modules = load_official_modules(&config)?;
-        let builder = RuntimeBuilder::new(config.clone(), auth_package);
-        let mut builder = builder;
-        for module in modules {
-            builder = builder.with_boxed_module(module);
-        }
-        let plan = builder.build().map_err(|error| {
-            CliRunError::execution(format!("failed to build runtime plan: {error}"))
-        })?;
-        let server = plan
-            .server_host(
-                &EnvironmentSecretResolver,
-                cookie_secret.as_bytes(),
-                csrf_secret.as_bytes(),
-            )
-            .map_err(|error| {
-                CliRunError::execution(format!("failed to build dev server host: {error}"))
-            })?;
         let listener = tokio::net::TcpListener::bind(&bind)
             .await
             .map_err(|error| {
                 CliRunError::execution(format!("failed to bind dev server on `{bind}`: {error}"))
             })?;
 
-        println!("Serving `{}` on http://{bind}", plan.config.app.name);
+        println!("Serving `{}` on http://{bind}", app_name);
         server.serve(listener).await.map_err(|error| {
             CliRunError::execution(format!("dev server stopped unexpectedly: {error}"))
         })
@@ -15557,6 +15561,45 @@ expect = true
         assert!(rendered.contains("migrate apply"));
         assert!(rendered.contains("module:cms"));
         assert!(rendered.contains("status: planned"));
+    }
+
+    #[test]
+    fn run_from_args_reports_migrate_apply_database_failures_without_panicking() {
+        let _env_lock = database_env_test_lock().lock().unwrap();
+        let config_path = customer_app_fixture();
+        let original_database_url = std::env::var("DATABASE_URL").ok();
+
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://davenda:devpass@127.0.0.1:1/davenda");
+        }
+
+        let outcome = std::panic::catch_unwind(|| {
+            run_from_args([
+                "migrate".to_string(),
+                "apply".to_string(),
+                "--config".to_string(),
+                config_path.display().to_string(),
+                "--yes".to_string(),
+            ])
+        });
+
+        match original_database_url {
+            Some(database_url) => unsafe {
+                std::env::set_var("DATABASE_URL", database_url);
+            },
+            None => unsafe {
+                std::env::remove_var("DATABASE_URL");
+            },
+        }
+
+        let error = outcome
+            .expect("migrate apply should return an error instead of panicking")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to read applied migrations")
+        );
     }
 
     #[test]

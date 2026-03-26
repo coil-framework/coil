@@ -70,30 +70,65 @@ impl CommerceModule {
     pub fn migration_plan(&self) -> Result<MigrationPlan, CommerceModelError> {
         let owner = MigrationOwner::Module(self.name.clone());
         let mut plan = MigrationPlan::new();
-        plan.insert(MigrationStep::new(
-            MigrationId::new("001_catalog_products")?,
-            owner.clone(),
-            10,
-            "create catalog products and variants tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("002_collections")?,
-            owner.clone(),
-            20,
-            "create collections and product membership tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("003_checkouts_orders")?,
-            owner.clone(),
-            30,
-            "create checkout, order, and pricing snapshot tables",
-        )?)?;
-        plan.insert(MigrationStep::new(
-            MigrationId::new("004_refunds")?,
-            owner,
-            40,
-            "create refund ledger and payment reconciliation tables",
-        )?)?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("001_catalog_products")?,
+                owner.clone(),
+                10,
+                "create catalog products and variants tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_catalog_products (id TEXT PRIMARY KEY, slug TEXT NOT NULL, sku TEXT NOT NULL, title TEXT NOT NULL, product_type TEXT NOT NULL, status TEXT NOT NULL, price_minor BIGINT NOT NULL, currency TEXT NOT NULL, source_system TEXT, source_key TEXT UNIQUE, import_batch_id TEXT, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_catalog_variants (id TEXT PRIMARY KEY, product_id TEXT NOT NULL, sku TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, price_minor BIGINT NOT NULL, currency TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("002_collections")?,
+                owner.clone(),
+                20,
+                "create collections and product membership tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_collections (id TEXT PRIMARY KEY, handle TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_collection_products (collection_id TEXT NOT NULL, product_id TEXT NOT NULL, position BIGINT NOT NULL, PRIMARY KEY (collection_id, product_id))",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("003_checkouts_orders")?,
+                owner.clone(),
+                30,
+                "create checkout, order, and pricing snapshot tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_checkouts (id TEXT PRIMARY KEY, status TEXT NOT NULL, currency TEXT NOT NULL, email TEXT, principal_id TEXT, subtotal_minor BIGINT NOT NULL, total_minor BIGINT NOT NULL, payment_reference TEXT, source_system TEXT, source_key TEXT UNIQUE, import_batch_id TEXT, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_orders (id TEXT PRIMARY KEY, checkout_id TEXT, status TEXT NOT NULL, currency TEXT NOT NULL, email TEXT, principal_id TEXT, subtotal_minor BIGINT NOT NULL, total_minor BIGINT NOT NULL, payment_status TEXT NOT NULL, payment_reference TEXT, source_system TEXT, source_key TEXT UNIQUE, import_batch_id TEXT, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_order_lines (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, product_id TEXT, variant_id TEXT, title TEXT NOT NULL, quantity BIGINT NOT NULL, line_total_minor BIGINT NOT NULL, currency TEXT NOT NULL)",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("004_refunds")?,
+                owner,
+                40,
+                "create refund ledger and payment reconciliation tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_refunds (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, status TEXT NOT NULL, amount_minor BIGINT NOT NULL, currency TEXT NOT NULL, reason TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_payment_reconciliation (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, provider TEXT NOT NULL, provider_reference TEXT NOT NULL, status TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?,
+        )?;
         Ok(plan)
     }
 }

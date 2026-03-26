@@ -1,7 +1,9 @@
-FROM rust:1.85-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 
 WORKDIR /workspace
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+ENV CARGO_HTTP_TIMEOUT=600
+ENV CARGO_NET_RETRY=10
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -20,7 +22,10 @@ COPY crates ./crates
 COPY apps ./apps
 COPY third_party ./third_party
 
-RUN cargo build --locked -p davenda-cli --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --locked -p davenda-cli --release
 
 FROM debian:bookworm-slim
 

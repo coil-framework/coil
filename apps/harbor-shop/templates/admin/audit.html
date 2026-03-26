@@ -34,9 +34,13 @@
           without re-authenticating.
         </p>
         <p>
-          This page should answer who changed what and when. In the checked-in sample app the
-          audit backend is not wired yet, so the right operator move is to use the adjacent admin
-          surfaces for state inspection and rely on runtime diagnostics for execution traces.
+          This page now captures privileged Harbor Shop admin actions so operators can confirm who
+          changed what and when without leaving the checked-in back office.
+        </p>
+        <p>
+          Backend <code dv:text="${auditBackend}">local-sqlite</code> at
+          <code dv:text="${auditLocation}">/var/lib/davenda/shared-state</code> with
+          <strong dv:text="${auditEntryCount}">0</strong> recorded entries.
         </p>
       </section>
 
@@ -48,15 +52,24 @@
               <th scope="col">When</th>
               <th scope="col">Actor</th>
               <th scope="col">Action</th>
+              <th scope="col">Capability</th>
+              <th scope="col">Outcome</th>
               <th scope="col">Resource</th>
+              <th scope="col">Detail</th>
             </tr>
           </thead>
           <tbody>
             <tr dv:each="entry : ${auditEntries}">
-              <td dv:text="${entry.when}">2026-03-25T12:00:00Z</td>
+              <td dv:text="${entry.when}">1764223200</td>
               <td dv:text="${entry.actor}">operator-live-1</td>
-              <td dv:text="${entry.action}">order.refund.issue</td>
-              <td dv:text="${entry.resource}">ORD-10042</td>
+              <td dv:text="${entry.action}">Issue refund</td>
+              <td dv:text="${entry.capability}">order.refund.issue</td>
+              <td dv:text="${entry.outcome}">Succeeded</td>
+              <td dv:text="${entry.resource}">order:ORD-10042</td>
+              <td>
+                <span dv:if="${entry.hasDetail}" dv:text="${entry.detail}">Operator detail</span>
+                <span dv:unless="${entry.hasDetail}">No additional detail</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -64,31 +77,34 @@
 
       <section class="admin-panel" dv:unless="${hasAuditEntries}">
         <p class="admin-panel__eyebrow">Status</p>
-        <h2>No persisted audit entries yet</h2>
+        <h2>No privileged admin actions captured yet</h2>
         <p dv:text="${auditEmptyText}">
-          Audit capture is not persisted in the sample app yet.
+          No privileged admin actions have been captured yet.
         </p>
         <div class="admin-card-grid">
           <article class="admin-card">
-            <h3>Inspect live order activity</h3>
-            <p>Use the orders surface to review checkout output and the customer-facing order history that the runtime currently exposes.</p>
+            <h3>Capture a support action</h3>
+            <p>Use the orders surface to review live order state or process a refund so the audit history proves who handled the action.</p>
             <a class="button" href="/admin/orders" dv:attr="href=${links.adminOrders}">
               Open orders
             </a>
           </article>
           <article class="admin-card">
-            <h3>Validate content routes</h3>
-            <p>Use pages, navigation, and redirects to confirm what customers can reach today.</p>
+            <h3>Capture a content action</h3>
+            <p>Use pages, navigation, and redirects to save a draft, publish a page, or update route protection and then confirm the audit row appears here.</p>
             <a class="button" href="/admin/pages" dv:attr="href=${links.adminPages}">
               Open pages
             </a>
           </article>
           <article class="admin-card">
-            <h3>Escalate runtime trace review</h3>
+            <h3>Capture a merchandising action</h3>
             <p>
-              Use runtime diagnostics and deployment logs for execution-level traceability until
-              audit persistence is wired into the back office.
+              Use catalog admin to change live product or collection copy and verify the same actor,
+              capability, and resource show up in the audit trail.
             </p>
+            <a class="button" href="/admin/catalog/products" dv:attr="href=${links.adminCatalog}">
+              Open catalog
+            </a>
           </article>
         </div>
         <div class="admin-page__actions">

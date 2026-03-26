@@ -54,6 +54,7 @@ use davenda_wasm::{
 };
 use thiserror::Error;
 
+mod admin_audit;
 mod backends;
 mod browser;
 mod builder;
@@ -72,6 +73,7 @@ mod tls;
 mod wasm;
 mod wasm_data;
 
+pub(crate) use admin_audit::*;
 pub use browser::*;
 pub use builder::*;
 pub use cache::*;

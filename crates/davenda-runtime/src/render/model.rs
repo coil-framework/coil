@@ -16,6 +16,7 @@ use davenda_template::{
     RenderModel, RenderValue, TemplateModelError, TemplateNamespace, TrustedHtml,
 };
 use std::collections::BTreeMap;
+use url::form_urlencoded;
 
 impl RuntimePlan {
     pub(super) fn template_namespaces_for_execution(
@@ -293,16 +294,28 @@ fn page_model_for_route(
         "commerce.account.orders" => {
             "Review completed purchases, payment details, and membership-linked order history."
         }
-        "admin.dashboard" => "Operator overview for catalog, orders, and content.",
-        "admin.audit" => "Audit trail and operator action history.",
-        "commerce.orders" => "Operator order queue and payment history.",
+        "admin.dashboard" => {
+            "Operator dashboard for launch-day catalog, orders, and content checks."
+        }
+        "admin.audit" => {
+            "Recent privileged actions, the acting operator, and the affected resources."
+        }
+        "commerce.orders" => {
+            "Store-wide order queue with payment state, customer email, and refund visibility."
+        }
         "commerce.order-detail" => {
             "Support and finance detail for a specific order, including payment, customer, and refund state."
         }
-        "commerce.catalog-admin" => "Merchandising inventory, collections, and featured products.",
-        "cms.pages.index" => "Live page inventory and publication state.",
-        "cms.navigation.index" => "Navigation trees and top-level route links.",
-        "cms.redirects.index" => "Redirect rules and route handoff records.",
+        "commerce.catalog-admin" => {
+            "Live catalog copy, storefront visibility, list price, and collection management for the checked-in store."
+        }
+        "cms.pages.index" => "Draft, preview, publish, and unpublish live CMS pages.",
+        "cms.navigation.index" => {
+            "Edit the live primary navigation links rendered in the storefront shell."
+        }
+        "cms.redirects.index" => {
+            "Manage live redirect rules for legacy and unmatched storefront routes."
+        }
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             "Membership state, recent orders, and next actions for the signed-in customer."
         }
@@ -349,22 +362,43 @@ fn apply_route_specific_bindings(
                 .get("collection_slug")
                 .map(String::as_str)
                 .unwrap_or("featured");
-            let product_cards = fixture.product_cards_for_collection(slug);
-            model = model
-                .with_object("collection", fixture.collection_for(slug))?
-                .with_bool("hasProductCards", !product_cards.is_empty())?
-                .with_list("productCards", product_cards)?;
+            if let Some(_collection) = catalog.visible_collection(slug) {
+                let product_cards = fixture.product_cards_for_collection(slug);
+                model = model
+                    .with_bool("hasCollection", true)?
+                    .with_object("collection", fixture.collection_for(slug))?
+                    .with_bool("hasProductCards", !product_cards.is_empty())?
+                    .with_list("productCards", product_cards)?;
+            } else {
+                model = model
+                    .with_bool("hasCollection", false)?
+                    .with_bool("hasProductCards", false)?
+                    .with_list("productCards", Vec::<RenderModel>::new())?
+                    .with_value(
+                        "missingCollectionHandle",
+                        RenderValue::text(slug.to_string()),
+                    )?;
+            }
         }
         "commerce.product-detail" => {
             let slug = params
                 .get("product_slug")
                 .map(String::as_str)
                 .unwrap_or("harbor-cap");
-            let product_cards = fixture.related_product_cards_for_product(slug);
-            model = model
-                .with_object("product", fixture.product_for(slug))?
-                .with_bool("hasProductCards", !product_cards.is_empty())?
-                .with_list("productCards", product_cards)?;
+            if catalog.visible_product(slug).is_some() {
+                let product_cards = fixture.related_product_cards_for_product(slug);
+                model = model
+                    .with_bool("hasProduct", true)?
+                    .with_object("product", fixture.product_for(slug))?
+                    .with_bool("hasProductCards", !product_cards.is_empty())?
+                    .with_list("productCards", product_cards)?;
+            } else {
+                model = model
+                    .with_bool("hasProduct", false)?
+                    .with_bool("hasProductCards", false)?
+                    .with_list("productCards", Vec::<RenderModel>::new())?
+                    .with_value("missingProductHandle", RenderValue::text(slug.to_string()))?;
+            }
         }
         "commerce.cart" => {
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
@@ -499,15 +533,20 @@ fn apply_route_specific_bindings(
                 .with_value("contentCount", RenderValue::text(content_count))?;
         }
         "admin.audit" => {
+            let audit_history = admin_audit_history(plan)?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasAuditEntries", false)?
-                .with_list("auditEntries", Vec::new())?
+                .with_bool("hasAuditEntries", !audit_history.entries.is_empty())?
+                .with_list("auditEntries", audit_history.entries)?
                 .with_value(
                     "auditEmptyText",
-                    RenderValue::text(
-                        "Audit capture is not persisted in the sample app yet. Use diagnostics for runtime traces and add the audit backend when operator logging is wired.",
-                    ),
+                    RenderValue::text(audit_history.empty_text),
+                )?
+                .with_value("auditBackend", RenderValue::text(audit_history.backend))?
+                .with_value("auditLocation", RenderValue::text(audit_history.location))?
+                .with_value(
+                    "auditEntryCount",
+                    RenderValue::text(audit_history.entry_count.to_string()),
                 )?;
         }
         "commerce.orders" => {
@@ -567,17 +606,60 @@ fn apply_route_specific_bindings(
                 .transpose()?
                 .unwrap_or_else(default_cms_admin_workspace);
             let pages = cms_admin_pages_model(&workspace)?;
-            let selected_page = workspace
-                .selected_page(query_first(query_params, "page"))
-                .cloned();
+            let is_creating_page =
+                query_flag(query_params, "new") || cms_admin_form_targets_new_page(form_state);
+            let selected_page = (!is_creating_page)
+                .then(|| {
+                    workspace
+                        .selected_page(query_first(query_params, "page"))
+                        .cloned()
+                })
+                .flatten();
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
                 .with_bool("hasContentPages", !pages.is_empty())?
                 .with_list("contentPages", pages)?
-                .with_bool("hasSelectedContentPage", selected_page.is_some())?
+                .with_bool(
+                    "hasSelectedContentPage",
+                    selected_page.is_some() || is_creating_page,
+                )?
+                .with_bool("isCreatingContentPage", is_creating_page)?
+                .with_bool("hasPersistedContentPage", selected_page.is_some())?
                 .with_object(
                     "selectedContentPage",
                     cms_admin_selected_page_model_with_form_state(selected_page, form_state)?,
+                )?
+                .with_value(
+                    "newContentPageHref",
+                    RenderValue::text("/admin/pages?new=1"),
+                )?
+                .with_value(
+                    "contentPageEditorTitle",
+                    RenderValue::text(if is_creating_page {
+                        "New page draft"
+                    } else {
+                        "Draft workflow"
+                    }),
+                )?
+                .with_value(
+                    "contentPageEditorSummary",
+                    RenderValue::text(if is_creating_page {
+                        "Start a new draft page, save it to create a stable preview, then publish it when the route is ready."
+                    } else {
+                        "Update the draft, review the preview, then publish it to the live route."
+                    }),
+                )?
+                .with_value(
+                    "contentPageSaveLabel",
+                    RenderValue::text(if is_creating_page {
+                        "Create draft"
+                    } else {
+                        "Save draft"
+                    }),
+                )?
+                .with_bool(
+                    "showPagesEmptyState",
+                    workspace.pages.is_empty() && !is_creating_page,
                 )?
                 .with_value(
                     "pagesEmptyText",
@@ -906,6 +988,18 @@ fn order_detail_from_storefront(
         "This order is not currently eligible for an additional refund from the checked-in workflow."
             .to_string()
     };
+    let can_fulfill = order.status == "paid";
+    let fulfillment_action_summary = if can_fulfill {
+        "Mark the order fulfilled once packing or dispatch is complete. The support queue and order history will show the fulfilled status after this action."
+            .to_string()
+    } else if order.status == "fulfilled" {
+        "This order is already marked fulfilled in the checked-in workflow.".to_string()
+    } else if order.status == "pending_payment" {
+        "Capture payment before marking the order fulfilled.".to_string()
+    } else {
+        "This order is not currently eligible for fulfillment in the checked-in workflow."
+            .to_string()
+    };
     let payment_reference = order.payment.reference.clone().unwrap_or_default();
     let checkout_email = order.payment.checkout_email.clone().unwrap_or_default();
     let principal_id = order.principal_id.clone().unwrap_or_default();
@@ -962,6 +1056,11 @@ fn order_detail_from_storefront(
         .with_bool("hasCheckoutEmail", order.payment.checkout_email.is_some())?
         .with_value("principalId", RenderValue::text(principal_id))?
         .with_bool("hasPrincipalId", order.principal_id.is_some())?
+        .with_bool("canFulfill", can_fulfill)?
+        .with_value(
+            "fulfillmentActionSummary",
+            RenderValue::text(fulfillment_action_summary),
+        )?
         .with_value("sessionId", RenderValue::text(order.session_id.clone()))?
         .with_value("subtotal", RenderValue::text(order.subtotal.clone()))?
         .with_value("total", RenderValue::text(order.total.clone()))?
@@ -1053,6 +1152,204 @@ fn operator_identity(
                 .and_then(|session| session.session_id.as_deref())
                 .is_some(),
         )
+}
+
+struct AdminAuditHistoryView {
+    entries: Vec<RenderModel>,
+    empty_text: String,
+    backend: String,
+    location: String,
+    entry_count: usize,
+}
+
+#[derive(Default)]
+struct ParsedOperatorAuditRecord {
+    action: String,
+    route: String,
+    capability: String,
+    resource_kind: String,
+    resource_id: String,
+    outcome: String,
+    detail: String,
+}
+
+fn admin_audit_history(
+    plan: Option<&RuntimePlan>,
+) -> Result<AdminAuditHistoryView, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(AdminAuditHistoryView {
+            entries: Vec::new(),
+            empty_text:
+                "Start the checked-in Harbor Shop runtime before expecting persisted operator audit history."
+                    .to_string(),
+            backend: "unavailable".to_string(),
+            location: "runtime not started".to_string(),
+            entry_count: 0,
+        });
+    };
+
+    let snapshot = match RuntimeWasmHostServices::new(plan.clone()).metadata_snapshot(100) {
+        Ok(snapshot) => snapshot,
+        Err(reason) => {
+            let fallback = AdminAuditLog::open(plan);
+            let fallback_entries = fallback.recent_entries(100).map_err(|error| {
+                TemplateModelError::TemplateRead {
+                    path: "admin-audit-log".to_string(),
+                    message: format!(
+                        "audit history is currently unavailable: {reason}; local fallback also failed: {error}"
+                    ),
+                }
+            })?;
+            let entries = fallback_entries
+                .iter()
+                .map(|record| {
+                    admin_audit_entry_model(
+                        record.recorded_at_unix_seconds,
+                        record.actor.as_str(),
+                        record.kind.as_str(),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(AdminAuditHistoryView {
+                empty_text: format!(
+                    "Audit history is using the local fallback log because the shared metadata backend is unavailable: {reason}"
+                ),
+                backend: "local-fallback".to_string(),
+                location: fallback.location_label(),
+                entry_count: fallback_entries.len(),
+                entries,
+            });
+        }
+    };
+
+    let entries = snapshot
+        .recent_records
+        .iter()
+        .map(|record| {
+            admin_audit_entry_model(
+                record.recorded_at_unix_seconds,
+                record
+                    .principal_id
+                    .as_deref()
+                    .unwrap_or(record.principal_kind.as_str()),
+                record.kind.as_str(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(AdminAuditHistoryView {
+        empty_text: format!(
+            "Audit backend `{}` at `{}` is live, but no privileged admin actions have been captured yet for this Harbor Shop runtime.",
+            snapshot.backend.as_str(),
+            snapshot.location
+        ),
+        backend: snapshot.backend.as_str().to_string(),
+        location: snapshot.location,
+        entry_count: snapshot.entry_count,
+        entries,
+    })
+}
+
+fn admin_audit_entry_model(
+    recorded_at_unix_seconds: i64,
+    actor: &str,
+    kind: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    let parsed = parse_operator_audit_record(kind);
+    let resource = if parsed.resource_id.trim().is_empty() {
+        parsed.resource_kind.clone()
+    } else {
+        format!("{}:{}", parsed.resource_kind, parsed.resource_id)
+    };
+    let detail = parsed.detail.trim().to_string();
+    RenderModel::new()
+        .with_value(
+            "when",
+            RenderValue::text(recorded_at_unix_seconds.to_string()),
+        )?
+        .with_value("actor", RenderValue::text(actor.to_string()))?
+        .with_value(
+            "action",
+            RenderValue::text(admin_audit_action_label(parsed.action.as_str())),
+        )?
+        .with_value("capability", RenderValue::text(parsed.capability))?
+        .with_value("resource", RenderValue::text(resource))?
+        .with_value(
+            "outcome",
+            RenderValue::text(admin_audit_outcome_label(parsed.outcome.as_str())),
+        )?
+        .with_bool("hasDetail", !detail.is_empty())?
+        .with_value("detail", RenderValue::text(detail))
+}
+
+fn parse_operator_audit_record(kind: &str) -> ParsedOperatorAuditRecord {
+    if !kind.contains('=') {
+        return ParsedOperatorAuditRecord {
+            action: kind.to_string(),
+            capability: admin_audit_capability_fallback(kind).to_string(),
+            outcome: "succeeded".to_string(),
+            ..ParsedOperatorAuditRecord::default()
+        };
+    }
+
+    let mut parsed = ParsedOperatorAuditRecord::default();
+    for (key, value) in form_urlencoded::parse(kind.as_bytes()) {
+        match key.as_ref() {
+            "action" => parsed.action = value.into_owned(),
+            "route" => parsed.route = value.into_owned(),
+            "capability" => parsed.capability = value.into_owned(),
+            "resource_kind" => parsed.resource_kind = value.into_owned(),
+            "resource_id" => parsed.resource_id = value.into_owned(),
+            "outcome" => parsed.outcome = value.into_owned(),
+            "detail" => parsed.detail = value.into_owned(),
+            _ => {}
+        }
+    }
+
+    if parsed.capability.is_empty() {
+        parsed.capability = admin_audit_capability_fallback(parsed.action.as_str()).to_string();
+    }
+    if parsed.outcome.is_empty() {
+        parsed.outcome = "succeeded".to_string();
+    }
+    parsed
+}
+
+fn admin_audit_capability_fallback(action: &str) -> &'static str {
+    match action {
+        "cms.pages.save-draft" => "cms.page.edit",
+        "cms.pages.publish" | "cms.pages.unpublish" => "cms.page.publish",
+        "cms.navigation.save" => "cms.navigation.edit",
+        "cms.redirects.save" => "cms.page.edit",
+        "commerce.catalog-admin-update.product"
+        | "commerce.catalog-admin-update.collection"
+        | "commerce.catalog-admin-update" => "catalog.product.edit",
+        "commerce.order-refund" => "order.refund.issue",
+        "commerce.order-fulfill" => "order.refund.issue",
+        _ => "",
+    }
+}
+
+fn admin_audit_action_label(action: &str) -> &'static str {
+    match action {
+        "cms.pages.save-draft" => "Save draft",
+        "cms.pages.publish" => "Publish page",
+        "cms.pages.unpublish" => "Unpublish page",
+        "cms.navigation.save" => "Save navigation",
+        "cms.redirects.save" => "Save redirects",
+        "commerce.catalog-admin-update.product" => "Update product",
+        "commerce.catalog-admin-update.collection" => "Update collection",
+        "commerce.order-refund" => "Issue refund",
+        "commerce.order-fulfill" => "Mark fulfilled",
+        _ => "Privileged action",
+    }
+}
+
+fn admin_audit_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "succeeded" => "Succeeded",
+        "rejected" => "Rejected",
+        _ => "Recorded",
+    }
 }
 
 fn admin_panels(
@@ -1162,6 +1459,29 @@ fn query_first<'a>(query_params: &'a RequestFieldMap, name: &str) -> Option<&'a 
         .get(name)
         .and_then(|values| values.first())
         .map(String::as_str)
+}
+
+fn query_flag(query_params: &RequestFieldMap, name: &str) -> bool {
+    query_first(query_params, name)
+        .is_some_and(|value| matches!(value, "1" | "true" | "yes" | "on"))
+}
+
+fn cms_admin_form_targets_new_page(form_state: Option<&StorefrontFormState>) -> bool {
+    let Some(form_state) = form_state else {
+        return false;
+    };
+    let page_id = form_state
+        .fields
+        .get("page_id")
+        .map(String::as_str)
+        .unwrap_or_default()
+        .trim();
+    if !page_id.is_empty() {
+        return false;
+    }
+    ["page_title", "page_slug", "page_summary", "page_body_html"]
+        .iter()
+        .any(|field| form_state.fields.contains_key(*field))
 }
 
 fn cms_admin_workspace(plan: &RuntimePlan) -> Result<CmsAdminWorkspace, TemplateModelError> {
@@ -2391,6 +2711,7 @@ fn storefront_fixture(
     let products_data = catalog
         .products
         .iter()
+        .filter(|product| catalog.visible_product(product.handle.as_str()).is_some())
         .map(|product| ProductFixture {
             handle: product.handle.clone(),
             title: product.title.clone(),
@@ -2421,6 +2742,7 @@ fn storefront_fixture(
     let collections_data = catalog
         .collections
         .iter()
+        .filter(|collection| collection.is_visible)
         .map(|collection| CollectionFixture {
             handle: collection.handle.clone(),
             title: collection.title.clone(),
@@ -2575,7 +2897,23 @@ fn catalog_admin_products_model(
             let price_error = catalog_admin_form_error(form_state, is_active_form, "product_price");
             let collection_error =
                 catalog_admin_form_error(form_state, is_active_form, "product_collection_handle");
+            let visibility_input = catalog_admin_checkbox_value(
+                form_state,
+                is_active_form,
+                "product_visible",
+                product.is_visible,
+            );
             product_model_for_locale(locale, &fixture, plan)?
+                .with_bool("isVisible", product.is_visible)?
+                .with_bool("visibilityInput", visibility_input)?
+                .with_value(
+                    "visibilityLabel",
+                    RenderValue::text(if product.is_visible {
+                        "Visible in storefront"
+                    } else {
+                        "Hidden from storefront"
+                    }),
+                )?
                 .with_value(
                     "titleInput",
                     RenderValue::text(catalog_admin_form_value(
@@ -2673,7 +3011,23 @@ fn catalog_admin_collections_model(
                 catalog_admin_form_error(form_state, is_active_form, "collection_label");
             let summary_error =
                 catalog_admin_form_error(form_state, is_active_form, "collection_summary");
+            let visibility_input = catalog_admin_checkbox_value(
+                form_state,
+                is_active_form,
+                "collection_visible",
+                collection.is_visible,
+            );
             collection_section_model(locale, &fixture)?
+                .with_bool("isVisible", collection.is_visible)?
+                .with_bool("visibilityInput", visibility_input)?
+                .with_value(
+                    "visibilityLabel",
+                    RenderValue::text(if collection.is_visible {
+                        "Visible in storefront"
+                    } else {
+                        "Hidden from storefront"
+                    }),
+                )?
                 .with_value(
                     "titleInput",
                     RenderValue::text(catalog_admin_form_value(
@@ -2775,6 +3129,20 @@ fn catalog_admin_form_value(
         .and_then(|state| state.fields.get(field))
         .cloned()
         .unwrap_or_else(|| default.to_string())
+}
+
+fn catalog_admin_checkbox_value(
+    form_state: Option<&StorefrontFormState>,
+    is_active_form: bool,
+    field: &str,
+    default: bool,
+) -> bool {
+    if !is_active_form {
+        return default;
+    }
+    form_state
+        .and_then(|state| state.fields.get(field))
+        .is_some_and(|value| value == "yes")
 }
 
 fn catalog_admin_form_error(

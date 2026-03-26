@@ -51,6 +51,8 @@ pub enum StorefrontStateError {
     MissingPaymentWebhookSecret,
     #[error("refund reason is required")]
     MissingRefundReason,
+    #[error("order `{order_id}` cannot be fulfilled while it is `{status}`")]
+    FulfillmentNotAllowed { order_id: String, status: String },
     #[error("order `{order_id}` cannot be refunded while it is `{status}`")]
     RefundNotAllowed { order_id: String, status: String },
     #[error("catalog product `{handle}` does not exist")]
@@ -279,6 +281,7 @@ pub struct StorefrontCatalogProductUpdate {
     pub summary: String,
     pub price_minor: i64,
     pub collection_handle: String,
+    pub is_visible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,6 +290,7 @@ pub struct StorefrontCatalogCollectionUpdate {
     pub title: String,
     pub label: String,
     pub summary: String,
+    pub is_visible: bool,
 }
 
 impl StorefrontFormState {
@@ -354,6 +358,8 @@ pub struct StorefrontCollectionDefinition {
     pub title: String,
     pub label: String,
     pub summary: String,
+    #[serde(default = "default_catalog_visibility")]
+    pub is_visible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -366,6 +372,8 @@ pub struct StorefrontProductDefinition {
     #[serde(default = "default_currency")]
     pub currency: String,
     pub collection_handle: String,
+    #[serde(default = "default_catalog_visibility")]
+    pub is_visible: bool,
     #[serde(default = "default_variant_title")]
     pub variant_title: String,
     #[serde(default = "default_product_kind")]
@@ -384,6 +392,7 @@ impl StorefrontCatalog {
                     summary:
                         "Current campaign picks spanning merch, memberships, and event offers."
                             .to_string(),
+                    is_visible: true,
                 },
                 StorefrontCollectionDefinition {
                     handle: "memberships".to_string(),
@@ -392,6 +401,7 @@ impl StorefrontCatalog {
                     summary:
                         "Recurring and premium access products that unlock customer benefits."
                             .to_string(),
+                    is_visible: true,
                 },
                 StorefrontCollectionDefinition {
                     handle: "events".to_string(),
@@ -400,6 +410,7 @@ impl StorefrontCatalog {
                     summary:
                         "Bookable offers and event-linked passes surfaced alongside editorial content."
                             .to_string(),
+                    is_visible: true,
                 },
             ],
             products: vec![
@@ -411,6 +422,7 @@ impl StorefrontCatalog {
                     price_minor: 2_900,
                     currency: default_currency(),
                     collection_handle: "featured".to_string(),
+                    is_visible: true,
                     variant_title: "Standard".to_string(),
                     product_kind: "physical".to_string(),
                     entitlement_key: None,
@@ -425,6 +437,7 @@ impl StorefrontCatalog {
                     price_minor: 8_900,
                     currency: default_currency(),
                     collection_handle: "memberships".to_string(),
+                    is_visible: true,
                     variant_title: "Annual".to_string(),
                     product_kind: "membership".to_string(),
                     entitlement_key: Some("membership.gold".to_string()),
@@ -438,6 +451,7 @@ impl StorefrontCatalog {
                     price_minor: 4_500,
                     currency: default_currency(),
                     collection_handle: "events".to_string(),
+                    is_visible: true,
                     variant_title: "Single pass".to_string(),
                     product_kind: "physical".to_string(),
                     entitlement_key: None,
@@ -517,10 +531,19 @@ impl StorefrontCatalog {
             .find(|collection| collection.handle == handle)
     }
 
+    pub fn visible_collection(&self, handle: &str) -> Option<&StorefrontCollectionDefinition> {
+        self.collection(handle).filter(|collection| collection.is_visible)
+    }
+
     pub fn product(&self, handle: &str) -> Option<&StorefrontProductDefinition> {
         self.products
             .iter()
             .find(|product| product.handle == handle)
+    }
+
+    pub fn visible_product(&self, handle: &str) -> Option<&StorefrontProductDefinition> {
+        self.product(handle)
+            .filter(|product| self.is_product_visible(product))
     }
 
     pub fn product_by_sku_or_handle(&self, value: &str) -> Option<&StorefrontProductDefinition> {
@@ -530,15 +553,25 @@ impl StorefrontCatalog {
     }
 
     pub fn products_for_collection(&self, handle: &str) -> Vec<&StorefrontProductDefinition> {
+        if handle != "featured" && self.visible_collection(handle).is_none() {
+            return Vec::new();
+        }
         self.products
             .iter()
-            .filter(|product| product.collection_handle == handle || handle == "featured")
+            .filter(|product| {
+                self.is_product_visible(product)
+                    && (product.collection_handle == handle || handle == "featured")
+            })
             .collect()
     }
 
     pub fn related_products_for_product(&self, handle: &str) -> Vec<&StorefrontProductDefinition> {
-        let Some(product) = self.product(handle) else {
-            return self.products.iter().collect();
+        let Some(product) = self.visible_product(handle) else {
+            return self
+                .products
+                .iter()
+                .filter(|candidate| self.is_product_visible(candidate))
+                .collect();
         };
         self.products_for_collection(&product.collection_handle)
             .into_iter()
@@ -546,8 +579,17 @@ impl StorefrontCatalog {
             .collect()
     }
 
+    fn is_product_visible(&self, product: &StorefrontProductDefinition) -> bool {
+        product.is_visible
+            && self
+                .collection(product.collection_handle.as_str())
+                .is_some_and(|collection| collection.is_visible)
+    }
+
     fn catalog_item(&self, sku: &str) -> Option<CatalogItem> {
-        let product = self.product_by_sku_or_handle(sku)?;
+        let product = self
+            .product_by_sku_or_handle(sku)
+            .filter(|product| self.is_product_visible(product))?;
         Some(CatalogItem {
             sku: product.sku.clone(),
             title: product.title.clone(),
@@ -561,6 +603,10 @@ impl StorefrontCatalog {
 
 fn default_currency() -> String {
     DEFAULT_CURRENCY.to_string()
+}
+
+fn default_catalog_visibility() -> bool {
+    true
 }
 
 fn default_product_kind() -> String {
@@ -690,6 +736,16 @@ impl StorefrontStateStore {
                     summary TEXT NOT NULL,
                     updated_at_unix_seconds INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS catalog_product_visibility_overrides (
+                    handle TEXT PRIMARY KEY,
+                    is_visible INTEGER NOT NULL,
+                    updated_at_unix_seconds INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS catalog_collection_visibility_overrides (
+                    handle TEXT PRIMARY KEY,
+                    is_visible INTEGER NOT NULL,
+                    updated_at_unix_seconds INTEGER NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS orders_by_session
                     ON orders (session_id, created_at_unix_seconds DESC);
                 CREATE INDEX IF NOT EXISTS orders_by_principal
@@ -816,6 +872,26 @@ impl StorefrontStateStore {
                 "failed to persist storefront catalog product override: {error}"
             ))
         })?;
+        tx.execute(
+            r#"
+            INSERT INTO catalog_product_visibility_overrides (
+                handle, is_visible, updated_at_unix_seconds
+            ) VALUES (?1, ?2, ?3)
+            ON CONFLICT(handle) DO UPDATE SET
+                is_visible = excluded.is_visible,
+                updated_at_unix_seconds = excluded.updated_at_unix_seconds
+            "#,
+            params![
+                update.handle,
+                if update.is_visible { 1_i64 } else { 0_i64 },
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to persist storefront catalog product visibility override: {error}"
+            ))
+        })?;
         let catalog = self.load_effective_catalog(&tx)?;
         tx.commit().map_err(|error| {
             query_error(format!(
@@ -864,6 +940,26 @@ impl StorefrontStateStore {
         .map_err(|error| {
             query_error(format!(
                 "failed to persist storefront catalog collection override: {error}"
+            ))
+        })?;
+        tx.execute(
+            r#"
+            INSERT INTO catalog_collection_visibility_overrides (
+                handle, is_visible, updated_at_unix_seconds
+            ) VALUES (?1, ?2, ?3)
+            ON CONFLICT(handle) DO UPDATE SET
+                is_visible = excluded.is_visible,
+                updated_at_unix_seconds = excluded.updated_at_unix_seconds
+            "#,
+            params![
+                update.handle,
+                if update.is_visible { 1_i64 } else { 0_i64 },
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to persist storefront catalog collection visibility override: {error}"
             ))
         })?;
         let catalog = self.load_effective_catalog(&tx)?;
@@ -1051,6 +1147,43 @@ impl StorefrontStateStore {
                 collection.summary = summary;
             }
         }
+        let mut collection_visibility_statement = tx
+            .prepare(
+                r#"
+                SELECT handle, is_visible
+                FROM catalog_collection_visibility_overrides
+                ORDER BY handle ASC
+                "#,
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to prepare storefront catalog collection visibility query: {error}"
+                ))
+            })?;
+        let collection_visibility_overrides = collection_visibility_statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+            })
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to query storefront catalog collection visibility overrides: {error}"
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to collect storefront catalog collection visibility overrides: {error}"
+                ))
+            })?;
+        for (handle, is_visible) in collection_visibility_overrides {
+            if let Some(collection) = catalog
+                .collections
+                .iter_mut()
+                .find(|collection| collection.handle == handle)
+            {
+                collection.is_visible = is_visible;
+            }
+        }
 
         let mut product_statement = tx
             .prepare(
@@ -1101,6 +1234,43 @@ impl StorefrontStateStore {
                 product.summary = summary;
                 product.price_minor = price_minor;
                 product.collection_handle = collection_handle;
+            }
+        }
+        let mut product_visibility_statement = tx
+            .prepare(
+                r#"
+                SELECT handle, is_visible
+                FROM catalog_product_visibility_overrides
+                ORDER BY handle ASC
+                "#,
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to prepare storefront catalog product visibility query: {error}"
+                ))
+            })?;
+        let product_visibility_overrides = product_visibility_statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+            })
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to query storefront catalog product visibility overrides: {error}"
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to collect storefront catalog product visibility overrides: {error}"
+                ))
+            })?;
+        for (handle, is_visible) in product_visibility_overrides {
+            if let Some(product) = catalog
+                .products
+                .iter_mut()
+                .find(|product| product.handle == handle)
+            {
+                product.is_visible = is_visible;
             }
         }
 
@@ -1411,6 +1581,73 @@ impl StorefrontStateStore {
         tx.commit().map_err(|error| {
             query_error(format!(
                 "failed to commit storefront refund transaction: {error}"
+            ))
+        })?;
+        Ok(updated)
+    }
+
+    pub fn fulfill_order(
+        &self,
+        order_id: &str,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontOrderSnapshot, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront fulfillment transaction: {error}"
+            ))
+        })?;
+        let order = self
+            .load_order_by_id(&tx, order_id)
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to load storefront order for fulfillment: {error}"
+                ))
+            })?
+            .ok_or_else(|| StorefrontStateError::UnknownOrder {
+                order_id: order_id.to_string(),
+            })?;
+        if order.status == "fulfilled" {
+            tx.commit().map_err(|error| {
+                query_error(format!(
+                    "failed to commit storefront fulfillment transaction: {error}"
+                ))
+            })?;
+            return Ok(order);
+        }
+        if order.status != "paid" {
+            return Err(StorefrontStateError::FulfillmentNotAllowed {
+                order_id: order_id.to_string(),
+                status: order.status,
+            });
+        }
+
+        tx.execute(
+            r#"
+            UPDATE orders
+            SET status = 'fulfilled'
+            WHERE order_id = ?1
+            "#,
+            params![order_id],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to update storefront fulfilled order: {error}"
+            ))
+        })?;
+        let updated = self
+            .load_order_by_id(&tx, order_id)
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to reload fulfilled storefront order: {error}"
+                ))
+            })?
+            .ok_or_else(|| StorefrontStateError::UnknownOrder {
+                order_id: order_id.to_string(),
+            })?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront fulfillment transaction: {error}"
             ))
         })?;
         Ok(updated)

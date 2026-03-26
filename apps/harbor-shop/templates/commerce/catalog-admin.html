@@ -25,8 +25,8 @@
         </p>
         <p>
           This checked-in admin flow can now edit the live Harbor Shop catalog copy for titles,
-          summaries, list price, and collection placement. Save here, then confirm the linked
-          storefront routes show the exact browse path customers will use.
+          summaries, list price, storefront visibility, and collection placement. Save here, then
+          confirm the linked storefront routes show the exact browse path customers will use.
         </p>
         <p>
           Inventory, publish scheduling, product creation, and deletion are still outside this
@@ -94,6 +94,9 @@
         <div class="admin-card-grid">
           <article class="admin-card" dv:each="product : ${productCards}">
             <h2 dv:text="${product.name}">Harbor Cap</h2>
+            <p class="admin-panel__eyebrow" dv:text="${product.visibilityLabel}">
+              Visible in storefront
+            </p>
             <p>
               Storefront route:
               <a href="/shop/products/harbor-cap" dv:attr="href=${product.url}">
@@ -154,6 +157,23 @@
                 Choose a collection for this product.
               </p>
 
+              <label>
+                <input
+                  type="checkbox"
+                  name="product_visible"
+                  value="yes"
+                  dv:if="${product.visibilityInput}"
+                  checked="checked"
+                />
+                <input
+                  type="checkbox"
+                  name="product_visible"
+                  value="yes"
+                  dv:unless="${product.visibilityInput}"
+                />
+                Visible in storefront
+              </label>
+
               <div class="admin-page__actions">
                 <button class="button" type="submit">Save product</button>
                 <a class="button button--secondary" href="/shop/products/harbor-cap" dv:attr="href=${product.url}">
@@ -170,6 +190,9 @@
         <div class="admin-card-grid">
           <article class="admin-card" dv:each="section : ${catalogSections}">
             <h2 dv:text="${section.title}">Featured</h2>
+            <p class="admin-panel__eyebrow" dv:text="${section.visibilityLabel}">
+              Visible in storefront
+            </p>
             <p>
               Storefront route:
               <a href="/shop/collections/featured" dv:attr="href=${section.url}">
@@ -203,6 +226,23 @@
               <p class="field-error" dv:if="${section.hasSummaryError}" dv:text="${section.summaryError}">
                 Enter a collection summary.
               </p>
+
+              <label>
+                <input
+                  type="checkbox"
+                  name="collection_visible"
+                  value="yes"
+                  dv:if="${section.visibilityInput}"
+                  checked="checked"
+                />
+                <input
+                  type="checkbox"
+                  name="collection_visible"
+                  value="yes"
+                  dv:unless="${section.visibilityInput}"
+                />
+                Visible in storefront
+              </label>
 
               <div class="admin-page__actions">
                 <button class="button" type="submit">Save collection</button>

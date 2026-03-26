@@ -211,6 +211,12 @@ fn route_surfaces() -> Vec<RouteSurface> {
         )
         .gated_by(Capability::OrderRefundIssue),
         RouteSurface::new(
+            "commerce.order-fulfill",
+            RouteSurfaceKind::AdminAction,
+            "/admin/orders/fulfill",
+        )
+        .gated_by(Capability::OrderRefundIssue),
+        RouteSurface::new(
             "commerce.catalog-admin",
             RouteSurfaceKind::AdminPage,
             "/admin/catalog/products",
@@ -510,6 +516,15 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             HttpSurfaceMethod::Post,
             HttpSurfaceArea::Admin,
             "/admin/orders/refund",
+            "/admin/orders",
+            303,
+        )
+        .gated_by(Capability::OrderRefundIssue),
+        HttpSurfaceContribution::redirect(
+            "commerce.order-fulfill",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Admin,
+            "/admin/orders/fulfill",
             "/admin/orders",
             303,
         )

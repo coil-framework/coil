@@ -670,6 +670,15 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
     assert_eq!(order_refund.kind, RouteSurfaceKind::AdminAction);
     assert_eq!(order_refund.path, "/admin/orders/refund");
     assert_eq!(order_refund.capability, Some(Capability::OrderRefundIssue));
+
+    let order_fulfill = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.order-fulfill")
+        .expect("order fulfill surface should exist");
+    assert_eq!(order_fulfill.kind, RouteSurfaceKind::AdminAction);
+    assert_eq!(order_fulfill.path, "/admin/orders/fulfill");
+    assert_eq!(order_fulfill.capability, Some(Capability::OrderRefundIssue));
 }
 
 #[test]
@@ -845,6 +854,23 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
     assert_eq!(order_refund.capability, Some(Capability::OrderRefundIssue));
     assert_eq!(
         order_refund.response,
+        HttpResponseContract::Redirect {
+            location: "/admin/orders".to_string(),
+            status: 303,
+        }
+    );
+
+    let order_fulfill = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.order-fulfill")
+        .expect("order fulfill http surface should exist");
+    assert_eq!(order_fulfill.area, HttpSurfaceArea::Admin);
+    assert_eq!(order_fulfill.method, HttpSurfaceMethod::Post);
+    assert_eq!(order_fulfill.path, "/admin/orders/fulfill");
+    assert_eq!(order_fulfill.capability, Some(Capability::OrderRefundIssue));
+    assert_eq!(
+        order_fulfill.response,
         HttpResponseContract::Redirect {
             location: "/admin/orders".to_string(),
             status: 303,

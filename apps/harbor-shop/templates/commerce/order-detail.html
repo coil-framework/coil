@@ -110,6 +110,19 @@
               </button>
             </form>
           </article>
+          <article class="admin-card">
+            <h2>Fulfillment action</h2>
+            <p dv:text="${selectedOrder.fulfillmentActionSummary}">
+              Mark the order fulfilled after packing or dispatch so the support queue reflects the completed shipment.
+            </p>
+            <form action="/admin/orders/fulfill" method="post">
+              <input type="hidden" name="order_id" dv:attr="value=${selectedOrder.orderId}" />
+              <button type="submit" class="button" dv:if="${selectedOrder.canFulfill}">Mark fulfilled</button>
+              <button type="submit" class="button" dv:unless="${selectedOrder.canFulfill}" disabled="disabled">
+                Fulfillment unavailable
+              </button>
+            </form>
+          </article>
         </div>
       </section>
 

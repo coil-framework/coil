@@ -27,6 +27,9 @@
           route family.
         </p>
         <div class="admin-page__actions">
+          <a class="button" href="/admin/pages?new=1" dv:attr="href=${newContentPageHref}">
+            Create page
+          </a>
           <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
             Edit navigation
           </a>
@@ -94,7 +97,10 @@
 
       <section class="admin-panel" dv:if="${hasSelectedContentPage}">
         <p class="admin-panel__eyebrow">Editor</p>
-        <h2>Draft workflow</h2>
+        <h2 dv:text="${contentPageEditorTitle}">Draft workflow</h2>
+        <p dv:text="${contentPageEditorSummary}">
+          Update the draft, review the preview, then publish it to the live route.
+        </p>
         <form action="/admin/pages/draft" method="post">
           <input type="hidden" name="page_id" dv:attr="value=${selectedContentPage.id}" />
           <div class="admin-card-grid">
@@ -118,11 +124,21 @@
             </textarea>
           </label>
           <div class="admin-page__actions">
-            <button class="button button--secondary" type="submit">Save draft</button>
+            <button class="button button--secondary" type="submit" dv:text="${contentPageSaveLabel}">
+              Save draft
+            </button>
+            <a
+              class="button button--secondary"
+              href="/admin/pages"
+              dv:if="${isCreatingContentPage}"
+              dv:attr="href=${links.adminPages}"
+            >
+              Cancel
+            </a>
           </div>
         </form>
 
-        <div class="admin-page__actions">
+        <div class="admin-page__actions" dv:if="${hasPersistedContentPage}">
           <form action="/admin/pages/publish" method="post">
             <input type="hidden" name="page_id" dv:attr="value=${selectedContentPage.id}" />
             <button class="button" type="submit">Publish live page</button>
@@ -132,6 +148,9 @@
             <button class="button button--secondary" type="submit">Unpublish</button>
           </form>
         </div>
+        <p dv:unless="${hasPersistedContentPage}">
+          Save the draft first to generate the stable preview route and unlock publish controls.
+        </p>
 
         <div class="admin-card-grid">
           <article class="admin-card">
@@ -174,7 +193,7 @@
         </article>
       </section>
 
-      <section class="admin-panel" dv:unless="${hasContentPages}">
+      <section class="admin-panel" dv:if="${showPagesEmptyState}">
         <p class="admin-panel__eyebrow">Pages</p>
         <h2>No CMS pages yet</h2>
         <p dv:text="${pagesEmptyText}">Create a draft page and publish it.</p>

@@ -17,7 +17,7 @@
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main product-page">
-      <section class="product-page__hero">
+      <section class="product-page__hero" dv:if="${hasProduct}">
         <div class="product-page__media">
           <img
             src="/theme/assets/logo.svg"
@@ -91,13 +91,31 @@
         </div>
       </section>
 
-      <section class="catalog-assurance">
+      <section class="catalog-assurance" dv:if="${hasProduct}">
         <article>
           <h2>Next step: add to cart or keep browsing this collection</h2>
           <p>
             Customers should not have to hunt for the next action here. Keep the cart handoff and
             the route back to the collection visible at the same time.
           </p>
+        </article>
+      </section>
+
+      <section class="catalog-assurance" dv:unless="${hasProduct}">
+        <article>
+          <h1>This product is not currently available.</h1>
+          <p>
+            Harbor Shop has removed this item from the live storefront. Return to the current
+            catalog or collections view to keep shopping.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Open catalog
+            </a>
+            <a class="button button--secondary" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+              Browse collections
+            </a>
+          </div>
         </article>
       </section>
 

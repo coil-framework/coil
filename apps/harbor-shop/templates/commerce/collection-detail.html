@@ -17,7 +17,7 @@
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main collections-page">
-      <section class="collections-page__intro">
+      <section class="collections-page__intro" dv:if="${hasCollection}">
         <p class="collections-page__eyebrow">Collection</p>
         <p>
           <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
@@ -41,7 +41,7 @@
         </div>
       </section>
 
-      <section class="catalog-assurance">
+      <section class="catalog-assurance" dv:if="${hasCollection}">
         <article>
           <h2>Browse the products in this collection</h2>
           <p>
@@ -51,7 +51,25 @@
         </article>
       </section>
 
-      <section class="product-grid">
+      <section class="catalog-assurance" dv:unless="${hasCollection}">
+        <article>
+          <h1>This collection is not currently available.</h1>
+          <p>
+            Harbor Shop has removed this collection from the live storefront. Return to the
+            collections index or the full catalog to continue shopping.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+              All collections
+            </a>
+            <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Full catalog
+            </a>
+          </div>
+        </article>
+      </section>
+
+      <section class="product-grid" dv:if="${hasCollection}">
         <ul class="product-grid__list" dv:if="${hasProductCards}">
           <li class="product-grid__item" dv:each="product : ${collection.products}">
             <article class="product-card">
@@ -114,7 +132,7 @@
         </div>
       </section>
 
-      <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
+      <div dv:replace="~{commerce/storefront-journey :: journey}" dv:if="${hasCollection}"></div>
     </main>
     <footer class="site-footer">
       <small>Harbor Shop</small>

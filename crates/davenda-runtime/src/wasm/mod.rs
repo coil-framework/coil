@@ -28,5 +28,6 @@ mod support;
 pub(crate) use host::RuntimeWasmHostServices;
 pub use host::{
     ExtensionPrincipal, InstalledExtensionSummary, LiveWasmExecutionError, RegisteredExtensionSlot,
-    WasmHost,
+    WasmHost, WebhookObservationBackendKind, WebhookObservationEvent, WebhookObservationSnapshot,
+    WebhookObservationStatus, WebhookObservationStatusCounts,
 };

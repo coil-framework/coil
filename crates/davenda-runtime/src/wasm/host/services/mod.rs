@@ -10,8 +10,13 @@ mod http;
 mod jobs;
 mod metadata;
 mod secrets;
+mod webhooks;
 
 pub(crate) use metadata::MetadataAuditSnapshot;
+pub use webhooks::{
+    WebhookObservationBackendKind, WebhookObservationEvent, WebhookObservationSnapshot,
+    WebhookObservationStatus, WebhookObservationStatusCounts,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeWasmHostServices {
@@ -19,6 +24,7 @@ pub(crate) struct RuntimeWasmHostServices {
     secrets: secrets::RuntimeSecretBackend,
     jobs: jobs::RuntimeJobBackend,
     metadata: metadata::RuntimeMetadataBackend,
+    webhooks: webhooks::RuntimeWebhookObservationBackend,
     storage: StorageHost,
 }
 
@@ -26,6 +32,7 @@ impl RuntimeWasmHostServices {
     pub(crate) fn new(plan: RuntimePlan) -> Self {
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
         let metadata = metadata::RuntimeMetadataBackend::open(&plan);
+        let webhooks = webhooks::RuntimeWebhookObservationBackend::open(&plan);
         let storage = plan.storage_host();
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
@@ -35,6 +42,7 @@ impl RuntimeWasmHostServices {
             secrets: secrets::RuntimeSecretBackend::deny_all(plan.config.app.name.clone()),
             jobs,
             metadata,
+            webhooks,
             storage,
         }
     }
@@ -46,6 +54,7 @@ impl RuntimeWasmHostServices {
     ) -> Self {
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
         let metadata = metadata::RuntimeMetadataBackend::open(&plan);
+        let webhooks = webhooks::RuntimeWebhookObservationBackend::open(&plan);
         Self {
             http: http::RuntimeOutboundHttpBackend::with_targets(
                 plan.wasm.allow_network,
@@ -57,6 +66,7 @@ impl RuntimeWasmHostServices {
             ),
             jobs,
             metadata,
+            webhooks,
             storage,
         }
     }
@@ -68,8 +78,13 @@ impl RuntimeWasmHostServices {
         http_targets: BTreeMap<String, url::Url>,
         secrets: BTreeMap<String, String>,
     ) -> Self {
+        let root = root.into();
         let jobs = jobs::RuntimeJobBackend::new(plan.clone());
         let metadata = metadata::RuntimeMetadataBackend::with_local_root(
+            root.clone(),
+            plan.shared_backend_namespace(),
+        );
+        let webhooks = webhooks::RuntimeWebhookObservationBackend::with_local_root(
             root,
             plan.shared_backend_namespace(),
         );
@@ -82,6 +97,7 @@ impl RuntimeWasmHostServices {
             secrets: secrets::RuntimeSecretBackend::with_values(secrets),
             jobs,
             metadata,
+            webhooks,
             storage,
         }
     }
@@ -133,6 +149,24 @@ impl RuntimeWasmHostServices {
 
     pub(crate) fn metadata_location(&self) -> String {
         self.metadata.location_label()
+    }
+
+    pub(crate) fn record_webhook_observation(
+        &self,
+        source: &str,
+        event: &str,
+        status: WebhookObservationStatus,
+        context: &InvocationContext,
+        detail: Option<String>,
+    ) -> Result<(), String> {
+        self.webhooks.record(source, event, status, context, detail)
+    }
+
+    pub(crate) fn webhook_observation_snapshot(
+        &self,
+        limit: usize,
+    ) -> Result<WebhookObservationSnapshot, String> {
+        self.webhooks.snapshot(limit)
     }
 
     pub(crate) fn storage_host(&self) -> &StorageHost {

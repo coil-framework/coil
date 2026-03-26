@@ -2976,6 +2976,9 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
         "{cart_body}"
     );
     assert!(cart_body.contains("Harbor Cap"), "{cart_body}");
+    assert!(cart_body.contains("/en-GB/shop/products/harbor-cap"), "{cart_body}");
+    assert!(cart_body.contains("/en-GB/shop/collections/featured"), "{cart_body}");
+    assert!(cart_body.contains("/en-GB/shop/collections"), "{cart_body}");
     assert!(cart_body.contains("Checkout"), "{cart_body}");
 }
 

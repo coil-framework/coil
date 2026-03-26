@@ -343,7 +343,12 @@ fn apply_route_specific_bindings(
                     .with_bool("hasCartItems", !snapshot.cart.lines.is_empty())?
                     .with_list(
                         "cartItems",
-                        cart_items_from_storefront(&snapshot.cart.lines, form_state)?,
+                        cart_items_from_storefront(
+                            catalog,
+                            locale,
+                            &snapshot.cart.lines,
+                            form_state,
+                        )?,
                     )?
                     .with_object("cartSummary", cart_summary_from_storefront(&snapshot)?)?
                     .with_object("cartForm", cart_form_model(form_state)?)?;
@@ -357,7 +362,8 @@ fn apply_route_specific_bindings(
         }
         "commerce.checkout" => {
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
-                let line_items = cart_items_from_storefront(&snapshot.cart.lines, form_state)?;
+                let line_items =
+                    cart_items_from_storefront(catalog, locale, &snapshot.cart.lines, form_state)?;
                 model = model
                     .with_object("customer", checkout_customer(principal)?)?
                     .with_object(
@@ -569,12 +575,14 @@ fn live_storefront_latest_order(
 }
 
 fn cart_items_from_storefront(
+    catalog: &StorefrontCatalog,
+    locale: &str,
     lines: &[StorefrontCartLine],
     form_state: Option<&StorefrontFormState>,
 ) -> Result<Vec<RenderModel>, TemplateModelError> {
     lines
         .iter()
-        .map(|line| cart_item_from_storefront(line, form_state))
+        .map(|line| cart_item_from_storefront(catalog, locale, line, form_state))
         .collect::<Result<Vec<_>, _>>()
 }
 
@@ -838,6 +846,8 @@ fn content_page(
 }
 
 fn cart_item_from_storefront(
+    catalog: &StorefrontCatalog,
+    locale: &str,
     line: &StorefrontCartLine,
     form_state: Option<&StorefrontFormState>,
 ) -> Result<RenderModel, TemplateModelError> {
@@ -847,7 +857,7 @@ fn cart_item_from_storefront(
         .cloned()
         .unwrap_or_else(|| line.quantity.to_string());
     let quantity_error = form_state.and_then(|state| state.field_errors.get(&quantity_field));
-    cart_item(
+    let model = cart_item(
         &line.title,
         &line.variant_title,
         &quantity_value,
@@ -860,7 +870,52 @@ fn cart_item_from_storefront(
             "quantityError",
             RenderValue::text(quantity_error.cloned().unwrap_or_default()),
         )
-    })
+    })?;
+
+    decorate_cart_item_with_catalog_context(model, catalog, locale, &line.sku, &line.title)
+}
+
+fn decorate_cart_item_with_catalog_context(
+    model: RenderModel,
+    catalog: &StorefrontCatalog,
+    locale: &str,
+    sku_or_handle: &str,
+    title: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    let Some(product) = catalog_product_for_cart_item(catalog, sku_or_handle, title) else {
+        return model
+            .with_bool("hasProductLink", false)?
+            .with_value("productUrl", RenderValue::text(String::new()))?
+            .with_value("collectionUrl", RenderValue::text(String::new()))?
+            .with_value("collectionName", RenderValue::text(String::new()));
+    };
+
+    let collection_name = catalog
+        .collection(&product.collection_handle)
+        .map(|collection| collection.title.as_str())
+        .unwrap_or("Collection");
+
+    model
+        .with_bool("hasProductLink", true)?
+        .with_value(
+            "productUrl",
+            RenderValue::text(localized_product_path(locale, &product.handle)),
+        )?
+        .with_value(
+            "collectionUrl",
+            RenderValue::text(localized_collection_path(locale, &product.collection_handle)),
+        )?
+        .with_value("collectionName", RenderValue::text(collection_name))
+}
+
+fn catalog_product_for_cart_item<'a>(
+    catalog: &'a StorefrontCatalog,
+    sku_or_handle: &str,
+    title: &str,
+) -> Option<&'a StorefrontProductDefinition> {
+    catalog
+        .product_by_sku_or_handle(sku_or_handle)
+        .or_else(|| catalog.products.iter().find(|product| product.title == title))
 }
 
 fn checkout_customer(
@@ -1743,7 +1798,7 @@ fn storefront_fixture(
     let cart_items = current_order
         .lines
         .iter()
-        .map(cart_item_from_line)
+        .map(|line| cart_item_from_line(catalog, locale, line))
         .collect::<Result<Vec<_>, _>>()?;
     let cart_summary = RenderModel::new()
         .with_value(
@@ -1957,12 +2012,23 @@ fn account_order(
         .with_value("status", RenderValue::text(status))
 }
 
-fn cart_item_from_line(line: &CheckoutLine) -> Result<RenderModel, TemplateModelError> {
-    cart_item(
+fn cart_item_from_line(
+    catalog: &StorefrontCatalog,
+    locale: &str,
+    line: &CheckoutLine,
+) -> Result<RenderModel, TemplateModelError> {
+    let model = cart_item(
         &line.product_title,
         &line.variant_title,
         &line.quantity.to_string(),
         &money_display(&line.subtotal().expect("sample checkout line is valid")),
+    )?;
+    decorate_cart_item_with_catalog_context(
+        model,
+        catalog,
+        locale,
+        line.sku.as_str(),
+        &line.product_title,
     )
 }
 
@@ -2346,6 +2412,29 @@ mod tests {
 
         assert!(html.contains("value=\"harbor-cap\""), "{html}");
         assert!(html.contains("gold-membership"), "{html}");
+    }
+
+    #[test]
+    fn route_specific_model_populates_cart_links_from_fixture_catalog() {
+        let html = render_fixture(
+            "commerce.cart",
+            r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <ul>
+      <li dv:each="item : ${cartItems}">
+        <a class="collection" dv:if="${item.hasProductLink}" dv:attr="href=${item.collectionUrl}" dv:text="${item.collectionName}">Collection</a>
+        <a class="product" dv:if="${item.hasProductLink}" dv:attr="href=${item.productUrl}" dv:text="${item.title}">Product</a>
+      </li>
+    </ul>
+  </body>
+</html>"#,
+        );
+
+        assert!(html.contains("/en-GB/shop/products/harbor-cap"), "{html}");
+        assert!(html.contains("/en-GB/shop/collections/featured"), "{html}");
+        assert!(html.contains("/en-GB/shop/collections/memberships"), "{html}");
+        assert!(html.contains("Gold Membership"), "{html}");
     }
 
     #[test]

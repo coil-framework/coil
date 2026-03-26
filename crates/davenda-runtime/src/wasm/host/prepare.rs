@@ -152,8 +152,30 @@ impl WasmHost {
             replay_protected,
         )?);
         let context = self.async_context(trace_id.into(), principal, input)?;
-        self.registry
-            .prepare_webhook_invocation(source, event, context)
+        let prepared = self
+            .registry
+            .prepare_webhook_invocation(source, event, context.clone());
+        if let Err(error) = &prepared {
+            let status = match error {
+                WasmModelError::UnverifiedWebhook { .. } => {
+                    Some(services::WebhookObservationStatus::VerificationFailed)
+                }
+                WasmModelError::ReplayUnsafeWebhook { .. } => {
+                    Some(services::WebhookObservationStatus::ReplayRejected)
+                }
+                _ => None,
+            };
+            if let Some(status) = status {
+                let _ = self.host_services.record_webhook_observation(
+                    source,
+                    event,
+                    status,
+                    &context,
+                    Some(error.to_string()),
+                );
+            }
+        }
+        prepared
     }
 
     pub fn begin_webhook_invocation(

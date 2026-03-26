@@ -15,6 +15,19 @@ The checked-in example is:
   - a small Rust HTTP service that exposes Harbor Shop-specific backend logic
   - includes a customer-facing loyalty preview endpoint
   - includes a signed CRM webhook consumer
+  - includes a crate-level tutorial in `harbor-loyalty-backend/README.md`
+
+## Choose The Right Customization Path
+
+Use:
+
+- `templates/`, `theme/`, `content/`, and app config for presentation and app policy
+- `extensions/` for bounded WASM-based customization at explicit Davenda extension points
+- `backend/<service>/` for customer-owned native Rust adapters or services with their own HTTP/process boundary
+- `crates/` only when the behavior is becoming a reusable native module or needs deeper platform ownership
+
+The important rule is to keep customer-specific code contained. Do not scatter Harbor Shop-specific
+logic through core/runtime code just because it is Rust.
 
 ## Run It
 
@@ -32,6 +45,12 @@ Useful routes:
 - `GET http://localhost:8081/health`
 - `POST http://localhost:8081/api/loyalty/preview`
 - `POST http://localhost:8081/webhooks/crm/contact-updated`
+
+You can also run just the example service without Docker Compose:
+
+```bash
+cargo run --manifest-path apps/harbor-shop/backend/harbor-loyalty-backend/Cargo.toml
+```
 
 ## Local Curl Examples
 
@@ -64,6 +83,15 @@ The example intentionally demonstrates three things:
 - Harbor Shop-specific business rules written in plain Rust
 - a small HTTP API that another system or frontend can call directly
 - a fail-closed signed webhook entrypoint for customer-specific integration work
+
+It also demonstrates the code split we want third-party developers to copy:
+
+- `src/lib.rs` for the pure business rules
+- `src/http.rs` for the route wiring and validation
+- `src/main.rs` for process bootstrap
+
+If you are starting from scratch, read `harbor-loyalty-backend/README.md` first. It is the
+step-by-step tutorial for how this example is structured and how to add your own route.
 
 If you only need a bounded page hook, widget, or lightweight integration point, prefer a WASM
 extension. If you need a customer-owned native adapter or service, this is the pattern to follow.

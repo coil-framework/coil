@@ -1,3 +1,7 @@
+mod http;
+
+pub use http::{BackendConfig, build_router};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

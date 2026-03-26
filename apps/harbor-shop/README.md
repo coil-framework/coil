@@ -263,6 +263,8 @@ The practical rule is:
 
 - use Harbor Shop templates, config, auth bindings, and WASM extensions for app-specific presentation and bounded behavior
 - use native Rust modules or adapters when you need deeper access to transactions, render pipeline internals, shared data ownership, or widely reused domain logic
+- use `apps/harbor-shop/backend/` when the work is customer-owned native Rust with its own HTTP/process boundary
+- use `crates/` only when the behavior is becoming a reusable native module or needs platform-level ownership
 
 For customer-specific native Rust work, the right place is a customer-app-owned package or adapter crate in the workspace, not random edits scattered through core.
 
@@ -282,6 +284,15 @@ This example is intentionally small but real:
 - it exposes Harbor Shop-specific loyalty logic at `POST /api/loyalty/preview`
 - it exposes a fail-closed signed webhook consumer at `POST /webhooks/crm/contact-updated`
 - it demonstrates the customer-app-owned native backend path without modifying Davenda core
+- it shows the internal split a third-party developer should copy:
+  - `src/lib.rs` for pure business rules
+  - `src/http.rs` for route wiring and validation
+  - `src/main.rs` for bootstrap and environment loading
+
+Read these files first if you want to add custom backend logic:
+
+- `backend/README.md`
+- `backend/harbor-loyalty-backend/README.md`
 
 To run it with the local stack:
 
@@ -308,6 +319,13 @@ curl -sS \
 
 The example is meant to be copied and reshaped by third-party developers who need customer-owned
 Rust/backend logic that sits next to Harbor Shop rather than leaking into platform core.
+
+To work on the example without Docker Compose:
+
+```bash
+cargo run --manifest-path apps/harbor-shop/backend/harbor-loyalty-backend/Cargo.toml
+cargo test --manifest-path apps/harbor-shop/backend/harbor-loyalty-backend/Cargo.toml
+```
 
 ## Troubleshooting
 

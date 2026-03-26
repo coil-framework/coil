@@ -32,6 +32,7 @@ impl SharedMetadataAuditStore {
         self.ensure_initialized()?;
         let client = self.client()?.clone();
         let table = self.qualified_table();
+        let record = record.clone();
         run_blocking(async move {
             sqlx::query(&format!(
                 "INSERT INTO {} (recorded_at_unix_seconds, app_id, trace_id, request_id, principal_kind, principal_id, kind) VALUES ($1, $2, $3, $4, $5, $6, $7)",
@@ -190,17 +191,49 @@ fn quote_identifier(identifier: &str) -> String {
 
 fn run_blocking<T, F>(future: F) -> Result<T, String>
 where
-    F: std::future::Future<Output = Result<T, String>>,
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T, String>> + Send + 'static,
 {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        tokio::task::block_in_place(|| handle.block_on(future))
-    } else {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => match handle.runtime_flavor() {
+            tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| handle.block_on(future))
+            }
+            tokio::runtime::RuntimeFlavor::CurrentThread => {
+                run_future_on_dedicated_runtime(future)
+            }
+            _ => run_future_on_dedicated_runtime(future),
+        },
+        Err(_) => run_future_on_ephemeral_runtime(future),
+    }
+}
+
+fn run_future_on_dedicated_runtime<T, F>(future: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T, String>> + Send + 'static,
+{
+    std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;
         runtime.block_on(future)
-    }
+    })
+    .join()
+    .map_err(|_| "shared metadata worker thread panicked".to_string())?
+}
+
+fn run_future_on_ephemeral_runtime<T, F>(future: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T, String>> + Send + 'static,
+{
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    runtime.block_on(future)
 }
 
 #[cfg(test)]
@@ -228,5 +261,17 @@ mod tests {
             backend.location_label(),
             "shared-postgres:public.metadata_audit_entries"
         );
+    }
+
+    #[test]
+    fn shared_metadata_run_blocking_works_inside_current_thread_runtime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let value = runtime.block_on(async { run_blocking(async { Ok::<_, String>(7usize) }) });
+
+        assert_eq!(value.unwrap(), 7);
     }
 }

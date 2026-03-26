@@ -146,8 +146,11 @@ impl StorageExecutor {
                         logical_path: plan.logical_path.clone(),
                     }
                 })?;
-                self.object_store_client(&plan.logical_path)?
-                    .put(object_key, bytes, content_type)?
+                self.object_store_client(&plan.logical_path)?.put(
+                    object_key,
+                    bytes,
+                    content_type,
+                )?
             }
         };
 

@@ -1,9 +1,9 @@
 use bytes::Bytes;
 use object_store::ObjectStoreExt;
-use object_store::{Attribute, Attributes, ObjectStore, PutOptions};
 use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::path::Path as ObjectPath;
 use object_store::signer::Signer;
+use object_store::{Attribute, Attributes, ObjectStore, PutOptions};
 use reqwest::Method;
 use std::future::Future;
 use std::path::PathBuf;
@@ -48,12 +48,13 @@ impl S3CompatibleObjectStoreClient {
             attributes,
             ..Default::default()
         };
-        run_object_store_future(async move { store.put_opts(&path, payload.into(), options).await }).map_err(
-            |message| StorageExecutionError::WriteFailed {
-                path: object_key.to_string(),
-                message,
-            },
-        )?;
+        run_object_store_future(
+            async move { store.put_opts(&path, payload.into(), options).await },
+        )
+        .map_err(|message| StorageExecutionError::WriteFailed {
+            path: object_key.to_string(),
+            message,
+        })?;
         Ok(PathBuf::from(normalize_object_key(object_key)?))
     }
 

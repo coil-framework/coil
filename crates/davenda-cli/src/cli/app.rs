@@ -15609,7 +15609,10 @@ expect = true
         let original_database_url = std::env::var("DATABASE_URL").ok();
 
         unsafe {
-            std::env::set_var("DATABASE_URL", "postgres://davenda:devpass@127.0.0.1:1/davenda");
+            std::env::set_var(
+                "DATABASE_URL",
+                "postgres://davenda:devpass@127.0.0.1:1/davenda",
+            );
         }
 
         let outcome = std::panic::catch_unwind(|| {
@@ -15663,9 +15666,11 @@ expect = true
             .as_ref()
             .expect("dev server plan should include published theme assets");
 
-        assert!(manifest
-            .entries()
-            .any(|(logical_path, _)| logical_path == "theme/assets/site.css"));
+        assert!(
+            manifest
+                .entries()
+                .any(|(logical_path, _)| logical_path == "theme/assets/site.css")
+        );
     }
 
     #[test]

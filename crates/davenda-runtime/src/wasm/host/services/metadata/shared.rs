@@ -199,9 +199,7 @@ where
             tokio::runtime::RuntimeFlavor::MultiThread => {
                 tokio::task::block_in_place(|| handle.block_on(future))
             }
-            tokio::runtime::RuntimeFlavor::CurrentThread => {
-                run_future_on_dedicated_runtime(future)
-            }
+            tokio::runtime::RuntimeFlavor::CurrentThread => run_future_on_dedicated_runtime(future),
             _ => run_future_on_dedicated_runtime(future),
         },
         Err(_) => run_future_on_ephemeral_runtime(future),

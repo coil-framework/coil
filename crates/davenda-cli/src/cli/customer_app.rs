@@ -147,12 +147,16 @@ mod tests {
         let app_root = temp_root.join("apps").join("harbor-shop");
         fs::create_dir_all(&app_root).unwrap();
         fs::write(app_root.join("app.toml"), "id = \"harbor-shop\"\n").unwrap();
-        fs::write(app_root.join("platform.dev.toml"), "[app]\nname = \"harbor-shop\"\n").unwrap();
+        fs::write(
+            app_root.join("platform.dev.toml"),
+            "[app]\nname = \"harbor-shop\"\n",
+        )
+        .unwrap();
 
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&app_root).unwrap();
-        let resolved = resolve_customer_app_root(Path::new("platform.dev.toml"), "harbor-shop")
-            .unwrap();
+        let resolved =
+            resolve_customer_app_root(Path::new("platform.dev.toml"), "harbor-shop").unwrap();
         std::env::set_current_dir(original_dir).unwrap();
         let expected = app_root.canonicalize().unwrap();
         let _ = fs::remove_dir_all(&temp_root);

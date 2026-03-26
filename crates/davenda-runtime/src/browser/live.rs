@@ -376,7 +376,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = runtime.block_on(async { run_future_on_runtime(&store_runtime, async { 7usize }) });
+        let result =
+            runtime.block_on(async { run_future_on_runtime(&store_runtime, async { 7usize }) });
 
         assert_eq!(result, 7);
     }

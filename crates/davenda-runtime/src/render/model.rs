@@ -528,7 +528,9 @@ fn apply_route_specific_bindings(
             let (recent_orders, _) = admin_orders_from_storefront(plan, &fixture)?;
             let selected_order = params
                 .get("order_id")
-                .and_then(|order_id| order_detail_from_storefront(plan, order_id).transpose())
+                .and_then(|order_id| {
+                    order_detail_from_storefront(plan, order_id, form_state).transpose()
+                })
                 .transpose()?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
@@ -542,6 +544,7 @@ fn apply_route_specific_bindings(
             if let Some(order) = selected_order {
                 model = model.with_object("selectedOrder", order)?;
             }
+            model = merge_order_refund_form_feedback(model, form_state)?;
         }
         "commerce.catalog-admin" => {
             let product_cards = catalog_admin_products_model(locale, catalog, plan, form_state)?;
@@ -868,6 +871,7 @@ fn admin_orders_from_storefront(
 fn order_detail_from_storefront(
     plan: Option<&RuntimePlan>,
     order_id: &str,
+    form_state: Option<&StorefrontFormState>,
 ) -> Result<Option<RenderModel>, TemplateModelError> {
     let Some(plan) = plan else {
         return Ok(None);
@@ -881,6 +885,27 @@ fn order_detail_from_storefront(
         order.payment.last4.as_deref(),
         order.payment.reference.as_deref(),
     );
+    let can_refund = matches!(
+        order.status.as_str(),
+        "paid" | "fulfilled" | "partially_refunded"
+    ) && order.refundable_total_minor > 0;
+    let refund_reason = form_state
+        .and_then(|state| state.fields.get("reason"))
+        .cloned()
+        .unwrap_or_else(|| "customer_support".to_string());
+    let refund_reason_error = storefront_field_error(form_state, "reason");
+    let refund_action_summary = if can_refund {
+        "Issue a full remaining refund from the checked-in order state. The order will move to Refunded."
+            .to_string()
+    } else if order.status == "pending_payment" {
+        "This order is still awaiting provider confirmation. Confirm payment capture or failure before refunding."
+            .to_string()
+    } else if order.refundable_total_minor <= 0 {
+        "This order has no remaining refundable balance in the checked-in order state.".to_string()
+    } else {
+        "This order is not currently eligible for an additional refund from the checked-in workflow."
+            .to_string()
+    };
     let payment_reference = order.payment.reference.clone().unwrap_or_default();
     let checkout_email = order.payment.checkout_email.clone().unwrap_or_default();
     let principal_id = order.principal_id.clone().unwrap_or_default();
@@ -948,12 +973,16 @@ fn order_detail_from_storefront(
             "refundableTotal",
             RenderValue::text(order.refundable_total.clone()),
         )?
-        .with_bool(
-            "canRefund",
-            matches!(
-                order.status.as_str(),
-                "paid" | "fulfilled" | "partially_refunded"
-            ) && order.refundable_total_minor > 0,
+        .with_bool("canRefund", can_refund)?
+        .with_value(
+            "refundActionSummary",
+            RenderValue::text(refund_action_summary),
+        )?
+        .with_value("refundReason", RenderValue::text(refund_reason))?
+        .with_bool("hasRefundReasonError", refund_reason_error.is_some())?
+        .with_value(
+            "refundReasonError",
+            RenderValue::text(refund_reason_error.unwrap_or_default()),
         )?
         .with_bool("hasRefunds", !order.refunds.is_empty())?
         .with_list("refunds", refunds)?
@@ -1182,7 +1211,10 @@ fn cms_admin_selected_page_model(page: CmsAdminPage) -> Result<RenderModel, Temp
         .with_value("title", RenderValue::text(page.draft.title.clone()))?
         .with_value("slug", RenderValue::text(page.draft.slug.clone()))?
         .with_value("summary", RenderValue::text(page.draft.summary.clone()))?
-        .with_value("bodySource", RenderValue::text(page.draft.body_html.clone()))?
+        .with_value(
+            "bodySource",
+            RenderValue::text(page.draft.body_html.clone()),
+        )?
         .with_value("bodyHtml", RenderValue::trusted_html(preview_html))?
         .with_value(
             "statusLabel",
@@ -1193,6 +1225,7 @@ fn cms_admin_selected_page_model(page: CmsAdminPage) -> Result<RenderModel, Temp
             "livePath",
             RenderValue::text(page.live_path().unwrap_or_default()),
         )?
+        .with_bool("hasPreviewPath", true)?
         .with_value("previewPath", RenderValue::text(page.preview_path()))
 }
 
@@ -1234,6 +1267,11 @@ fn cms_admin_selected_page_model_with_form_state(
         .and_then(|page| page.live_path())
         .unwrap_or_default();
     let has_live_path = !live_path.is_empty();
+    let preview_path = page
+        .as_ref()
+        .map(|page| page.preview_path())
+        .or_else(|| (!page_id.is_empty()).then(|| format!("/admin/pages/preview?page={page_id}")))
+        .unwrap_or_default();
     RenderModel::new()
         .with_value("id", RenderValue::text(page_id))?
         .with_value("title", RenderValue::text(title))?
@@ -1247,7 +1285,8 @@ fn cms_admin_selected_page_model_with_form_state(
         .with_value("statusLabel", RenderValue::text(status_label))?
         .with_bool("hasLivePath", has_live_path)?
         .with_value("livePath", RenderValue::text(live_path))?
-        .with_value("previewPath", RenderValue::text(format!("/pages/{slug}")))
+        .with_bool("hasPreviewPath", !preview_path.is_empty())?
+        .with_value("previewPath", RenderValue::text(preview_path))
 }
 
 fn empty_cms_admin_selected_page_model() -> Result<RenderModel, TemplateModelError> {
@@ -1266,6 +1305,7 @@ fn empty_cms_admin_selected_page_model() -> Result<RenderModel, TemplateModelErr
         .with_value("statusLabel", RenderValue::text("Draft only"))?
         .with_bool("hasLivePath", false)?
         .with_value("livePath", RenderValue::text(String::new()))?
+        .with_bool("hasPreviewPath", false)?
         .with_value("previewPath", RenderValue::text(String::new()))
 }
 
@@ -1402,6 +1442,26 @@ fn merge_cms_redirect_form_feedback(
             ),
         )?
         .with_list("errors", errors)
+}
+
+fn merge_order_refund_form_feedback(
+    model: RenderModel,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    model
+        .with_bool("hasRefundErrors", !errors.is_empty())?
+        .with_value(
+            "refundErrorSummary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| {
+                        "Review the refund request before issuing another order change.".to_string()
+                    }),
+            ),
+        )?
+        .with_list("refundErrors", errors)
 }
 
 fn cart_item_from_storefront(

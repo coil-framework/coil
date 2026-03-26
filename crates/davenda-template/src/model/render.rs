@@ -194,7 +194,10 @@ impl RenderModel {
         values.extend(overlay.values.clone());
         let mut asset_paths = self.asset_paths.clone();
         asset_paths.extend(overlay.asset_paths.clone());
-        RenderModel { values, asset_paths }
+        RenderModel {
+            values,
+            asset_paths,
+        }
     }
 }
 

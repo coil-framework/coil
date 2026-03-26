@@ -232,13 +232,11 @@ fn report_definitions() -> Vec<ReportDefinition> {
 
 fn http_surfaces() -> Vec<HttpSurfaceContribution> {
     vec![
-        HttpSurfaceContribution::redirect(
+        HttpSurfaceContribution::page(
             "memberships.account.dashboard",
-            HttpSurfaceMethod::Get,
             HttpSurfaceArea::Account,
             "/account",
-            "/account/memberships",
-            302,
+            "account/dashboard",
         ),
         HttpSurfaceContribution::page(
             "memberships.account",

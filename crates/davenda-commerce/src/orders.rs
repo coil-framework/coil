@@ -2,7 +2,7 @@ use crate::checkout::CheckoutLine;
 use crate::error::CommerceModelError;
 use crate::identifiers::{CurrencyCode, OrderId, RefundId, Sku};
 use crate::model::{Money, OrderStatus, ProductKind};
-use crate::pricing::{ensure_same_currency, PriceQuote};
+use crate::pricing::{PriceQuote, ensure_same_currency};
 use crate::validation::require_non_empty;
 use davenda_data::{DomainWrite, TransactionIsolation, TransactionPlan};
 
@@ -287,9 +287,11 @@ mod tests {
     fn membership_orders_expose_confirmation_and_history_copy() {
         let order = membership_order();
 
-        assert!(order
-            .confirmation_message()
-            .contains("membership activation"));
+        assert!(
+            order
+                .confirmation_message()
+                .contains("membership activation")
+        );
         assert_eq!(order.history_status_label(), "Paid");
         assert_eq!(order.display_total(), "£89.00");
     }

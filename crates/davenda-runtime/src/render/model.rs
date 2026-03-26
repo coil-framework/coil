@@ -1,4 +1,5 @@
 use super::*;
+use davenda_assets::AssetDeliveryTarget;
 use crate::storefront::{
     StorefrontCartLine, StorefrontFormState, StorefrontOrderSnapshot, StorefrontPaymentSnapshot,
     StorefrontStateSnapshot, StorefrontStateStore,
@@ -122,6 +123,14 @@ impl RuntimePlan {
 
         if let Some(fragment_id) = fragment_id {
             model = model.with_value("fragment_id", RenderValue::text(fragment_id.to_string()))?;
+        }
+
+        if let Some(manifest) = &self.theme_asset_manifest {
+            for (logical_path, published) in manifest.entries() {
+                if let AssetDeliveryTarget::Cdn { public_url, .. } = published.delivery().target() {
+                    model = model.with_asset_path(logical_path, public_url.clone())?;
+                }
+            }
         }
 
         apply_route_specific_bindings(
@@ -303,7 +312,7 @@ fn apply_route_specific_bindings(
     let catalog = plan
         .map(|runtime| &runtime.storefront_catalog)
         .unwrap_or(&default_catalog);
-    let fixture = storefront_fixture(locale, catalog)?;
+    let fixture = storefront_fixture(locale, catalog, plan)?;
 
     match route_name {
         "home" | "commerce.catalog" | "commerce.collections" => {
@@ -1761,13 +1770,14 @@ impl StorefrontFixture {
 fn product_cards_by_collection(
     locale: &str,
     products: &[ProductFixture],
+    plan: Option<&RuntimePlan>,
 ) -> Result<BTreeMap<String, Vec<RenderModel>>, TemplateModelError> {
     let mut grouped: BTreeMap<String, Vec<RenderModel>> = BTreeMap::new();
     for product in products {
         grouped
             .entry(product.collection_handle.to_string())
             .or_default()
-            .push(product_model_for_locale(locale, product)?);
+            .push(product_model_for_locale(locale, product, plan)?);
     }
     Ok(grouped)
 }
@@ -1775,6 +1785,7 @@ fn product_cards_by_collection(
 fn storefront_fixture(
     locale: &str,
     catalog: &StorefrontCatalog,
+    plan: Option<&RuntimePlan>,
 ) -> Result<StorefrontFixture, TemplateModelError> {
     let products_data = catalog
         .products
@@ -1793,9 +1804,9 @@ fn storefront_fixture(
         .collect::<Vec<_>>();
     let product_cards = products_data
         .iter()
-        .map(|product| product_model_for_locale(locale, product))
+        .map(|product| product_model_for_locale(locale, product, plan))
         .collect::<Result<Vec<_>, _>>()?;
-    let product_cards_by_collection = product_cards_by_collection(locale, &products_data)?;
+    let product_cards_by_collection = product_cards_by_collection(locale, &products_data, plan)?;
     let product_collection_handles = products_data
         .iter()
         .map(|product| {
@@ -1958,7 +1969,7 @@ fn collection_detail_model(
         .filter(|product| {
             product.collection_handle == collection.handle || collection.handle == "featured"
         })
-        .map(|product| product_model_for_locale(locale, product))
+        .map(|product| product_model_for_locale(locale, product, None))
         .collect::<Vec<_>>();
     let filtered_products = filtered_products
         .into_iter()
@@ -1978,12 +1989,13 @@ fn collection_detail_model(
 }
 
 fn product_model(product: &ProductFixture) -> Result<RenderModel, TemplateModelError> {
-    product_model_for_locale("en-GB", product)
+    product_model_for_locale("en-GB", product, None)
 }
 
 fn product_model_for_locale(
     locale: &str,
     product: &ProductFixture,
+    plan: Option<&RuntimePlan>,
 ) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
         .with_value("handle", RenderValue::text(product.handle.as_str()))?
@@ -1997,7 +2009,10 @@ fn product_model_for_locale(
             RenderValue::text(localized_product_path(locale, product.handle.as_str())),
         )?
         .with_value("addToCartUrl", RenderValue::text("/cart/items"))?
-        .with_value("imageUrl", RenderValue::text("/theme/assets/logo.svg"))?
+        .with_value(
+            "imageUrl",
+            RenderValue::text(theme_asset_url(plan, "theme/assets/logo.svg")),
+        )?
         .with_value("imageAlt", RenderValue::text(product.title.as_str()))?
         .with_value(
             "collectionHandle",
@@ -2014,6 +2029,16 @@ fn product_model_for_locale(
             "collectionName",
             RenderValue::text(product.collection_name.as_str()),
         )
+}
+
+fn theme_asset_url(plan: Option<&RuntimePlan>, logical_path: &str) -> String {
+    plan.and_then(|runtime| runtime.theme_asset_manifest.as_ref())
+        .and_then(|manifest| manifest.resolve(logical_path))
+        .and_then(|published| match published.delivery().target() {
+            AssetDeliveryTarget::Cdn { public_url, .. } => Some(public_url.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| format!("/{logical_path}"))
 }
 
 fn cart_item(

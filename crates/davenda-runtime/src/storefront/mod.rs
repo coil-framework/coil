@@ -79,12 +79,11 @@ pub struct StorefrontPaymentInput {
 }
 
 impl StorefrontPaymentInput {
-    pub fn new(
+    fn validate_common(
         method: impl Into<String>,
         checkout_email: impl Into<String>,
-        last4: Option<String>,
         intent_reference: impl Into<String>,
-    ) -> Result<Self, StorefrontStateError> {
+    ) -> Result<(String, String, String), StorefrontStateError> {
         let method = method.into().trim().to_ascii_lowercase();
         if method.is_empty() {
             return Err(StorefrontStateError::MissingPaymentMethod);
@@ -93,6 +92,21 @@ impl StorefrontPaymentInput {
         if checkout_email.is_empty() {
             return Err(StorefrontStateError::MissingCheckoutEmail);
         }
+        let intent_reference = intent_reference.into().trim().to_string();
+        if intent_reference.is_empty() {
+            return Err(StorefrontStateError::MissingPaymentIntent);
+        }
+        Ok((method, checkout_email, intent_reference))
+    }
+
+    pub fn new(
+        method: impl Into<String>,
+        checkout_email: impl Into<String>,
+        last4: Option<String>,
+        intent_reference: impl Into<String>,
+    ) -> Result<Self, StorefrontStateError> {
+        let (method, checkout_email, intent_reference) =
+            Self::validate_common(method, checkout_email, intent_reference)?;
         let last4 = last4
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
@@ -103,13 +117,24 @@ impl StorefrontPaymentInput {
         if method == "card" && !has_valid_last4 {
             return Err(StorefrontStateError::InvalidPaymentLast4);
         }
-        let intent_reference = intent_reference.into().trim().to_string();
-        if intent_reference.is_empty() {
-            return Err(StorefrontStateError::MissingPaymentIntent);
-        }
         Ok(Self {
             method,
             last4,
+            checkout_email,
+            intent_reference,
+        })
+    }
+
+    pub fn hosted(
+        method: impl Into<String>,
+        checkout_email: impl Into<String>,
+        intent_reference: impl Into<String>,
+    ) -> Result<Self, StorefrontStateError> {
+        let (method, checkout_email, intent_reference) =
+            Self::validate_common(method, checkout_email, intent_reference)?;
+        Ok(Self {
+            method,
+            last4: None,
             checkout_email,
             intent_reference,
         })

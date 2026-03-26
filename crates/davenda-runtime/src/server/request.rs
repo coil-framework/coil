@@ -64,6 +64,65 @@ struct StripeCheckoutSessionResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostedCheckoutSession {
+    pub(crate) id: String,
+    pub(crate) url: String,
+}
+
+pub(crate) trait HostedCheckoutClient: Send + Sync {
+    fn create_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        request_body: &str,
+        idempotency_key: &str,
+    ) -> Result<HostedCheckoutSession, String>;
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct LiveStripeHostedCheckoutClient;
+
+impl HostedCheckoutClient for LiveStripeHostedCheckoutClient {
+    fn create_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        request_body: &str,
+        idempotency_key: &str,
+    ) -> Result<HostedCheckoutSession, String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout_read(std::time::Duration::from_secs(10))
+            .build();
+        let request = agent
+            .post("https://api.stripe.com/v1/checkout/sessions")
+            .set("authorization", &format!("Bearer {api_key}"))
+            .set("content-type", "application/x-www-form-urlencoded")
+            .set("idempotency-key", idempotency_key);
+        match request.send_string(request_body) {
+            Ok(response) => {
+                let body = response
+                    .into_string()
+                    .map_err(|error| format!("failed to read Stripe Checkout response: {error}"))?;
+                let session = serde_json::from_str::<StripeCheckoutSessionResponse>(&body)
+                    .map_err(|error| format!("failed to decode Stripe Checkout response: {error}"))?;
+                Ok(HostedCheckoutSession {
+                    id: session.id,
+                    url: session.url,
+                })
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                Err(format!(
+                    "Stripe Checkout session creation failed with HTTP {code}: {body}"
+                ))
+            }
+            Err(ureq::Error::Transport(error)) => {
+                Err(format!("Stripe Checkout handoff request failed: {error}"))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveHttpRequest {
     pub method: HttpMethod,
     pub host: String,
@@ -685,8 +744,12 @@ fn validated_cart_quantities_from_execution(
 }
 
 fn validated_storefront_payment_input_from_execution(
+    state: &RuntimeServerState,
     execution: &RequestExecution,
 ) -> Result<StorefrontPaymentInput, StorefrontFormState> {
+    let hosted_checkout = configured_commerce_payment_provider(&state.plan.config)
+        .map(|provider| provider.uses_hosted_checkout())
+        .unwrap_or(false);
     let checkout_email = execution_form_field(execution, "checkout_email")
         .or_else(|| execution_form_field(execution, "checkoutEmail"))
         .or_else(|| execution_form_field(execution, "email"))
@@ -719,7 +782,7 @@ fn validated_storefront_payment_input_from_execution(
             "Enter the email address for order confirmation.",
         );
     }
-    if method.is_empty() {
+    if method.is_empty() && !hosted_checkout {
         has_errors = true;
         form_state = form_state.with_field_error(
             "payment_method",
@@ -727,6 +790,7 @@ fn validated_storefront_payment_input_from_execution(
         );
     }
     if method == "card"
+        && !hosted_checkout
         && (last4.len() != 4 || !last4.chars().all(|character| character.is_ascii_digit()))
     {
         has_errors = true;
@@ -764,12 +828,22 @@ fn validated_storefront_payment_input_from_execution(
         .or_else(|| execution_form_field(execution, "payment_reference"))
         .or_else(|| execution_form_field(execution, "paymentReference"))
         .unwrap_or_default();
-    StorefrontPaymentInput::new(
-        method,
-        checkout_email,
-        (!last4.is_empty()).then_some(last4),
-        intent_reference,
-    )
+    let method = if method.is_empty() && hosted_checkout {
+        "card".to_string()
+    } else {
+        method
+    };
+    let payment = if hosted_checkout && last4.is_empty() {
+        StorefrontPaymentInput::hosted(method, checkout_email, intent_reference)
+    } else {
+        StorefrontPaymentInput::new(
+            method,
+            checkout_email,
+            (!last4.is_empty()).then_some(last4),
+            intent_reference,
+        )
+    };
+    payment
     .map_err(|error| {
         let mut form_state = storefront_checkout_form_state_from_execution(
             execution,
@@ -1002,7 +1076,8 @@ async fn apply_native_storefront_mutations(
             }
         }
         "commerce.checkout-complete" => {
-            let payment = match validated_storefront_payment_input_from_execution(execution) {
+            let payment = match validated_storefront_payment_input_from_execution(state, execution)
+            {
                 Ok(payment) => payment,
                 Err(form_state) => {
                     push_storefront_form_state(state, response_cookies, &form_state)?;
@@ -1148,34 +1223,9 @@ async fn launch_stripe_checkout_handoff(
         .to_string();
     let request_body = stripe_checkout_session_request_body(execution, order)?;
     let idempotency_key = format!("davenda-order-{}", order.order_id);
+    let checkout_client = Arc::clone(&state.hosted_checkout_client);
     let response = tokio::task::spawn_blocking(move || {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(std::time::Duration::from_secs(5))
-            .timeout_read(std::time::Duration::from_secs(10))
-            .build();
-        let request = agent
-            .post("https://api.stripe.com/v1/checkout/sessions")
-            .set("authorization", &format!("Bearer {api_key}"))
-            .set("content-type", "application/x-www-form-urlencoded")
-            .set("idempotency-key", &idempotency_key);
-        match request.send_string(&request_body) {
-            Ok(response) => {
-                let body = response
-                    .into_string()
-                    .map_err(|error| format!("failed to read Stripe Checkout response: {error}"))?;
-                serde_json::from_str::<StripeCheckoutSessionResponse>(&body)
-                    .map_err(|error| format!("failed to decode Stripe Checkout response: {error}"))
-            }
-            Err(ureq::Error::Status(code, response)) => {
-                let body = response.into_string().unwrap_or_default();
-                Err(format!(
-                    "Stripe Checkout session creation failed with HTTP {code}: {body}"
-                ))
-            }
-            Err(ureq::Error::Transport(error)) => {
-                Err(format!("Stripe Checkout handoff request failed: {error}"))
-            }
-        }
+        checkout_client.create_stripe_checkout_session(&api_key, &request_body, &idempotency_key)
     })
     .await
     .map_err(|error| format!("failed to join Stripe Checkout handoff task: {error}"))??;

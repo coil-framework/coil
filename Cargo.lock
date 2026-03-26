@@ -730,9 +730,11 @@ name = "davenda-commerce"
 version = "0.1.0"
 dependencies = [
  "davenda-auth",
+ "davenda-config",
  "davenda-core",
  "davenda-data",
  "davenda-jobs",
+ "toml",
 ]
 
 [[package]]
@@ -5401,7 +5403,6 @@ dependencies = [
 [[package]]
 name = "zanzibar"
 version = "0.1.0"
-source = "git+ssh://git@github.com/worka-ai/zanzibar.git?rev=f21bfb7a5be3c6be404d3239c1b3da66a9e1ec0b#f21bfb7a5be3c6be404d3239c1b3da66a9e1ec0b"
 dependencies = [
  "anyhow",
  "async-trait",

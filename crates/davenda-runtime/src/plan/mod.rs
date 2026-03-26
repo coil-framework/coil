@@ -377,6 +377,32 @@ impl RuntimePlan {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn server_host_with_checkout_client<R: SecretResolver>(
+        &self,
+        resolver: &R,
+        cookie_secret: &[u8],
+        csrf_secret: &[u8],
+        hosted_checkout_client: std::sync::Arc<dyn crate::server::HostedCheckoutClient>,
+    ) -> Result<HttpServerHost, RuntimeServerError> {
+        if self.browser.sessions.store == davenda_core::SessionStoreTopology::Memory {
+            return Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost.into());
+        }
+
+        let wasm_secrets = self.wasm_secret_values(resolver)?;
+        let payment_webhook_secret =
+            crate::server::resolve_commerce_payment_webhook_secret(&self.config, resolver)?;
+        HttpServerHost::new_with_checkout_client(
+            self.clone(),
+            self.shared_backend_clients(resolver)?,
+            wasm_secrets,
+            payment_webhook_secret,
+            cookie_secret.to_vec(),
+            csrf_secret.to_vec(),
+            hosted_checkout_client,
+        )
+    }
+
     pub(crate) fn cache_namespace(&self) -> Result<CacheNamespace, CacheModelError> {
         CacheNamespace::new(format!("customer-app:{}", self.config.app.name))
     }

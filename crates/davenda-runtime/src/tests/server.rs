@@ -2,6 +2,7 @@ use super::*;
 use axum::response::Response;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::sync::Mutex;
 
 const LIVE_DATABASE_URL: &str = "postgres://platform:secret@db.internal/platform";
 const LIVE_OBJECT_STORE_SECRET: &str = r#"
@@ -16,6 +17,53 @@ const PAYMENT_WEBHOOK_SECRET: &str = "harbor-shop-webhook-secret";
 const STRIPE_SECRET_KEY: &str = "sk_test_runtime_placeholder";
 
 type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HostedCheckoutCall {
+    api_key: String,
+    request_body: String,
+    idempotency_key: String,
+}
+
+#[derive(Debug)]
+struct StaticHostedCheckoutClient {
+    session_id: String,
+    session_url: String,
+    calls: Mutex<Vec<HostedCheckoutCall>>,
+}
+
+impl StaticHostedCheckoutClient {
+    fn with_url(session_url: &str) -> Self {
+        Self {
+            session_id: "cs_test_harbor_shop".to_string(),
+            session_url: session_url.to_string(),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn take_calls(&self) -> Vec<HostedCheckoutCall> {
+        std::mem::take(&mut *self.calls.lock().unwrap())
+    }
+}
+
+impl crate::server::HostedCheckoutClient for StaticHostedCheckoutClient {
+    fn create_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        request_body: &str,
+        idempotency_key: &str,
+    ) -> Result<crate::server::HostedCheckoutSession, String> {
+        self.calls.lock().unwrap().push(HostedCheckoutCall {
+            api_key: api_key.to_string(),
+            request_body: request_body.to_string(),
+            idempotency_key: idempotency_key.to_string(),
+        });
+        Ok(crate::server::HostedCheckoutSession {
+            id: self.session_id.clone(),
+            url: self.session_url.clone(),
+        })
+    }
+}
 
 fn live_backend_secret_resolver() -> StaticSecretResolver {
     StaticSecretResolver::new()
@@ -108,20 +156,6 @@ fn checked_in_harbor_shop_config(app_name: &str) -> PlatformConfig {
         .join(format!("davenda-runtime-{app_name}"))
         .display()
         .to_string();
-    // Keep checked-in Harbor Shop server tests deterministic. The checked-in app now advertises
-    // hosted Stripe checkout, but the server tests exercise local request flows without a live
-    // Stripe session API seam.
-    if let Some(settings) = config
-        .modules
-        .settings
-        .get_mut("commerce-payments-stripe")
-        .and_then(toml::Value::as_table_mut)
-    {
-        settings.insert(
-            "checkout_mode".to_string(),
-            toml::Value::String("webhook-confirmation".to_string()),
-        );
-    }
     config
 }
 
@@ -3169,11 +3203,15 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_contract",
+    ));
     let server = plan
-        .server_host(
+        .server_host_with_checkout_client(
             &resolver,
             b"01234567012345670123456701234567",
             b"76543210765432107654321076543210",
+            checkout_client.clone(),
         )
         .unwrap();
 
@@ -3275,19 +3313,16 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
     )
     .unwrap();
     assert!(
-        checkout_body.contains("Stripe webhook confirmation"),
+        checkout_body.contains("Stripe hosted checkout"),
         "{checkout_body}"
     );
     assert!(
         checkout_body.contains(
-            "This checkout uses the installed Stripe payment provider. The order stays visible until the signed Stripe webhook confirms the payment result."
+            "This checkout reserves the order in Davenda, then redirects the customer to Stripe Checkout for payment collection. Davenda still waits for the signed Stripe webhook before treating the order as paid."
         ),
         "{checkout_body}"
     );
-    assert!(
-        checkout_body.contains("Place order and wait for Stripe confirmation"),
-        "{checkout_body}"
-    );
+    assert!(checkout_body.contains("Continue to Stripe"), "{checkout_body}");
 
     let complete_response = server
         .respond(
@@ -3313,17 +3348,44 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
         .await
         .unwrap();
     assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
-    let flash_cookie =
-        cookie_pair_from_response(&complete_response, "davenda_flash").expect("flash cookie");
+    assert_eq!(
+        response_header(&complete_response, "location"),
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_contract"
+    );
+    let checkout_calls = checkout_client.take_calls();
+    assert_eq!(checkout_calls.len(), 1);
+    assert_eq!(checkout_calls[0].api_key, STRIPE_SECRET_KEY);
+    assert_eq!(checkout_calls[0].idempotency_key, "davenda-order-ORD-10042");
+    assert!(
+        checkout_calls[0]
+            .request_body
+            .contains("client_reference_id=PAY-50001"),
+        "{:?}",
+        checkout_calls[0]
+    );
+    assert!(
+        checkout_calls[0]
+            .request_body
+            .contains("payment_intent_data%5Bmetadata%5D%5Border_id%5D=ORD-10042"),
+        "{:?}",
+        checkout_calls[0]
+    );
+    assert!(
+        checkout_calls[0]
+            .request_body
+            .contains("customer_email=buyer%40example.com"),
+        "{:?}",
+        checkout_calls[0]
+    );
 
     let confirmation_response = server
         .respond(
             Request::builder()
                 .method("GET")
-                .uri("/checkout/confirmation")
+                .uri("/checkout/confirmation?provider_result=return&payment_reference=PAY-50001")
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
-                .header("cookie", format!("{session_cookie}; {flash_cookie}"))
+                .header("cookie", &session_cookie)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -3338,20 +3400,12 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
     .unwrap();
 
     assert!(
-        confirmation_body
-            .contains("Order ORD-10042 was received. Stripe still needs to confirm payment."),
-        "{confirmation_body}"
-    );
-    assert!(
         confirmation_body.contains(
-            "Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives."
+            "Stripe Checkout has not confirmed this payment yet. The order will move forward after the hosted Stripe session finishes and the signed Stripe webhook arrives."
         ),
         "{confirmation_body}"
     );
-    assert!(
-        confirmation_body.contains("Stripe webhook confirmation"),
-        "{confirmation_body}"
-    );
+    assert!(confirmation_body.contains("Stripe hosted checkout"), "{confirmation_body}");
 
     fs::remove_dir_all(&template_root).unwrap();
 }
@@ -5013,11 +5067,15 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_handoff",
+    ));
     let server = plan
-        .server_host(
+        .server_host_with_checkout_client(
             &resolver,
             b"01234567012345670123456701234567",
             b"76543210765432107654321076543210",
+            checkout_client.clone(),
         )
         .unwrap();
     let now = BrowserInstant::from_unix_seconds(
@@ -5169,19 +5227,16 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
     )
     .unwrap();
     assert!(
-        checkout_body.contains("Stripe webhook confirmation"),
+        checkout_body.contains("Stripe hosted checkout"),
         "{checkout_body}"
     );
     assert!(
         checkout_body.contains(
-            "This checkout uses the installed Stripe payment provider. The order stays visible until the signed Stripe webhook confirms the payment result."
+            "This checkout reserves the order in Davenda, then redirects the customer to Stripe Checkout for payment collection. Davenda still waits for the signed Stripe webhook before treating the order as paid."
         ),
         "{checkout_body}"
     );
-    assert!(
-        checkout_body.contains("Place order and wait for Stripe confirmation"),
-        "{checkout_body}"
-    );
+    assert!(checkout_body.contains("Continue to Stripe"), "{checkout_body}");
     assert!(
         checkout_body.contains("Ready for payment"),
         "{checkout_body}"
@@ -5201,7 +5256,6 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
                     url::form_urlencoded::Serializer::new(String::new())
                         .append_pair("checkout_email", "buyer@example.com")
                         .append_pair("payment_method", "card")
-                        .append_pair("payment_last4", "4242")
                         .append_pair("checkout_intent", "PAY-50001")
                         .append_pair("terms_accepted", "yes")
                         .finish(),
@@ -5213,13 +5267,31 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
     assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response_header(&complete_response, "location"),
-        "/checkout/confirmation"
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_handoff"
+    );
+    let checkout_calls = checkout_client.take_calls();
+    assert_eq!(checkout_calls.len(), 1);
+    assert_eq!(checkout_calls[0].api_key, STRIPE_SECRET_KEY);
+    assert_eq!(checkout_calls[0].idempotency_key, "davenda-order-ORD-10042");
+    assert!(
+        checkout_calls[0]
+            .request_body
+            .contains("success_url=http%3A%2F%2Fwww.example.com%2Fcheckout%2Fconfirmation%3Fprovider_result%3Dreturn%26payment_reference%3DPAY-50001"),
+        "{:?}",
+        checkout_calls[0]
+    );
+    assert!(
+        checkout_calls[0]
+            .request_body
+            .contains("cancel_url=http%3A%2F%2Fwww.example.com%2Fcheckout%2Fconfirmation%3Fprovider_result%3Dcancel%26payment_reference%3DPAY-50001"),
+        "{:?}",
+        checkout_calls[0]
     );
     let pending_confirmation_response = server
         .respond(
             Request::builder()
                 .method("GET")
-                .uri("/checkout/confirmation")
+                .uri("/checkout/confirmation?provider_result=return&payment_reference=PAY-50001")
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
                 .header("cookie", &session_cookie)
@@ -5245,12 +5317,12 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
     );
     assert!(
         pending_confirmation_body.contains(
-            "Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives."
+            "Stripe Checkout has not confirmed this payment yet. The order will move forward after the hosted Stripe session finishes and the signed Stripe webhook arrives."
         ),
         "{pending_confirmation_body}"
     );
     assert!(
-        pending_confirmation_body.contains("Stripe webhook confirmation"),
+        pending_confirmation_body.contains("Stripe hosted checkout"),
         "{pending_confirmation_body}"
     );
 
@@ -5396,11 +5468,15 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_reconciliation",
+    ));
     let server = plan
-        .server_host(
+        .server_host_with_checkout_client(
             &resolver,
             b"01234567012345670123456701234567",
             b"76543210765432107654321076543210",
+            checkout_client.clone(),
         )
         .unwrap();
     let now = BrowserInstant::from_unix_seconds(
@@ -5517,19 +5593,16 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
     )
     .unwrap();
     assert!(
-        checkout_body.contains("Stripe webhook confirmation"),
+        checkout_body.contains("Stripe hosted checkout"),
         "{checkout_body}"
     );
     assert!(
         checkout_body.contains(
-            "This checkout uses the installed Stripe payment provider. The order stays visible until the signed Stripe webhook confirms the payment result."
+            "This checkout reserves the order in Davenda, then redirects the customer to Stripe Checkout for payment collection. Davenda still waits for the signed Stripe webhook before treating the order as paid."
         ),
         "{checkout_body}"
     );
-    assert!(
-        checkout_body.contains("Place order and wait for Stripe confirmation"),
-        "{checkout_body}"
-    );
+    assert!(checkout_body.contains("Continue to Stripe"), "{checkout_body}");
 
     let complete_response = server
         .respond(
@@ -5557,14 +5630,17 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
     assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response_header(&complete_response, "location"),
-        "/checkout/confirmation"
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_reconciliation"
     );
+    let checkout_calls = checkout_client.take_calls();
+    assert_eq!(checkout_calls.len(), 1);
+    assert_eq!(checkout_calls[0].api_key, STRIPE_SECRET_KEY);
 
     let pending_confirmation_response = server
         .respond(
             Request::builder()
                 .method("GET")
-                .uri("/checkout/confirmation")
+                .uri("/checkout/confirmation?provider_result=return&payment_reference=PAY-50001")
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
                 .header("cookie", &session_cookie)
@@ -5590,7 +5666,7 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
     );
     assert!(
         pending_confirmation_body.contains(
-            "Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives."
+            "Stripe Checkout has not confirmed this payment yet. The order will move forward after the hosted Stripe session finishes and the signed Stripe webhook arrives."
         ),
         "{pending_confirmation_body}"
     );
@@ -5658,7 +5734,7 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
     );
     assert!(
         still_pending_body.contains(
-            "Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives."
+            "Stripe Checkout has not confirmed this payment yet. The order will move forward after the hosted Stripe session finishes and the signed Stripe webhook arrives."
         ),
         "{still_pending_body}"
     );

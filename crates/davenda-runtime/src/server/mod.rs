@@ -29,8 +29,13 @@ pub use backend::{
 };
 use diagnostics::privileged_router as diagnostics_router;
 use observability::public_router as observability_router;
+pub(crate) use request::HostedCheckoutClient;
+#[cfg(test)]
+pub(crate) type HostedCheckoutSession = request::HostedCheckoutSession;
 pub use request::LiveHttpRequest;
-use request::{error_response, execute_live_request, serve_runtime_request};
+use request::{
+    LiveStripeHostedCheckoutClient, error_response, execute_live_request, serve_runtime_request,
+};
 
 #[cfg(test)]
 #[allow(unused_imports)]
@@ -81,6 +86,7 @@ pub(crate) struct RuntimeServerState {
     csrf_secret: Vec<u8>,
     payment_webhook_secret: Option<String>,
     payment_provider_api_key: Option<String>,
+    hosted_checkout_client: Arc<dyn HostedCheckoutClient>,
     backends: SharedBackendClients,
     route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
     auth_explainer: Option<Arc<dyn auth::LiveAuthExplainer>>,
@@ -132,6 +138,8 @@ impl HttpServerHost {
                 plan.auth_package.clone(),
             ));
         let auth_explainer = build_auth_explainer(&plan)?;
+        let hosted_checkout_client: Arc<dyn HostedCheckoutClient> =
+            Arc::new(LiveStripeHostedCheckoutClient);
         let browser =
             materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
         let storage_host = plan.storage_host_with_object_store(
@@ -158,6 +166,7 @@ impl HttpServerHost {
             backends,
             payment_webhook_secret,
             payment_provider_api_key,
+            hosted_checkout_client,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -182,6 +191,8 @@ impl HttpServerHost {
         let auth_explainer = build_auth_explainer(&plan)?;
         let wasm_host = plan.wasm_host();
         let storefront = StorefrontStateStore::open_for_plan(&plan)?;
+        let hosted_checkout_client: Arc<dyn HostedCheckoutClient> =
+            Arc::new(LiveStripeHostedCheckoutClient);
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
@@ -190,6 +201,7 @@ impl HttpServerHost {
             backends,
             None,
             None,
+            hosted_checkout_client,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -209,6 +221,8 @@ impl HttpServerHost {
         let wasm_host = plan.wasm_host();
         let auth_explainer = build_auth_explainer(&plan)?;
         let storefront = StorefrontStateStore::open_for_plan(&plan)?;
+        let hosted_checkout_client: Arc<dyn HostedCheckoutClient> =
+            Arc::new(LiveStripeHostedCheckoutClient);
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
@@ -217,6 +231,7 @@ impl HttpServerHost {
             backends,
             None,
             None,
+            hosted_checkout_client,
             cookie_secret,
             csrf_secret,
             route_authorizer,
@@ -236,6 +251,8 @@ impl HttpServerHost {
         let browser = plan.browser_host()?;
         let wasm_host = plan.wasm_host();
         let storefront = StorefrontStateStore::open_for_plan(&plan)?;
+        let hosted_checkout_client: Arc<dyn HostedCheckoutClient> =
+            Arc::new(LiveStripeHostedCheckoutClient);
         Ok(Self::new_with_browser_and_authorizer(
             plan,
             browser,
@@ -244,10 +261,99 @@ impl HttpServerHost {
             backends,
             None,
             None,
+            hosted_checkout_client,
             cookie_secret,
             csrf_secret,
             route_authorizer,
             Some(auth_explainer),
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_checkout_client(
+        plan: RuntimePlan,
+        backends: SharedBackendClients,
+        wasm_secrets: BTreeMap<String, String>,
+        payment_webhook_secret: Option<String>,
+        cookie_secret: Vec<u8>,
+        csrf_secret: Vec<u8>,
+        hosted_checkout_client: Arc<dyn HostedCheckoutClient>,
+    ) -> Result<Self, RuntimeServerError> {
+        let materializer = RuntimeBackendMaterializer::new(
+            plan.shared_backend_namespace(),
+            backends.clone(),
+            plan.shared_state_root().clone(),
+        );
+        let payment_provider_api_key = configured_commerce_payment_provider(&plan.config)
+            .and_then(|provider| provider.api_key_from_runtime_secrets(&wasm_secrets));
+        let route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer> =
+            Arc::new(DeferredPostgresRouteCapabilityAuthorizer::new(
+                plan.data.clone(),
+                plan.tenant_id(),
+                backends.database.url.clone(),
+                plan.auth_package.clone(),
+            ));
+        let auth_explainer = build_auth_explainer(&plan)?;
+        let browser =
+            materializer.browser_host(plan.config.app.name.clone(), plan.browser.clone())?;
+        let storage_host = plan.storage_host_with_object_store(
+            backends
+                .object_store
+                .as_ref()
+                .and_then(|backend| backend.object_store_client_config()),
+        );
+        let wasm_host = WasmHost::with_host_services(
+            plan.clone(),
+            plan.config.app.name.clone(),
+            plan.wasm.clone(),
+            plan.extension_registry.clone(),
+            plan.config.i18n.default_locale.clone(),
+            plan.registered_runtime_jobs.clone(),
+            RuntimeWasmHostServices::with_runtime_secrets(plan.clone(), storage_host, wasm_secrets),
+        );
+        let storefront = StorefrontStateStore::open_for_plan(&plan)?;
+        Ok(Self::new_with_browser_and_authorizer(
+            plan,
+            browser,
+            wasm_host,
+            storefront,
+            backends,
+            payment_webhook_secret,
+            payment_provider_api_key,
+            hosted_checkout_client,
+            cookie_secret,
+            csrf_secret,
+            route_authorizer,
+            auth_explainer,
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_authorizer_and_checkout_client(
+        plan: RuntimePlan,
+        backends: SharedBackendClients,
+        cookie_secret: Vec<u8>,
+        csrf_secret: Vec<u8>,
+        route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
+        hosted_checkout_client: Arc<dyn HostedCheckoutClient>,
+    ) -> Result<Self, RuntimeServerError> {
+        let browser = plan.browser_host()?;
+        let wasm_host = plan.wasm_host();
+        let auth_explainer = build_auth_explainer(&plan)?;
+        let storefront = StorefrontStateStore::open_for_plan(&plan)?;
+        Ok(Self::new_with_browser_and_authorizer(
+            plan,
+            browser,
+            wasm_host,
+            storefront,
+            backends,
+            None,
+            None,
+            hosted_checkout_client,
+            cookie_secret,
+            csrf_secret,
+            route_authorizer,
+            auth_explainer,
         ))
     }
 
@@ -259,6 +365,7 @@ impl HttpServerHost {
         backends: SharedBackendClients,
         payment_webhook_secret: Option<String>,
         payment_provider_api_key: Option<String>,
+        hosted_checkout_client: Arc<dyn HostedCheckoutClient>,
         cookie_secret: Vec<u8>,
         csrf_secret: Vec<u8>,
         route_authorizer: Arc<dyn LiveRouteCapabilityAuthorizer>,
@@ -273,6 +380,7 @@ impl HttpServerHost {
             csrf_secret,
             payment_webhook_secret,
             payment_provider_api_key,
+            hosted_checkout_client,
             backends,
             route_authorizer,
             auth_explainer,

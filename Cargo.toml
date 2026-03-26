@@ -29,6 +29,7 @@ members = [
     "crates/davenda-tls",
     "crates/davenda-wasm",
 ]
+exclude = ["third_party/zanzibar"]
 
 [workspace.package]
 edition = "2024"
@@ -36,4 +37,4 @@ version = "0.1.0"
 rust-version = "1.85"
 
 [workspace.dependencies]
-zanzibar = { git = "ssh://git@github.com/worka-ai/zanzibar.git", rev = "f21bfb7a5be3c6be404d3239c1b3da66a9e1ec0b" }
+zanzibar = { path = "third_party/zanzibar" }

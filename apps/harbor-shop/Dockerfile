@@ -1,6 +1,7 @@
 FROM rust:1.85-bookworm AS builder
 
 WORKDIR /workspace
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -9,14 +10,17 @@ RUN apt-get update \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+RUN git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/" \
+    && git config --global --add url."https://github.com/".insteadOf "git@github.com:" \
+    && git config --global --add url."https://github.com/worka-ai/".insteadOf "ssh://git@github.com/worka-ai/"
 
 COPY .cargo ./.cargo
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY apps ./apps
+COPY third_party ./third_party
 
-RUN cargo build -p davenda-cli --release
+RUN cargo build --locked -p davenda-cli --release
 
 FROM debian:bookworm-slim
 

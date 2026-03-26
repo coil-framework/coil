@@ -7,7 +7,7 @@ use sqlx::{Postgres, Row as PgRow};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
 
 pub(crate) fn live_shared_runtime(
     kind: SessionStoreBackendKind,
@@ -128,8 +128,11 @@ impl ProductionPostgresSharedSessionStore {
         })
     }
 
-    fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
-        self.runtime.block_on(future)
+    fn block_on<T>(&self, future: impl Future<Output = T> + Send) -> T
+    where
+        T: Send,
+    {
+        run_future_on_runtime(&self.runtime, future)
     }
 
     async fn ensure_table(pool: &sqlx::Pool<Postgres>) -> Result<(), RuntimeBrowserError> {
@@ -153,8 +156,11 @@ impl ProductionPostgresSharedSessionStore {
 
     fn read_state<T>(
         &self,
-        op: impl FnOnce(&SessionStoreSnapshot) -> T,
-    ) -> Result<T, RuntimeBrowserError> {
+        op: impl FnOnce(&SessionStoreSnapshot) -> T + Send,
+    ) -> Result<T, RuntimeBrowserError>
+    where
+        T: Send,
+    {
         self.block_on(async {
             Self::ensure_table(&self.pool).await?;
             let payload = sqlx::query("SELECT payload FROM session_state WHERE namespace = $1")
@@ -185,8 +191,11 @@ impl ProductionPostgresSharedSessionStore {
 
     fn with_state_mut<T>(
         &self,
-        op: impl FnOnce(&mut SessionStoreSnapshot) -> Result<T, RuntimeBrowserError>,
-    ) -> Result<T, RuntimeBrowserError> {
+        op: impl FnOnce(&mut SessionStoreSnapshot) -> Result<T, RuntimeBrowserError> + Send,
+    ) -> Result<T, RuntimeBrowserError>
+    where
+        T: Send,
+    {
         self.block_on(async {
             Self::ensure_table(&self.pool).await?;
             let mut tx = self.pool.begin().await.map_err(|error| {
@@ -268,6 +277,21 @@ impl ProductionPostgresSharedSessionStore {
     }
 }
 
+fn run_future_on_runtime<T>(runtime: &Runtime, future: impl Future<Output = T> + Send) -> T
+where
+    T: Send,
+{
+    match Handle::try_current() {
+        Ok(_) => std::thread::scope(|scope| {
+            scope
+                .spawn(|| runtime.block_on(future))
+                .join()
+                .expect("live shared session worker thread panicked")
+        }),
+        Err(_) => runtime.block_on(future),
+    }
+}
+
 fn session_backend_url(
     kind: SessionStoreBackendKind,
     namespace: &str,
@@ -342,6 +366,20 @@ impl SessionStoreSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_shared_store_block_on_runs_inside_an_existing_runtime() {
+        let store_runtime = Runtime::new().unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let result = runtime.block_on(async { run_future_on_runtime(&store_runtime, async { 7usize }) });
+
+        assert_eq!(result, 7);
+    }
 
     #[test]
     fn live_session_backend_requires_explicit_database_url() {

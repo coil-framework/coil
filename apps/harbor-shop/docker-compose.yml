@@ -12,7 +12,7 @@ services:
         condition: service_completed_successfully
     environment:
       DAVENDA_CONFIG: platform.dev.toml
-      DATABASE_URL: postgres://davenda:devpass@postgres:5438/davenda_harbor_shop
+      DATABASE_URL: postgres://davenda:devpass@postgres:5432/davenda_harbor_shop
       REDIS_URL: redis://redis:6379
       DAVENDA_COOKIE_SECRET: "01234567012345670123456701234567"
       DAVENDA_CSRF_SECRET: "76543210765432107654321076543210"

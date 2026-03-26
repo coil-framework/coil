@@ -8897,6 +8897,34 @@ fn build_customer_app_runtime_context(
     })
 }
 
+fn build_dev_server_runtime_plan(
+    config_path: &Path,
+) -> Result<davenda_runtime::RuntimePlan, CliRunError> {
+    let config = PlatformConfig::from_file(config_path).map_err(|error| {
+        CliRunError::execution(format!(
+            "failed to load platform config from `{}`: {error}",
+            config_path.display()
+        ))
+    })?;
+    let app_root = resolve_customer_app_root(config_path, &config.app.name)?;
+    let auth_package = load_auth_package_from_app_root(&app_root, &config.auth.package)?;
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let runtime_guard = tokio_runtime.enter();
+    let modules = load_official_modules(&config)?;
+    let mut builder = RuntimeBuilder::new(config, auth_package).with_template_root(&app_root);
+    for module in modules {
+        builder = builder.with_boxed_module(module);
+    }
+    let plan = builder
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to build runtime plan: {error}")))?;
+    drop(runtime_guard);
+    Ok(plan)
+}
+
 fn evaluate_cutover_migration_readiness(
     built: &BuiltCustomerAppContext,
 ) -> Result<(bool, String), CliRunError> {
@@ -9236,32 +9264,15 @@ fn import_model_error(error: ImportModelError) -> CliRunError {
 }
 
 fn run_dev_server(invocation: &DevServerInvocation) -> Result<(), CliRunError> {
-    let config = PlatformConfig::from_file(&invocation.config_path).map_err(|error| {
-        CliRunError::execution(format!(
-            "failed to load platform config from `{}`: {error}",
-            invocation.config_path.display()
-        ))
-    })?;
-
     let cookie_secret = read_runtime_secret("DAVENDA_COOKIE_SECRET")?;
     let csrf_secret = read_runtime_secret("DAVENDA_CSRF_SECRET")?;
-    let bind = config.server.bind.clone();
-    let app_root = resolve_customer_app_root(&invocation.config_path, &config.app.name)?;
-    let auth_package = load_auth_package_from_app_root(&app_root, &config.auth.package)?;
+    let plan = build_dev_server_runtime_plan(&invocation.config_path)?;
+    let bind = plan.config.server.bind.clone();
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
     let runtime_guard = tokio_runtime.enter();
-    let modules = load_official_modules(&config)?;
-    let builder = RuntimeBuilder::new(config.clone(), auth_package);
-    let mut builder = builder;
-    for module in modules {
-        builder = builder.with_boxed_module(module);
-    }
-    let plan = builder
-        .build()
-        .map_err(|error| CliRunError::execution(format!("failed to build runtime plan: {error}")))?;
     let server = plan
         .server_host(
             &EnvironmentSecretResolver,
@@ -15600,6 +15611,16 @@ expect = true
                 .to_string()
                 .contains("failed to read applied migrations")
         );
+    }
+
+    #[test]
+    fn build_dev_server_runtime_plan_loads_customer_templates_from_app_root() {
+        let config_path = customer_app_fixture();
+
+        let plan = build_dev_server_runtime_plan(&config_path).unwrap();
+        let rendered = format!("{:?}", plan.template.registry);
+
+        assert!(rendered.contains("pages/home"));
     }
 
     #[test]

@@ -43,6 +43,13 @@ fn live_backend_secret_resolver_with_payment_webhook() -> StaticSecretResolver {
             PAYMENT_WEBHOOK_SECRET,
         )
         .unwrap()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "STRIPE_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap()
 }
 
 fn with_payment_webhook_secret(config: PlatformConfig) -> PlatformConfig {
@@ -54,6 +61,40 @@ fn with_payment_webhook_secret(config: PlatformConfig) -> PlatformConfig {
         )
     ))
     .unwrap()
+}
+
+fn with_stripe_payment_provider(config: PlatformConfig) -> PlatformConfig {
+    let mut config = config;
+    config.modules.enabled = vec!["commerce".to_string(), "commerce-payments-stripe".to_string()];
+    let mut stripe_settings = toml::Table::new();
+    stripe_settings.insert("provider".to_string(), toml::Value::String("stripe".to_string()));
+    stripe_settings.insert(
+        "checkout_mode".to_string(),
+        toml::Value::String("webhook-confirmation".to_string()),
+    );
+    stripe_settings.insert(
+        "webhook_secret".to_string(),
+        toml::Value::try_from(davenda_config::SecretRef::Env {
+            var: "STRIPE_WEBHOOK_SECRET".to_string(),
+        })
+        .unwrap(),
+    );
+    config.modules.settings.insert(
+        "commerce-payments-stripe".to_string(),
+        toml::Value::Table(stripe_settings),
+    );
+    config
+}
+
+fn checked_in_harbor_shop_config(app_name: &str) -> PlatformConfig {
+    let mut config =
+        PlatformConfig::from_file(checked_in_harbor_shop_root().join("platform.toml")).unwrap();
+    config.app.name = app_name.to_string();
+    config.storage.local_root = std::env::temp_dir()
+        .join(format!("davenda-runtime-{app_name}"))
+        .display()
+        .to_string();
+    config
 }
 
 fn payment_webhook_signature(provider: &str, event: &str, payment_reference: &str) -> String {
@@ -1534,7 +1575,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
     assert!(checkout_body.contains("Gold Membership"), "{checkout_body}");
     assert!(checkout_body.contains("£118.00"), "{checkout_body}");
     assert!(
-        checkout_body.contains("Platform fallback payment path"),
+        checkout_body.contains("Stripe payment confirmation"),
         "{checkout_body}"
     );
     assert!(checkout_body.contains("PAY-50001"), "{checkout_body}");
@@ -1974,7 +2015,7 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
     assert!(checkout_body.contains("Harbor Cap"), "{checkout_body}");
     assert!(checkout_body.contains("£58.00"), "{checkout_body}");
     assert!(
-        checkout_body.contains("Platform fallback payment path"),
+        checkout_body.contains("Stripe payment confirmation"),
         "{checkout_body}"
     );
     assert!(checkout_body.contains("PAY-50001"), "{checkout_body}");
@@ -2835,6 +2876,65 @@ async fn server_host_rejects_payment_webhooks_with_invalid_signatures() {
 }
 
 #[tokio::test]
+async fn server_host_rejects_payment_webhooks_for_an_unconfigured_provider() {
+    let app_name = unique_app_name("harbor-shop-runtime-payment-provider-mismatch");
+    let config = with_stripe_payment_provider(config_with_app_name(&app_name));
+    let template_root = checked_in_harbor_shop_root();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("provider", "paypal")
+                        .append_pair("event", "payment.captured")
+                        .append_pair("payment_reference", "PAY-50001")
+                        .append_pair(
+                            "signature",
+                            &payment_webhook_signature("paypal", "payment.captured", "PAY-50001"),
+                        )
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.contains("does not match configured provider `stripe`"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn server_host_restores_checkout_after_payment_failure_webhook() {
     let app_name = unique_app_name("harbor-shop-runtime-payment-failure-recovery");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));
@@ -2980,6 +3080,245 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
     assert!(cart_body.contains("/en-GB/shop/collections/featured"), "{cart_body}");
     assert!(cart_body.contains("/en-GB/shop/collections"), "{cart_body}");
     assert!(cart_body.contains("Checkout"), "{cart_body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
+    let app_name = unique_app_name("harbor-shop-runtime-stripe-checkout-contract");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    config.auth.package = "platform-default-auth".to_string();
+    let template_root = unique_temp_template_root("stripe-checkout-contract");
+    write_template_file(
+        &template_root,
+        "templates/commerce/cart.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main class="cart-page"><h1>Cart</h1></main></body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="checkout-page">
+      <p class="provider" dv:text="${checkout.providerLabel}">Provider</p>
+      <p class="summary" dv:text="${checkout.providerSummary}">Summary</p>
+      <button class="submit" dv:text="${checkout.submitLabel}">Submit</button>
+      <p class="reference" dv:text="${checkout.paymentReference}">PAY-50001</p>
+    </main>
+  </body>
+</html>"#,
+    );
+    write_template_file(
+        &template_root,
+        "templates/commerce/checkout-confirmation.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main class="confirmation-page">
+      <div class="flash" dv:if="${hasFlashMessages}">
+        <p dv:each="message : ${flashMessages}" dv:text="${message.text}">Flash</p>
+      </div>
+      <p class="provider" dv:text="${confirmation.providerLabel}">Provider</p>
+      <p class="next-step" dv:text="${confirmation.nextStep}">Next step</p>
+    </main>
+  </body>
+</html>"#,
+    );
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_cookie =
+        cookie_pair_from_response(&cart_bootstrap, "davenda_session").expect("session cookie");
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "harbor-cap")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+    let checkout_body = String::from_utf8(
+        to_bytes(checkout_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        checkout_body.contains("Stripe webhook confirmation"),
+        "{checkout_body}"
+    );
+    assert!(
+        checkout_body.contains(
+            "This checkout uses the installed Stripe payment provider. The order stays visible until the signed Stripe webhook confirms the payment result."
+        ),
+        "{checkout_body}"
+    );
+    assert!(
+        checkout_body.contains("Place order and wait for Stripe confirmation"),
+        "{checkout_body}"
+    );
+
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("payment_last4", "4242")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    let flash_cookie =
+        cookie_pair_from_response(&complete_response, "davenda_flash").expect("flash cookie");
+
+    let confirmation_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout/confirmation")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("{session_cookie}; {flash_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let confirmation_body = String::from_utf8(
+        to_bytes(confirmation_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert!(
+        confirmation_body
+            .contains("Order ORD-10042 was received. Stripe still needs to confirm payment."),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains(
+            "Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives."
+        ),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("Stripe webhook confirmation"),
+        "{confirmation_body}"
+    );
+
+    fs::remove_dir_all(&template_root).unwrap();
 }
 
 #[tokio::test]

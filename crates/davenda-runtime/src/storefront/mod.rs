@@ -38,6 +38,10 @@ pub enum StorefrontStateError {
     UnknownPaymentReference { payment_reference: String },
     #[error("unknown storefront payment webhook event `{event}`")]
     UnknownPaymentWebhookEvent { event: String },
+    #[error(
+        "payment webhook provider `{received}` does not match configured provider `{expected}`"
+    )]
+    UnexpectedPaymentWebhookProvider { expected: String, received: String },
     #[error("payment webhook verification failed")]
     InvalidPaymentWebhookSignature,
     #[error("payment webhook secret is not configured")]

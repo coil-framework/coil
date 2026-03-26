@@ -16,7 +16,10 @@ use url::form_urlencoded;
 
 const STOREFRONT_ORDER_HISTORY_JSON_PATH: &str = "/account/orders.json";
 const STOREFRONT_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
-    ("/cart/items", "x-davenda-storefront-csrf-commerce-add-to-cart"),
+    (
+        "/cart/items",
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    ),
     ("/cart", "x-davenda-storefront-csrf-commerce-cart-update"),
     (
         "/checkout/start",
@@ -285,6 +288,7 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
             | StorefrontStateError::EmptyCart { .. }
             | StorefrontStateError::UnknownPaymentReference { .. }
             | StorefrontStateError::UnknownPaymentWebhookEvent { .. }
+            | StorefrontStateError::UnexpectedPaymentWebhookProvider { .. }
             | StorefrontStateError::InvalidPaymentWebhookSignature,
         ) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
         RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret) => {
@@ -792,6 +796,16 @@ fn validated_payment_webhook_from_execution(
         .unwrap_or("generic")
         .trim()
         .to_ascii_lowercase();
+    if let Some(configured_provider) = configured_commerce_payment_provider(&state.plan.config) {
+        if provider != configured_provider.code {
+            return Err(RuntimeServerError::Storefront(
+                StorefrontStateError::UnexpectedPaymentWebhookProvider {
+                    expected: configured_provider.code,
+                    received: provider,
+                },
+            ));
+        }
+    }
     let event = execution_form_field(execution, "event")
         .or_else(|| execution_form_field(execution, "payment_event"))
         .map(str::trim)
@@ -1029,11 +1043,12 @@ fn apply_native_storefront_mutations(
             let message = snapshot
                 .latest_order
                 .as_ref()
-                .map(|order| {
-                    format!(
+                .map(|order| match configured_commerce_payment_provider(&state.plan.config) {
+                    Some(provider) => provider.pending_confirmation_summary(&order.order_id),
+                    None => format!(
                         "Order {} was received. Payment is still awaiting provider confirmation.",
                         order.order_id
-                    )
+                    ),
                 })
                 .unwrap_or_else(|| {
                     "Checkout could not complete because the cart is empty.".to_string()
@@ -1346,11 +1361,7 @@ fn inject_storefront_form_csrf_inputs(
     document_html
 }
 
-fn inject_hidden_csrf_input(
-    mut document_html: String,
-    action_path: &str,
-    token: &str,
-) -> String {
+fn inject_hidden_csrf_input(mut document_html: String, action_path: &str, token: &str) -> String {
     let action_attr = format!("action=\"{action_path}\"");
     let hidden_input = format!(r#"<input type="hidden" name="_csrf" value="{token}" />"#);
     let mut search_from = 0;

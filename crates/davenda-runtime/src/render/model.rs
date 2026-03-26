@@ -368,7 +368,12 @@ fn apply_route_specific_bindings(
                     .with_object("customer", checkout_customer(principal)?)?
                     .with_object(
                         "checkout",
-                        checkout_form_from_storefront(&snapshot.payment, principal, form_state)?,
+                        checkout_form_from_storefront(
+                            plan,
+                            &snapshot.payment,
+                            principal,
+                            form_state,
+                        )?,
                     )?
                     .with_bool("hasLineItems", !line_items.is_empty())?
                     .with_list("lineItems", line_items)?
@@ -390,9 +395,9 @@ fn apply_route_specific_bindings(
                 let confirmation = snapshot
                     .latest_order
                     .as_ref()
-                    .map(confirmation_from_storefront)
+                    .map(|order| confirmation_from_storefront(plan, order))
                     .transpose()?
-                    .unwrap_or(empty_confirmation_model()?);
+                    .unwrap_or(empty_confirmation_model(plan)?);
                 if snapshot.latest_order.is_some() {
                     model = model
                         .with_bool("hasConfirmation", true)?
@@ -599,6 +604,7 @@ fn cart_summary_from_storefront(
 }
 
 fn confirmation_from_storefront(
+    plan: Option<&RuntimePlan>,
     order: &StorefrontOrderSnapshot,
 ) -> Result<RenderModel, TemplateModelError> {
     let includes_membership = order
@@ -607,11 +613,15 @@ fn confirmation_from_storefront(
         .any(|line| line.product_kind == "membership");
     let payment_is_final = matches!(order.status.as_str(), "paid" | "fulfilled");
     let next_step = if !payment_is_final {
-        "Payment confirmation is pending. The order will move forward after the provider callback arrives."
+        configured_payment_provider(plan)
+            .map(|provider| provider.pending_next_step())
+            .unwrap_or_else(|| {
+                "Payment confirmation is pending. The order will move forward after the provider callback arrives.".to_string()
+            })
     } else if includes_membership {
-        "A confirmation email and membership activation will follow shortly."
+        "A confirmation email and membership activation will follow shortly.".to_string()
     } else {
-        "A confirmation email and fulfillment summary are on the way."
+        "A confirmation email and fulfillment summary are on the way.".to_string()
     };
     let payment_method = payment_method_label(order.payment.method.as_deref());
     let payment_status = payment_status_label(&order.payment.status);
@@ -647,7 +657,7 @@ fn confirmation_from_storefront(
         .with_value("paymentSummary", RenderValue::text(payment_summary))?
         .with_value(
             "providerLabel",
-            RenderValue::text(payment_provider_label().to_string()),
+            RenderValue::text(payment_provider_label(plan)),
         )?
         .with_bool("hasPaymentLast4", order.payment.last4.is_some())?
         .with_bool("hasPaymentReference", order.payment.reference.is_some())?
@@ -656,7 +666,7 @@ fn confirmation_from_storefront(
         .with_list("lineItems", confirmation_line_items_from_storefront(order)?)
 }
 
-fn empty_confirmation_model() -> Result<RenderModel, TemplateModelError> {
+fn empty_confirmation_model(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
         .with_value("orderNumber", RenderValue::text(String::new()))?
         .with_value("status", RenderValue::text("No recent order".to_string()))?
@@ -671,7 +681,7 @@ fn empty_confirmation_model() -> Result<RenderModel, TemplateModelError> {
         )?
         .with_value(
             "providerLabel",
-            RenderValue::text(payment_provider_label().to_string()),
+            RenderValue::text(payment_provider_label(plan)),
         )?
         .with_value(
             "paymentSummary",
@@ -903,7 +913,10 @@ fn decorate_cart_item_with_catalog_context(
         )?
         .with_value(
             "collectionUrl",
-            RenderValue::text(localized_collection_path(locale, &product.collection_handle)),
+            RenderValue::text(localized_collection_path(
+                locale,
+                &product.collection_handle,
+            )),
         )?
         .with_value("collectionName", RenderValue::text(collection_name))
 }
@@ -913,9 +926,12 @@ fn catalog_product_for_cart_item<'a>(
     sku_or_handle: &str,
     title: &str,
 ) -> Option<&'a StorefrontProductDefinition> {
-    catalog
-        .product_by_sku_or_handle(sku_or_handle)
-        .or_else(|| catalog.products.iter().find(|product| product.title == title))
+    catalog.product_by_sku_or_handle(sku_or_handle).or_else(|| {
+        catalog
+            .products
+            .iter()
+            .find(|product| product.title == title)
+    })
 }
 
 fn checkout_customer(
@@ -935,10 +951,15 @@ fn checkout_customer(
 }
 
 fn checkout_form_from_storefront(
+    plan: Option<&RuntimePlan>,
     payment: &StorefrontPaymentSnapshot,
     principal: Option<&PrincipalContext>,
     form_state: Option<&StorefrontFormState>,
 ) -> Result<RenderModel, TemplateModelError> {
+    let provider_code = payment_provider_code(plan);
+    let provider_label = payment_provider_label(plan);
+    let provider_summary = payment_provider_summary(plan);
+    let submit_label = payment_submit_label(plan);
     let payment_method = form_state
         .and_then(|state| state.fields.get("payment_method"))
         .cloned()
@@ -984,23 +1005,11 @@ fn checkout_form_from_storefront(
     let has_checkout_email = !checkout_email.is_empty();
     let model = RenderModel::new()
         .with_value("paymentReference", RenderValue::text(payment_reference))?
-        .with_value(
-            "paymentMethod",
-            RenderValue::text(payment_method.clone()),
-        )?
-        .with_value(
-            "checkoutEmail",
-            RenderValue::text(checkout_email),
-        )?
+        .with_value("paymentMethod", RenderValue::text(payment_method.clone()))?
+        .with_value("checkoutEmail", RenderValue::text(checkout_email))?
         .with_bool("hasCheckoutEmail", has_checkout_email)?
-        .with_value(
-            "paymentLast4",
-            RenderValue::text(payment_last4),
-        )?
-        .with_value(
-            "checkoutIntent",
-            RenderValue::text(checkout_intent),
-        )?
+        .with_value("paymentLast4", RenderValue::text(payment_last4))?
+        .with_value("checkoutIntent", RenderValue::text(checkout_intent))?
         .with_value("deliveryName", RenderValue::text(delivery_name))?
         .with_value("deliveryNote", RenderValue::text(delivery_note))?
         .with_bool("termsAccepted", terms_accepted)?
@@ -1013,31 +1022,48 @@ fn checkout_form_from_storefront(
             "paymentStatusLabel",
             RenderValue::text(payment_status_label(&payment.status)),
         )?
-        .with_value(
-            "providerCode",
-            RenderValue::text("platform_fallback".to_string()),
-        )?
+        .with_value("providerCode", RenderValue::text(provider_code.to_string()))?
         .with_value(
             "providerLabel",
-            RenderValue::text(payment_provider_label().to_string()),
+            RenderValue::text(provider_label.to_string()),
         )?
-        .with_value(
-            "providerSummary",
-            RenderValue::text(
-                "This checkout is using the platform fallback payment path until a provider-backed handoff is installed.",
-            ),
-        )?
-        .with_value(
-            "submitLabel",
-            RenderValue::text("Place order".to_string()),
-        )?
+        .with_value("providerSummary", RenderValue::text(provider_summary))?
+        .with_value("submitLabel", RenderValue::text(submit_label))?
         .with_bool("hasPaymentReference", payment.reference.is_some())?
         .with_bool("hasPaymentLast4", payment.last4.is_some())?;
     merge_checkout_form_feedback(model, form_state)
 }
 
-fn payment_provider_label() -> &'static str {
-    "Platform fallback payment path"
+fn payment_provider_code(plan: Option<&RuntimePlan>) -> String {
+    configured_payment_provider(plan)
+        .map(|provider| provider.code.clone())
+        .unwrap_or_else(|| "platform_fallback".to_string())
+}
+
+fn payment_provider_label(plan: Option<&RuntimePlan>) -> String {
+    configured_payment_provider(plan)
+        .map(|provider| provider.label())
+        .unwrap_or_else(|| "Platform fallback payment path".to_string())
+}
+
+fn payment_provider_summary(plan: Option<&RuntimePlan>) -> String {
+    configured_payment_provider(plan)
+        .map(|provider| provider.summary())
+        .unwrap_or_else(|| {
+            "This checkout is using the platform fallback payment path until a provider-backed handoff is installed.".to_string()
+        })
+}
+
+fn payment_submit_label(plan: Option<&RuntimePlan>) -> String {
+    configured_payment_provider(plan)
+        .map(|provider| provider.submit_label())
+        .unwrap_or_else(|| "Place order".to_string())
+}
+
+fn configured_payment_provider(
+    plan: Option<&RuntimePlan>,
+) -> Option<crate::server::CommercePaymentProviderConfig> {
+    plan.and_then(|plan| crate::server::configured_commerce_payment_provider(&plan.config))
 }
 
 fn payment_method_label(method: Option<&str>) -> String {
@@ -1215,6 +1241,8 @@ fn fixture_account_surface_bindings(
             .with_bool("hasRecentOrders", has_recent_orders)?
             .with_bool("hasMembership", true)?
             .with_bool("hasLatestOrder", true)?
+            .with_bool("hasPendingMembershipOrder", false)?
+            .with_bool("needsMembershipPurchase", false)?
             .with_value("stateSource", RenderValue::text("fixture-preview"))?
             .with_value(
                 "stateSummary",
@@ -1289,6 +1317,10 @@ fn live_account_surface_bindings(
         .unwrap_or_else(|| "Current Browser Session".to_string());
     let membership_summary =
         membership_summary_from_storefront(snapshot.as_ref(), include_pending_membership)?;
+    let has_membership = membership_summary.is_some();
+    let has_latest_order = latest_order.is_some();
+    let has_pending_membership_order = !has_membership && has_latest_order;
+    let needs_membership_purchase = !has_membership && !has_latest_order;
     let latest_order_reference = latest_order
         .as_ref()
         .map(|order| order.order_id.clone())
@@ -1322,8 +1354,10 @@ fn live_account_surface_bindings(
             .with_bool("hasPrincipal", principal_id.is_some())?
             .with_bool("hasCustomerEmail", !email.is_empty())?
             .with_bool("hasRecentOrders", has_recent_orders)?
-            .with_bool("hasMembership", membership_summary.is_some())?
-            .with_bool("hasLatestOrder", latest_order.is_some())?
+            .with_bool("hasMembership", has_membership)?
+            .with_bool("hasLatestOrder", has_latest_order)?
+            .with_bool("hasPendingMembershipOrder", has_pending_membership_order)?
+            .with_bool("needsMembershipPurchase", needs_membership_purchase)?
             .with_value("stateSource", RenderValue::text("storefront-session"))?
             .with_value("stateSummary", RenderValue::text(state_summary))?
             .with_value(
@@ -1816,16 +1850,17 @@ fn storefront_fixture(
         .with_value("paymentMethodLabel", RenderValue::text("Card"))?
         .with_value("paymentStatus", RenderValue::text("ready_for_payment"))?
         .with_value("paymentStatusLabel", RenderValue::text("Ready for payment"))?
-        .with_value("providerCode", RenderValue::text("platform_fallback"))?
+        .with_value(
+            "providerCode",
+            RenderValue::text(payment_provider_code(None)),
+        )?
         .with_value(
             "providerLabel",
-            RenderValue::text(payment_provider_label().to_string()),
+            RenderValue::text(payment_provider_label(None).to_string()),
         )?
         .with_value(
             "providerSummary",
-            RenderValue::text(
-                "This checkout is using the platform fallback payment path until a provider-backed handoff is installed.",
-            ),
+            RenderValue::text(payment_provider_summary(None)),
         )?
         .with_value("submitLabel", RenderValue::text("Place order"))?
         .with_value("checkoutEmail", RenderValue::text("member@example.com"))?
@@ -2061,7 +2096,7 @@ fn confirmation_model(order: &Order) -> Result<RenderModel, TemplateModelError> 
         .and_then(|model| {
             model.with_value(
                 "providerLabel",
-                RenderValue::text(payment_provider_label().to_string()),
+                RenderValue::text(payment_provider_label(None).to_string()),
             )
         })
         .and_then(|model| model.with_bool("hasPaymentLast4", true))
@@ -2433,7 +2468,10 @@ mod tests {
 
         assert!(html.contains("/en-GB/shop/products/harbor-cap"), "{html}");
         assert!(html.contains("/en-GB/shop/collections/featured"), "{html}");
-        assert!(html.contains("/en-GB/shop/collections/memberships"), "{html}");
+        assert!(
+            html.contains("/en-GB/shop/collections/memberships"),
+            "{html}"
+        );
         assert!(html.contains("Gold Membership"), "{html}");
     }
 

@@ -85,6 +85,12 @@ pub(crate) struct RuntimeServerState {
     auth_explainer: Option<Arc<dyn auth::LiveAuthExplainer>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommercePaymentProviderConfig {
+    pub code: String,
+    pub checkout_mode: String,
+}
+
 impl fmt::Debug for RuntimeServerState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RuntimeServerState")
@@ -340,15 +346,65 @@ pub(crate) fn resolve_commerce_payment_webhook_secret<R: SecretResolver>(
     config: &PlatformConfig,
     resolver: &R,
 ) -> Result<Option<String>, RuntimeServerError> {
-    let Some(commerce_settings) = config.modules.settings.get("commerce") else {
+    if let Some(provider) = configured_commerce_payment_provider(config) {
+        if let Some(secret) =
+            resolve_module_payment_webhook_secret(config, &provider.module_config_key(), resolver)?
+        {
+            return Ok(Some(secret));
+        }
+    }
+
+    resolve_module_payment_webhook_secret(config, "commerce", resolver)
+}
+
+pub(crate) fn configured_commerce_payment_provider(
+    config: &PlatformConfig,
+) -> Option<CommercePaymentProviderConfig> {
+    let Some(stripe_settings) = config.modules.settings.get("commerce-payments-stripe") else {
+        return None;
+    };
+    let table = stripe_settings.as_table()?;
+    let code = table
+        .get("provider")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("stripe")
+        .to_ascii_lowercase();
+    let checkout_mode = table
+        .get("checkout_mode")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("webhook-confirmation")
+        .to_ascii_lowercase();
+    Some(CommercePaymentProviderConfig {
+        code,
+        checkout_mode,
+    })
+}
+
+fn resolve_module_payment_webhook_secret<R: SecretResolver>(
+    config: &PlatformConfig,
+    module_key: &str,
+    resolver: &R,
+) -> Result<Option<String>, RuntimeServerError> {
+    let Some(module_settings) = config.modules.settings.get(module_key) else {
         return Ok(None);
     };
-    let Some(table) = commerce_settings.as_table() else {
+    let Some(table) = module_settings.as_table() else {
         return Err(RuntimeServerError::Configuration {
-            reason: "modules.commerce must be a table when provided".to_string(),
+            reason: format!("modules.{module_key} must be a table when provided"),
         });
     };
-    let Some(secret_value) = table.get("payment_webhook_secret") else {
+    let secret_field = if table.contains_key("webhook_secret") {
+        "webhook_secret"
+    } else if table.contains_key("payment_webhook_secret") {
+        "payment_webhook_secret"
+    } else {
+        return Ok(None);
+    };
+    let Some(secret_value) = table.get(secret_field) else {
         return Ok(None);
     };
     let secret_ref: SecretRef =
@@ -356,11 +412,101 @@ pub(crate) fn resolve_commerce_payment_webhook_secret<R: SecretResolver>(
             .clone()
             .try_into()
             .map_err(|error| RuntimeServerError::Configuration {
-                reason: format!(
-                    "modules.commerce.payment_webhook_secret is invalid: {error}"
-                ),
+                reason: format!("modules.{module_key}.{secret_field} is invalid: {error}"),
             })?;
     Ok(Some(resolver.resolve(&secret_ref)?))
+}
+
+impl CommercePaymentProviderConfig {
+    pub(crate) fn module_config_key(&self) -> String {
+        match self.code.as_str() {
+            "stripe" => "commerce-payments-stripe".to_string(),
+            other => format!("commerce-payments-{other}"),
+        }
+    }
+
+    pub(crate) fn label(&self) -> String {
+        match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", "webhook-confirmation") => "Stripe webhook confirmation".to_string(),
+            ("stripe", _) => "Stripe payment provider".to_string(),
+            (other, "webhook-confirmation") => {
+                format!(
+                    "{} webhook confirmation",
+                    display_payment_provider_name(other)
+                )
+            }
+            (other, _) => format!("{} payment provider", display_payment_provider_name(other)),
+        }
+    }
+
+    pub(crate) fn summary(&self) -> String {
+        match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", "webhook-confirmation") => "This checkout uses the installed Stripe payment provider. The order stays visible until the signed Stripe webhook confirms the payment result.".to_string(),
+            ("stripe", _) => "This checkout uses the installed Stripe payment provider for payment confirmation.".to_string(),
+            (other, "webhook-confirmation") => format!(
+                "This checkout uses the installed {} payment provider. The order stays visible until its signed webhook confirms the payment result.",
+                display_payment_provider_name(other)
+            ),
+            (other, _) => format!(
+                "This checkout uses the installed {} payment provider for payment confirmation.",
+                display_payment_provider_name(other)
+            ),
+        }
+    }
+
+    pub(crate) fn submit_label(&self) -> String {
+        match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", "webhook-confirmation") => {
+                "Place order and wait for Stripe confirmation".to_string()
+            }
+            (_, "webhook-confirmation") => {
+                format!(
+                    "Place order and wait for {} confirmation",
+                    display_payment_provider_name(&self.code)
+                )
+            }
+            _ => "Place order".to_string(),
+        }
+    }
+
+    pub(crate) fn pending_confirmation_summary(&self, order_id: &str) -> String {
+        match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", "webhook-confirmation") => {
+                format!("Order {order_id} was received. Stripe still needs to confirm payment.")
+            }
+            (_, "webhook-confirmation") => format!(
+                "Order {order_id} was received. {} still needs to confirm payment.",
+                display_payment_provider_name(&self.code)
+            ),
+            _ => format!("Order {order_id} was received and is awaiting payment confirmation."),
+        }
+    }
+
+    pub(crate) fn pending_next_step(&self) -> String {
+        match (self.code.as_str(), self.checkout_mode.as_str()) {
+            ("stripe", "webhook-confirmation") => {
+                "Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives.".to_string()
+            }
+            (_, "webhook-confirmation") => format!(
+                "{} has not confirmed this payment yet. The order will move forward after its signed webhook arrives.",
+                display_payment_provider_name(&self.code)
+            ),
+            _ => "Payment confirmation is pending. The order will move forward after the provider callback arrives.".to_string(),
+        }
+    }
+}
+
+fn display_payment_provider_name(code: &str) -> String {
+    match code {
+        "stripe" => "Stripe".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => "Payment provider".to_string(),
+            }
+        }
+    }
 }
 
 fn build_auth_explainer(

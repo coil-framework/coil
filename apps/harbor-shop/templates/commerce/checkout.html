@@ -69,11 +69,11 @@
           </p>
           <div class="checkout-provider">
             <p>
-              <strong dv:text="${checkout.providerLabel}">Platform fallback payment path</strong>
+              <strong dv:text="${checkout.providerLabel}">Stripe payment confirmation</strong>
             </p>
             <p dv:text="${checkout.providerSummary}">
-              This checkout is using the platform fallback payment path until a provider-backed
-              handoff is installed.
+              This checkout uses the installed Stripe payment provider and waits for its signed
+              webhook confirmation before the order moves forward.
             </p>
             <p>
               Intent

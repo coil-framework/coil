@@ -70,10 +70,12 @@ explain_api = false
 tenant_id = 101
 
 [modules]
-enabled = ["cms", "media", "commerce", "memberships", "events", "admin", "ops"]
+enabled = ["cms", "media", "commerce", "commerce-payments-stripe", "memberships", "events", "admin", "ops"]
 
-[modules.commerce]
-payment_webhook_secret = { kind = "env", var = "PAYMENT_WEBHOOK_SECRET" }
+[modules."commerce-payments-stripe"]
+provider = "stripe"
+checkout_mode = "webhook-confirmation"
+webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
 
 [wasm]
 directory = "apps/harbor-shop/extensions"

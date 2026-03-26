@@ -60,12 +60,11 @@
         </article>
       </section>
 
-      <section class="memberships-page__summary" dv:unless="${account.hasMembership}">
+      <section class="memberships-page__summary" dv:if="${account.hasPendingMembershipOrder}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
-          <h2 dv:if="${account.hasLatestOrder}">Pending activation</h2>
-          <h2 dv:unless="${account.hasLatestOrder}">Membership not active yet</h2>
-          <p dv:if="${account.hasLatestOrder}">
+          <h2>Pending activation</h2>
+          <p>
             Your latest order
             <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
             is
@@ -74,16 +73,22 @@
             for this account view. Check order history for the latest payment state, then return
             here once this browser session shows the order as captured.
           </p>
-          <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
-            Join to unlock early access, subscriber-only bundles, and concierge support.
-          </p>
-          <a class="button button--secondary" href="/account/orders" dv:if="${account.hasLatestOrder}">
+          <a class="button button--secondary" href="/account/orders">
             View order history
           </a>
+        </article>
+      </section>
+
+      <section class="memberships-page__summary" dv:if="${account.needsMembershipPurchase}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Current tier</p>
+          <h2>Membership not active yet</h2>
+          <p dv:text="${account.membershipEmptyText}">
+            Join to unlock early access, subscriber-only bundles, and concierge support.
+          </p>
           <a
             class="button"
             href="/en-GB/shop/collections/memberships"
-            dv:unless="${account.hasLatestOrder}"
             dv:attr="href=${account.membershipCtaUrl}"
           >
             Explore memberships

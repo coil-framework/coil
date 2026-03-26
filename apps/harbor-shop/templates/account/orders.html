@@ -95,8 +95,8 @@
             </p>
             <a class="button" href="/account/memberships">View memberships</a>
           </div>
-          <div dv:unless="${account.hasMembership}">
-            <p dv:if="${account.hasLatestOrder}">
+          <div dv:if="${account.hasPendingMembershipOrder}">
+            <p>
               Latest order
               <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
               is
@@ -105,17 +105,19 @@
               captured for this account view. Use order history to confirm the latest status, then
               return to memberships once payment has settled.
             </p>
-            <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
+            <a class="button" href="/account/memberships">View memberships</a>
+            <a class="button button--secondary" href="/account/orders">
+              Review this order
+            </a>
+          </div>
+          <div dv:if="${account.needsMembershipPurchase}">
+            <p dv:text="${account.membershipEmptyText}">
               No active membership is attached yet.
             </p>
             <a class="button" href="/account/memberships">View memberships</a>
-            <a class="button button--secondary" href="/account/orders" dv:if="${account.hasLatestOrder}">
-              Review this order
-            </a>
             <a
               class="button button--secondary"
               href="/shop/collections/memberships"
-              dv:unless="${account.hasLatestOrder}"
               dv:attr="href=${account.membershipCtaUrl}"
             >
               Explore memberships

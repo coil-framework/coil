@@ -40,29 +40,30 @@
         </p>
         <a class="button" href="/account/memberships">View membership details</a>
       </div>
-      <div dv:unless="${account.hasMembership}">
-        <p dv:if="${account.hasLatestOrder}">
+      <div dv:if="${account.hasPendingMembershipOrder}">
+        <p>
           <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
           <span dv:text="${account.latestOrderStatus}">Pending Payment</span>
         </p>
-        <p dv:if="${account.hasLatestOrder}">
+        <p>
           Membership access appears here only after a qualifying membership purchase is captured for
           this account view. Review order history first, then return here once the payment state
           settles for this browser session.
         </p>
-        <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
-          No membership is attached yet. Join to unlock early-access drops and concierge support.
-        </p>
-        <a class="button" href="/account/memberships" dv:if="${account.hasLatestOrder}">
+        <a class="button" href="/account/memberships">
           View memberships
         </a>
-        <a class="button button--secondary" href="/account/orders" dv:if="${account.hasLatestOrder}">
+        <a class="button button--secondary" href="/account/orders">
           View order history
         </a>
+      </div>
+      <div dv:if="${account.needsMembershipPurchase}">
+        <p dv:text="${account.membershipEmptyText}">
+          No membership is attached yet. Join to unlock early-access drops and concierge support.
+        </p>
         <a
           class="button"
           href="/en-GB/shop/collections/memberships"
-          dv:unless="${account.hasLatestOrder}"
           dv:attr="href=${account.membershipCtaUrl}"
         >
           Explore memberships

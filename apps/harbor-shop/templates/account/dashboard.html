@@ -61,34 +61,30 @@
             <p dv:if="${account.hasMembership}">
               Check your active tiers, renewals, and entitlement status.
             </p>
-            <div dv:unless="${account.hasMembership}">
-              <p dv:if="${account.hasLatestOrder}">
-                Latest order
-                <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
-                is
-                <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
-                Membership access moves into this account area after a qualifying membership
-                purchase is captured for this browser session.
-              </p>
-              <p dv:unless="${account.hasLatestOrder}">
-                No active membership is attached to this account view yet. Open the membership area
-                to check qualifying orders or return to the storefront collection to join.
-              </p>
-            </div>
+            <p dv:if="${account.hasPendingMembershipOrder}">
+              Latest order
+              <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+              is
+              <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
+              Membership access moves into this account area after a qualifying membership purchase
+              is captured for this browser session.
+            </p>
+            <p dv:if="${account.needsMembershipPurchase}">
+              No active membership is attached to this account view yet. Open the membership area
+              to check qualifying orders or return to the storefront collection to join.
+            </p>
             <a class="button" href="/account/memberships">View memberships</a>
-            <div dv:unless="${account.hasMembership}">
-              <a class="button button--secondary" href="/account/orders" dv:if="${account.hasLatestOrder}">
-                View order history
-              </a>
-              <a
-                class="button button--secondary"
-                href="/en-GB/shop/collections/memberships"
-                dv:unless="${account.hasLatestOrder}"
-                dv:attr="href=${account.membershipCtaUrl}"
-              >
-                Explore memberships
-              </a>
-            </div>
+            <a class="button button--secondary" href="/account/orders" dv:if="${account.hasPendingMembershipOrder}">
+              View order history
+            </a>
+            <a
+              class="button button--secondary"
+              href="/en-GB/shop/collections/memberships"
+              dv:if="${account.needsMembershipPurchase}"
+              dv:attr="href=${account.membershipCtaUrl}"
+            >
+              Explore memberships
+            </a>
           </article>
           <article class="account-card">
             <h2>Orders and storefront</h2>

@@ -1575,7 +1575,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
     assert!(checkout_body.contains("Gold Membership"), "{checkout_body}");
     assert!(checkout_body.contains("£118.00"), "{checkout_body}");
     assert!(
-        checkout_body.contains("Stripe payment confirmation"),
+        checkout_body.contains("Platform fallback payment path"),
         "{checkout_body}"
     );
     assert!(checkout_body.contains("PAY-50001"), "{checkout_body}");
@@ -2015,7 +2015,7 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
     assert!(checkout_body.contains("Harbor Cap"), "{checkout_body}");
     assert!(checkout_body.contains("£58.00"), "{checkout_body}");
     assert!(
-        checkout_body.contains("Stripe payment confirmation"),
+        checkout_body.contains("Platform fallback payment path"),
         "{checkout_body}"
     );
     assert!(checkout_body.contains("PAY-50001"), "{checkout_body}");
@@ -2941,6 +2941,7 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
         .build()
         .unwrap();
@@ -3076,8 +3077,14 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
         "{cart_body}"
     );
     assert!(cart_body.contains("Harbor Cap"), "{cart_body}");
-    assert!(cart_body.contains("/en-GB/shop/products/harbor-cap"), "{cart_body}");
-    assert!(cart_body.contains("/en-GB/shop/collections/featured"), "{cart_body}");
+    assert!(
+        cart_body.contains("/en-GB/shop/products/harbor-cap"),
+        "{cart_body}"
+    );
+    assert!(
+        cart_body.contains("/en-GB/shop/collections/featured"),
+        "{cart_body}"
+    );
     assert!(cart_body.contains("/en-GB/shop/collections"), "{cart_body}");
     assert!(cart_body.contains("Checkout"), "{cart_body}");
 }
@@ -3328,6 +3335,7 @@ async fn server_host_ignores_regressive_payment_failure_after_capture() {
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
         .build()
         .unwrap();
@@ -3657,6 +3665,7 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
         .build()
@@ -3946,6 +3955,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
         .build()
@@ -3996,7 +4006,10 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
     );
     assert!(account_body.contains("Open checkout"), "{account_body}");
     assert!(account_body.contains("Continue shopping"), "{account_body}");
-    assert!(account_body.contains("Explore memberships"), "{account_body}");
+    assert!(
+        account_body.contains("Explore memberships"),
+        "{account_body}"
+    );
 
     let order_history_response = server
         .respond(
@@ -4092,6 +4105,7 @@ async fn server_host_can_end_a_checked_in_harbor_shop_account_session() {
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
         .build()
@@ -4206,6 +4220,7 @@ async fn server_host_renders_checked_in_harbor_shop_catalog_collection_and_produ
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
         .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
         .build()
         .unwrap();
@@ -4350,6 +4365,7 @@ async fn server_host_injects_hidden_csrf_inputs_into_checked_in_storefront_forms
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
         .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
         .build()
@@ -4518,6 +4534,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         .with_module(AdminModule::new())
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
         .build()
@@ -4836,7 +4853,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
     )
     .unwrap();
     assert!(
-        account_body.contains("No active membership is attached to this account view yet."),
+        account_body.contains("Membership access moves into this account area"),
         "{account_body}"
     );
     assert!(account_body.contains("Pending Payment"), "{account_body}");
@@ -4954,6 +4971,7 @@ async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
         .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
         .build()
@@ -5231,7 +5249,7 @@ async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
     )
     .unwrap();
     assert!(
-        account_body.contains("No active membership is attached to this account view yet."),
+        account_body.contains("Membership access moves into this account area"),
         "{account_body}"
     );
     assert!(account_body.contains("Pending Payment"), "{account_body}");
@@ -5788,6 +5806,7 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
         .with_module(AdminModule::new())
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
         .build()
         .unwrap();
@@ -5881,7 +5900,10 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
                 assert!(body.contains("navigation editor"), "{route}: {body}");
             }
             "/admin/redirects" => {
-                assert!(body.contains("tested redirect inventory"), "{route}: {body}");
+                assert!(
+                    body.contains("tested redirect inventory"),
+                    "{route}: {body}"
+                );
             }
             _ => {}
         }
@@ -5900,6 +5922,7 @@ async fn server_host_renders_live_completed_orders_on_checked_in_admin_orders_su
         .with_module(AdminModule::new())
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
         .build()
         .unwrap();

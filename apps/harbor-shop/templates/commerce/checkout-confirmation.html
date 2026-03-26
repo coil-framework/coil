@@ -1,7 +1,7 @@
 <!doctype html>
 <html
   xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Order confirmed'"
+  dv:with="pageTitle='Order status'"
   lang="en-GB"
   dv:attr="lang=${locale}"
 >
@@ -17,9 +17,18 @@
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main account-page">
+      <section class="storefront-flash" dv:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" dv:text="${message.level}">info</p>
+          <p dv:text="${message.text}">Your order is still moving through payment confirmation.</p>
+        </article>
+      </section>
       <section class="account-page__intro" dv:if="${hasConfirmation}">
         <p class="account-page__eyebrow">Confirmation</p>
-        <h1>Order received</h1>
+        <h1>Order status</h1>
+        <p>
+          Review the current payment state and next step before leaving this page.
+        </p>
         <p class="checkout-confirmation__order">
           Reference <strong dv:text="${confirmation.orderNumber}">HS-10482</strong>
         </p>
@@ -36,6 +45,10 @@
         <div class="checkout-confirmation__payment">
           <p>
             <strong dv:text="${confirmation.providerLabel}">Platform fallback payment path</strong>
+          </p>
+          <p>
+            The sample store keeps the order in view while payment moves from submission to
+            provider confirmation.
           </p>
           <p dv:text="${confirmation.paymentSummary}">
             Card ending 4242, reference PAY-50001
@@ -61,7 +74,7 @@
       </section>
       <section class="account-page__intro" dv:unless="${hasConfirmation}">
         <p class="account-page__eyebrow">Confirmation</p>
-        <h1>No recent order to confirm</h1>
+        <h1>No recent order status to review</h1>
         <p dv:text="${confirmation.nextStep}">
           There is no recent checkout confirmation for this browser session yet.
         </p>

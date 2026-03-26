@@ -24,6 +24,10 @@
           The page is structured for a short, trustworthy flow: contact first, delivery second,
           then payment and final review.
         </p>
+        <p>
+          Orders stay in an awaiting-confirmation state until the provider callback updates the
+          payment result.
+        </p>
       </section>
       <section class="storefront-flash" dv:if="${hasFlashMessages}">
         <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
@@ -76,6 +80,10 @@
               <strong dv:text="${checkout.paymentReference}">PAYMENT-PENDING</strong>
               is
               <span dv:text="${checkout.paymentStatusLabel}">Ready for payment</span>.
+            </p>
+            <p>
+              If confirmation fails, the basket is restored so another checkout attempt can start
+              from the cart.
             </p>
           </div>
         </section>

@@ -19,34 +19,50 @@
     <main class="site-main collections-page">
       <section class="collections-page__intro">
         <p class="collections-page__eyebrow">Collections</p>
-        <h1>Browse by intention, not just by SKU.</h1>
         <p>
-          Each collection is meant to act like a storefront landing page: a clear promise, a short
-          story, and a fast path into products.
+          <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+          <span>/</span>
+          <span>Collections</span>
         </p>
+        <h1>Choose the collection before you choose the product.</h1>
+        <p>
+          This page should send customers into a tighter merchandising edit first, then on to
+          product detail and cart.
+        </p>
+        <div class="checkout-actions">
+          <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">Browse full catalog</a>
+          <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+            Review cart
+          </a>
+        </div>
       </section>
 
       <div dv:replace="~{commerce/collection-grid :: grid}"></div>
 
-      <section class="collections-page__editorial">
+      <section class="catalog-assurance">
         <article>
-          <h2>Seasonal edits</h2>
+          <h2>Use this page as the browse handoff</h2>
           <p>
-            Rotate these pages around launches, events, and repeat-purchase campaigns so customers
-            always see a relevant entry point.
+            The next click from here should be a collection detail page, not a dead-end editorial
+            block.
           </p>
         </article>
         <article>
-          <h2>Browse paths that convert</h2>
-          <ul>
-            <li>Launch into a featured collection for campaign traffic and merch drops.</li>
-            <li>Use product detail when the customer already knows what they want.</li>
-            <li>Return shoppers can keep momentum by jumping straight from collection to cart.</li>
-          </ul>
-          <div class="checkout-actions">
-            <a class="button" href="/shop">Open full catalog</a>
-            <a class="button button--secondary" href="/cart">Review basket</a>
-          </div>
+          <h2>Then move into product detail</h2>
+          <p>
+            Once the customer is in the right collection, product detail should be the only
+            decision surface before cart.
+          </p>
+        </article>
+      </section>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>Prefer a single item?</h2>
+          <p>
+            Use the product listings below when the customer already knows the item they want and
+            just needs a short path into product detail and cart.
+          </p>
         </article>
       </section>
 

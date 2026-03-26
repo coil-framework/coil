@@ -26,6 +26,13 @@
         <p dv:if="${operator.hasPrincipal}">
           Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
         </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Principal id <code dv:text="${operator.principalId}">operator-live-1</code>.
+        </p>
+        <p dv:if="${operator.hasSession}">
+          The current browser session is active, so you can cross-check nearby operator surfaces
+          without re-authenticating.
+        </p>
         <p>
           This page should answer who changed what and when. In the checked-in sample app the
           audit backend is not wired yet, so the right operator move is to use the adjacent admin
@@ -83,6 +90,14 @@
               audit persistence is wired into the back office.
             </p>
           </article>
+        </div>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin" dv:attr="href=${links.adminDashboard}">
+            Back to dashboard
+          </a>
+          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
+            Review navigation
+          </a>
         </div>
       </section>
     </main>

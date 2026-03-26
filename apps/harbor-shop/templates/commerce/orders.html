@@ -26,10 +26,12 @@
         <p dv:if="${operator.hasPrincipal}">
           Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
         </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Principal id <code dv:text="${operator.principalId}">operator-live-1</code>.
+        </p>
         <p>
-          This view is for day-one support and launch checks: confirm order references, receipt
-          email handoff, and the storefront-visible payment summary before you promise customers
-          that post-checkout operations are ready.
+          This view is for day-one support and launch checks. It currently exposes only the order
+          reference, order status, and total that the checked-in runtime can prove here.
         </p>
       </section>
 
@@ -41,8 +43,8 @@
             <p>Use the order status to distinguish pending storefront checkout from captured or completed customer purchases.</p>
           </article>
           <article class="admin-card">
-            <h2>Payment context</h2>
-            <p>Use payment references and receipt emails when reconciling support requests or webhook behavior.</p>
+            <h2>Current data contract</h2>
+            <p>This screen does not yet expose payment references, receipt email, or line-item detail, so use it as an honest queue rather than a full order console.</p>
           </article>
           <article class="admin-card">
             <h2>Current limitation</h2>
@@ -77,8 +79,14 @@
           </tbody>
         </table>
         <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin" dv:attr="href=${links.adminDashboard}">
+            Back to dashboard
+          </a>
           <a class="button button--secondary" href="/account/orders" dv:attr="href=${links.orders}">
             Open storefront order history
+          </a>
+          <a class="button button--secondary" href="/shop" dv:attr="href=${links.catalog}">
+            Open storefront catalog
           </a>
         </div>
       </section>
@@ -93,9 +101,14 @@
           Use the storefront checkout flow to generate the first supportable order, then return
           here to confirm that the order queue and payment handoff are visible to operators.
         </p>
-        <a class="button" href="/shop" dv:attr="href=${links.catalog}">
-          Open storefront
-        </a>
+        <div class="admin-page__actions">
+          <a class="button" href="/shop" dv:attr="href=${links.catalog}">
+            Open storefront
+          </a>
+          <a class="button button--secondary" href="/admin" dv:attr="href=${links.adminDashboard}">
+            Back to dashboard
+          </a>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

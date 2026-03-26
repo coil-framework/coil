@@ -20,6 +20,10 @@
       <section class="cart-page__intro">
         <p class="cart-page__eyebrow">Cart</p>
         <h1>Review the basket before moving to payment.</h1>
+        <p>
+          If payment confirmation fails, the order lines return here so checkout can start again
+          from a restored basket.
+        </p>
       </section>
       <section class="storefront-flash" dv:if="${hasFlashMessages}">
         <article class="storefront-flash__message" dv:each="message : ${flashMessages}">

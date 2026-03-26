@@ -26,6 +26,11 @@
         <p dv:if="${operator.hasPrincipal}">
           Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
         </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Principal id
+          <code dv:text="${operator.principalId}">operator-live-1</code>
+          is using the current admin session.
+        </p>
         <p dv:unless="${operator.hasPrincipal}">
           This operator view is using the current browser session.
         </p>
@@ -98,6 +103,28 @@
             Open panel
           </a>
         </article>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operator route set</p>
+        <p>
+          These routes are inspection surfaces for the checked-in store. They do not yet replace
+          full audit, capture, refund, or CMS editing workflows.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+            Orders
+          </a>
+          <a class="button button--secondary" href="/admin/catalog/products" dv:attr="href=${links.adminCatalog}">
+            Catalog
+          </a>
+          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            Pages
+          </a>
+          <a class="button button--secondary" href="/admin/audit" dv:attr="href=${links.adminAudit}">
+            Audit
+          </a>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

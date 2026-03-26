@@ -23,6 +23,18 @@
         <p dv:text="${page.summary}">
           Navigation trees and top-level route links.
         </p>
+        <p>
+          This is the current live route set, not a drag-and-drop navigation editor. Use it to
+          confirm what customers can reach from primary navigation today.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            Review page inventory
+          </a>
+          <a class="button button--secondary" href="/admin/redirects" dv:attr="href=${links.adminRedirects}">
+            Review redirects
+          </a>
+        </div>
       </section>
 
       <section class="admin-panel" dv:if="${hasNavigationItems}">
@@ -63,6 +75,14 @@
           Operators should not launch until the public storefront paths customers rely on are
           reachable from this primary navigation set or intentionally excluded.
         </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            Review pages
+          </a>
+          <a class="button button--secondary" href="/admin/redirects" dv:attr="href=${links.adminRedirects}">
+            Review redirects
+          </a>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

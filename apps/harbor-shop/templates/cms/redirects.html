@@ -23,6 +23,18 @@
         <p dv:text="${page.summary}">
           Redirect rules and route handoff records.
         </p>
+        <p>
+          Use this surface as an explicit migration and SEO checklist. It is not yet a persisted
+          redirect administration console.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            Review pages
+          </a>
+          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
+            Review navigation
+          </a>
+        </div>
       </section>
 
       <section class="admin-panel" dv:if="${hasRedirects}">
@@ -66,6 +78,14 @@
             <h3>Operator check</h3>
             <p>Keep a tested redirect inventory alongside launch and rollback plans, even if persistence is not wired yet.</p>
           </article>
+        </div>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            Review pages
+          </a>
+          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
+            Review navigation
+          </a>
         </div>
       </section>
     </main>

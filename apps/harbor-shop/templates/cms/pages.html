@@ -27,6 +27,18 @@
           The Harbor Shop sample app does not persist CMS records yet. This route reflects the
           live page inventory that operators can actually send customers to today.
         </p>
+        <p>
+          Treat this as the launch route list for support, merchandising, and migration checks,
+          not as a page editor.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
+            Check navigation
+          </a>
+          <a class="button button--secondary" href="/admin/redirects" dv:attr="href=${links.adminRedirects}">
+            Check redirects
+          </a>
+        </div>
       </section>
 
       <section class="admin-panel" dv:if="${hasContentPages}">
@@ -71,6 +83,14 @@
           Before launch, confirm that every customer-facing path you plan to market or migrate
           from WordPress appears in this inventory.
         </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
+            Review navigation
+          </a>
+          <a class="button button--secondary" href="/admin/redirects" dv:attr="href=${links.adminRedirects}">
+            Review redirects
+          </a>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

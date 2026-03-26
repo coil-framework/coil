@@ -27,6 +27,18 @@
           Use this page to verify what customers can actually browse today. It is suited to route
           and merchandising checks, not yet full product editing.
         </p>
+        <p>
+          Pricing, inventory, and publish mutations are still handled outside this screen, so use
+          the linked storefront routes as the source of truth for what is currently sellable.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/shop" dv:attr="href=${links.catalog}">
+            Open storefront catalog
+          </a>
+          <a class="button button--secondary" href="/shop/collections" dv:attr="href=${links.collections}">
+            Open storefront collections
+          </a>
+        </div>
       </section>
 
       <section class="admin-panel">
@@ -115,6 +127,14 @@
           Operators should not advertise storefront launches until products and collections appear
           here and the linked storefront routes render correctly.
         </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/shop" dv:attr="href=${links.catalog}">
+            Open storefront catalog
+          </a>
+          <a class="button button--secondary" href="/shop/collections" dv:attr="href=${links.collections}">
+            Open storefront collections
+          </a>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

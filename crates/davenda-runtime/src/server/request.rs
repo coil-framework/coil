@@ -1019,7 +1019,7 @@ fn apply_native_storefront_mutations(
                 .as_ref()
                 .map(|order| {
                     format!(
-                        "Order {} is awaiting provider confirmation.",
+                        "Order {} was received. Payment is still awaiting provider confirmation.",
                         order.order_id
                     )
                 })
@@ -1069,11 +1069,11 @@ fn redirect_failed_checkout_confirmation(
         response_cookies,
         FlashLevel::Error,
         format!(
-            "Payment for order {} failed. Review the cart and try checkout again with a new payment attempt.",
+            "Payment for order {} failed. Your basket has been restored so you can review it and start checkout again.",
             order.order_id
         ),
     )?;
-    Ok(Some("/checkout".to_string()))
+    Ok(Some("/cart".to_string()))
 }
 
 fn dispatch_paid_order_event(

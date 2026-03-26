@@ -24,10 +24,11 @@
         </article>
       </section>
       <section class="account-page__intro" dv:if="${hasConfirmation}">
-        <p class="account-page__eyebrow">Confirmation</p>
-        <h1>Order status</h1>
+        <p class="account-page__eyebrow">Stripe return</p>
+        <h1>Order and payment status</h1>
         <p>
-          Review the current payment state and next step before leaving this page.
+          This is the return screen for the current browser session after checkout submission.
+          Review the payment state here before leaving the order.
         </p>
         <p class="checkout-confirmation__order">
           Reference <strong dv:text="${confirmation.orderNumber}">HS-10482</strong>
@@ -47,13 +48,26 @@
             <strong dv:text="${confirmation.providerLabel}">Stripe payment confirmation</strong>
           </p>
           <p>
-            The sample store keeps the order in view while payment moves from submission to
-            provider confirmation.
+            Harbor Shop has already recorded the order and is now waiting for the provider result
+            tied to this payment route.
+          </p>
+          <p>
+            Payment state
+            <strong dv:text="${confirmation.paymentStatus}">Awaiting provider confirmation</strong>.
           </p>
           <p dv:text="${confirmation.paymentSummary}">
             Card ending 4242, reference PAY-50001
           </p>
+          <p>
+            If you have just returned from Stripe, this page can remain in a pending state until
+            the signed confirmation reaches Harbor Shop.
+          </p>
         </div>
+        <ol class="checkout-list">
+          <li>Order recorded in Harbor Shop under the reference above.</li>
+          <li>Stripe confirmation updates the payment state shown on this page.</li>
+          <li>Order history and memberships in this same browser session reflect the final result.</li>
+        </ol>
         <ul class="checkout-summary checkout-summary--stacked" dv:if="${confirmation.hasLineItems}">
           <li dv:each="item : ${confirmation.lineItems}">
             <span dv:text="${item.title}">Harbor pantry set</span>
@@ -62,7 +76,11 @@
           </li>
         </ul>
         <div class="checkout-actions">
-          <a class="button" href="/account">View account</a>
+          <a class="button" href="/account/orders">View order history</a>
+          <a class="button button--secondary" href="/account">View account</a>
+          <a class="button button--secondary" href="/account/memberships" dv:if="${confirmation.hasMembershipItems}">
+            Check memberships
+          </a>
           <a
             class="button button--secondary"
             href="/en-GB/shop"
@@ -73,13 +91,18 @@
         </div>
       </section>
       <section class="account-page__intro" dv:unless="${hasConfirmation}">
-        <p class="account-page__eyebrow">Confirmation</p>
-        <h1>No recent order status to review</h1>
+        <p class="account-page__eyebrow">Stripe return</p>
+        <h1>No recent provider return to review</h1>
         <p dv:text="${confirmation.nextStep}">
           There is no recent checkout confirmation for this browser session yet.
         </p>
+        <p>
+          If you expected a Stripe return, reopen checkout or order history in the same browser
+          session and verify that the latest payment reference is still present.
+        </p>
         <div class="checkout-actions">
           <a class="button" href="/cart">Return to cart</a>
+          <a class="button button--secondary" href="/account/orders">View order history</a>
           <a
             class="button button--secondary"
             href="/en-GB/shop"

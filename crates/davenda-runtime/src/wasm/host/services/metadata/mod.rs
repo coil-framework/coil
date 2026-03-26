@@ -80,6 +80,17 @@ impl RuntimeMetadataBackend {
         })
     }
 
+    pub(super) fn record_operator_action(
+        &self,
+        kind: impl Into<String>,
+        app_id: &str,
+        request_id: Option<&str>,
+        principal_id: Option<&str>,
+    ) -> Result<(), String> {
+        let record = MetadataAuditRecord::operator_action(kind, app_id, request_id, principal_id);
+        self.backend.insert(&record)
+    }
+
     pub(super) fn snapshot(&self, limit: usize) -> Result<MetadataAuditSnapshot, String> {
         Ok(MetadataAuditSnapshot {
             backend: self.backend.kind(),
@@ -131,6 +142,31 @@ impl MetadataAuditRecord {
             request_id: context.trace.request_id.clone(),
             principal_kind: context.principal.kind.to_string(),
             principal_id: context.principal.id.clone(),
+        }
+    }
+
+    fn operator_action(
+        kind: impl Into<String>,
+        app_id: &str,
+        request_id: Option<&str>,
+        principal_id: Option<&str>,
+    ) -> Self {
+        let recorded_at_unix_seconds = unix_seconds_now();
+        Self {
+            id: 0,
+            recorded_at_unix_seconds,
+            kind: kind.into(),
+            app_id: app_id.to_string(),
+            trace_id: request_id
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| format!("audit-{recorded_at_unix_seconds}")),
+            request_id: request_id.map(ToOwned::to_owned),
+            principal_kind: if principal_id.is_some() {
+                "user".to_string()
+            } else {
+                "anonymous".to_string()
+            },
+            principal_id: principal_id.map(ToOwned::to_owned),
         }
     }
 }

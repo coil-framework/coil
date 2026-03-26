@@ -151,6 +151,17 @@ impl RuntimeWasmHostServices {
         self.metadata.location_label()
     }
 
+    pub(crate) fn record_operator_audit(
+        &self,
+        kind: impl Into<String>,
+        app_id: &str,
+        request_id: Option<&str>,
+        principal_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.metadata
+            .record_operator_action(kind, app_id, request_id, principal_id)
+    }
+
     pub(crate) fn record_webhook_observation(
         &self,
         source: &str,

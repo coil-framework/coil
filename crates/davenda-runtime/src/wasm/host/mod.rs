@@ -135,6 +135,17 @@ impl WasmHost {
         self.host_services.metadata_location()
     }
 
+    pub(crate) fn record_operator_audit(
+        &self,
+        kind: impl Into<String>,
+        app_id: &str,
+        request_id: Option<&str>,
+        principal_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.host_services
+            .record_operator_audit(kind, app_id, request_id, principal_id)
+    }
+
     pub fn webhook_observation_snapshot(
         &self,
         limit: usize,

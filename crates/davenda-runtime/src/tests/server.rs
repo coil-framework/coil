@@ -3990,6 +3990,164 @@ async fn server_host_renders_checked_in_harbor_shop_catalog_collection_and_produ
 }
 
 #[tokio::test]
+async fn server_host_injects_hidden_csrf_inputs_into_checked_in_storefront_forms() {
+    let app_name = unique_app_name("harbor-shop-runtime-storefront-form-csrf");
+    let config = config_with_app_name(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server.issue_session(SessionIssueRequest::new(), now).unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let product_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/shop/products/gold-membership")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let product_body = String::from_utf8(
+        to_bytes(product_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let add_token = storefront_csrf_token_from_body(&product_body, "commerce.add-to-cart");
+    assert!(
+        product_body.contains(&format!(r#"name="_csrf" value="{add_token}""#)),
+        "{product_body}"
+    );
+
+    let add_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &add_token)
+        .append_pair("product_slug", "gold-membership")
+        .append_pair("quantity", "1")
+        .finish();
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(add_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&add_response, "location"), "/cart");
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let cart_body = String::from_utf8(
+        to_bytes(cart_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let cart_update_token = storefront_csrf_token_from_body(&cart_body, "commerce.cart-update");
+    let checkout_start_token =
+        storefront_csrf_token_from_body(&cart_body, "commerce.checkout-start");
+    assert!(
+        cart_body.contains(&format!(r#"name="_csrf" value="{cart_update_token}""#)),
+        "{cart_body}"
+    );
+    assert!(
+        cart_body.contains(&format!(r#"name="_csrf" value="{checkout_start_token}""#)),
+        "{cart_body}"
+    );
+
+    let checkout_start_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &checkout_start_token)
+        .finish();
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(checkout_start_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&checkout_start, "location"), "/checkout");
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_body = String::from_utf8(
+        to_bytes(checkout_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let checkout_complete_token =
+        storefront_csrf_token_from_body(&checkout_body, "commerce.checkout-complete");
+    assert!(
+        checkout_body.contains(&format!(r#"name="_csrf" value="{checkout_complete_token}""#)),
+        "{checkout_body}"
+    );
+}
+
+#[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journey() {
     let app_name = unique_app_name("harbor-shop-runtime-customer-operator-journey");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));

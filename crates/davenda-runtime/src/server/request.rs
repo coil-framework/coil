@@ -15,6 +15,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
 const STOREFRONT_ORDER_HISTORY_JSON_PATH: &str = "/account/orders.json";
+const STOREFRONT_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
+    ("/cart/items", "x-davenda-storefront-csrf-commerce-add-to-cart"),
+    ("/cart", "x-davenda-storefront-csrf-commerce-cart-update"),
+    (
+        "/checkout/start",
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    ),
+    (
+        "/checkout/complete",
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    ),
+];
 const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.cart",
     "commerce.add-to-cart",
@@ -1267,6 +1279,7 @@ async fn apply_storefront_response_augmentation(
     let Some(augmentation) = augmentation else {
         return Ok(response);
     };
+    let form_tokens = storefront_form_tokens_from_headers(&augmentation.headers);
     for (name, value) in augmentation.headers {
         if let (Ok(name), Ok(value)) = (
             HeaderName::from_bytes(name.as_bytes()),
@@ -1295,6 +1308,7 @@ async fn apply_storefront_response_augmentation(
             reason: error.to_string(),
         })
     })?;
+    let html = inject_storefront_form_csrf_inputs(html, form_tokens.as_slice());
     Ok(Response::from_parts(
         parts,
         Body::from(inject_storefront_markup(html, markup.as_str())),
@@ -1311,6 +1325,62 @@ fn inject_storefront_markup(document_html: String, markup: &str) -> String {
         return html;
     }
     format!("{document_html}{markup}")
+}
+
+fn storefront_form_tokens_from_headers(
+    headers: &BTreeMap<String, String>,
+) -> Vec<(&'static str, String)> {
+    STOREFRONT_FORM_CSRF_HEADERS
+        .iter()
+        .filter_map(|(path, header)| headers.get(*header).map(|token| (*path, token.clone())))
+        .collect()
+}
+
+fn inject_storefront_form_csrf_inputs(
+    mut document_html: String,
+    form_tokens: &[(&'static str, String)],
+) -> String {
+    for (action_path, token) in form_tokens {
+        document_html = inject_hidden_csrf_input(document_html, action_path, token.as_str());
+    }
+    document_html
+}
+
+fn inject_hidden_csrf_input(
+    mut document_html: String,
+    action_path: &str,
+    token: &str,
+) -> String {
+    let action_attr = format!("action=\"{action_path}\"");
+    let hidden_input = format!(r#"<input type="hidden" name="_csrf" value="{token}" />"#);
+    let mut search_from = 0;
+
+    while let Some(relative) = document_html[search_from..].find(&action_attr) {
+        let action_index = search_from + relative;
+        let Some(form_start) = document_html[..action_index].rfind("<form") else {
+            search_from = action_index + action_attr.len();
+            continue;
+        };
+        let Some(open_end_relative) = document_html[action_index..].find('>') else {
+            break;
+        };
+        let open_end = action_index + open_end_relative;
+        let Some(close_relative) = document_html[open_end..].find("</form>") else {
+            break;
+        };
+        let close_index = open_end + close_relative;
+        if document_html[open_end..close_index].contains("name=\"_csrf\"") {
+            search_from = close_index + "</form>".len();
+            continue;
+        }
+        document_html.insert_str(open_end + 1, hidden_input.as_str());
+        search_from = open_end + 1 + hidden_input.len();
+        if search_from < form_start {
+            search_from = form_start;
+        }
+    }
+
+    document_html
 }
 
 async fn enforce_request_body_limit(

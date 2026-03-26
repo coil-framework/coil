@@ -46,8 +46,8 @@
           <span dv:text="${account.latestOrderStatus}">Pending Payment</span>
         </p>
         <p dv:if="${account.hasLatestOrder}">
-          Membership activation will appear here once the storefront order is captured and the
-          membership sync completes.
+          Membership access appears here only after a qualifying membership purchase is captured for
+          this account view.
         </p>
         <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
           No membership is attached yet. Join to unlock early-access drops and concierge support.
@@ -70,20 +70,21 @@
       <p class="account-panel__eyebrow">Support</p>
       <h2>Continue your account journey</h2>
       <p dv:if="${account.hasCustomerEmail}">
-        Review orders, retry checkout, or check membership activation for
+        Use this account area to review orders, retry checkout, or check membership access for
         <strong dv:text="${customer.email}">member@example.com</strong>.
       </p>
       <p dv:if="${account.hasPrincipal}">
-        Signed-in customer state will continue to expand here as more account tools ship.
+        This session already carries a durable customer identity inside the runtime.
       </p>
       <p dv:unless="${account.hasPrincipal}">
-        Formal sign-in is not installed yet, so this account area follows the current browser
-        session instead.
+        This customer account currently follows the browser session you are using. Keep this
+        browser active if you need to revisit the same order history or membership state.
       </p>
       <ul class="account-panel__list">
         <li><a href="/account/orders">Review order history</a></li>
-        <li><a href="/checkout">Retry checkout</a></li>
         <li><a href="/account/memberships">Check membership status</a></li>
+        <li><a href="/checkout">Open checkout</a></li>
+        <li><a href="/en-GB/shop" dv:attr="href=${links.catalog}">Continue shopping</a></li>
       </ul>
     </article>
   </div>

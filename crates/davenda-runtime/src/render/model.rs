@@ -421,18 +421,23 @@ fn apply_route_specific_bindings(
                 .with_object("membershipSummary", account.membership_summary)?;
         }
         "admin.dashboard" => {
+            let live_recent_orders = recent_orders_from_storefront(
+                live_storefront_state(plan, session, principal)?.as_ref(),
+            )?;
+            let order_count = if live_recent_orders.is_empty() {
+                fixture.recent_orders.len()
+            } else {
+                live_recent_orders.len()
+            };
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
                 .with_bool("hasAdminPanels", true)?
-                .with_list("adminPanels", admin_panels(locale, &fixture)?)?
+                .with_list("adminPanels", admin_panels(locale, &fixture, order_count)?)?
                 .with_value(
                     "catalogCount",
                     RenderValue::text(fixture.product_cards.len().to_string()),
                 )?
-                .with_value(
-                    "orderCount",
-                    RenderValue::text(fixture.recent_orders.len().to_string()),
-                )?
+                .with_value("orderCount", RenderValue::text(order_count.to_string()))?
                 .with_value(
                     "contentCount",
                     RenderValue::text(content_pages(locale)?.len().to_string()),
@@ -451,10 +456,18 @@ fn apply_route_specific_bindings(
                 )?;
         }
         "commerce.orders" => {
+            let live_recent_orders = recent_orders_from_storefront(
+                live_storefront_state(plan, session, principal)?.as_ref(),
+            )?;
+            let recent_orders = if live_recent_orders.is_empty() {
+                fixture.recent_orders.clone()
+            } else {
+                live_recent_orders
+            };
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasRecentOrders", !fixture.recent_orders.is_empty())?
-                .with_list("recentOrders", fixture.recent_orders.clone())?
+                .with_bool("hasRecentOrders", !recent_orders.is_empty())?
+                .with_list("recentOrders", recent_orders)?
                 .with_value(
                     "ordersEmptyText",
                     RenderValue::text(
@@ -712,6 +725,7 @@ fn operator_identity(
 fn admin_panels(
     locale: &str,
     fixture: &StorefrontFixture,
+    order_count: usize,
 ) -> Result<Vec<RenderModel>, TemplateModelError> {
     let content_pages = content_pages(locale)?;
     Ok(vec![
@@ -729,10 +743,7 @@ fn admin_panels(
             "Orders",
             "Review recent purchases",
             "/admin/orders",
-            &format!(
-                "{} completed orders are available for operator review.",
-                fixture.recent_orders.len()
-            ),
+            &format!("{order_count} completed orders are available for operator review."),
         )?,
         admin_panel(
             "Content",
@@ -1219,7 +1230,7 @@ fn live_account_surface_bindings(
         if principal_id.is_some() {
             "Using the live storefront session identity for this account view. Order history and membership state render from the current signed-in browser session."
         } else {
-            "This account area is using the current browser session. Formal sign-in is not installed yet, so completed checkouts from this browser become the account history shown here."
+            "This account area follows the current browser session. Completed checkouts from this browser become the order history shown here, and any qualifying membership purchase from this browser appears here after payment capture."
         },
         latest_order.as_ref(),
     );
@@ -1250,7 +1261,7 @@ fn live_account_surface_bindings(
                     if principal_id.is_some() {
                         "No order history is attached to this signed-in account yet. Completed storefront purchases will appear here once live account history is available."
                     } else {
-                        "This browser session has not completed checkout yet. Orders placed from this browser will appear here automatically."
+                        "This browser session has no completed orders yet. Orders placed from this browser will appear here automatically after checkout."
                     },
                 ),
             )?
@@ -1260,7 +1271,7 @@ fn live_account_surface_bindings(
                     if principal_id.is_some() {
                         "No active membership is attached to this signed-in account yet. Join from the storefront to unlock early access and renewal visibility."
                     } else {
-                        "No active membership is attached to this browser session yet. Membership purchases completed here will appear after checkout."
+                        "No active membership is attached to this browser session yet. A qualifying membership purchase completed here will appear after payment capture."
                     },
                 ),
             )?
@@ -2167,6 +2178,24 @@ mod tests {
         .unwrap()
     }
 
+    fn session_scoped_account_model() -> RenderModel {
+        let session = SessionContext {
+            session_id: Some("session-live-guest".to_string()),
+            resolved_from_cookie: true,
+        };
+        apply_route_specific_bindings(
+            None,
+            RenderModel::new(),
+            "memberships.account.dashboard",
+            "en-GB",
+            &BTreeMap::new(),
+            None,
+            Some(&session),
+            None,
+        )
+        .unwrap()
+    }
+
     fn render_fixture(route_name: &str, template_body: &str) -> String {
         let namespace = TemplateNamespace::new("customer-app").unwrap();
         let template = TemplateSourceParser::new()
@@ -2355,6 +2384,44 @@ mod tests {
         assert!(!html.contains("Paid"));
         assert!(!html.contains("Gold Membership"));
         assert!(html.contains("Membership unavailable"));
+    }
+
+    #[test]
+    fn session_scoped_account_surface_uses_honest_browser_session_guidance() {
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <p class="summary" dv:text="${account.stateSummary}">State</p>
+    <p class="orders-empty" dv:text="${account.ordersEmptyText}">Orders</p>
+    <p class="membership-empty" dv:text="${account.membershipEmptyText}">Membership</p>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    session_scoped_account_model(),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(
+            html.contains("follows the current browser session"),
+            "{html}"
+        );
+        assert!(html.contains("no completed orders yet"), "{html}");
+        assert!(html.contains("qualifying membership purchase"), "{html}");
     }
 }
 #[derive(Clone)]

@@ -27,14 +27,30 @@
 
       <section class="admin-panel" dv:if="${hasNavigationItems}">
         <p class="admin-panel__eyebrow">Primary navigation</p>
-        <ul class="admin-panel__list">
-          <li dv:each="item : ${navigationItems}">
-            <div>
-              <strong dv:text="${item.label}">Home</strong>
-              <span dv:text="${item.href}">/</span>
-            </div>
-          </li>
-        </ul>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Label</th>
+              <th scope="col">Href</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="item : ${navigationItems}">
+              <td>
+                <strong dv:text="${item.label}">Home</strong>
+              </td>
+              <td>
+                <code dv:text="${item.href}">/</code>
+              </td>
+              <td>
+                <a class="button button--secondary" href="/" dv:attr="href=${item.href}">
+                  Open route
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="admin-panel" dv:unless="${hasNavigationItems}">
@@ -42,6 +58,10 @@
         <h2>No navigation items yet</h2>
         <p dv:text="${navigationEmptyText}">
           Primary navigation is not configured yet.
+        </p>
+        <p>
+          Operators should not launch until the public storefront paths customers rely on are
+          reachable from this primary navigation set or intentionally excluded.
         </p>
       </section>
     </main>

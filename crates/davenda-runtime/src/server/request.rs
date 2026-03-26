@@ -228,6 +228,23 @@ pub(super) async fn execute_live_request(
     execution
         .response_cookies
         .extend(storefront_mutation_cookies);
+    let route_name = execution.route.route_name.clone();
+    let method = execution.method;
+    let session_id = execution.session.session_id.clone();
+    let principal_id = execution.principal.principal_id.clone();
+    if let Some(location) = redirect_failed_checkout_confirmation(
+        state,
+        route_name.as_str(),
+        method,
+        session_id.as_deref(),
+        principal_id.as_deref(),
+        &mut execution.response_cookies,
+    )? {
+        return Ok(storefront_redirect_response(
+            &location,
+            &execution.response_cookies,
+        ));
+    }
     let augmentation = storefront_response_augmentation(state, &execution)?;
     let response = execution_response(&state.plan, &state.wasm_host, execution)?;
     apply_storefront_response_augmentation(response, augmentation).await
@@ -804,8 +821,10 @@ fn validated_payment_webhook_from_execution(
     mac.update(event.as_bytes());
     mac.update(b":");
     mac.update(payment_reference.as_bytes());
-    let expected = format!("{:x}", mac.finalize().into_bytes());
-    if expected != signature {
+    let provided_signature = decode_hex_signature(signature).ok_or(
+        RuntimeServerError::Storefront(StorefrontStateError::InvalidPaymentWebhookSignature),
+    )?;
+    if mac.verify_slice(&provided_signature).is_err() {
         return Err(RuntimeServerError::Storefront(
             StorefrontStateError::InvalidPaymentWebhookSignature,
         ));
@@ -1024,6 +1043,39 @@ fn apply_native_storefront_mutations(
     Ok(None)
 }
 
+fn redirect_failed_checkout_confirmation(
+    state: &RuntimeServerState,
+    route_name: &str,
+    method: HttpMethod,
+    session_id: Option<&str>,
+    principal_id: Option<&str>,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if route_name != "commerce.checkout-confirmation" || method != HttpMethod::Get {
+        return Ok(None);
+    }
+    let Some(session_id) = session_id else {
+        return Ok(None);
+    };
+    let snapshot = state.storefront.snapshot(session_id, principal_id)?;
+    let Some(order) = snapshot.latest_order.as_ref() else {
+        return Ok(None);
+    };
+    if order.payment.status != "failed" {
+        return Ok(None);
+    }
+    push_storefront_flash(
+        state,
+        response_cookies,
+        FlashLevel::Error,
+        format!(
+            "Payment for order {} failed. Review the cart and try checkout again with a new payment attempt.",
+            order.order_id
+        ),
+    )?;
+    Ok(Some("/checkout".to_string()))
+}
+
 fn dispatch_paid_order_event(
     state: &RuntimeServerState,
     order: &StorefrontOrderSnapshot,
@@ -1052,6 +1104,29 @@ fn execution_form_field<'a>(execution: &'a RequestExecution, name: &str) -> Opti
         .form_fields
         .get(name)
         .and_then(|values| values.first().map(String::as_str))
+}
+
+fn decode_hex_signature(signature: &str) -> Option<Vec<u8>> {
+    if !signature.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(signature.len() / 2);
+    let mut chars = signature.as_bytes().chunks_exact(2);
+    for chunk in &mut chars {
+        let high = decode_hex_nibble(chunk[0])?;
+        let low = decode_hex_nibble(chunk[1])?;
+        bytes.push((high << 4) | low);
+    }
+    Some(bytes)
+}
+
+fn decode_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn storefront_sku_from_execution(

@@ -26,19 +26,61 @@
         <p dv:if="${operator.hasPrincipal}">
           Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
         </p>
+        <p>
+          This view is for day-one support and launch checks: confirm order references, receipt
+          email handoff, and the storefront-visible payment summary before you promise customers
+          that post-checkout operations are ready.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operator guidance</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Order state</h2>
+            <p>Use the order status to distinguish pending storefront checkout from captured or completed customer purchases.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Payment context</h2>
+            <p>Use payment references and receipt emails when reconciling support requests or webhook behavior.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Current limitation</h2>
+            <p>Capture, refund, and full order detail actions are not wired here yet, so treat this as an inspection queue rather than a mutation console.</p>
+          </article>
+        </div>
       </section>
 
       <section class="admin-panel" dv:if="${hasRecentOrders}">
         <p class="admin-panel__eyebrow">Recent orders</p>
-        <ol class="admin-panel__list">
-          <li dv:each="order : ${recentOrders}">
-            <div>
-              <strong dv:text="${order.reference}">ORD-10042</strong>
-              <span dv:text="${order.status}">Paid</span>
-            </div>
-            <p dv:text="${order.total}">£0.00</p>
-          </li>
-        </ol>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Order</th>
+              <th scope="col">Status</th>
+              <th scope="col">Total</th>
+              <th scope="col">Operator next step</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="order : ${recentOrders}">
+              <td>
+                <strong dv:text="${order.reference}">ORD-10042</strong>
+              </td>
+              <td dv:text="${order.status}">Paid</td>
+              <td dv:text="${order.total}">£0.00</td>
+              <td>
+                Review the matching storefront history and confirmation path before escalating
+                support or payment issues.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/account/orders" dv:attr="href=${links.orders}">
+            Open storefront order history
+          </a>
+        </div>
       </section>
 
       <section class="admin-panel" dv:unless="${hasRecentOrders}">
@@ -47,6 +89,13 @@
         <p dv:text="${ordersEmptyText}">
           No completed orders have been captured in the checked-in sample app yet.
         </p>
+        <p>
+          Use the storefront checkout flow to generate the first supportable order, then return
+          here to confirm that the order queue and payment handoff are visible to operators.
+        </p>
+        <a class="button" href="/shop" dv:attr="href=${links.catalog}">
+          Open storefront
+        </a>
       </section>
     </main>
     <footer class="site-footer">

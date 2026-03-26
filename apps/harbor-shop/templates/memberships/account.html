@@ -28,8 +28,7 @@
           Signed in as <strong dv:text="${customer.displayName}">Member Live</strong>.
         </p>
         <p dv:unless="${account.hasPrincipal}">
-          This membership view is following the current browser session until formal sign-in is
-          installed.
+          This membership view currently follows the browser session you are using right now.
         </p>
         <p dv:if="${account.hasLatestOrder}">
           Latest qualifying order
@@ -64,14 +63,15 @@
       <section class="memberships-page__summary" dv:unless="${account.hasMembership}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
-          <h2 dv:if="${account.hasLatestOrder}">Membership purchase pending</h2>
+          <h2 dv:if="${account.hasLatestOrder}">Membership not active yet</h2>
           <h2 dv:unless="${account.hasLatestOrder}">Membership not active yet</h2>
           <p dv:if="${account.hasLatestOrder}">
             Your latest order
             <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
             is
             <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
-            Membership activation will appear here once payment capture and sync complete.
+            Membership access only appears here after a qualifying membership purchase is captured
+            for this account view.
           </p>
           <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
             Join to unlock early access, subscriber-only bundles, and concierge support.
@@ -101,6 +101,7 @@
           <p dv:text="${account.stateSummary}">
             Order and membership state are drawn from the live storefront session.
           </p>
+          <a class="button button--secondary" href="/account/orders">Review order history</a>
         </article>
       </section>
 

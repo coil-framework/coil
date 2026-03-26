@@ -29,6 +29,11 @@
         <p dv:unless="${operator.hasPrincipal}">
           This operator view is using the current browser session.
         </p>
+        <p>
+          Use this dashboard as the day-one control room: verify catalog routes, review storefront
+          orders, check page inventory, and confirm what still depends on runtime diagnostics
+          rather than a persisted back-office workflow.
+        </p>
       </section>
 
       <section class="admin-metrics">
@@ -46,6 +51,42 @@
         </article>
       </section>
 
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Day-one tasks</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Review storefront orders</h2>
+            <p>
+              Check whether checkout is producing the expected order queue, payment references, and
+              receipt emails before staff handle customer issues.
+            </p>
+            <a class="button" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+              Open orders
+            </a>
+          </article>
+          <article class="admin-card">
+            <h2>Confirm catalog routes</h2>
+            <p>
+              Verify the current product and collection inventory that customers can actually
+              browse today.
+            </p>
+            <a class="button" href="/admin/catalog/products" dv:attr="href=${links.adminCatalog}">
+              Open catalog
+            </a>
+          </article>
+          <article class="admin-card">
+            <h2>Check content inventory</h2>
+            <p>
+              Review the live route set, navigation, and redirect readiness before traffic or
+              migration cutover.
+            </p>
+            <a class="button" href="/admin/pages" dv:attr="href=${links.adminPages}">
+              Open content
+            </a>
+          </article>
+        </div>
+      </section>
+
       <section class="admin-panels">
         <article class="admin-panel" dv:each="panel : ${adminPanels}">
           <p class="admin-panel__eyebrow" dv:text="${panel.label}">Inspect products and collections</p>
@@ -53,7 +94,7 @@
           <p dv:text="${panel.summary}">
             Products and collections represented in the sample app.
           </p>
-          <a class="button" href="/admin/catalog/products" dv:attr="href=${panel.href}">
+          <a class="button button--secondary" href="/admin/catalog/products" dv:attr="href=${panel.href}">
             Open panel
           </a>
         </article>

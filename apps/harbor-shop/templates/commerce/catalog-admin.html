@@ -23,39 +23,86 @@
         <p dv:text="${page.summary}">
           Merchandising inventory, collections, and featured products.
         </p>
+        <p>
+          Use this page to verify what customers can actually browse today. It is suited to route
+          and merchandising checks, not yet full product editing.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operator checklist</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Product coverage</h2>
+            <p>Confirm that every item you intend to sell has a storefront route, summary, and visible price.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Collection coverage</h2>
+            <p>Verify that featured, memberships, and events collections all lead customers into the expected journey.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Launch caveat</h2>
+            <p>Editing actions are not wired here yet, so treat this surface as a verification console for the checked-in catalog.</p>
+          </article>
+        </div>
       </section>
 
       <section class="admin-panel" dv:if="${hasProductCards}">
         <p class="admin-panel__eyebrow">Products</p>
-        <div class="admin-card-grid">
-          <article class="admin-card" dv:each="product : ${productCards}">
-            <p class="admin-card__eyebrow" dv:text="${product.collectionName}">Featured</p>
-            <h2 dv:text="${product.name}">Harbor Cap</h2>
-            <p dv:text="${product.summary}">
-              Product summary
-            </p>
-            <p dv:text="${product.price}">£29.00</p>
-            <a class="button" href="/shop/products/harbor-cap" dv:attr="href=${product.url}">
-              View storefront page
-            </a>
-          </article>
-        </div>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Product</th>
+              <th scope="col">Collection</th>
+              <th scope="col">Summary</th>
+              <th scope="col">Price</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="product : ${productCards}">
+              <td>
+                <strong dv:text="${product.name}">Harbor Cap</strong>
+              </td>
+              <td dv:text="${product.collectionName}">Featured</td>
+              <td dv:text="${product.summary}">Product summary</td>
+              <td dv:text="${product.price}">£29.00</td>
+              <td>
+                <a class="button button--secondary" href="/shop/products/harbor-cap" dv:attr="href=${product.url}">
+                  View storefront page
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="admin-panel" dv:if="${hasCatalogSections}">
         <p class="admin-panel__eyebrow">Collections</p>
-        <div class="admin-card-grid">
-          <article class="admin-card" dv:each="section : ${catalogSections}">
-            <p class="admin-card__eyebrow" dv:text="${section.label}">Featured edit</p>
-            <h2 dv:text="${section.title}">Featured</h2>
-            <p dv:text="${section.summary}">
-              Collection summary
-            </p>
-            <a class="button button--secondary" href="/shop/collections/featured" dv:attr="href=${section.url}">
-              Open collection
-            </a>
-          </article>
-        </div>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Collection</th>
+              <th scope="col">Merchandising focus</th>
+              <th scope="col">Summary</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="section : ${catalogSections}">
+              <td>
+                <strong dv:text="${section.title}">Featured</strong>
+              </td>
+              <td dv:text="${section.label}">Featured edit</td>
+              <td dv:text="${section.summary}">Collection summary</td>
+              <td>
+                <a class="button button--secondary" href="/shop/collections/featured" dv:attr="href=${section.url}">
+                  Open collection
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="admin-panel" dv:unless="${hasProductCards}">
@@ -63,6 +110,10 @@
         <h2>No catalog entries yet</h2>
         <p dv:text="${catalogEmptyText}">
           No catalog entries are available in the sample app yet.
+        </p>
+        <p>
+          Operators should not advertise storefront launches until products and collections appear
+          here and the linked storefront routes render correctly.
         </p>
       </section>
     </main>

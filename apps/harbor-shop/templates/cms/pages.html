@@ -31,18 +31,34 @@
 
       <section class="admin-panel" dv:if="${hasContentPages}">
         <p class="admin-panel__eyebrow">Pages</p>
-        <div class="admin-card-grid">
-          <article class="admin-card" dv:each="pageRecord : ${contentPages}">
-            <p class="admin-card__eyebrow" dv:text="${pageRecord.surface}">public</p>
-            <h2 dv:text="${pageRecord.title}">Home</h2>
-            <p dv:text="${pageRecord.summary}">
-              Page summary
-            </p>
-            <a class="button" href="/" dv:attr="href=${pageRecord.href}">
-              Open route
-            </a>
-          </article>
-        </div>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Title</th>
+              <th scope="col">Surface</th>
+              <th scope="col">Route</th>
+              <th scope="col">Purpose</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="pageRecord : ${contentPages}">
+              <td>
+                <strong dv:text="${pageRecord.title}">Home</strong>
+              </td>
+              <td dv:text="${pageRecord.surface}">public</td>
+              <td>
+                <code dv:text="${pageRecord.href}">/</code>
+              </td>
+              <td dv:text="${pageRecord.summary}">Page summary</td>
+              <td>
+                <a class="button button--secondary" href="/" dv:attr="href=${pageRecord.href}">
+                  Open route
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="admin-panel" dv:unless="${hasContentPages}">
@@ -50,6 +66,10 @@
         <h2>No content pages yet</h2>
         <p dv:text="${pagesEmptyText}">
           The current Harbor Shop sample app does not persist CMS page records yet.
+        </p>
+        <p>
+          Before launch, confirm that every customer-facing path you plan to market or migrate
+          from WordPress appears in this inventory.
         </p>
       </section>
     </main>

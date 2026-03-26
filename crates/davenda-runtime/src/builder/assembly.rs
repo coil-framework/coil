@@ -1,8 +1,8 @@
 use super::*;
 use crate::builder::helpers::*;
 use crate::builder::http::*;
-use crate::builder::templates;
 use crate::builder::state::RuntimeBuilderParts;
+use crate::builder::templates;
 use crate::plan::shared_state_root;
 use davenda_template::TemplateRuntime;
 
@@ -97,10 +97,19 @@ where
     for definition in templates {
         template.registry.register(definition)?;
     }
-    for definition in templates::load_customer_templates_from_roots(
+    let mut customer_templates = templates::load_customer_templates_from_roots(
         &template_roots,
         template.customer_app_namespace.clone(),
-    )? {
+    )?;
+    templates::supplement_customer_templates(
+        &mut customer_templates,
+        template.customer_app_namespace.clone(),
+        &module_manifests
+            .iter()
+            .map(|manifest| manifest.name.clone())
+            .collect::<Vec<_>>(),
+    )?;
+    for definition in customer_templates {
         template.registry.register(definition)?;
     }
     template.runtime = TemplateRuntime::new(template.registry.clone());

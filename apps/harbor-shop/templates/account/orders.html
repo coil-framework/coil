@@ -27,11 +27,12 @@
           Signed in as <strong dv:text="${customer.displayName}">Member Live</strong>.
         </p>
         <p dv:unless="${account.hasPrincipal}">
-          This order history is bound to the current browser session until formal sign-in is
-          installed.
+          This order history currently follows the browser session you are using right now. Orders
+          placed from another browser will not appear here yet.
         </p>
         <p dv:if="${account.hasCustomerEmail}">
-          Receipt email: <strong dv:text="${customer.email}">member@example.com</strong>.
+          Receipt email for this account view:
+          <strong dv:text="${customer.email}">member@example.com</strong>.
         </p>
       </section>
       <nav class="account-page__nav" dv:replace="~{account/nav :: nav}"></nav>
@@ -100,7 +101,8 @@
               <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
               is
               <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
-              Membership activation will follow once the storefront sync completes.
+              Membership access only appears here after a qualifying membership purchase is
+              captured for this account view.
             </p>
             <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
               No active membership is attached yet.
@@ -115,6 +117,21 @@
               Explore memberships
             </a>
           </div>
+        </article>
+        <article class="account-card">
+          <h2>Next steps</h2>
+          <p dv:if="${account.hasRecentOrders}">
+            Review order status, then continue shopping or return to checkout if you still have
+            work to finish on this browser session.
+          </p>
+          <p dv:unless="${account.hasRecentOrders}">
+            Start from the storefront, then come back here once checkout has completed on this
+            browser session.
+          </p>
+          <a class="button" href="/checkout">Open checkout</a>
+          <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+            Continue shopping
+          </a>
         </article>
       </section>
     </main>

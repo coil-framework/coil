@@ -26,18 +26,64 @@
         <p dv:if="${operator.hasPrincipal}">
           Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
         </p>
+        <p>
+          This page should answer who changed what and when. In the checked-in sample app the
+          audit backend is not wired yet, so the right operator move is to use the adjacent admin
+          surfaces for state inspection and rely on runtime diagnostics for execution traces.
+        </p>
       </section>
 
-      <section class="admin-panel">
+      <section class="admin-panel" dv:if="${hasAuditEntries}">
+        <p class="admin-panel__eyebrow">Audit entries</p>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Actor</th>
+              <th scope="col">Action</th>
+              <th scope="col">Resource</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="entry : ${auditEntries}">
+              <td dv:text="${entry.when}">2026-03-25T12:00:00Z</td>
+              <td dv:text="${entry.actor}">operator-live-1</td>
+              <td dv:text="${entry.action}">order.refund.issue</td>
+              <td dv:text="${entry.resource}">ORD-10042</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" dv:unless="${hasAuditEntries}">
         <p class="admin-panel__eyebrow">Status</p>
         <h2>No persisted audit entries yet</h2>
         <p dv:text="${auditEmptyText}">
           Audit capture is not persisted in the sample app yet.
         </p>
-        <p>
-          Use the runtime diagnostics surface for now, then wire audit persistence once the back
-          office logging backend is in place.
-        </p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h3>Inspect live order activity</h3>
+            <p>Use the orders surface to review checkout output, payment references, and customer-facing history.</p>
+            <a class="button" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+              Open orders
+            </a>
+          </article>
+          <article class="admin-card">
+            <h3>Validate content routes</h3>
+            <p>Use pages, navigation, and redirects to confirm what customers can reach today.</p>
+            <a class="button" href="/admin/pages" dv:attr="href=${links.adminPages}">
+              Open pages
+            </a>
+          </article>
+          <article class="admin-card">
+            <h3>Escalate runtime trace review</h3>
+            <p>
+              Use runtime diagnostics and deployment logs for execution-level traceability until
+              audit persistence is wired into the back office.
+            </p>
+          </article>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

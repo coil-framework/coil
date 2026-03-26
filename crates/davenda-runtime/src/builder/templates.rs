@@ -1,6 +1,7 @@
 use super::*;
 use davenda_template::{
-    TemplateDefinition, TemplateKind, TemplateModelError, TemplateNamespace, TemplateSourceParser,
+    TemplateDefinition, TemplateKind, TemplateModelError, TemplateName, TemplateNamespace,
+    TemplateSourceParser,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,40 @@ pub(crate) fn load_customer_templates_from_roots(
         templates.extend(load_customer_templates_from_root(root, namespace.clone())?);
     }
     Ok(templates)
+}
+
+pub(crate) fn supplement_customer_templates(
+    templates: &mut Vec<TemplateDefinition>,
+    namespace: TemplateNamespace,
+    module_names: &[String],
+) -> Result<(), RuntimeBuildError> {
+    if !module_names.iter().any(|name| name == "events") {
+        return Ok(());
+    }
+
+    let parser = TemplateSourceParser::new();
+    if !templates
+        .iter()
+        .any(|template| template.key.name.as_str() == "events/list")
+    {
+        templates.push(parser.parse_layout(
+            namespace.clone(),
+            TemplateName::new("events/list")?,
+            events_list_template(),
+        )?);
+    }
+    if !templates
+        .iter()
+        .any(|template| template.key.name.as_str() == "events/detail")
+    {
+        templates.push(parser.parse_layout(
+            namespace,
+            TemplateName::new("events/detail")?,
+            events_detail_template(),
+        )?);
+    }
+
+    Ok(())
 }
 
 pub(crate) fn load_customer_templates_from_root(
@@ -45,7 +80,8 @@ pub(crate) fn load_customer_templates_from_root(
 
     let parser = TemplateSourceParser::new();
     let mut files = Vec::new();
-    collect_customer_template_files(&templates_root, &mut files).map_err(RuntimeBuildError::from)?;
+    collect_customer_template_files(&templates_root, &mut files)
+        .map_err(RuntimeBuildError::from)?;
     files.sort();
 
     let mut templates = Vec::with_capacity(files.len());
@@ -121,6 +157,130 @@ fn classify_customer_template(root: &Path, path: &Path, source: &str) -> Templat
             }
         }
     }
+}
+
+fn events_list_template() -> &'static str {
+    r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}" lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Events · Harbor Shop</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor events">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main">
+      <section class="home-page events-page">
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow">Public events</p>
+          <h1>Events are enabled, but the sample catalog is still being wired.</h1>
+          <p class="events-route" dv:text="${route_name}">events.list</p>
+          <p>
+            This route is live and locale-aware. Published event records will appear here once the
+            events catalog is connected; until then, the page keeps the member journey honest.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/shop/collections/events" dv:attr="href=${links.eventsCollection}">
+              Browse event-linked offers
+            </a>
+            <a
+              class="button button--secondary"
+              href="/account/memberships"
+              dv:attr="href=${links.memberships}"
+            >
+              Review memberships
+            </a>
+          </div>
+        </article>
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow">Member path</p>
+          <h2>Prepare to book</h2>
+          <p>
+            The checkout and account journey already exists. This route keeps the events entry
+            point close to those live surfaces without inventing event inventory.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/account" dv:attr="href=${links.account}">Open account</a>
+            <a
+              class="button button--secondary"
+              href="/shop/collections/memberships"
+              dv:attr="href=${links.membershipsCollection}"
+            >
+              Membership offers
+            </a>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>"#
+}
+
+fn events_detail_template() -> &'static str {
+    r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}" lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Event detail · Harbor Shop</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
+  </head>
+  <body class="harbor events">
+    <header class="site-header">
+      <a href="/" class="brand">Harbor Shop</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main">
+      <section class="home-page events-page">
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow">Event detail</p>
+          <h1 dv:text="${route_params.event_slug}">spring-tasting</h1>
+          <p>
+            Event records are not published in the checked-in Harbor Shop sample yet, so this
+            route shows the real customer entry point without pretending there is catalog data
+            behind it.
+          </p>
+          <p class="catalog-section__eyebrow">Current route</p>
+          <p class="events-route" dv:text="${route_name}">events.detail</p>
+          <div class="checkout-actions">
+            <a class="button" href="/events">Back to events</a>
+            <a class="button button--secondary" href="/account" dv:attr="href=${links.account}">
+              Open account
+            </a>
+          </div>
+        </article>
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow">Membership path</p>
+          <h2>Use the live membership flow</h2>
+          <p>
+            Events in this installation are tied to membership and booking capability. The sample
+            app keeps the route live while the event catalog is still being connected.
+          </p>
+          <div class="checkout-actions">
+            <a
+              class="button"
+              href="/account/memberships"
+              dv:attr="href=${links.memberships}"
+            >
+              Review memberships
+            </a>
+            <a
+              class="button button--secondary"
+              href="/shop/collections/events"
+              dv:attr="href=${links.eventsCollection}"
+            >
+              Browse event-linked offers
+            </a>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>"#
 }
 
 #[cfg(test)]
@@ -257,6 +417,70 @@ mod tests {
                 .iter()
                 .find(|template| template.key.name.as_str() == "account/sidebar")
                 .is_some_and(|template| template.kind == TemplateKind::Fragment)
+        );
+    }
+
+    #[test]
+    fn supplements_honest_events_surfaces_when_events_module_is_installed() {
+        let mut templates = vec![
+            TemplateSourceParser::new()
+                .parse_layout(
+                    TemplateNamespace::new("customer-app").unwrap(),
+                    TemplateName::new("pages/home").unwrap(),
+                    r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev"><body><main>Home</main></body></html>"#,
+                )
+                .unwrap(),
+        ];
+
+        supplement_customer_templates(
+            &mut templates,
+            TemplateNamespace::new("customer-app").unwrap(),
+            &[String::from("events")],
+        )
+        .unwrap();
+
+        assert!(
+            templates
+                .iter()
+                .any(|template| template.key.name.as_str() == "events/list")
+        );
+        assert!(
+            templates
+                .iter()
+                .any(|template| template.key.name.as_str() == "events/detail")
+        );
+    }
+
+    #[test]
+    fn does_not_supplement_events_surfaces_without_events_module() {
+        let mut templates = vec![
+            TemplateSourceParser::new()
+                .parse_layout(
+                    TemplateNamespace::new("customer-app").unwrap(),
+                    TemplateName::new("pages/home").unwrap(),
+                    r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev"><body><main>Home</main></body></html>"#,
+                )
+                .unwrap(),
+        ];
+
+        supplement_customer_templates(
+            &mut templates,
+            TemplateNamespace::new("customer-app").unwrap(),
+            &[String::from("commerce")],
+        )
+        .unwrap();
+
+        assert!(
+            templates
+                .iter()
+                .all(|template| template.key.name.as_str() != "events/list")
+        );
+        assert!(
+            templates
+                .iter()
+                .all(|template| template.key.name.as_str() != "events/detail")
         );
     }
 

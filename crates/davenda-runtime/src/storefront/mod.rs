@@ -723,33 +723,39 @@ impl StorefrontStateStore {
             current_status,
             payment_status,
             paid_event_dispatched_at,
-        )) =
-            self.load_order_header_by_payment_reference(&tx, payment_reference)?
+        )) = self.load_order_header_by_payment_reference(&tx, payment_reference)?
         else {
             return Err(StorefrontStateError::UnknownPaymentReference {
                 payment_reference: payment_reference.to_string(),
             });
         };
 
-        let payment_is_final = payment_status == "captured";
+        let payment_is_captured = payment_status == "captured";
+        let payment_is_failed = payment_status == "failed";
         let (next_status, next_payment_status) = match event {
-            "payment.captured" | "payment.succeeded" | "commerce.order.paid" => (
-                if current_status == "fulfilled" {
-                    current_status.clone()
+            "payment.captured" | "payment.succeeded" | "commerce.order.paid" => {
+                if payment_is_failed {
+                    (current_status.clone(), payment_status.clone())
                 } else {
-                    "paid".to_string()
-                },
-                "captured".to_string(),
-            ),
+                    (
+                        if current_status == "fulfilled" {
+                            current_status.clone()
+                        } else {
+                            "paid".to_string()
+                        },
+                        "captured".to_string(),
+                    )
+                }
+            }
             "payment.authorized" => {
-                if payment_is_final {
+                if payment_is_captured || payment_is_failed {
                     (current_status.clone(), payment_status.clone())
                 } else {
                     (current_status.clone(), "authorized".to_string())
                 }
             }
             "payment.failed" => {
-                if payment_is_final {
+                if payment_is_captured || payment_is_failed {
                     (current_status.clone(), payment_status.clone())
                 } else {
                     ("pending_payment".to_string(), "failed".to_string())
@@ -783,11 +789,37 @@ impl StorefrontStateStore {
         }
 
         let cart_payment = self.load_cart_payment(&tx, session_id.as_str())?;
+        let should_restore_checkout = payment_status != "failed" && next_payment_status == "failed";
+        let should_clear_restored_cart =
+            payment_status != "captured" && next_payment_status == "captured";
+        if should_restore_checkout {
+            let _ = self.restore_order_lines_to_cart_if_empty(
+                &tx,
+                session_id.as_str(),
+                order_id.as_str(),
+            )?;
+        } else if should_clear_restored_cart {
+            let _ = self.clear_cart_lines_if_matching_order(
+                &tx,
+                session_id.as_str(),
+                order_id.as_str(),
+            )?;
+        }
+        let cart_status = if should_restore_checkout {
+            "active"
+        } else {
+            "completed"
+        };
+        let cart_payment_reference = if should_restore_checkout {
+            None
+        } else {
+            Some(payment_reference)
+        };
         self.touch_cart(
             &tx,
             session_id.as_str(),
             principal_id.as_deref(),
-            "completed",
+            cart_status,
             now_unix_seconds,
         )?;
         self.update_cart_payment(
@@ -797,7 +829,7 @@ impl StorefrontStateStore {
             cart_payment.method.as_deref(),
             cart_payment.last4.as_deref(),
             cart_payment.checkout_email.as_deref(),
-            Some(payment_reference),
+            cart_payment_reference,
         )?;
 
         let order = self
@@ -1386,6 +1418,90 @@ impl StorefrontStateStore {
         Ok(orders)
     }
 
+    fn restore_order_lines_to_cart_if_empty(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+        order_id: &str,
+    ) -> Result<bool, StorefrontStateError> {
+        if self.cart_line_count(tx, session_id)? > 0 {
+            return Ok(false);
+        }
+        let lines = self.load_order_lines(tx, order_id).map_err(|error| {
+            query_error(format!(
+                "failed to load storefront order lines for recovery: {error}"
+            ))
+        })?;
+        if lines.is_empty() {
+            return Ok(false);
+        }
+        for line in lines {
+            tx.execute(
+                r#"
+                INSERT INTO cart_lines (
+                    session_id, sku, title, variant_title, product_kind, entitlement_key,
+                    quantity, unit_price_minor, currency
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                ON CONFLICT(session_id, sku) DO UPDATE SET
+                    quantity = excluded.quantity,
+                    title = excluded.title,
+                    variant_title = excluded.variant_title,
+                    product_kind = excluded.product_kind,
+                    entitlement_key = excluded.entitlement_key,
+                    unit_price_minor = excluded.unit_price_minor,
+                    currency = excluded.currency
+                "#,
+                params![
+                    session_id,
+                    line.sku,
+                    line.title,
+                    line.variant_title,
+                    line.product_kind,
+                    line.entitlement_key,
+                    i64::from(line.quantity),
+                    line.unit_price_minor,
+                    line.currency,
+                ],
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to restore storefront cart line from order: {error}"
+                ))
+            })?;
+        }
+        Ok(true)
+    }
+
+    fn clear_cart_lines_if_matching_order(
+        &self,
+        tx: &Transaction<'_>,
+        session_id: &str,
+        order_id: &str,
+    ) -> Result<bool, StorefrontStateError> {
+        let cart_lines = self.load_cart_lines(tx, session_id)?;
+        if cart_lines.is_empty() {
+            return Ok(false);
+        }
+        let order_lines = self.load_order_lines(tx, order_id).map_err(|error| {
+            query_error(format!(
+                "failed to load storefront order lines for settlement: {error}"
+            ))
+        })?;
+        if !cart_lines_match_order(&cart_lines, &order_lines) {
+            return Ok(false);
+        }
+        tx.execute(
+            "DELETE FROM cart_lines WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to clear restored storefront cart lines after payment capture: {error}"
+            ))
+        })?;
+        Ok(true)
+    }
+
     fn load_order_lines(
         &self,
         tx: &Transaction<'_>,
@@ -1431,8 +1547,7 @@ impl StorefrontStateStore {
     ) -> Result<
         Option<(String, String, Option<String>, String, String, Option<i64>)>,
         StorefrontStateError,
-    >
-    {
+    > {
         tx.query_row(
             r#"
             SELECT
@@ -1752,6 +1867,44 @@ fn catalog_item(sku: &str) -> Result<CatalogItem, StorefrontStateError> {
             sku: sku.to_string(),
         }),
     }
+}
+
+fn cart_lines_match_order(
+    cart_lines: &[StorefrontCartLine],
+    order_lines: &[StorefrontOrderLine],
+) -> bool {
+    if cart_lines.len() != order_lines.len() {
+        return false;
+    }
+    let cart_map = cart_lines
+        .iter()
+        .map(|line| {
+            (
+                line.sku.as_str(),
+                (
+                    line.quantity,
+                    line.unit_price_minor,
+                    line.product_kind.as_str(),
+                    line.entitlement_key.as_deref(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let order_map = order_lines
+        .iter()
+        .map(|line| {
+            (
+                line.sku.as_str(),
+                (
+                    line.quantity,
+                    line.unit_price_minor,
+                    line.product_kind.as_str(),
+                    line.entitlement_key.as_deref(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    cart_map == order_map
 }
 
 fn saturating_i64(value: u64) -> i64 {

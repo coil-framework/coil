@@ -27,14 +27,24 @@
 
       <section class="admin-panel" dv:if="${hasRedirects}">
         <p class="admin-panel__eyebrow">Redirect rules</p>
-        <ul class="admin-panel__list">
-          <li dv:each="redirect : ${redirects}">
-            <div>
-              <strong dv:text="${redirect.from}">/legacy/home</strong>
-              <span dv:text="${redirect.to}">/</span>
-            </div>
-          </li>
-        </ul>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">From</th>
+              <th scope="col">To</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="redirect : ${redirects}">
+              <td>
+                <code dv:text="${redirect.from}">/legacy/home</code>
+              </td>
+              <td>
+                <code dv:text="${redirect.to}">/</code>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="admin-panel" dv:unless="${hasRedirects}">
@@ -43,6 +53,20 @@
         <p dv:text="${redirectsEmptyText}">
           Redirect rules are not configured yet in the sample app.
         </p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h3>Migration readiness</h3>
+            <p>Import or map legacy URLs before customer traffic is switched from the old site.</p>
+          </article>
+          <article class="admin-card">
+            <h3>SEO protection</h3>
+            <p>Preserve canonical paths and top landing pages so cutover does not drop search traffic.</p>
+          </article>
+          <article class="admin-card">
+            <h3>Operator check</h3>
+            <p>Keep a tested redirect inventory alongside launch and rollback plans, even if persistence is not wired yet.</p>
+          </article>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

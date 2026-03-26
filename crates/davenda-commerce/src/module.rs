@@ -4,4 +4,7 @@ mod stripe;
 mod support;
 
 pub use core::CommerceModule;
-pub use stripe::CommercePaymentsStripeModule;
+pub use stripe::{
+    CommercePaymentsStripeConfig, CommercePaymentsStripeModule, StripeCheckoutMode,
+    StripeProviderMetadata,
+};

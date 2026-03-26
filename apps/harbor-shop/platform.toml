@@ -75,6 +75,7 @@ enabled = ["cms", "media", "commerce", "commerce-payments-stripe", "memberships"
 [modules."commerce-payments-stripe"]
 provider = "stripe"
 checkout_mode = "webhook-confirmation"
+publishable_key = { kind = "env", var = "STRIPE_PUBLISHABLE_KEY" }
 webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
 
 [wasm]

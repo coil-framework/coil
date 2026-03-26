@@ -84,6 +84,20 @@ pub enum CommerceModelError {
         refunded_minor: i64,
         requested_minor: i64,
     },
+    MissingModuleSetting {
+        module: String,
+        field: String,
+    },
+    InvalidModuleSetting {
+        module: String,
+        field: String,
+        reason: String,
+    },
+    UnsupportedModuleSetting {
+        module: String,
+        field: String,
+        value: String,
+    },
 }
 
 impl fmt::Display for CommerceModelError {
@@ -160,6 +174,29 @@ impl fmt::Display for CommerceModelError {
                 f,
                 "refund for order `{order_id}` exceeds captured amount: captured={captured_minor} refunded={refunded_minor} requested={requested_minor}"
             ),
+            Self::MissingModuleSetting { module, field } => {
+                write!(f, "module `{module}` requires setting `{field}`")
+            }
+            Self::InvalidModuleSetting {
+                module,
+                field,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "module `{module}` has invalid setting `{field}`: {reason}"
+                )
+            }
+            Self::UnsupportedModuleSetting {
+                module,
+                field,
+                value,
+            } => {
+                write!(
+                    f,
+                    "module `{module}` does not support `{field} = {value}` in the current checkout contract"
+                )
+            }
         }
     }
 }

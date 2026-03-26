@@ -65,6 +65,7 @@ enabled = ["cms", "commerce", "commerce-payments-stripe", "media", "events", "ad
 [modules."commerce-payments-stripe"]
 provider = "stripe"
 checkout_mode = "webhook-confirmation"
+publishable_key = { kind = "env", var = "STRIPE_PUBLISHABLE_KEY" }
 
 [wasm]
 directory = "extensions"

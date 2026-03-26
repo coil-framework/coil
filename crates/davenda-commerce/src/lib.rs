@@ -21,7 +21,10 @@ pub use model::{
     AdjustmentDirection, AdjustmentKind, CheckoutStatus, Money, OrderStatus, ProductKind,
     ProductStatus,
 };
-pub use module::{CommerceModule, CommercePaymentsStripeModule};
+pub use module::{
+    CommerceModule, CommercePaymentsStripeConfig, CommercePaymentsStripeModule, StripeCheckoutMode,
+    StripeProviderMetadata,
+};
 pub use orders::{Order, OrderOutcome, Refund};
 pub use pricing::{DiscountRule, PriceAdjustment, PriceQuote, PricingPolicy};
 

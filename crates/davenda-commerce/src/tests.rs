@@ -79,8 +79,8 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             .contains(&Capability::AssetRead)
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 19);
-    assert_eq!(manifest.http_surfaces.len(), 19);
+    assert_eq!(manifest.route_surfaces.len(), 20);
+    assert_eq!(manifest.http_surfaces.len(), 20);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 2);

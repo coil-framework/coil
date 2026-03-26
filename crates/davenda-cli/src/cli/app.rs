@@ -9173,6 +9173,11 @@ fn evaluate_cutover_migration_readiness(
 ) -> Result<(bool, String), CliRunError> {
     let executable_plan = &built.runtime_plan.runtime.install_migrations;
     let manual_customer_entries = manual_customer_migration_entries(&built.runtime_plan);
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
+    let _runtime_guard = tokio_runtime.enter();
     let client = match built.runtime_plan.runtime.data.connect_lazy_postgres() {
         Ok(client) => client,
         Err(error) => {
@@ -9185,18 +9190,18 @@ fn evaluate_cutover_migration_readiness(
             ));
         }
     };
-    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| CliRunError::execution(format!("failed to start runtime: {error}")))?;
     let applied_keys = tokio_runtime
         .block_on(async { client.applied_migration_keys().await })
         .map_err(|error| {
-            CliRunError::execution(format!(
+            format!(
                 "failed to read applied migrations for `{}`: {error}",
                 built.manifest.id
-            ))
-        })?;
+            )
+        });
+    let applied_keys = match applied_keys {
+        Ok(applied_keys) => applied_keys,
+        Err(detail) => return Ok((false, detail)),
+    };
     let pending_plan = pending_migration_plan(executable_plan, &applied_keys)?;
     let pending_steps = pending_plan.ordered_steps().len();
     let (auth_ready, auth_detail) = evaluate_auth_package_validation_readiness(config_path);

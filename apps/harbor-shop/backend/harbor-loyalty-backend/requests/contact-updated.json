@@ -1,0 +1,6 @@
+{
+  "customer_email": "member@harbor.test",
+  "membership_tier": "standard",
+  "lifecycle_stage": "winback",
+  "last_order_total_gbp": 42.0
+}

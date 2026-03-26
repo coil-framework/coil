@@ -36,6 +36,19 @@ services:
       retries: 20
     restart: unless-stopped
 
+  harbor-backend-example:
+    profiles: ["backend-example"]
+    build:
+      context: ../..
+      dockerfile: apps/harbor-shop/backend/harbor-loyalty-backend/Dockerfile
+    environment:
+      HARBOR_BACKEND_BIND: "0.0.0.0:8081"
+      HARBOR_BACKEND_BRAND: "Harbor Shop"
+      HARBOR_BACKEND_WEBHOOK_SECRET: "${HARBOR_BACKEND_WEBHOOK_SECRET:-harbor-backend-dev-secret}"
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
   postgres:
     image: postgres:16
     environment:

@@ -49,6 +49,10 @@ journey without requiring a pre-seeded database user or live Stripe credentials:
 `extensions/`
 - the deployment target for customer-specific WASM extension artifacts
 
+`backend/`
+- customer-app-owned native Rust backend examples
+- use this when Harbor Shop needs deeper custom logic than templates or a bounded WASM extension
+
 `docker/`, `Dockerfile`, `docker-compose.yml`
 - the local developer stack
 
@@ -82,10 +86,17 @@ cp .env.example .env
 docker compose up --build
 ```
 
+If you also want the checked-in native Rust backend example running locally:
+
+```bash
+docker compose --profile backend-example up --build
+```
+
 Then open:
 
 - `http://localhost:8080/`
 - `http://localhost:8080/__dev`
+- `http://localhost:8081/`
 
 The `__dev` page gives you one-click local login shortcuts for the checked-in customer and admin
 paths. This is the local bootstrap mechanism for authenticated walkthroughs; Harbor Shop does not
@@ -147,6 +158,11 @@ The intended first-run path is:
 
 That is a complete local walkthrough. You do not need a seeded SQL user to exercise account or
 admin routes in the default development stack.
+
+If you started the optional backend-example profile, also visit:
+
+- `http://localhost:8081/`
+- `http://localhost:8081/health`
 
 ## Local Stripe Testing
 
@@ -255,6 +271,43 @@ Examples of native-Rust changes that are reasonable:
 - a customer-owned integration adapter with strict transaction requirements
 - a reusable module-level capability or workflow that is broader than one page render hook
 - deeper commerce or membership business rules that need native domain access
+
+Harbor Shop now includes a concrete checked-in example under:
+
+- `backend/harbor-loyalty-backend/`
+
+This example is intentionally small but real:
+
+- it is a standalone Rust HTTP service
+- it exposes Harbor Shop-specific loyalty logic at `POST /api/loyalty/preview`
+- it exposes a fail-closed signed webhook consumer at `POST /webhooks/crm/contact-updated`
+- it demonstrates the customer-app-owned native backend path without modifying Davenda core
+
+To run it with the local stack:
+
+```bash
+docker compose --profile backend-example up --build
+```
+
+Then exercise it with the checked-in sample payloads:
+
+```bash
+curl -sS \
+  -X POST http://localhost:8081/api/loyalty/preview \
+  -H 'content-type: application/json' \
+  --data @backend/harbor-loyalty-backend/requests/loyalty-preview.json
+```
+
+```bash
+curl -sS \
+  -X POST http://localhost:8081/webhooks/crm/contact-updated \
+  -H 'content-type: application/json' \
+  -H "x-harbor-backend-secret: ${HARBOR_BACKEND_WEBHOOK_SECRET:-harbor-backend-dev-secret}" \
+  --data @backend/harbor-loyalty-backend/requests/contact-updated.json
+```
+
+The example is meant to be copied and reshaped by third-party developers who need customer-owned
+Rust/backend logic that sits next to Harbor Shop rather than leaking into platform core.
 
 ## Troubleshooting
 

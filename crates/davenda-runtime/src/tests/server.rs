@@ -1354,12 +1354,6 @@ async fn server_host_loads_customer_storefront_templates_from_template_roots() {
 
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_template_root(&template_root)
-        .with_route(
-            RouteDefinition::new("storefront.home", HttpMethod::Get, "/")
-                .unwrap()
-                .from_module("commerce"),
-        )
-        .with_handler(HandlerDefinition::page("storefront.home", "pages/home").unwrap())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -1396,7 +1390,7 @@ async fn server_host_loads_customer_storefront_templates_from_template_roots() {
         body.contains("Featured collections load from customer templates."),
         "{body}"
     );
-    assert!(body.contains("storefront.home"), "{body}");
+    assert!(body.contains("home"), "{body}");
 }
 
 #[tokio::test]
@@ -4535,6 +4529,35 @@ async fn server_host_renders_checked_in_harbor_shop_catalog_collection_and_produ
         "{product_body}"
     );
     assert!(!product_body.contains("Harbor Cap"), "{product_body}");
+}
+
+#[test]
+fn runtime_plan_registers_checked_in_harbor_shop_root_route_from_customer_home_template() {
+    let app_name = unique_app_name("harbor-shop-runtime-root-route");
+    let config = config_with_app_name(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/").unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    assert_eq!(execution.route.route_name, "home");
+    assert_eq!(execution.path, "/");
+    assert_eq!(execution.locale, "en-GB");
+    match execution.response {
+        HandlerResponse::Page(page) => assert_eq!(page.template, "pages/home"),
+        other => panic!("expected page response for synthesized home route, got {other:?}"),
+    }
 }
 
 #[tokio::test]

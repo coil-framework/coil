@@ -77,11 +77,25 @@ where
         module_manifests.push(manifest.clone());
     }
 
+    let mut customer_templates = templates::load_customer_templates_from_roots(
+        &template_roots,
+        template.customer_app_namespace.clone(),
+    )?;
+    templates::supplement_customer_templates(
+        &mut customer_templates,
+        template.customer_app_namespace.clone(),
+        &module_manifests
+            .iter()
+            .map(|manifest| manifest.name.clone())
+            .collect::<Vec<_>>(),
+    )?;
+
     let (module_routes, module_handlers) = module_http_contributions(&module_manifests)?;
     let mut all_routes = routes;
     all_routes.extend(module_routes);
     let mut all_handlers = handlers;
     all_handlers.extend(module_handlers);
+    append_customer_home_route(&customer_templates, &mut all_routes, &mut all_handlers)?;
     let http = build_http_runtime_plan(&auth_package, &all_routes)?;
     let handlers = build_handler_registry(&all_routes, all_handlers)?;
 
@@ -97,18 +111,6 @@ where
     for definition in templates {
         template.registry.register(definition)?;
     }
-    let mut customer_templates = templates::load_customer_templates_from_roots(
-        &template_roots,
-        template.customer_app_namespace.clone(),
-    )?;
-    templates::supplement_customer_templates(
-        &mut customer_templates,
-        template.customer_app_namespace.clone(),
-        &module_manifests
-            .iter()
-            .map(|manifest| manifest.name.clone())
-            .collect::<Vec<_>>(),
-    )?;
     for definition in customer_templates {
         template.registry.register(definition)?;
     }
@@ -246,6 +248,7 @@ where
         handlers,
         storage_planner,
         storefront_catalog,
+        theme_asset_manifest: None,
         template,
         tls: bootstrap.tls,
         wasm: bootstrap.wasm,
@@ -270,4 +273,31 @@ where
         jobs_domain,
         ops_catalog,
     })
+}
+
+fn append_customer_home_route(
+    customer_templates: &[davenda_template::TemplateDefinition],
+    routes: &mut Vec<RouteDefinition>,
+    handlers: &mut Vec<HandlerDefinition>,
+) -> Result<(), RuntimeBuildError> {
+    let has_customer_home_template = customer_templates.iter().any(|template| {
+        template.kind == davenda_template::TemplateKind::Layout
+            && template.key.name.as_str() == "pages/home"
+    });
+    if !has_customer_home_template {
+        return Ok(());
+    }
+
+    let has_explicit_root_route = routes
+        .iter()
+        .any(|route| route.method == HttpMethod::Get && route.path == "/");
+    let has_explicit_home_route = routes.iter().any(|route| route.name == "home");
+    let has_explicit_home_handler = handlers.iter().any(|handler| handler.route_name == "home");
+    if has_explicit_root_route || has_explicit_home_route || has_explicit_home_handler {
+        return Ok(());
+    }
+
+    routes.push(RouteDefinition::new("home", HttpMethod::Get, "/")?);
+    handlers.push(HandlerDefinition::page("home", "pages/home")?);
+    Ok(())
 }

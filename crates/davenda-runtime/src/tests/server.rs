@@ -244,6 +244,31 @@ fn storefront_csrf_token_from_body(body: &str, action: &str) -> String {
     rest[..end].to_string()
 }
 
+fn cms_form_csrf_token_from_body(body: &str, action: &str) -> String {
+    let action_attr = format!("action=\"{action}\"");
+    let action_index = body
+        .find(&action_attr)
+        .unwrap_or_else(|| panic!("missing CMS admin form action `{action}`"));
+    let form_start = body[..action_index]
+        .rfind("<form")
+        .unwrap_or_else(|| panic!("missing form start for CMS admin action `{action}`"));
+    let form_end = body[action_index..]
+        .find("</form>")
+        .map(|relative| action_index + relative)
+        .unwrap_or_else(|| panic!("missing form end for CMS admin action `{action}`"));
+    let form_html = &body[form_start..form_end];
+    let token_attr = "name=\"_csrf\" value=\"";
+    let token_start = form_html
+        .find(token_attr)
+        .unwrap_or_else(|| panic!("missing CMS admin csrf token for `{action}`"))
+        + token_attr.len();
+    let token_rest = &form_html[token_start..];
+    let token_end = token_rest
+        .find('"')
+        .unwrap_or_else(|| panic!("missing closing quote for CMS admin csrf token `{action}`"));
+    token_rest[..token_end].to_string()
+}
+
 fn unique_app_name(label: &str) -> String {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -5157,7 +5182,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         "{admin_orders_body}"
     );
     assert!(
-        admin_orders_body.contains("Gold Membership"),
+        admin_orders_body.contains("View details"),
         "{admin_orders_body}"
     );
     assert!(admin_orders_body.contains("£89.00"), "{admin_orders_body}");
@@ -5166,7 +5191,11 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         "{admin_orders_body}"
     );
     assert!(
-        admin_orders_body.contains("returned from Stripe"),
+        admin_orders_body.contains("buyer@example.com"),
+        "{admin_orders_body}"
+    );
+    assert!(
+        admin_orders_body.contains("store-wide"),
         "{admin_orders_body}"
     );
 }
@@ -7021,7 +7050,7 @@ async fn server_host_executes_admin_widget_extensions_during_live_requests() {
 #[tokio::test]
 async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
     let template_root = checked_in_harbor_shop_root();
-    let mut config = config_with_app_name("harbor-shop");
+    let mut config = config_with_app_name(&unique_app_name("harbor-shop-runtime-admin-surfaces"));
     config.auth.package = "harbor-auth".to_string();
     let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
         .expect("checked-in harbor auth package should load");
@@ -7098,39 +7127,671 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
                 assert!(body.contains("Cutover content checks"), "{route}: {body}");
             }
             "/admin/orders" => {
-                assert!(body.contains("Settlement boundary"), "{route}: {body}");
+                assert!(body.contains("Support first"), "{route}: {body}");
                 assert!(
-                    body.contains("does not yet expose payment references"),
+                    body.contains("Pending Payment is not failure"),
                     "{route}: {body}"
                 );
-                assert!(
-                    body.contains("Customer-visible consistency"),
-                    "{route}: {body}"
-                );
+                assert!(body.contains("Refund boundary"), "{route}: {body}");
             }
             "/admin/catalog/products" => {
-                assert!(body.contains("Sellable truth"), "{route}: {body}");
-                assert!(
-                    body.contains("Inventory mutation, product editing, and publish workflows"),
-                    "{route}: {body}"
-                );
+                assert!(body.contains("Save product"), "{route}: {body}");
+                assert!(body.contains("Live browse truth"), "{route}: {body}");
+                assert!(body.contains("Save collection"), "{route}: {body}");
             }
             "/admin/pages" => {
-                assert!(body.contains("Launch check"), "{route}: {body}");
-                assert!(body.contains("route truth only"), "{route}: {body}");
+                assert!(body.contains("Draft workflow"), "{route}: {body}");
+                assert!(body.contains("Save draft"), "{route}: {body}");
+                assert!(body.contains("Draft preview"), "{route}: {body}");
             }
             "/admin/navigation" => {
-                assert!(body.contains("navigation editor"), "{route}: {body}");
+                assert!(body.contains("Primary navigation"), "{route}: {body}");
+                assert!(body.contains("Save navigation"), "{route}: {body}");
             }
             "/admin/redirects" => {
-                assert!(
-                    body.contains("tested redirect inventory"),
-                    "{route}: {body}"
-                );
+                assert!(body.contains("Redirect rules"), "{route}: {body}");
+                assert!(body.contains("Save redirects"), "{route}: {body}");
             }
             _ => {}
         }
     }
+}
+
+#[tokio::test]
+async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_workflow() {
+    let app_name = unique_app_name("harbor-shop-runtime-cms-draft-publish");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let draft_token =
+        response_header(&admin_response, "x-davenda-cms-csrf-cms-pages-save-draft");
+    let admin_body = String::from_utf8(
+        to_bytes(admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    let draft_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &draft_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("page_title", "Harbor Membership Access")
+        .append_pair("page_slug", "harbor-membership-access")
+        .append_pair(
+            "page_summary",
+            "Explains what customers unlock after checkout and how activation appears in account.",
+        )
+        .append_pair(
+            "page_body_html",
+            "<p>Customers can review pending activation immediately after checkout.</p><p>Publishing from Harbor Shop admin makes this page live for the storefront.</p>",
+        )
+        .finish();
+    let draft_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/draft")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(draft_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(draft_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&draft_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+    let draft_flash =
+        cookie_pair_from_response(&draft_response, "davenda_flash").expect("draft save flash");
+
+    let draft_admin_cookie = format!("{session_cookie}; {draft_flash}");
+    let draft_admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &draft_admin_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let publish_token =
+        response_header(&draft_admin_response, "x-davenda-cms-csrf-cms-pages-publish");
+    let draft_admin_body = String::from_utf8(
+        to_bytes(draft_admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        draft_admin_body.contains("Draft saved. Preview and publish when ready."),
+        "{draft_admin_body}"
+    );
+    assert!(
+        draft_admin_body.contains("Harbor Membership Access"),
+        "{draft_admin_body}"
+    );
+    assert!(
+        draft_admin_body.contains("harbor-membership-access"),
+        "{draft_admin_body}"
+    );
+    assert!(
+        draft_admin_body.contains("Customers can review pending activation immediately after checkout."),
+        "{draft_admin_body}"
+    );
+
+    let publish_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &publish_token)
+        .append_pair("page_id", "page-membership-guide")
+        .finish();
+    let publish_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/publish")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(publish_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&publish_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+
+    let live_page = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/pages/harbor-membership-access")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live_page.status(), StatusCode::OK);
+    let live_page_body = String::from_utf8(
+        to_bytes(live_page.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(live_page_body.contains("Harbor Membership Access"), "{live_page_body}");
+    assert!(
+        live_page_body.contains("Customers can review pending activation immediately after checkout."),
+        "{live_page_body}"
+    );
+    assert!(
+        live_page_body.contains("Publishing from Harbor Shop admin makes this page live for the storefront."),
+        "{live_page_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_updates_checked_in_harbor_shop_navigation_from_cms_admin() {
+    let app_name = unique_app_name("harbor-shop-runtime-cms-navigation");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/navigation")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let save_token = response_header(&admin_response, "x-davenda-cms-csrf-cms-navigation-save");
+
+    let save_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &save_token)
+        .append_pair("nav_label_0", "Home")
+        .append_pair("nav_href_0", "/")
+        .append_pair("nav_label_1", "Visit Harbor")
+        .append_pair("nav_href_1", "/pages/visit-harbor")
+        .append_pair("nav_label_2", "Member Guide")
+        .append_pair("nav_href_2", "/pages/membership-guide")
+        .finish();
+    let save_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/navigation/save")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(save_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&save_response, "location"),
+        "/admin/navigation"
+    );
+
+    let home_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let home_body = String::from_utf8(
+        to_bytes(home_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(home_body.contains(">Visit Harbor<"), "{home_body}");
+    assert!(home_body.contains("/pages/visit-harbor"), "{home_body}");
+    assert!(home_body.contains(">Member Guide<"), "{home_body}");
+    assert!(home_body.contains("/pages/membership-guide"), "{home_body}");
+}
+
+#[tokio::test]
+async fn server_host_applies_checked_in_harbor_shop_redirect_rules_from_cms_admin() {
+    let app_name = unique_app_name("harbor-shop-runtime-cms-redirects");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/redirects")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let save_token = response_header(&admin_response, "x-davenda-cms-csrf-cms-redirects-save");
+
+    let save_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &save_token)
+        .append_pair("redirect_from_0", "/legacy/home")
+        .append_pair("redirect_to_0", "/")
+        .append_pair("redirect_permanent_0", "yes")
+        .append_pair("new_redirect_from", "/legacy/about")
+        .append_pair("new_redirect_to", "/pages/visit-harbor")
+        .append_pair("new_redirect_permanent", "yes")
+        .finish();
+    let save_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/redirects/save")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(save_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&save_response, "location"),
+        "/admin/redirects"
+    );
+
+    let redirect_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/legacy/about")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(redirect_response.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        response_header(&redirect_response, "location"),
+        "/pages/visit-harbor"
+    );
+}
+
+#[tokio::test]
+async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface() {
+    let app_name = unique_app_name("harbor-shop-runtime-admin-catalog-update");
+    let mut config = config_with_app_name(&app_name);
+    config.auth.package = "harbor-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/catalog/products")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let admin_body = String::from_utf8(
+        to_bytes(admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(admin_body.contains("Harbor Cap"), "{admin_body}");
+    let product_token =
+        storefront_csrf_token_from_body(&admin_body, "commerce.catalog-admin-update");
+    assert!(
+        admin_body.contains(&format!(r#"name="_csrf" value="{product_token}""#)),
+        "{admin_body}"
+    );
+
+    let product_update = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &product_token)
+        .append_pair("catalog_entity", "product")
+        .append_pair("product_handle", "harbor-cap")
+        .append_pair("product_title", "Dockside Cap")
+        .append_pair(
+            "product_summary",
+            "Updated from Harbor Shop admin to prove live merchandising changes.",
+        )
+        .append_pair("product_price", "31.00")
+        .append_pair("product_collection_handle", "featured")
+        .finish();
+    let product_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/catalog/products")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(product_update))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(product_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&product_response, "location"),
+        "/admin/catalog/products"
+    );
+    let flash_cookie = cookie_pair_from_response(&product_response, "davenda_flash")
+        .expect("catalog admin save should set a flash cookie");
+
+    let admin_cookie = format!("{session_cookie}; {flash_cookie}");
+    let updated_admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/catalog/products")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &admin_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let updated_admin_body = String::from_utf8(
+        to_bytes(updated_admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        updated_admin_body.contains("Saved product changes for Dockside Cap."),
+        "{updated_admin_body}"
+    );
+    assert!(
+        updated_admin_body.contains("value=\"Dockside Cap\""),
+        "{updated_admin_body}"
+    );
+    assert!(
+        updated_admin_body
+            .contains("Updated from Harbor Shop admin to prove live merchandising changes."),
+        "{updated_admin_body}"
+    );
+    assert!(
+        updated_admin_body.contains("value=\"31.00\""),
+        "{updated_admin_body}"
+    );
+
+    let product_page = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/shop/products/harbor-cap")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let product_page_body = String::from_utf8(
+        to_bytes(product_page.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        product_page_body.contains("Dockside Cap"),
+        "{product_page_body}"
+    );
+    assert!(
+        product_page_body
+            .contains("Updated from Harbor Shop admin to prove live merchandising changes."),
+        "{product_page_body}"
+    );
+    assert!(product_page_body.contains("£31.00"), "{product_page_body}");
+
+    let collection_token =
+        storefront_csrf_token_from_body(&updated_admin_body, "commerce.catalog-admin-update");
+    let collection_update = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &collection_token)
+        .append_pair("catalog_entity", "collection")
+        .append_pair("collection_handle", "featured")
+        .append_pair("collection_title", "Harbor Essentials")
+        .append_pair("collection_label", "Live catalog")
+        .append_pair(
+            "collection_summary",
+            "Updated collection copy from the checked-in Harbor Shop admin route.",
+        )
+        .finish();
+    let collection_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/catalog/products")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(collection_update))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(collection_response.status(), StatusCode::SEE_OTHER);
+    let collection_page = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/shop/collections/featured")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let collection_page_body = String::from_utf8(
+        to_bytes(collection_page.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        collection_page_body.contains("Harbor Essentials"),
+        "{collection_page_body}"
+    );
+    assert!(
+        collection_page_body
+            .contains("Updated collection copy from the checked-in Harbor Shop admin route."),
+        "{collection_page_body}"
+    );
 }
 
 #[tokio::test]
@@ -7252,6 +7913,199 @@ async fn server_host_renders_live_completed_orders_on_checked_in_admin_orders_su
     assert!(body.contains("Pending Payment"), "{body}");
     assert!(body.contains("£89.00"), "{body}");
     assert!(!body.contains("No completed orders yet"), "{body}");
+    assert!(body.contains("View details"), "{body}");
+    assert!(body.contains("operator-live-orders@example.com"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_supports_checked_in_harbor_shop_order_detail_and_refund_flow() {
+    let app_name = unique_app_name("harbor-shop-runtime-admin-order-detail-refund");
+    let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
+    config.auth.package = "harbor-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_module(davenda_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let customer_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-customer-order-support")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-order-support")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_cookie = format!("davenda_session={}", operator_session.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &customer_session.record.session_id,
+            Some("member-live-customer-order-support"),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(
+            &customer_session.record.session_id,
+            Some("member-live-customer-order-support"),
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_complete(
+            &customer_session.record.session_id,
+            Some("member-live-customer-order-support"),
+            &StorefrontPaymentInput::card("buyer@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+    store
+        .apply_payment_webhook("PAY-50001", "payment.captured", 103)
+        .unwrap();
+
+    let admin_orders_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/orders")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let admin_orders_body = String::from_utf8(
+        to_bytes(admin_orders_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(admin_orders_body.contains("ORD-10042"), "{admin_orders_body}");
+    assert!(admin_orders_body.contains("buyer@example.com"), "{admin_orders_body}");
+    assert!(admin_orders_body.contains("View details"), "{admin_orders_body}");
+
+    let detail_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/orders/ORD-10042")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let detail_body = String::from_utf8(
+        to_bytes(detail_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(detail_body.contains("buyer@example.com"), "{detail_body}");
+    assert!(detail_body.contains("PAY-50001"), "{detail_body}");
+    assert!(detail_body.contains("Gold Membership"), "{detail_body}");
+    assert!(detail_body.contains("Issue refund"), "{detail_body}");
+    let refund_token = storefront_csrf_token_from_body(&detail_body, "commerce.order-refund");
+
+    let refund_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/orders/refund")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("_csrf", &refund_token)
+                        .append_pair("order_id", "ORD-10042")
+                        .append_pair("reason", "customer_support")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(refund_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&refund_response, "location"),
+        "/admin/orders/ORD-10042"
+    );
+    let flash_cookie = cookie_pair_from_response(&refund_response, "davenda_flash")
+        .expect("refund flow should set a flash cookie");
+    let refund_cookie = format!("{operator_cookie}; {flash_cookie}");
+
+    let refunded_detail_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/orders/ORD-10042")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &refund_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let refunded_detail_body = String::from_utf8(
+        to_bytes(refunded_detail_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        refunded_detail_body.contains("Refunded £89.00 for order ORD-10042."),
+        "{refunded_detail_body}"
+    );
+    assert!(refunded_detail_body.contains("Refunded"), "{refunded_detail_body}");
+    assert!(refunded_detail_body.contains("RFD-07001"), "{refunded_detail_body}");
+    assert!(
+        refunded_detail_body.contains("customer_support"),
+        "{refunded_detail_body}"
+    );
 }
 
 #[tokio::test]

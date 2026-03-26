@@ -30,6 +30,36 @@ const STOREFRONT_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
         "/checkout/complete",
         "x-davenda-storefront-csrf-commerce-checkout-complete",
     ),
+    (
+        "/admin/catalog/products",
+        "x-davenda-storefront-csrf-commerce-catalog-admin-update",
+    ),
+    (
+        "/admin/orders/refund",
+        "x-davenda-storefront-csrf-commerce-order-refund",
+    ),
+];
+const CMS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
+    (
+        "/admin/pages/draft",
+        "x-davenda-cms-csrf-cms-pages-save-draft",
+    ),
+    (
+        "/admin/pages/publish",
+        "x-davenda-cms-csrf-cms-pages-publish",
+    ),
+    (
+        "/admin/pages/unpublish",
+        "x-davenda-cms-csrf-cms-pages-unpublish",
+    ),
+    (
+        "/admin/navigation/save",
+        "x-davenda-cms-csrf-cms-navigation-save",
+    ),
+    (
+        "/admin/redirects/save",
+        "x-davenda-cms-csrf-cms-redirects-save",
+    ),
 ];
 const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.cart",
@@ -39,14 +69,44 @@ const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.checkout-start",
     "commerce.checkout-complete",
     "commerce.checkout-confirmation",
+    "commerce.catalog-admin-update",
     "commerce.account-session-end",
+    "commerce.order-refund",
+];
+const CMS_ADMIN_NATIVE_MUTATION_ROUTES: &[&str] = &[
+    "cms.pages.save-draft",
+    "cms.pages.publish",
+    "cms.pages.unpublish",
+    "cms.navigation.save",
+    "cms.redirects.save",
 ];
 const STOREFRONT_CSRF_ACTIONS: &[&str] = &[
     "commerce.add-to-cart",
     "commerce.cart-update",
     "commerce.checkout-start",
     "commerce.checkout-complete",
+    "commerce.catalog-admin-update",
     "commerce.account-session-end",
+    "commerce.order-refund",
+];
+const CMS_ADMIN_CSRF_ACTIONS: &[(&str, &str)] = &[
+    (
+        "cms.pages.save-draft",
+        "x-davenda-cms-csrf-cms-pages-save-draft",
+    ),
+    ("cms.pages.publish", "x-davenda-cms-csrf-cms-pages-publish"),
+    (
+        "cms.pages.unpublish",
+        "x-davenda-cms-csrf-cms-pages-unpublish",
+    ),
+    (
+        "cms.navigation.save",
+        "x-davenda-cms-csrf-cms-navigation-save",
+    ),
+    (
+        "cms.redirects.save",
+        "x-davenda-cms-csrf-cms-redirects-save",
+    ),
 ];
 
 type HmacSha256 = Hmac<Sha256>;
@@ -55,6 +115,12 @@ type HmacSha256 = Hmac<Sha256>;
 struct VerifiedPaymentWebhook {
     event: String,
     payment_reference: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CatalogAdminMutationInput {
+    Product(crate::storefront::StorefrontCatalogProductUpdate),
+    Collection(crate::storefront::StorefrontCatalogCollectionUpdate),
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,6 +300,22 @@ pub(super) async fn execute_live_request(
     )?;
     live_request.form_fields = parse_form_fields(live_request.method, raw_request).await?;
     let mut request = live_request.into_request_input()?;
+    if request.method == HttpMethod::Get
+        && state
+            .plan
+            .http
+            .resolve_match(
+                &state.plan.config,
+                request.method,
+                &request.host,
+                &request.path,
+            )
+            .is_none()
+    {
+        if let Some(response) = cms_admin_redirect_response(state, &request.path)? {
+            return Ok(response);
+        }
+    }
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -297,6 +379,17 @@ pub(super) async fn execute_live_request(
     };
 
     let mut storefront_mutation_cookies = Vec::new();
+    if let Some(location) =
+        apply_native_cms_admin_mutations(state, &execution, now, &mut storefront_mutation_cookies)?
+    {
+        execution
+            .response_cookies
+            .extend(storefront_mutation_cookies);
+        return Ok(storefront_redirect_response(
+            &location,
+            &execution.response_cookies,
+        ));
+    }
     if let Some(location) =
         apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)
             .await?
@@ -634,6 +727,34 @@ fn storefront_redirect_response(location: &str, response_cookies: &[String]) -> 
     response
 }
 
+fn cms_admin_redirect_response(
+    state: &RuntimeServerState,
+    path: &str,
+) -> Result<Option<Response<Body>>, RuntimeServerError> {
+    if path.starts_with("/admin") {
+        return Ok(None);
+    }
+    let workspace = CmsAdminWorkspace::load(&state.plan).map_err(|reason| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to load CMS admin workspace: {reason}"),
+        }
+    })?;
+    let Some(redirect) = workspace.redirect_for_path(path) else {
+        return Ok(None);
+    };
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = if redirect.permanent {
+        StatusCode::PERMANENT_REDIRECT
+    } else {
+        StatusCode::TEMPORARY_REDIRECT
+    };
+    response.headers_mut().insert(
+        HeaderName::from_static("location"),
+        HeaderValue::from_str(&redirect.to).expect("redirect target is a valid header value"),
+    );
+    Ok(Some(response))
+}
+
 fn revoke_storefront_session(
     state: &RuntimeServerState,
     session_id: &str,
@@ -698,6 +819,67 @@ fn storefront_checkout_form_state_from_execution(
     state
 }
 
+fn cms_page_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.pages.index", summary.into());
+    for field in [
+        "page_id",
+        "page_title",
+        "page_slug",
+        "page_summary",
+        "page_body_html",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    state
+}
+
+fn cms_navigation_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.navigation.index", summary.into());
+    for (name, values) in &execution.form_fields {
+        if (name.starts_with("nav_label_")
+            || name.starts_with("nav_href_")
+            || name == "new_nav_label"
+            || name == "new_nav_href")
+            && !values.is_empty()
+        {
+            state = state.with_field_value(name.clone(), values[0].clone());
+        }
+    }
+    state
+}
+
+fn cms_redirect_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.redirects.index", summary.into());
+    for (name, values) in &execution.form_fields {
+        if (name.starts_with("redirect_from_")
+            || name.starts_with("redirect_to_")
+            || name.starts_with("redirect_permanent_")
+            || name == "new_redirect_from"
+            || name == "new_redirect_to"
+            || name == "new_redirect_permanent")
+            && !values.is_empty()
+        {
+            state = state.with_field_value(name.clone(), values[0].clone());
+        }
+    }
+    if execution.form_fields.contains_key("new_redirect_permanent") {
+        state = state.with_field_value("new_redirect_permanent", "yes");
+    }
+    state
+}
+
 fn storefront_cart_form_state_from_execution(
     execution: &RequestExecution,
     summary: impl Into<String>,
@@ -711,6 +893,188 @@ fn storefront_cart_form_state_from_execution(
         }
     }
     state
+}
+
+fn catalog_admin_product_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.catalog-admin", summary.into());
+    for field in [
+        "catalog_entity",
+        "product_handle",
+        "product_title",
+        "product_summary",
+        "product_price",
+        "product_collection_handle",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    state
+}
+
+fn catalog_admin_collection_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.catalog-admin", summary.into());
+    for field in [
+        "catalog_entity",
+        "collection_handle",
+        "collection_title",
+        "collection_label",
+        "collection_summary",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    state
+}
+
+fn parse_decimal_price_minor(value: &str) -> Option<i64> {
+    let trimmed = value.trim().trim_start_matches('£');
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
+    }
+    let mut parts = trimmed.split('.');
+    let pounds = parts.next()?;
+    let pence = parts.next().unwrap_or("00");
+    if parts.next().is_some()
+        || pounds.is_empty()
+        || !pounds.chars().all(|ch| ch.is_ascii_digit())
+        || !pence.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return None;
+    }
+    let pence = match pence.len() {
+        0 => "00".to_string(),
+        1 => format!("{pence}0"),
+        2 => pence.to_string(),
+        _ => return None,
+    };
+    let pounds = pounds.parse::<i64>().ok()?;
+    let pence = pence.parse::<i64>().ok()?;
+    let minor = pounds.checked_mul(100)?.checked_add(pence)?;
+    (minor > 0).then_some(minor)
+}
+
+fn validated_catalog_admin_update_from_execution(
+    execution: &RequestExecution,
+) -> Result<CatalogAdminMutationInput, StorefrontFormState> {
+    match execution_form_field(execution, "catalog_entity").unwrap_or_default() {
+        "product" => {
+            let mut form_state = catalog_admin_product_form_state_from_execution(
+                execution,
+                "Fix the highlighted product fields and save again.",
+            );
+            let handle = storefront_form_field_value(execution, "product_handle");
+            let title = storefront_form_field_value(execution, "product_title");
+            let summary = storefront_form_field_value(execution, "product_summary");
+            let price = storefront_form_field_value(execution, "product_price");
+            let collection_handle =
+                storefront_form_field_value(execution, "product_collection_handle");
+            let mut has_errors = false;
+            if handle.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error(
+                    "product_handle",
+                    "Refresh the page and try again before saving this product.",
+                );
+            }
+            if title.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error("product_title", "Enter a product title.");
+            }
+            if summary.trim().is_empty() {
+                has_errors = true;
+                form_state =
+                    form_state.with_field_error("product_summary", "Enter a product summary.");
+            }
+            if collection_handle.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error(
+                    "product_collection_handle",
+                    "Choose a collection for this product.",
+                );
+            }
+            let price_minor = match parse_decimal_price_minor(&price) {
+                Some(price_minor) => price_minor,
+                None => {
+                    has_errors = true;
+                    form_state = form_state.with_field_error(
+                        "product_price",
+                        "Enter a positive GBP price such as 29.00.",
+                    );
+                    0
+                }
+            };
+            if has_errors {
+                return Err(form_state);
+            }
+            Ok(CatalogAdminMutationInput::Product(
+                crate::storefront::StorefrontCatalogProductUpdate {
+                    handle,
+                    title,
+                    summary,
+                    price_minor,
+                    collection_handle,
+                },
+            ))
+        }
+        "collection" => {
+            let mut form_state = catalog_admin_collection_form_state_from_execution(
+                execution,
+                "Fix the highlighted collection fields and save again.",
+            );
+            let handle = storefront_form_field_value(execution, "collection_handle");
+            let title = storefront_form_field_value(execution, "collection_title");
+            let label = storefront_form_field_value(execution, "collection_label");
+            let summary = storefront_form_field_value(execution, "collection_summary");
+            let mut has_errors = false;
+            if handle.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error(
+                    "collection_handle",
+                    "Refresh the page and try again before saving this collection.",
+                );
+            }
+            if title.trim().is_empty() {
+                has_errors = true;
+                form_state =
+                    form_state.with_field_error("collection_title", "Enter a collection title.");
+            }
+            if label.trim().is_empty() {
+                has_errors = true;
+                form_state =
+                    form_state.with_field_error("collection_label", "Enter a merchandising label.");
+            }
+            if summary.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state
+                    .with_field_error("collection_summary", "Enter a collection summary.");
+            }
+            if has_errors {
+                return Err(form_state);
+            }
+            Ok(CatalogAdminMutationInput::Collection(
+                crate::storefront::StorefrontCatalogCollectionUpdate {
+                    handle,
+                    title,
+                    label,
+                    summary,
+                },
+            ))
+        }
+        _ => Err(StorefrontFormState::new(
+            "commerce.catalog-admin",
+            "Refresh the catalog admin page and try the save action again.",
+        )),
+    }
 }
 
 fn validated_cart_quantities_from_execution(
@@ -978,6 +1342,189 @@ fn storefront_payment_input_from_execution(
     .map_err(RuntimeServerError::Storefront)
 }
 
+fn apply_native_cms_admin_mutations(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if !CMS_ADMIN_NATIVE_MUTATION_ROUTES.contains(&execution.route.route_name.as_str()) {
+        return Ok(None);
+    }
+
+    let mut workspace = CmsAdminWorkspace::load(&state.plan).map_err(|reason| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to load CMS admin workspace: {reason}"),
+        }
+    })?;
+
+    match execution.route.route_name.as_str() {
+        "cms.pages.save-draft" => {
+            let page_input = CmsAdminPageInput {
+                page_id: execution_form_field(execution, "page_id").map(str::to_string),
+                title: storefront_form_field_value(execution, "page_title"),
+                slug: storefront_form_field_value(execution, "page_slug"),
+                summary: storefront_form_field_value(execution, "page_summary"),
+                body_html: storefront_form_field_value(execution, "page_body_html"),
+            };
+            let page_id = match workspace.save_page_draft(page_input, now.as_unix_seconds()) {
+                Ok(page_id) => page_id,
+                Err(reason) => {
+                    let mut form_state =
+                        cms_page_form_state_from_execution(execution, reason.clone());
+                    for field in ["page_title", "page_slug", "page_summary", "page_body_html"] {
+                        form_state = form_state.with_field_error(field, reason.clone());
+                    }
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/pages".to_string()));
+                }
+            };
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS page draft: {reason}"),
+                })?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Draft saved. Preview and publish when ready.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.pages.publish" => {
+            let page_id = if execution_form_field(execution, "page_title").is_some() {
+                let page_input = CmsAdminPageInput {
+                    page_id: execution_form_field(execution, "page_id").map(str::to_string),
+                    title: storefront_form_field_value(execution, "page_title"),
+                    slug: storefront_form_field_value(execution, "page_slug"),
+                    summary: storefront_form_field_value(execution, "page_summary"),
+                    body_html: storefront_form_field_value(execution, "page_body_html"),
+                };
+                match workspace.save_page_draft(page_input, now.as_unix_seconds()) {
+                    Ok(page_id) => page_id,
+                    Err(reason) => {
+                        let mut form_state =
+                            cms_page_form_state_from_execution(execution, reason.clone());
+                        for field in ["page_title", "page_slug", "page_summary", "page_body_html"] {
+                            form_state = form_state.with_field_error(field, reason.clone());
+                        }
+                        push_storefront_form_state(state, response_cookies, &form_state)?;
+                        return Ok(Some("/admin/pages".to_string()));
+                    }
+                }
+            } else {
+                execution_form_field(execution, "page_id")
+                    .map(str::to_string)
+                    .ok_or_else(|| RuntimeServerError::Configuration {
+                        reason: "missing page_id for publish".to_string(),
+                    })?
+            };
+            workspace
+                .publish_page(&page_id, now.as_unix_seconds())
+                .map_err(|reason| RuntimeServerError::Configuration { reason })?;
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS publication: {reason}"),
+                })?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Page published to the live /pages/{slug} surface.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.pages.unpublish" => {
+            let page_id = execution_form_field(execution, "page_id").ok_or_else(|| {
+                RuntimeServerError::Configuration {
+                    reason: "missing page_id for unpublish".to_string(),
+                }
+            })?;
+            workspace
+                .unpublish_page(page_id, now.as_unix_seconds())
+                .map_err(|reason| RuntimeServerError::Configuration { reason })?;
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS unpublish: {reason}"),
+                })?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Info,
+                "Page removed from the live route but kept as a draft.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.navigation.save" => {
+            let items = match navigation_items_from_fields(&execution.form_fields) {
+                Ok(items) => items,
+                Err(reason) => {
+                    let form_state =
+                        cms_navigation_form_state_from_execution(execution, reason.clone())
+                            .with_field_error("new_nav_label", reason);
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/navigation".to_string()));
+                }
+            };
+            if let Err(reason) = workspace.save_navigation(items) {
+                let form_state =
+                    cms_navigation_form_state_from_execution(execution, reason.clone())
+                        .with_field_error("new_nav_label", reason);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/admin/navigation".to_string()));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS navigation: {reason}"),
+                })?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Primary navigation updated for the live storefront shell.",
+            )?;
+            return Ok(Some("/admin/navigation".to_string()));
+        }
+        "cms.redirects.save" => {
+            let redirects = match redirects_from_fields(&execution.form_fields) {
+                Ok(redirects) => redirects,
+                Err(reason) => {
+                    let form_state =
+                        cms_redirect_form_state_from_execution(execution, reason.clone())
+                            .with_field_error("new_redirect_from", reason);
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/redirects".to_string()));
+                }
+            };
+            if let Err(reason) = workspace.save_redirects(redirects) {
+                let form_state = cms_redirect_form_state_from_execution(execution, reason.clone())
+                    .with_field_error("new_redirect_from", reason);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/admin/redirects".to_string()));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS redirects: {reason}"),
+                })?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Redirect rules saved for unmatched live requests.",
+            )?;
+            return Ok(Some("/admin/redirects".to_string()));
+        }
+        _ => {}
+    }
+
+    Ok(None)
+}
+
 async fn apply_native_storefront_mutations(
     state: &RuntimeServerState,
     execution: &RequestExecution,
@@ -1140,6 +1687,101 @@ async fn apply_native_storefront_mutations(
             .await?
             {
                 return Ok(Some(location));
+            }
+        }
+        "commerce.catalog-admin-update" => {
+            let update = match validated_catalog_admin_update_from_execution(execution) {
+                Ok(update) => update,
+                Err(form_state) => {
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/catalog/products".to_string()));
+                }
+            };
+            let update_result = match &update {
+                CatalogAdminMutationInput::Product(update) => state
+                    .storefront
+                    .update_catalog_product(update, now.as_unix_seconds()),
+                CatalogAdminMutationInput::Collection(update) => state
+                    .storefront
+                    .update_catalog_collection(update, now.as_unix_seconds()),
+            };
+            match update_result {
+                Ok(_) => {
+                    let message = match &update {
+                        CatalogAdminMutationInput::Product(update) => {
+                            format!("Saved product changes for {}.", update.title)
+                        }
+                        CatalogAdminMutationInput::Collection(update) => {
+                            format!("Saved collection changes for {}.", update.title)
+                        }
+                    };
+                    push_storefront_flash(state, response_cookies, FlashLevel::Success, message)?;
+                    return Ok(Some("/admin/catalog/products".to_string()));
+                }
+                Err(
+                    error @ (StorefrontStateError::MissingCatalogProduct { .. }
+                    | StorefrontStateError::MissingCatalogCollection { .. }),
+                ) => {
+                    let mut form_state = match &update {
+                        CatalogAdminMutationInput::Product(_) => {
+                            catalog_admin_product_form_state_from_execution(
+                                execution,
+                                "Refresh the catalog admin page and try again.",
+                            )
+                        }
+                        CatalogAdminMutationInput::Collection(_) => {
+                            catalog_admin_collection_form_state_from_execution(
+                                execution,
+                                "Refresh the catalog admin page and try again.",
+                            )
+                        }
+                    };
+                    form_state = form_state.with_summary(error.to_string());
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/catalog/products".to_string()));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
+        }
+        "commerce.order-refund" => {
+            let order_id = storefront_form_field_value(execution, "order_id");
+            let reason = storefront_form_field_value(execution, "reason");
+            let redirect_location = if order_id.trim().is_empty() {
+                "/admin/orders".to_string()
+            } else {
+                format!("/admin/orders/{}", order_id.trim())
+            };
+            match state.storefront.refund_order(
+                order_id.trim(),
+                reason.as_str(),
+                now.as_unix_seconds(),
+            ) {
+                Ok(order) => {
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Success,
+                        format!(
+                            "Refunded {} for order {}.",
+                            order.refunded_total, order.order_id
+                        ),
+                    )?;
+                    return Ok(Some(format!("/admin/orders/{}", order.order_id)));
+                }
+                Err(
+                    error @ (StorefrontStateError::MissingRefundReason
+                    | StorefrontStateError::UnknownOrder { .. }
+                    | StorefrontStateError::RefundNotAllowed { .. }),
+                ) => {
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Error,
+                        error.to_string(),
+                    )?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
             }
         }
         "commerce.account-session-end" => {
@@ -1541,27 +2183,50 @@ fn storefront_response_augmentation(
     state: &RuntimeServerState,
     execution: &RequestExecution,
 ) -> Result<Option<StorefrontResponseAugmentation>, RuntimeServerError> {
-    if !should_render_storefront_state(execution) {
+    let should_render_storefront = should_render_storefront_state(execution);
+    let should_render_cms_admin_forms = should_render_cms_admin_forms(execution);
+    if !should_render_storefront && !should_render_cms_admin_forms {
         return Ok(None);
     }
     let Some(session_id) = execution.session.session_id.as_deref() else {
         return Ok(None);
     };
-    let snapshot = state
-        .storefront
-        .snapshot(session_id, execution.principal.principal_id.as_deref())?;
-    let tokens = issue_storefront_csrf_tokens(state, session_id)?;
-    Ok(Some(state.storefront.build_response_augmentation(
-        execution.route.route_name.as_str(),
-        &snapshot,
-        tokens,
-    )?))
+    let mut augmentation = if should_render_storefront {
+        let snapshot = state
+            .storefront
+            .snapshot(session_id, execution.principal.principal_id.as_deref())?;
+        let tokens = issue_storefront_csrf_tokens(state, session_id)?;
+        state.storefront.build_response_augmentation(
+            execution.route.route_name.as_str(),
+            &snapshot,
+            tokens,
+        )?
+    } else {
+        StorefrontResponseAugmentation {
+            html_fragment: None,
+            headers: BTreeMap::new(),
+        }
+    };
+    if should_render_cms_admin_forms {
+        augmentation
+            .headers
+            .extend(issue_cms_admin_csrf_tokens(state, session_id)?);
+    }
+    Ok(Some(augmentation))
 }
 
 fn should_render_storefront_state(execution: &RequestExecution) -> bool {
     matches!(execution.response, HandlerResponse::Page(_))
         && (execution.route.route_name.starts_with("commerce.")
             || execution.route_area == RouteArea::Account)
+}
+
+fn should_render_cms_admin_forms(execution: &RequestExecution) -> bool {
+    matches!(execution.response, HandlerResponse::Page(_))
+        && matches!(
+            execution.route.route_name.as_str(),
+            "cms.pages.index" | "cms.navigation.index" | "cms.redirects.index"
+        )
 }
 
 fn issue_storefront_csrf_tokens(
@@ -1578,6 +2243,24 @@ fn issue_storefront_csrf_tokens(
             .issue_csrf_token(&state.csrf_secret, session_id, action)
             .map_err(RequestExecutionError::from_browser_error)?;
         tokens.insert((*action).to_string(), token);
+    }
+    Ok(tokens)
+}
+
+fn issue_cms_admin_csrf_tokens(
+    state: &RuntimeServerState,
+    session_id: &str,
+) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+    let browser = state
+        .browser
+        .lock()
+        .expect("runtime browser mutex poisoned");
+    let mut tokens = BTreeMap::new();
+    for (action, header) in CMS_ADMIN_CSRF_ACTIONS {
+        let token = browser
+            .issue_csrf_token(&state.csrf_secret, session_id, action)
+            .map_err(RequestExecutionError::from_browser_error)?;
+        tokens.insert((*header).to_string(), token);
     }
     Ok(tokens)
 }
@@ -1691,6 +2374,7 @@ fn storefront_form_tokens_from_headers(
 ) -> Vec<(&'static str, String)> {
     STOREFRONT_FORM_CSRF_HEADERS
         .iter()
+        .chain(CMS_ADMIN_FORM_CSRF_HEADERS.iter())
         .filter_map(|(path, header)| headers.get(*header).map(|token| (*path, token.clone())))
         .collect()
 }

@@ -1,9 +1,9 @@
 use super::*;
-use davenda_assets::AssetDeliveryTarget;
 use crate::storefront::{
     StorefrontCartLine, StorefrontFormState, StorefrontOrderSnapshot, StorefrontPaymentSnapshot,
     StorefrontStateSnapshot, StorefrontStateStore,
 };
+use davenda_assets::AssetDeliveryTarget;
 use davenda_commerce::{
     CheckoutId, CheckoutLine, CheckoutSession, CurrencyCode, EntitlementKey, Money, Order, OrderId,
     PricingPolicy, ProductId, ProductKind, Sku,
@@ -12,7 +12,9 @@ use davenda_memberships::{
     BillingInterval, MemberAccountId, MembershipCatalog, MembershipInstant, MembershipModelError,
     MembershipTier, MembershipTierId, SubscriptionStatus, TierVisibility,
 };
-use davenda_template::{RenderModel, RenderValue, TemplateModelError, TemplateNamespace};
+use davenda_template::{
+    RenderModel, RenderValue, TemplateModelError, TemplateNamespace, TrustedHtml,
+};
 use std::collections::BTreeMap;
 
 impl RuntimePlan {
@@ -107,7 +109,7 @@ impl RuntimePlan {
             )?
             .with_object("route_params", route_params_model(&execution.route.params))?
             .with_object("links", links_model(&execution.locale)?)?
-            .with_object("navigation", navigation_model())?
+            .with_object("navigation", navigation_model(Some(self))?)?
             .with_bool(
                 "hasFlashMessages",
                 !storefront_feedback.visible_flash_messages.is_empty(),
@@ -139,6 +141,7 @@ impl RuntimePlan {
             execution.route.route_name.as_str(),
             execution.locale.as_str(),
             &execution.route.params,
+            &execution.query_params,
             storefront_feedback.form_state.as_ref(),
             Some(&execution.session),
             Some(&execution.principal),
@@ -156,10 +159,8 @@ fn route_params_model(params: &BTreeMap<String, String>) -> RenderModel {
     model
 }
 
-fn navigation_model() -> RenderModel {
-    RenderModel::new()
-        .with_list("primary", primary_navigation_items())
-        .expect("navigation keys are valid")
+fn navigation_model(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new().with_list("primary", primary_navigation_items(plan)?)
 }
 
 fn nav_item(label: &str, href: &str) -> RenderModel {
@@ -169,15 +170,26 @@ fn nav_item(label: &str, href: &str) -> RenderModel {
         .expect("navigation item keys are valid")
 }
 
-fn primary_navigation_items() -> Vec<RenderModel> {
-    vec![
-        nav_item("Home", "/"),
-        nav_item("Shop", "/shop"),
-        nav_item("Collections", "/shop/collections"),
-        nav_item("Events", "/events"),
-        nav_item("Cart", "/cart"),
-        nav_item("Account", "/account"),
-    ]
+fn primary_navigation_items(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let items = if let Some(plan) = plan {
+        cms_admin_workspace(plan)?
+            .navigation
+            .into_iter()
+            .map(|item| nav_item(item.label.as_str(), item.href.as_str()))
+            .collect::<Vec<_>>()
+    } else {
+        vec![
+            nav_item("Home", "/"),
+            nav_item("Shop", "/shop"),
+            nav_item("Collections", "/shop/collections"),
+            nav_item("Events", "/events"),
+            nav_item("Cart", "/cart"),
+            nav_item("Account", "/account"),
+        ]
+    };
+    Ok(items)
 }
 
 fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
@@ -242,6 +254,12 @@ fn page_model_for_route(
         "admin.dashboard" => "Harbor Shop Admin".to_string(),
         "admin.audit" => "Audit Log".to_string(),
         "commerce.orders" => "Orders".to_string(),
+        "commerce.order-detail" => execution
+            .route
+            .params
+            .get("order_id")
+            .map(|order_id| format!("Order {order_id}"))
+            .unwrap_or_else(|| "Order Detail".to_string()),
         "commerce.catalog-admin" => "Catalog Administration".to_string(),
         "cms.pages.index" => "Pages".to_string(),
         "cms.navigation.index" => "Navigation".to_string(),
@@ -278,6 +296,9 @@ fn page_model_for_route(
         "admin.dashboard" => "Operator overview for catalog, orders, and content.",
         "admin.audit" => "Audit trail and operator action history.",
         "commerce.orders" => "Operator order queue and payment history.",
+        "commerce.order-detail" => {
+            "Support and finance detail for a specific order, including payment, customer, and refund state."
+        }
         "commerce.catalog-admin" => "Merchandising inventory, collections, and featured products.",
         "cms.pages.index" => "Live page inventory and publication state.",
         "cms.navigation.index" => "Navigation trees and top-level route links.",
@@ -304,14 +325,13 @@ fn apply_route_specific_bindings(
     route_name: &str,
     locale: &str,
     params: &BTreeMap<String, String>,
+    query_params: &RequestFieldMap,
     form_state: Option<&StorefrontFormState>,
     session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
 ) -> Result<RenderModel, TemplateModelError> {
-    let default_catalog = StorefrontCatalog::default_sample();
-    let catalog = plan
-        .map(|runtime| &runtime.storefront_catalog)
-        .unwrap_or(&default_catalog);
+    let effective_catalog = effective_storefront_catalog(plan)?;
+    let catalog = &effective_catalog;
     let fixture = storefront_fixture(locale, catalog, plan)?;
 
     match route_name {
@@ -462,6 +482,11 @@ fn apply_route_specific_bindings(
             } else {
                 live_recent_orders.len()
             };
+            let content_count = if let Some(plan) = plan {
+                cms_admin_workspace(plan)?.pages.len().to_string()
+            } else {
+                content_pages(locale)?.len().to_string()
+            };
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
                 .with_bool("hasAdminPanels", true)?
@@ -471,10 +496,7 @@ fn apply_route_specific_bindings(
                     RenderValue::text(fixture.product_cards.len().to_string()),
                 )?
                 .with_value("orderCount", RenderValue::text(order_count.to_string()))?
-                .with_value(
-                    "contentCount",
-                    RenderValue::text(content_pages(locale)?.len().to_string()),
-                )?;
+                .with_value("contentCount", RenderValue::text(content_count))?;
         }
         "admin.audit" => {
             model = model
@@ -489,18 +511,12 @@ fn apply_route_specific_bindings(
                 )?;
         }
         "commerce.orders" => {
-            let live_recent_orders = recent_orders_from_storefront(
-                live_storefront_state(plan, session, principal)?.as_ref(),
-            )?;
-            let recent_orders = if live_recent_orders.is_empty() {
-                fixture.recent_orders.clone()
-            } else {
-                live_recent_orders
-            };
+            let (recent_orders, order_stats) = admin_orders_from_storefront(plan, &fixture)?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
                 .with_bool("hasRecentOrders", !recent_orders.is_empty())?
                 .with_list("recentOrders", recent_orders)?
+                .with_object("orderStats", order_stats)?
                 .with_value(
                     "ordersEmptyText",
                     RenderValue::text(
@@ -508,55 +524,138 @@ fn apply_route_specific_bindings(
                     ),
                 )?;
         }
-        "commerce.catalog-admin" => {
+        "commerce.order-detail" => {
+            let (recent_orders, _) = admin_orders_from_storefront(plan, &fixture)?;
+            let selected_order = params
+                .get("order_id")
+                .and_then(|order_id| order_detail_from_storefront(plan, order_id).transpose())
+                .transpose()?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasCatalogSections", !fixture.catalog_sections.is_empty())?
-                .with_list("catalogSections", fixture.catalog_sections.clone())?
-                .with_bool("hasProductCards", !fixture.product_cards.is_empty())?
-                .with_list("productCards", fixture.product_cards.clone())?
+                .with_bool("hasRecentOrders", !recent_orders.is_empty())?
+                .with_list("recentOrders", recent_orders)?
+                .with_bool("hasSelectedOrder", selected_order.is_some())?
+                .with_bool(
+                    "hasMissingOrder",
+                    params.get("order_id").is_some() && selected_order.is_none(),
+                )?;
+            if let Some(order) = selected_order {
+                model = model.with_object("selectedOrder", order)?;
+            }
+        }
+        "commerce.catalog-admin" => {
+            let product_cards = catalog_admin_products_model(locale, catalog, plan, form_state)?;
+            let catalog_sections = catalog_admin_collections_model(locale, catalog, form_state)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_object("catalogAdminForm", catalog_admin_form_model(form_state)?)?
+                .with_bool("hasCatalogSections", !catalog_sections.is_empty())?
+                .with_list("catalogSections", catalog_sections)?
+                .with_bool("hasProductCards", !product_cards.is_empty())?
+                .with_list("productCards", product_cards)?
                 .with_value(
                     "catalogEmptyText",
                     RenderValue::text("No catalog entries are available in the sample app yet."),
                 )?;
         }
         "cms.pages.index" => {
-            let pages = content_pages(locale)?;
+            let workspace = plan
+                .map(cms_admin_workspace)
+                .transpose()?
+                .unwrap_or_else(default_cms_admin_workspace);
+            let pages = cms_admin_pages_model(&workspace)?;
+            let selected_page = workspace
+                .selected_page(query_first(query_params, "page"))
+                .cloned();
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
                 .with_bool("hasContentPages", !pages.is_empty())?
                 .with_list("contentPages", pages)?
+                .with_bool("hasSelectedContentPage", selected_page.is_some())?
+                .with_object(
+                    "selectedContentPage",
+                    cms_admin_selected_page_model_with_form_state(selected_page, form_state)?,
+                )?
                 .with_value(
                     "pagesEmptyText",
                     RenderValue::text(
-                        "The current Harbor Shop sample app does not persist CMS page records yet. This screen reflects the live route inventory.",
+                        "Create or update a draft page, preview it below, then publish it to the live /pages/{slug} route.",
                     ),
                 )?;
+            model = merge_cms_page_form_feedback(model, form_state)?;
+        }
+        "cms.preview" => {
+            let workspace = plan
+                .map(cms_admin_workspace)
+                .transpose()?
+                .unwrap_or_else(default_cms_admin_workspace);
+            let selected_page = workspace
+                .selected_page(query_first(query_params, "page"))
+                .cloned();
+            model = model.with_object(
+                "selectedContentPage",
+                cms_admin_selected_page_model_with_form_state(selected_page, form_state)?,
+            )?;
         }
         "cms.navigation.index" => {
+            let workspace = plan
+                .map(cms_admin_workspace)
+                .transpose()?
+                .unwrap_or_else(default_cms_admin_workspace);
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasNavigationItems", !primary_navigation_items().is_empty())?
-                .with_list("navigationItems", primary_navigation_items())?
+                .with_bool("hasNavigationItems", !workspace.navigation.is_empty())?
+                .with_list(
+                    "navigationItems",
+                    cms_navigation_items_model(&workspace.navigation)?,
+                )?
                 .with_value(
                     "navigationEmptyText",
-                    RenderValue::text("Primary navigation is not configured yet."),
+                    RenderValue::text("Add at least one primary navigation item before saving."),
                 )?;
+            model = merge_cms_navigation_form_feedback(model, form_state)?;
         }
         "cms.redirects.index" => {
+            let workspace = plan
+                .map(cms_admin_workspace)
+                .transpose()?
+                .unwrap_or_else(default_cms_admin_workspace);
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasRedirects", false)?
-                .with_list("redirects", Vec::new())?
+                .with_bool("hasRedirects", !workspace.redirects.is_empty())?
+                .with_list("redirects", cms_redirects_model(&workspace.redirects)?)?
                 .with_value(
                     "redirectsEmptyText",
-                    RenderValue::text("Redirect rules are not configured yet in the sample app."),
+                    RenderValue::text(
+                        "Add redirect rules for unmatched legacy URLs before cutover.",
+                    ),
                 )?;
+            model = merge_cms_redirect_form_feedback(model, form_state)?;
+        }
+        "cms.page" => {
+            let workspace = plan
+                .map(cms_admin_workspace)
+                .transpose()?
+                .unwrap_or_else(default_cms_admin_workspace);
+            let slug = params.get("slug").map(String::as_str).unwrap_or_default();
+            model = model.with_object("cmsPage", cms_live_page_model(&workspace, slug)?)?;
         }
         _ => {}
     }
 
     Ok(model)
+}
+
+fn effective_storefront_catalog(
+    plan: Option<&RuntimePlan>,
+) -> Result<StorefrontCatalog, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(StorefrontCatalog::default_sample());
+    };
+    StorefrontStateStore::open_for_plan(plan)
+        .map_err(template_store_error)?
+        .catalog()
+        .map_err(template_store_error)
 }
 
 fn live_storefront_state(
@@ -738,6 +837,171 @@ fn account_order_from_storefront(
         })
 }
 
+fn admin_orders_from_storefront(
+    plan: Option<&RuntimePlan>,
+    _fixture: &StorefrontFixture,
+) -> Result<(Vec<RenderModel>, RenderModel), TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok((Vec::new(), admin_order_stats(0, 0, 0)?));
+    };
+    let store = StorefrontStateStore::open_for_plan(plan).map_err(template_store_error)?;
+    let orders = store.admin_orders(50).map_err(template_store_error)?;
+    if orders.is_empty() {
+        Ok((Vec::new(), admin_order_stats(0, 0, 0)?))
+    } else {
+        let pending = orders
+            .iter()
+            .filter(|order| order.status == "pending_payment")
+            .count();
+        let refunded = orders
+            .iter()
+            .filter(|order| order.status == "refunded")
+            .count();
+        let rows = orders
+            .iter()
+            .map(admin_order_row_from_storefront)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, admin_order_stats(orders.len(), pending, refunded)?))
+    }
+}
+
+fn order_detail_from_storefront(
+    plan: Option<&RuntimePlan>,
+    order_id: &str,
+) -> Result<Option<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(None);
+    };
+    let store = StorefrontStateStore::open_for_plan(plan).map_err(template_store_error)?;
+    let Some(order) = store.admin_order(order_id).map_err(template_store_error)? else {
+        return Ok(None);
+    };
+    let payment_summary = payment_summary(
+        order.payment.method.as_deref(),
+        order.payment.last4.as_deref(),
+        order.payment.reference.as_deref(),
+    );
+    let payment_reference = order.payment.reference.clone().unwrap_or_default();
+    let checkout_email = order.payment.checkout_email.clone().unwrap_or_default();
+    let principal_id = order.principal_id.clone().unwrap_or_default();
+    let line_items = order
+        .lines
+        .iter()
+        .map(|line| {
+            RenderModel::new()
+                .with_value("title", RenderValue::text(line.title.clone()))?
+                .with_value(
+                    "variantTitle",
+                    RenderValue::text(line.variant_title.clone()),
+                )?
+                .with_value("sku", RenderValue::text(line.sku.clone()))?
+                .with_value("quantity", RenderValue::text(line.quantity.to_string()))?
+                .with_value("total", RenderValue::text(line.total.clone()))?
+                .with_bool(
+                    "hasEntitlementKey",
+                    line.entitlement_key
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty()),
+                )?
+                .with_value(
+                    "entitlementKey",
+                    RenderValue::text(line.entitlement_key.clone().unwrap_or_default()),
+                )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let refunds = order
+        .refunds
+        .iter()
+        .map(|refund| {
+            RenderModel::new()
+                .with_value("refundId", RenderValue::text(refund.refund_id.clone()))?
+                .with_value("amount", RenderValue::text(refund.amount.clone()))?
+                .with_value("reason", RenderValue::text(refund.reason.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    RenderModel::new()
+        .with_value("orderId", RenderValue::text(order.order_id.clone()))?
+        .with_value("reference", RenderValue::text(order.order_id.clone()))?
+        .with_value(
+            "status",
+            RenderValue::text(display_status_label(&order.status)),
+        )?
+        .with_value(
+            "paymentStatus",
+            RenderValue::text(payment_status_label(&order.payment.status)),
+        )?
+        .with_value("paymentSummary", RenderValue::text(payment_summary))?
+        .with_value("paymentReference", RenderValue::text(payment_reference))?
+        .with_bool("hasPaymentReference", order.payment.reference.is_some())?
+        .with_value("checkoutEmail", RenderValue::text(checkout_email))?
+        .with_bool("hasCheckoutEmail", order.payment.checkout_email.is_some())?
+        .with_value("principalId", RenderValue::text(principal_id))?
+        .with_bool("hasPrincipalId", order.principal_id.is_some())?
+        .with_value("sessionId", RenderValue::text(order.session_id.clone()))?
+        .with_value("subtotal", RenderValue::text(order.subtotal.clone()))?
+        .with_value("total", RenderValue::text(order.total.clone()))?
+        .with_value(
+            "refundedTotal",
+            RenderValue::text(order.refunded_total.clone()),
+        )?
+        .with_value(
+            "refundableTotal",
+            RenderValue::text(order.refundable_total.clone()),
+        )?
+        .with_bool(
+            "canRefund",
+            matches!(
+                order.status.as_str(),
+                "paid" | "fulfilled" | "partially_refunded"
+            ) && order.refundable_total_minor > 0,
+        )?
+        .with_bool("hasRefunds", !order.refunds.is_empty())?
+        .with_list("refunds", refunds)?
+        .with_bool("hasLineItems", !order.lines.is_empty())?
+        .with_list("lineItems", line_items)?
+        .with_value(
+            "detailHref",
+            RenderValue::text(format!("/admin/orders/{}", order.order_id)),
+        )
+        .map(Some)
+}
+
+fn admin_order_row_from_storefront(
+    order: &StorefrontOrderSnapshot,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("reference", RenderValue::text(order.order_id.clone()))?
+        .with_value(
+            "status",
+            RenderValue::text(display_status_label(&order.status)),
+        )?
+        .with_value(
+            "paymentStatus",
+            RenderValue::text(payment_status_label(&order.payment.status)),
+        )?
+        .with_value("total", RenderValue::text(order.total.clone()))?
+        .with_value(
+            "customerEmail",
+            RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
+        )?
+        .with_bool("hasCustomerEmail", order.payment.checkout_email.is_some())?
+        .with_value(
+            "detailHref",
+            RenderValue::text(format!("/admin/orders/{}", order.order_id)),
+        )
+}
+
+fn admin_order_stats(
+    total: usize,
+    pending: usize,
+    refunded: usize,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("pending", RenderValue::text(pending.to_string()))?
+        .with_value("refunded", RenderValue::text(refunded.to_string()))
+}
+
 fn operator_identity(
     principal: Option<&PrincipalContext>,
     session: Option<&SessionContext>,
@@ -862,6 +1126,282 @@ fn content_page(
         .with_value("href", RenderValue::text(href))?
         .with_value("surface", RenderValue::text(surface))?
         .with_value("summary", RenderValue::text(summary))
+}
+
+fn query_first<'a>(query_params: &'a RequestFieldMap, name: &str) -> Option<&'a str> {
+    query_params
+        .get(name)
+        .and_then(|values| values.first())
+        .map(String::as_str)
+}
+
+fn cms_admin_workspace(plan: &RuntimePlan) -> Result<CmsAdminWorkspace, TemplateModelError> {
+    CmsAdminWorkspace::load(plan).map_err(|message| TemplateModelError::TemplateRead {
+        path: "cms-admin-workspace".to_string(),
+        message,
+    })
+}
+
+fn default_cms_admin_workspace() -> CmsAdminWorkspace {
+    crate::default_workspace()
+}
+
+fn cms_admin_pages_model(
+    workspace: &CmsAdminWorkspace,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    workspace
+        .pages
+        .iter()
+        .map(|page| {
+            RenderModel::new()
+                .with_value("id", RenderValue::text(page.id.clone()))?
+                .with_value("title", RenderValue::text(page.draft.title.clone()))?
+                .with_value("slug", RenderValue::text(page.draft.slug.clone()))?
+                .with_value(
+                    "statusLabel",
+                    RenderValue::text(page.status_label().to_string()),
+                )?
+                .with_value("summary", RenderValue::text(page.draft.summary.clone()))?
+                .with_value(
+                    "editHref",
+                    RenderValue::text(format!("/admin/pages?page={}", page.id)),
+                )?
+                .with_bool("hasLivePath", page.live_path().is_some())?
+                .with_value(
+                    "livePath",
+                    RenderValue::text(page.live_path().unwrap_or_default()),
+                )
+        })
+        .collect()
+}
+
+fn cms_admin_selected_page_model(page: CmsAdminPage) -> Result<RenderModel, TemplateModelError> {
+    let preview_html = TrustedHtml::new(page.draft.body_html.clone())?;
+    RenderModel::new()
+        .with_value("id", RenderValue::text(page.id.clone()))?
+        .with_value("title", RenderValue::text(page.draft.title.clone()))?
+        .with_value("slug", RenderValue::text(page.draft.slug.clone()))?
+        .with_value("summary", RenderValue::text(page.draft.summary.clone()))?
+        .with_value("bodySource", RenderValue::text(page.draft.body_html.clone()))?
+        .with_value("bodyHtml", RenderValue::trusted_html(preview_html))?
+        .with_value(
+            "statusLabel",
+            RenderValue::text(page.status_label().to_string()),
+        )?
+        .with_bool("hasLivePath", page.live_path().is_some())?
+        .with_value(
+            "livePath",
+            RenderValue::text(page.live_path().unwrap_or_default()),
+        )?
+        .with_value("previewPath", RenderValue::text(page.preview_path()))
+}
+
+fn cms_admin_selected_page_model_with_form_state(
+    page: Option<CmsAdminPage>,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let page_id = form_state
+        .and_then(|state| state.fields.get("page_id"))
+        .cloned()
+        .or_else(|| page.as_ref().map(|page| page.id.clone()))
+        .unwrap_or_default();
+    let title = form_state
+        .and_then(|state| state.fields.get("page_title"))
+        .cloned()
+        .or_else(|| page.as_ref().map(|page| page.draft.title.clone()))
+        .unwrap_or_default();
+    let slug = form_state
+        .and_then(|state| state.fields.get("page_slug"))
+        .cloned()
+        .or_else(|| page.as_ref().map(|page| page.draft.slug.clone()))
+        .unwrap_or_default();
+    let summary = form_state
+        .and_then(|state| state.fields.get("page_summary"))
+        .cloned()
+        .or_else(|| page.as_ref().map(|page| page.draft.summary.clone()))
+        .unwrap_or_default();
+    let body_html = form_state
+        .and_then(|state| state.fields.get("page_body_html"))
+        .cloned()
+        .or_else(|| page.as_ref().map(|page| page.draft.body_html.clone()))
+        .unwrap_or_else(|| "<p>Create a draft page to preview it.</p>".to_string());
+    let status_label = page
+        .as_ref()
+        .map(|page| page.status_label().to_string())
+        .unwrap_or_else(|| "Draft only".to_string());
+    let live_path = page
+        .as_ref()
+        .and_then(|page| page.live_path())
+        .unwrap_or_default();
+    let has_live_path = !live_path.is_empty();
+    RenderModel::new()
+        .with_value("id", RenderValue::text(page_id))?
+        .with_value("title", RenderValue::text(title))?
+        .with_value("slug", RenderValue::text(slug.clone()))?
+        .with_value("summary", RenderValue::text(summary))?
+        .with_value("bodySource", RenderValue::text(body_html.clone()))?
+        .with_value(
+            "bodyHtml",
+            RenderValue::trusted_html(TrustedHtml::new(body_html)?),
+        )?
+        .with_value("statusLabel", RenderValue::text(status_label))?
+        .with_bool("hasLivePath", has_live_path)?
+        .with_value("livePath", RenderValue::text(live_path))?
+        .with_value("previewPath", RenderValue::text(format!("/pages/{slug}")))
+}
+
+fn empty_cms_admin_selected_page_model() -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("id", RenderValue::text(String::new()))?
+        .with_value("title", RenderValue::text(String::new()))?
+        .with_value("slug", RenderValue::text(String::new()))?
+        .with_value("summary", RenderValue::text(String::new()))?
+        .with_value("bodySource", RenderValue::text(String::new()))?
+        .with_value(
+            "bodyHtml",
+            RenderValue::trusted_html(TrustedHtml::new(
+                "<p>Create a draft page to preview it.</p>",
+            )?),
+        )?
+        .with_value("statusLabel", RenderValue::text("Draft only"))?
+        .with_bool("hasLivePath", false)?
+        .with_value("livePath", RenderValue::text(String::new()))?
+        .with_value("previewPath", RenderValue::text(String::new()))
+}
+
+fn cms_navigation_items_model(
+    items: &[CmsAdminNavigationItem],
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            RenderModel::new()
+                .with_value("label", RenderValue::text(item.label.clone()))?
+                .with_value("href", RenderValue::text(item.href.clone()))?
+                .with_value(
+                    "labelField",
+                    RenderValue::text(format!("nav_label_{index}")),
+                )?
+                .with_value("hrefField", RenderValue::text(format!("nav_href_{index}")))
+        })
+        .collect()
+}
+
+fn cms_redirects_model(
+    redirects: &[CmsAdminRedirect],
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    redirects
+        .iter()
+        .enumerate()
+        .map(|(index, redirect)| {
+            RenderModel::new()
+                .with_value("from", RenderValue::text(redirect.from.clone()))?
+                .with_value("to", RenderValue::text(redirect.to.clone()))?
+                .with_bool("permanent", redirect.permanent)?
+                .with_value(
+                    "fromField",
+                    RenderValue::text(format!("redirect_from_{index}")),
+                )?
+                .with_value("toField", RenderValue::text(format!("redirect_to_{index}")))?
+                .with_value(
+                    "permanentField",
+                    RenderValue::text(format!("redirect_permanent_{index}")),
+                )
+        })
+        .collect()
+}
+
+fn cms_live_page_model(
+    workspace: &CmsAdminWorkspace,
+    slug: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    if let Some(page) = workspace.live_page_by_slug(slug) {
+        let live = page
+            .live
+            .as_ref()
+            .expect("live page should have a live revision");
+        return RenderModel::new()
+            .with_bool("isPublished", true)?
+            .with_value("title", RenderValue::text(live.title.clone()))?
+            .with_value("summary", RenderValue::text(live.summary.clone()))?
+            .with_value(
+                "bodyHtml",
+                RenderValue::trusted_html(TrustedHtml::new(live.body_html.clone())?),
+            )?
+            .with_value("slug", RenderValue::text(live.slug.clone()));
+    }
+
+    RenderModel::new()
+        .with_bool("isPublished", false)?
+        .with_value("title", RenderValue::text("Page unavailable"))?
+        .with_value(
+            "summary",
+            RenderValue::text(
+                "This CMS page is not published yet. Use the Harbor Shop admin workflow to publish it before linking customers to this path.",
+            ),
+        )?
+        .with_value(
+            "bodyHtml",
+            RenderValue::trusted_html(TrustedHtml::new(
+                "<p>The requested CMS page is not live yet.</p>",
+            )?),
+        )?
+        .with_value("slug", RenderValue::text(slug.to_string()))
+}
+
+fn merge_cms_page_form_feedback(
+    model: RenderModel,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    model
+        .with_bool("hasErrors", !errors.is_empty())?
+        .with_value(
+            "errorSummary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| "Update the page draft and save again.".to_string()),
+            ),
+        )?
+        .with_list("errors", errors)
+}
+
+fn merge_cms_navigation_form_feedback(
+    model: RenderModel,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    model
+        .with_bool("hasErrors", !errors.is_empty())?
+        .with_value(
+            "errorSummary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| "Update the navigation items and save again.".to_string()),
+            ),
+        )?
+        .with_list("errors", errors)
+}
+
+fn merge_cms_redirect_form_feedback(
+    model: RenderModel,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    model
+        .with_bool("hasErrors", !errors.is_empty())?
+        .with_value(
+            "errorSummary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| "Update the redirect rules and save again.".to_string()),
+            ),
+        )?
+        .with_list("errors", errors)
 }
 
 fn cart_item_from_storefront(
@@ -1093,6 +1633,7 @@ fn payment_status_label(status: &str) -> String {
         "captured" => "Captured".to_string(),
         "authorized" => "Authorized".to_string(),
         "failed" => "Failed".to_string(),
+        "refunded" => "Refunded".to_string(),
         other => display_status_label(other),
     }
 }
@@ -1925,6 +2466,268 @@ fn storefront_fixture(
     })
 }
 
+fn catalog_admin_form_model(
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    let has_errors = !errors.is_empty();
+    RenderModel::new()
+        .with_bool("hasErrors", has_errors)?
+        .with_value(
+            "errorSummary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| {
+                        "Fix the highlighted catalog fields and save again.".to_string()
+                    }),
+            ),
+        )?
+        .with_list("errors", errors)
+}
+
+fn catalog_admin_products_model(
+    locale: &str,
+    catalog: &StorefrontCatalog,
+    plan: Option<&RuntimePlan>,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    catalog
+        .products
+        .iter()
+        .map(|product| {
+            let collection_name = catalog
+                .collection(product.collection_handle.as_str())
+                .map(|collection| collection.title.clone())
+                .unwrap_or_else(|| "Collection".to_string());
+            let fixture = ProductFixture {
+                handle: product.handle.clone(),
+                title: product.title.clone(),
+                summary: product.summary.clone(),
+                price: money_display_minor(product.price_minor, &product.currency),
+                collection_handle: product.collection_handle.clone(),
+                collection_name,
+            };
+            let is_active_form = catalog_admin_form_targets_product(form_state, &product.handle);
+            let title_error = catalog_admin_form_error(form_state, is_active_form, "product_title");
+            let summary_error =
+                catalog_admin_form_error(form_state, is_active_form, "product_summary");
+            let price_error = catalog_admin_form_error(form_state, is_active_form, "product_price");
+            let collection_error =
+                catalog_admin_form_error(form_state, is_active_form, "product_collection_handle");
+            product_model_for_locale(locale, &fixture, plan)?
+                .with_value(
+                    "titleInput",
+                    RenderValue::text(catalog_admin_form_value(
+                        form_state,
+                        is_active_form,
+                        "product_title",
+                        &product.title,
+                    )),
+                )?
+                .with_value(
+                    "summaryInput",
+                    RenderValue::text(catalog_admin_form_value(
+                        form_state,
+                        is_active_form,
+                        "product_summary",
+                        &product.summary,
+                    )),
+                )?
+                .with_value(
+                    "priceInput",
+                    RenderValue::text(catalog_admin_form_value(
+                        form_state,
+                        is_active_form,
+                        "product_price",
+                        &decimal_money_input_minor(product.price_minor),
+                    )),
+                )?
+                .with_value(
+                    "collectionHandleInput",
+                    RenderValue::text(catalog_admin_form_value(
+                        form_state,
+                        is_active_form,
+                        "product_collection_handle",
+                        &product.collection_handle,
+                    )),
+                )?
+                .with_bool("hasTitleError", title_error.is_some())?
+                .with_value(
+                    "titleError",
+                    RenderValue::text(title_error.unwrap_or_default()),
+                )?
+                .with_bool("hasSummaryError", summary_error.is_some())?
+                .with_value(
+                    "summaryError",
+                    RenderValue::text(summary_error.unwrap_or_default()),
+                )?
+                .with_bool("hasPriceError", price_error.is_some())?
+                .with_value(
+                    "priceError",
+                    RenderValue::text(price_error.unwrap_or_default()),
+                )?
+                .with_bool("hasCollectionError", collection_error.is_some())?
+                .with_value(
+                    "collectionError",
+                    RenderValue::text(collection_error.unwrap_or_default()),
+                )?
+                .with_list(
+                    "collectionOptions",
+                    catalog_admin_collection_options(
+                        catalog,
+                        catalog_admin_form_value(
+                            form_state,
+                            is_active_form,
+                            "product_collection_handle",
+                            &product.collection_handle,
+                        )
+                        .as_str(),
+                    )?,
+                )
+        })
+        .collect()
+}
+
+fn catalog_admin_collections_model(
+    locale: &str,
+    catalog: &StorefrontCatalog,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    catalog
+        .collections
+        .iter()
+        .map(|collection| {
+            let fixture = CollectionFixture {
+                handle: collection.handle.clone(),
+                title: collection.title.clone(),
+                href: localized_collection_path(locale, &collection.handle),
+                summary: collection.summary.clone(),
+                label: collection.label.clone(),
+            };
+            let is_active_form =
+                catalog_admin_form_targets_collection(form_state, &collection.handle);
+            let title_error =
+                catalog_admin_form_error(form_state, is_active_form, "collection_title");
+            let label_error =
+                catalog_admin_form_error(form_state, is_active_form, "collection_label");
+            let summary_error =
+                catalog_admin_form_error(form_state, is_active_form, "collection_summary");
+            collection_section_model(locale, &fixture)?
+                .with_value(
+                    "titleInput",
+                    RenderValue::text(catalog_admin_form_value(
+                        form_state,
+                        is_active_form,
+                        "collection_title",
+                        &collection.title,
+                    )),
+                )?
+                .with_value(
+                    "labelInput",
+                    RenderValue::text(catalog_admin_form_value(
+                        form_state,
+                        is_active_form,
+                        "collection_label",
+                        &collection.label,
+                    )),
+                )?
+                .with_value(
+                    "summaryInput",
+                    RenderValue::text(catalog_admin_form_value(
+                        form_state,
+                        is_active_form,
+                        "collection_summary",
+                        &collection.summary,
+                    )),
+                )?
+                .with_bool("hasTitleError", title_error.is_some())?
+                .with_value(
+                    "titleError",
+                    RenderValue::text(title_error.unwrap_or_default()),
+                )?
+                .with_bool("hasLabelError", label_error.is_some())?
+                .with_value(
+                    "labelError",
+                    RenderValue::text(label_error.unwrap_or_default()),
+                )?
+                .with_bool("hasSummaryError", summary_error.is_some())?
+                .with_value(
+                    "summaryError",
+                    RenderValue::text(summary_error.unwrap_or_default()),
+                )
+        })
+        .collect()
+}
+
+fn catalog_admin_collection_options(
+    catalog: &StorefrontCatalog,
+    selected_handle: &str,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    catalog
+        .collections
+        .iter()
+        .map(|collection| {
+            RenderModel::new()
+                .with_value("handle", RenderValue::text(collection.handle.clone()))?
+                .with_value("title", RenderValue::text(collection.title.clone()))?
+                .with_bool("selected", collection.handle == selected_handle)
+        })
+        .collect()
+}
+
+fn catalog_admin_form_targets_product(
+    form_state: Option<&StorefrontFormState>,
+    handle: &str,
+) -> bool {
+    catalog_admin_form_matches(form_state, "product", "product_handle", handle)
+}
+
+fn catalog_admin_form_targets_collection(
+    form_state: Option<&StorefrontFormState>,
+    handle: &str,
+) -> bool {
+    catalog_admin_form_matches(form_state, "collection", "collection_handle", handle)
+}
+
+fn catalog_admin_form_matches(
+    form_state: Option<&StorefrontFormState>,
+    entity: &str,
+    handle_field: &str,
+    handle: &str,
+) -> bool {
+    form_state.is_some_and(|state| {
+        state.fields.get("catalog_entity").map(String::as_str) == Some(entity)
+            && state.fields.get(handle_field).map(String::as_str) == Some(handle)
+    })
+}
+
+fn catalog_admin_form_value(
+    form_state: Option<&StorefrontFormState>,
+    is_active_form: bool,
+    field: &str,
+    default: &str,
+) -> String {
+    if !is_active_form {
+        return default.to_string();
+    }
+    form_state
+        .and_then(|state| state.fields.get(field))
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn catalog_admin_form_error(
+    form_state: Option<&StorefrontFormState>,
+    is_active_form: bool,
+    field: &str,
+) -> Option<String> {
+    if !is_active_form {
+        return None;
+    }
+    form_state.and_then(|state| state.field_errors.get(field).cloned())
+}
+
 struct CollectionFixture {
     handle: String,
     title: String,
@@ -1947,6 +2750,7 @@ fn collection_section_model(
     collection: &CollectionFixture,
 ) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
+        .with_value("handle", RenderValue::text(collection.handle.as_str()))?
         .with_value("label", RenderValue::text(collection.label.as_str()))?
         .with_value("title", RenderValue::text(collection.title.as_str()))?
         .with_value("summary", RenderValue::text(collection.summary.as_str()))?
@@ -2256,6 +3060,12 @@ fn money_display(money: &Money) -> String {
     money_display_minor(money.amount_minor(), money.currency().as_str())
 }
 
+fn decimal_money_input_minor(amount_minor: i64) -> String {
+    let major = amount_minor / 100;
+    let remainder = amount_minor.abs() % 100;
+    format!("{major}.{remainder:02}")
+}
+
 fn money_display_minor(amount_minor: i64, currency: &str) -> String {
     let major = amount_minor / 100;
     let remainder = amount_minor % 100;
@@ -2289,6 +3099,7 @@ mod tests {
             route_name,
             "en-GB",
             &BTreeMap::new(),
+            &RequestFieldMap::new(),
             None,
             None,
             None,
@@ -2311,6 +3122,7 @@ mod tests {
             "memberships.account",
             "en-GB",
             &BTreeMap::new(),
+            &RequestFieldMap::new(),
             None,
             Some(&session),
             Some(&principal),
@@ -2329,6 +3141,7 @@ mod tests {
             "memberships.account.dashboard",
             "en-GB",
             &BTreeMap::new(),
+            &RequestFieldMap::new(),
             None,
             Some(&session),
             None,

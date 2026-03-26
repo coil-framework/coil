@@ -79,8 +79,8 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             .contains(&Capability::AssetRead)
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 16);
-    assert_eq!(manifest.http_surfaces.len(), 16);
+    assert_eq!(manifest.route_surfaces.len(), 19);
+    assert_eq!(manifest.http_surfaces.len(), 19);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 2);
@@ -640,6 +640,36 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
     assert_eq!(account_session_end.kind, RouteSurfaceKind::FrontendAction);
     assert_eq!(account_session_end.path, "/account/session/end");
     assert_eq!(account_session_end.capability, None);
+
+    let catalog_admin_update = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.catalog-admin-update")
+        .expect("catalog admin update surface should exist");
+    assert_eq!(catalog_admin_update.kind, RouteSurfaceKind::AdminAction);
+    assert_eq!(catalog_admin_update.path, "/admin/catalog/products");
+    assert_eq!(
+        catalog_admin_update.capability,
+        Some(Capability::CatalogProductEdit)
+    );
+
+    let order_detail = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.order-detail")
+        .expect("order detail surface should exist");
+    assert_eq!(order_detail.kind, RouteSurfaceKind::AdminPage);
+    assert_eq!(order_detail.path, "/admin/orders/{order_id}");
+    assert_eq!(order_detail.capability, Some(Capability::OrderRead));
+
+    let order_refund = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.order-refund")
+        .expect("order refund surface should exist");
+    assert_eq!(order_refund.kind, RouteSurfaceKind::AdminAction);
+    assert_eq!(order_refund.path, "/admin/orders/refund");
+    assert_eq!(order_refund.capability, Some(Capability::OrderRefundIssue));
 }
 
 #[test]
@@ -763,6 +793,60 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         cart_update.response,
         HttpResponseContract::Redirect {
             location: "/cart".to_string(),
+            status: 303,
+        }
+    );
+
+    let catalog_admin_update = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.catalog-admin-update")
+        .expect("catalog admin update http surface should exist");
+    assert_eq!(catalog_admin_update.area, HttpSurfaceArea::Admin);
+    assert_eq!(catalog_admin_update.method, HttpSurfaceMethod::Post);
+    assert_eq!(catalog_admin_update.path, "/admin/catalog/products");
+    assert_eq!(
+        catalog_admin_update.capability,
+        Some(Capability::CatalogProductEdit)
+    );
+    assert_eq!(
+        catalog_admin_update.response,
+        HttpResponseContract::Redirect {
+            location: "/admin/catalog/products".to_string(),
+            status: 303,
+        }
+    );
+
+    let order_detail = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.order-detail")
+        .expect("order detail http surface should exist");
+    assert_eq!(order_detail.area, HttpSurfaceArea::Admin);
+    assert_eq!(order_detail.method, HttpSurfaceMethod::Get);
+    assert_eq!(order_detail.path, "/admin/orders/{order_id}");
+    assert_eq!(order_detail.capability, Some(Capability::OrderRead));
+    assert_eq!(
+        order_detail.response,
+        HttpResponseContract::Page {
+            template: "commerce/order-detail".to_string(),
+            status: 200,
+        }
+    );
+
+    let order_refund = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.order-refund")
+        .expect("order refund http surface should exist");
+    assert_eq!(order_refund.area, HttpSurfaceArea::Admin);
+    assert_eq!(order_refund.method, HttpSurfaceMethod::Post);
+    assert_eq!(order_refund.path, "/admin/orders/refund");
+    assert_eq!(order_refund.capability, Some(Capability::OrderRefundIssue));
+    assert_eq!(
+        order_refund.response,
+        HttpResponseContract::Redirect {
+            location: "/admin/orders".to_string(),
             status: 303,
         }
     );

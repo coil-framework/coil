@@ -10,6 +10,7 @@ use super::*;
 
 const DEFAULT_CURRENCY: &str = "GBP";
 const INITIAL_ORDER_SEQUENCE: i64 = 10_042;
+const INITIAL_REFUND_SEQUENCE: i64 = 7_001;
 const STOREFRONT_FORM_STATE_PREFIX: &str = "__davenda_storefront_form_state__:";
 
 #[derive(Debug, Error)]
@@ -36,6 +37,8 @@ pub enum StorefrontStateError {
     EmptyCart { session_id: String },
     #[error("payment reference `{payment_reference}` does not match any storefront order")]
     UnknownPaymentReference { payment_reference: String },
+    #[error("storefront order `{order_id}` could not be found")]
+    UnknownOrder { order_id: String },
     #[error("unknown storefront payment webhook event `{event}`")]
     UnknownPaymentWebhookEvent { event: String },
     #[error(
@@ -46,6 +49,14 @@ pub enum StorefrontStateError {
     InvalidPaymentWebhookSignature,
     #[error("payment webhook secret is not configured")]
     MissingPaymentWebhookSecret,
+    #[error("refund reason is required")]
+    MissingRefundReason,
+    #[error("order `{order_id}` cannot be refunded while it is `{status}`")]
+    RefundNotAllowed { order_id: String, status: String },
+    #[error("catalog product `{handle}` does not exist")]
+    MissingCatalogProduct { handle: String },
+    #[error("catalog collection `{handle}` does not exist")]
+    MissingCatalogCollection { handle: String },
     #[error("failed to serialize storefront state: {reason}")]
     Serialization { reason: String },
     #[error("failed to initialize storefront state store `{path}`: {reason}")]
@@ -189,6 +200,17 @@ pub struct StorefrontOrderLine {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StorefrontOrderRefundSnapshot {
+    pub refund_id: String,
+    pub order_id: String,
+    pub amount_minor: i64,
+    pub amount: String,
+    pub currency: String,
+    pub reason: String,
+    pub created_at_unix_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StorefrontOrderSnapshot {
     pub order_id: String,
     pub session_id: String,
@@ -199,10 +221,15 @@ pub struct StorefrontOrderSnapshot {
     pub line_count: u32,
     pub subtotal_minor: i64,
     pub total_minor: i64,
+    pub refunded_total_minor: i64,
+    pub refundable_total_minor: i64,
     pub subtotal: String,
     pub total: String,
+    pub refunded_total: String,
+    pub refundable_total: String,
     pub created_at_unix_seconds: u64,
     pub lines: Vec<StorefrontOrderLine>,
+    pub refunds: Vec<StorefrontOrderRefundSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -228,7 +255,7 @@ pub struct StorefrontPaymentWebhookReceipt {
     pub needs_paid_event_dispatch: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StorefrontResponseAugmentation {
     pub html_fragment: Option<String>,
     pub headers: BTreeMap<String, String>,
@@ -243,6 +270,23 @@ pub struct StorefrontFormState {
     pub summary: String,
     pub field_errors: BTreeMap<String, String>,
     pub fields: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorefrontCatalogProductUpdate {
+    pub handle: String,
+    pub title: String,
+    pub summary: String,
+    pub price_minor: i64,
+    pub collection_handle: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorefrontCatalogCollectionUpdate {
+    pub handle: String,
+    pub title: String,
+    pub label: String,
+    pub summary: String,
 }
 
 impl StorefrontFormState {
@@ -631,6 +675,21 @@ impl StorefrontStateStore {
                     currency TEXT NOT NULL,
                     PRIMARY KEY (order_id, sku)
                 );
+                CREATE TABLE IF NOT EXISTS catalog_product_overrides (
+                    handle TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    price_minor INTEGER NOT NULL,
+                    collection_handle TEXT NOT NULL,
+                    updated_at_unix_seconds INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS catalog_collection_overrides (
+                    handle TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    updated_at_unix_seconds INTEGER NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS orders_by_session
                     ON orders (session_id, created_at_unix_seconds DESC);
                 CREATE INDEX IF NOT EXISTS orders_by_principal
@@ -641,6 +700,19 @@ impl StorefrontStateStore {
                 INSERT INTO storefront_sequences (name, next_value)
                 VALUES ('payment', 50001)
                 ON CONFLICT(name) DO NOTHING;
+                INSERT INTO storefront_sequences (name, next_value)
+                VALUES ('refund', 7001)
+                ON CONFLICT(name) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS order_refunds (
+                    refund_id TEXT PRIMARY KEY,
+                    order_id TEXT NOT NULL,
+                    amount_minor INTEGER NOT NULL,
+                    currency TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at_unix_seconds INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS order_refunds_by_order
+                    ON order_refunds (order_id, created_at_unix_seconds DESC);
                 "#,
             )
             .map_err(|error| StorefrontStateError::Initialization {
@@ -675,6 +747,132 @@ impl StorefrontStateStore {
             query_error(format!("failed to commit storefront snapshot: {error}"))
         })?;
         Ok(snapshot)
+    }
+
+    pub fn catalog(&self) -> Result<StorefrontCatalog, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront catalog transaction: {error}"
+            ))
+        })?;
+        let catalog = self.load_effective_catalog(&tx)?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront catalog transaction: {error}"
+            ))
+        })?;
+        Ok(catalog)
+    }
+
+    pub fn update_catalog_product(
+        &self,
+        update: &StorefrontCatalogProductUpdate,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontCatalog, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront catalog product update transaction: {error}"
+            ))
+        })?;
+        let catalog = self.load_effective_catalog(&tx)?;
+        if catalog.product(update.handle.as_str()).is_none() {
+            return Err(StorefrontStateError::MissingCatalogProduct {
+                handle: update.handle.clone(),
+            });
+        }
+        if catalog
+            .collection(update.collection_handle.as_str())
+            .is_none()
+        {
+            return Err(StorefrontStateError::MissingCatalogCollection {
+                handle: update.collection_handle.clone(),
+            });
+        }
+        tx.execute(
+            r#"
+            INSERT INTO catalog_product_overrides (
+                handle, title, summary, price_minor, collection_handle, updated_at_unix_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(handle) DO UPDATE SET
+                title = excluded.title,
+                summary = excluded.summary,
+                price_minor = excluded.price_minor,
+                collection_handle = excluded.collection_handle,
+                updated_at_unix_seconds = excluded.updated_at_unix_seconds
+            "#,
+            params![
+                update.handle,
+                update.title,
+                update.summary,
+                update.price_minor,
+                update.collection_handle,
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to persist storefront catalog product override: {error}"
+            ))
+        })?;
+        let catalog = self.load_effective_catalog(&tx)?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront catalog product update transaction: {error}"
+            ))
+        })?;
+        Ok(catalog)
+    }
+
+    pub fn update_catalog_collection(
+        &self,
+        update: &StorefrontCatalogCollectionUpdate,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontCatalog, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront catalog collection update transaction: {error}"
+            ))
+        })?;
+        let catalog = self.load_effective_catalog(&tx)?;
+        if catalog.collection(update.handle.as_str()).is_none() {
+            return Err(StorefrontStateError::MissingCatalogCollection {
+                handle: update.handle.clone(),
+            });
+        }
+        tx.execute(
+            r#"
+            INSERT INTO catalog_collection_overrides (
+                handle, title, label, summary, updated_at_unix_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(handle) DO UPDATE SET
+                title = excluded.title,
+                label = excluded.label,
+                summary = excluded.summary,
+                updated_at_unix_seconds = excluded.updated_at_unix_seconds
+            "#,
+            params![
+                update.handle,
+                update.title,
+                update.label,
+                update.summary,
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to persist storefront catalog collection override: {error}"
+            ))
+        })?;
+        let catalog = self.load_effective_catalog(&tx)?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront catalog collection update transaction: {error}"
+            ))
+        })?;
+        Ok(catalog)
     }
 
     pub fn add_to_cart(
@@ -796,11 +994,117 @@ impl StorefrontStateStore {
     }
 
     fn catalog_item(&self, sku: &str) -> Result<CatalogItem, StorefrontStateError> {
-        self.catalog
+        self.catalog()?
             .catalog_item(sku)
             .ok_or_else(|| StorefrontStateError::UnknownSku {
                 sku: sku.to_string(),
             })
+    }
+
+    fn load_effective_catalog(
+        &self,
+        tx: &Transaction<'_>,
+    ) -> Result<StorefrontCatalog, StorefrontStateError> {
+        let mut catalog = self.catalog.as_ref().clone();
+
+        let mut collection_statement = tx
+            .prepare(
+                r#"
+                SELECT handle, title, label, summary
+                FROM catalog_collection_overrides
+                ORDER BY handle ASC
+                "#,
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to prepare storefront catalog collection override query: {error}"
+                ))
+            })?;
+        let collection_overrides = collection_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to query storefront catalog collection overrides: {error}"
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to collect storefront catalog collection overrides: {error}"
+                ))
+            })?;
+        for (handle, title, label, summary) in collection_overrides {
+            if let Some(collection) = catalog
+                .collections
+                .iter_mut()
+                .find(|collection| collection.handle == handle)
+            {
+                collection.title = title;
+                collection.label = label;
+                collection.summary = summary;
+            }
+        }
+
+        let mut product_statement = tx
+            .prepare(
+                r#"
+                SELECT handle, title, summary, price_minor, collection_handle
+                FROM catalog_product_overrides
+                ORDER BY handle ASC
+                "#,
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to prepare storefront catalog product override query: {error}"
+                ))
+            })?;
+        let product_overrides = product_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to query storefront catalog product overrides: {error}"
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to collect storefront catalog product overrides: {error}"
+                ))
+            })?;
+        for (handle, title, summary, price_minor, collection_handle) in product_overrides {
+            if catalog.collection(collection_handle.as_str()).is_none() {
+                return Err(StorefrontStateError::MissingCatalogCollection {
+                    handle: collection_handle,
+                });
+            }
+            if let Some(product) = catalog
+                .products
+                .iter_mut()
+                .find(|product| product.handle == handle)
+            {
+                product.title = title;
+                product.summary = summary;
+                product.price_minor = price_minor;
+                product.collection_handle = collection_handle;
+            }
+        }
+
+        Ok(catalog)
     }
 
     pub fn checkout_start(
@@ -982,6 +1286,134 @@ impl StorefrontStateStore {
             principal_id: principal_id.map(ToOwned::to_owned),
             orders,
         })
+    }
+
+    pub fn admin_orders(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<StorefrontOrderSnapshot>, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront admin order-history transaction: {error}"
+            ))
+        })?;
+        let orders = self.load_all_orders(&tx, limit)?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront admin order-history transaction: {error}"
+            ))
+        })?;
+        Ok(orders)
+    }
+
+    pub fn admin_order(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<StorefrontOrderSnapshot>, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront admin order-detail transaction: {error}"
+            ))
+        })?;
+        let order = self.load_order_by_id(&tx, order_id).map_err(|error| {
+            query_error(format!(
+                "failed to load storefront admin order detail: {error}"
+            ))
+        })?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront admin order-detail transaction: {error}"
+            ))
+        })?;
+        Ok(order)
+    }
+
+    pub fn refund_order(
+        &self,
+        order_id: &str,
+        reason: &str,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontOrderSnapshot, StorefrontStateError> {
+        let reason = reason.trim();
+        if reason.is_empty() {
+            return Err(StorefrontStateError::MissingRefundReason);
+        }
+
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront refund transaction: {error}"
+            ))
+        })?;
+        let order = self
+            .load_order_by_id(&tx, order_id)
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to load storefront order for refund: {error}"
+                ))
+            })?
+            .ok_or_else(|| StorefrontStateError::UnknownOrder {
+                order_id: order_id.to_string(),
+            })?;
+        if !matches!(
+            order.status.as_str(),
+            "paid" | "fulfilled" | "partially_refunded"
+        ) || order.refundable_total_minor <= 0
+        {
+            return Err(StorefrontStateError::RefundNotAllowed {
+                order_id: order_id.to_string(),
+                status: order.status,
+            });
+        }
+
+        tx.execute(
+            r#"
+            INSERT INTO order_refunds (
+                refund_id, order_id, amount_minor, currency, reason, created_at_unix_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                next_refund_id(&tx)?,
+                order_id,
+                order.refundable_total_minor,
+                order.currency,
+                reason,
+                saturating_i64(now_unix_seconds),
+            ],
+        )
+        .map_err(|error| query_error(format!("failed to persist storefront refund: {error}")))?;
+        tx.execute(
+            r#"
+            UPDATE orders
+            SET status = 'refunded',
+                payment_status = 'refunded'
+            WHERE order_id = ?1
+            "#,
+            params![order_id],
+        )
+        .map_err(|error| {
+            query_error(format!(
+                "failed to update storefront refunded order: {error}"
+            ))
+        })?;
+        let updated = self
+            .load_order_by_id(&tx, order_id)
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to reload refunded storefront order: {error}"
+                ))
+            })?
+            .ok_or_else(|| StorefrontStateError::UnknownOrder {
+                order_id: order_id.to_string(),
+            })?;
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront refund transaction: {error}"
+            ))
+        })?;
+        Ok(updated)
     }
 
     pub fn apply_payment_webhook(
@@ -1649,7 +2081,85 @@ impl StorefrontStateStore {
             })?
         };
 
-        let mut orders = Vec::with_capacity(order_headers.len());
+        self.order_snapshots_from_headers(tx, order_headers)
+    }
+
+    fn load_all_orders(
+        &self,
+        tx: &Transaction<'_>,
+        limit: usize,
+    ) -> Result<Vec<StorefrontOrderSnapshot>, StorefrontStateError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut statement = tx
+            .prepare(
+                r#"
+                SELECT
+                    order_id, session_id, principal_id, status, payment_status,
+                    payment_method, payment_reference, payment_last4, checkout_email,
+                    currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
+                FROM orders
+                ORDER BY created_at_unix_seconds DESC, order_id DESC
+                LIMIT ?1
+                "#,
+            )
+            .map_err(|error| {
+                query_error(format!(
+                    "failed to prepare storefront admin order query: {error}"
+                ))
+            })?;
+        let rows = statement
+            .query_map(params![saturating_i64(limit as u64)], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(13)?,
+                ))
+            })
+            .map_err(|error| {
+                query_error(format!("failed to query storefront admin orders: {error}"))
+            })?;
+        let headers = rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+            query_error(format!(
+                "failed to collect storefront admin orders: {error}"
+            ))
+        })?;
+        self.order_snapshots_from_headers(tx, headers)
+    }
+
+    fn order_snapshots_from_headers(
+        &self,
+        tx: &Transaction<'_>,
+        headers: Vec<(
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            i64,
+            i64,
+            i64,
+            i64,
+        )>,
+    ) -> Result<Vec<StorefrontOrderSnapshot>, StorefrontStateError> {
+        let mut orders = Vec::with_capacity(headers.len());
         for (
             order_id,
             order_session_id,
@@ -1665,13 +2175,23 @@ impl StorefrontStateStore {
             subtotal_minor,
             total_minor,
             created_i64,
-        ) in order_headers
+        ) in headers
         {
             let lines = self
                 .load_order_lines(tx, order_id.as_str())
                 .map_err(|error| {
                     query_error(format!("failed to load storefront order lines: {error}"))
                 })?;
+            let refunds = self
+                .load_order_refunds(tx, order_id.as_str())
+                .map_err(|error| {
+                    query_error(format!("failed to load storefront order refunds: {error}"))
+                })?;
+            let refunded_total_minor = refunds
+                .iter()
+                .map(|refund| refund.amount_minor)
+                .sum::<i64>();
+            let refundable_total_minor = total_minor.saturating_sub(refunded_total_minor);
             orders.push(StorefrontOrderSnapshot {
                 order_id,
                 session_id: order_session_id,
@@ -1689,11 +2209,16 @@ impl StorefrontStateStore {
                     .map_err(|_| query_error("storefront order line count overflowed".into()))?,
                 subtotal_minor,
                 total_minor,
+                refunded_total_minor,
+                refundable_total_minor,
                 subtotal: format_minor_currency(subtotal_minor),
                 total: format_minor_currency(total_minor),
+                refunded_total: format_minor_currency(refunded_total_minor),
+                refundable_total: format_minor_currency(refundable_total_minor),
                 created_at_unix_seconds: u64::try_from(created_i64)
                     .map_err(|_| query_error("storefront order timestamp overflowed".into()))?,
                 lines,
+                refunds,
             });
         }
         Ok(orders)
@@ -1821,6 +2346,37 @@ impl StorefrontStateStore {
             .collect()
     }
 
+    fn load_order_refunds(
+        &self,
+        tx: &Transaction<'_>,
+        order_id: &str,
+    ) -> rusqlite::Result<Vec<StorefrontOrderRefundSnapshot>> {
+        let mut statement = tx.prepare(
+            r#"
+            SELECT refund_id, order_id, amount_minor, currency, reason, created_at_unix_seconds
+            FROM order_refunds
+            WHERE order_id = ?1
+            ORDER BY created_at_unix_seconds DESC, refund_id DESC
+            "#,
+        )?;
+        statement
+            .query_map(params![order_id], |row| {
+                let amount_minor: i64 = row.get(2)?;
+                let created_i64: i64 = row.get(5)?;
+                Ok(StorefrontOrderRefundSnapshot {
+                    refund_id: row.get(0)?,
+                    order_id: row.get(1)?,
+                    amount_minor,
+                    amount: format_minor_currency(amount_minor),
+                    currency: row.get(3)?,
+                    reason: row.get(4)?,
+                    created_at_unix_seconds: u64::try_from(created_i64)
+                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, created_i64))?,
+                })
+            })?
+            .collect()
+    }
+
     fn load_order_header_by_payment_reference(
         &self,
         tx: &Transaction<'_>,
@@ -1921,6 +2477,12 @@ impl StorefrontStateStore {
         };
 
         let lines = self.load_order_lines(tx, order_id.as_str())?;
+        let refunds = self.load_order_refunds(tx, order_id.as_str())?;
+        let refunded_total_minor = refunds
+            .iter()
+            .map(|refund| refund.amount_minor)
+            .sum::<i64>();
+        let refundable_total_minor = total_minor.saturating_sub(refunded_total_minor);
         Ok(Some(StorefrontOrderSnapshot {
             order_id,
             session_id,
@@ -1938,11 +2500,16 @@ impl StorefrontStateStore {
                 .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(10, line_count_i64))?,
             subtotal_minor,
             total_minor,
+            refunded_total_minor,
+            refundable_total_minor,
             subtotal: format_minor_currency(subtotal_minor),
             total: format_minor_currency(total_minor),
+            refunded_total: format_minor_currency(refunded_total_minor),
+            refundable_total: format_minor_currency(refundable_total_minor),
             created_at_unix_seconds: u64::try_from(created_i64)
                 .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(13, created_i64))?,
             lines,
+            refunds,
         }))
     }
 }
@@ -1986,6 +2553,36 @@ fn next_order_id(tx: &Transaction<'_>) -> Result<String, StorefrontStateError> {
         ))
     })?;
     Ok(format!("ORD-{next_value:05}"))
+}
+
+fn next_refund_id(tx: &Transaction<'_>) -> Result<String, StorefrontStateError> {
+    let next_value: i64 = tx
+        .query_row(
+            "SELECT next_value FROM storefront_sequences WHERE name = 'refund'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| {
+            query_error(format!(
+                "failed to load storefront refund sequence: {error}"
+            ))
+        })?
+        .unwrap_or(INITIAL_REFUND_SEQUENCE);
+    tx.execute(
+        r#"
+        INSERT INTO storefront_sequences (name, next_value)
+        VALUES ('refund', ?1)
+        ON CONFLICT(name) DO UPDATE SET next_value = excluded.next_value
+        "#,
+        params![next_value.saturating_add(1)],
+    )
+    .map_err(|error| {
+        query_error(format!(
+            "failed to advance storefront refund sequence: {error}"
+        ))
+    })?;
+    Ok(format!("RFD-{next_value:05}"))
 }
 
 fn next_payment_reference(tx: &Transaction<'_>) -> Result<String, StorefrontStateError> {

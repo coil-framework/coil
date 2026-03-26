@@ -199,8 +199,26 @@ fn route_surfaces() -> Vec<RouteSurface> {
         )
         .gated_by(Capability::OrderRead),
         RouteSurface::new(
+            "commerce.order-detail",
+            RouteSurfaceKind::AdminPage,
+            "/admin/orders/{order_id}",
+        )
+        .gated_by(Capability::OrderRead),
+        RouteSurface::new(
+            "commerce.order-refund",
+            RouteSurfaceKind::AdminAction,
+            "/admin/orders/refund",
+        )
+        .gated_by(Capability::OrderRefundIssue),
+        RouteSurface::new(
             "commerce.catalog-admin",
             RouteSurfaceKind::AdminPage,
+            "/admin/catalog/products",
+        )
+        .gated_by(Capability::CatalogProductEdit),
+        RouteSurface::new(
+            "commerce.catalog-admin-update",
+            RouteSurfaceKind::AdminAction,
             "/admin/catalog/products",
         )
         .gated_by(Capability::CatalogProductEdit),
@@ -481,10 +499,35 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
         )
         .gated_by(Capability::OrderRead),
         HttpSurfaceContribution::page(
+            "commerce.order-detail",
+            HttpSurfaceArea::Admin,
+            "/admin/orders/{order_id}",
+            "commerce/order-detail",
+        )
+        .gated_by(Capability::OrderRead),
+        HttpSurfaceContribution::redirect(
+            "commerce.order-refund",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Admin,
+            "/admin/orders/refund",
+            "/admin/orders",
+            303,
+        )
+        .gated_by(Capability::OrderRefundIssue),
+        HttpSurfaceContribution::page(
             "commerce.catalog-admin",
             HttpSurfaceArea::Admin,
             "/admin/catalog/products",
             "commerce/catalog-admin",
+        )
+        .gated_by(Capability::CatalogProductEdit),
+        HttpSurfaceContribution::redirect(
+            "commerce.catalog-admin-update",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Admin,
+            "/admin/catalog/products",
+            "/admin/catalog/products",
+            303,
         )
         .gated_by(Capability::CatalogProductEdit),
     ]

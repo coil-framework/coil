@@ -1467,6 +1467,78 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
 }
 
 #[test]
+fn storefront_state_store_persists_catalog_overrides_across_reopen() {
+    let root = unique_temp_template_root("storefront-catalog-admin");
+    let _ = fs::remove_dir_all(&root);
+    let store = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
+
+    let updated = store
+        .update_catalog_collection(
+            &crate::storefront::StorefrontCatalogCollectionUpdate {
+                handle: "featured".to_string(),
+                title: "Harbor Essentials".to_string(),
+                label: "Live catalog".to_string(),
+                summary: "Everyday storefront staples for the checked-in Harbor Shop.".to_string(),
+            },
+            100,
+        )
+        .unwrap();
+    assert_eq!(
+        updated
+            .collection("featured")
+            .map(|collection| collection.title.as_str()),
+        Some("Harbor Essentials")
+    );
+
+    let updated = store
+        .update_catalog_product(
+            &crate::storefront::StorefrontCatalogProductUpdate {
+                handle: "harbor-cap".to_string(),
+                title: "Dockside Cap".to_string(),
+                summary: "Updated live from the Harbor Shop admin workflow.".to_string(),
+                price_minor: 3_100,
+                collection_handle: "memberships".to_string(),
+            },
+            101,
+        )
+        .unwrap();
+    let product = updated.product("harbor-cap").unwrap();
+    assert_eq!(product.title, "Dockside Cap");
+    assert_eq!(
+        product.summary,
+        "Updated live from the Harbor Shop admin workflow."
+    );
+    assert_eq!(product.price_minor, 3_100);
+    assert_eq!(product.collection_handle, "memberships");
+
+    let reopened = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
+    let catalog = reopened.catalog().unwrap();
+    assert_eq!(
+        catalog
+            .collection("featured")
+            .map(|collection| collection.title.as_str()),
+        Some("Harbor Essentials")
+    );
+    let product = catalog.product("harbor-cap").unwrap();
+    assert_eq!(product.title, "Dockside Cap");
+    assert_eq!(
+        product.summary,
+        "Updated live from the Harbor Shop admin workflow."
+    );
+    assert_eq!(product.price_minor, 3_100);
+    assert_eq!(product.collection_handle, "memberships");
+
+    let snapshot = reopened
+        .add_to_cart("session-catalog-1", None, "harbor-cap", 1, 102)
+        .unwrap();
+    assert_eq!(snapshot.cart.item_count, 1);
+    assert_eq!(snapshot.cart.subtotal_minor, 3_100);
+    assert_eq!(snapshot.cart.lines[0].title, "Dockside Cap");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn storefront_payment_webhook_captures_pending_orders_and_marks_dispatch_once() {
     let root = unique_temp_template_root("storefront-payment-webhook");
     let _ = fs::remove_dir_all(&root);

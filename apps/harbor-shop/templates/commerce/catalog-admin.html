@@ -24,12 +24,14 @@
           Merchandising inventory, collections, and featured products.
         </p>
         <p>
-          Use this page to verify what customers can actually browse today. It is suited to route
-          and merchandising checks, not yet full product editing.
+          This checked-in admin flow can now edit the live Harbor Shop catalog copy for titles,
+          summaries, list price, and collection placement. Save here, then confirm the linked
+          storefront routes show the exact browse path customers will use.
         </p>
         <p>
-          Pricing, inventory, and publish mutations are still handled outside this screen, so use
-          the linked storefront routes as the source of truth for what is currently sellable.
+          Inventory, publish scheduling, product creation, and deletion are still outside this
+          bounded workflow, so keep launch promises aligned with what the linked storefront routes
+          can prove right now.
         </p>
         <div class="admin-page__actions">
           <a class="button button--secondary" href="/shop" dv:attr="href=${links.catalog}">
@@ -41,98 +43,176 @@
         </div>
       </section>
 
+      <section class="storefront-flash" dv:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
+          <p dv:text="${message.text}">Saved successfully.</p>
+        </article>
+      </section>
+
+      <section class="admin-panel" dv:if="${catalogAdminForm.hasErrors}">
+        <p class="admin-panel__eyebrow">Save blocked</p>
+        <h2>Catalog changes need attention</h2>
+        <p dv:text="${catalogAdminForm.errorSummary}">
+          Fix the highlighted catalog fields and save again.
+        </p>
+        <ul>
+          <li dv:each="error : ${catalogAdminForm.errors}" dv:text="${error.message}">
+            Update the highlighted field and try again.
+          </li>
+        </ul>
+      </section>
+
       <section class="admin-panel">
         <p class="admin-panel__eyebrow">Operator checklist</p>
         <div class="admin-card-grid">
           <article class="admin-card">
-            <h2>Product coverage</h2>
-            <p>Confirm that every item you intend to sell has a storefront route, summary, and visible price.</p>
+            <h2>Live browse truth</h2>
+            <p>
+              After each save, open the linked storefront route to confirm the customer-facing
+              title, summary, collection path, and list price all changed together.
+            </p>
           </article>
           <article class="admin-card">
-            <h2>Collection coverage</h2>
-            <p>Verify that featured, memberships, and events collections all lead customers into the expected journey.</p>
-          </article>
-          <article class="admin-card">
-            <h2>Launch caveat</h2>
-            <p>Editing actions are not wired here yet, so treat this surface as a verification console for the checked-in catalog.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="admin-panel">
-        <p class="admin-panel__eyebrow">Launch sign-off</p>
-        <div class="admin-card-grid">
-          <article class="admin-card">
-            <h2>Sellable truth</h2>
-            <p>Use the linked storefront pages as the final source of truth for what can be bought today, not this table alone.</p>
+            <h2>Launch boundary</h2>
+            <p>
+              This screen updates sellable copy and routing, not inventory counts, publish windows,
+              or deeper product operations.
+            </p>
           </article>
           <article class="admin-card">
             <h2>Support handoff</h2>
-            <p>Pair this screen with the orders screen so staff can trace a customer report from browse path to completed checkout output.</p>
-          </article>
-          <article class="admin-card">
-            <h2>Escalation boundary</h2>
-            <p>Inventory mutation, product editing, and publish workflows still need a fuller back-office path outside this checked-in store.</p>
+            <p>
+              Pair this screen with orders and the public storefront so operators can trace a
+              customer report from browse path to checkout output.
+            </p>
           </article>
         </div>
       </section>
 
       <section class="admin-panel" dv:if="${hasProductCards}">
         <p class="admin-panel__eyebrow">Products</p>
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th scope="col">Product</th>
-              <th scope="col">Collection</th>
-              <th scope="col">Summary</th>
-              <th scope="col">Price</th>
-              <th scope="col">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr dv:each="product : ${productCards}">
-              <td>
-                <strong dv:text="${product.name}">Harbor Cap</strong>
-              </td>
-              <td dv:text="${product.collectionName}">Featured</td>
-              <td dv:text="${product.summary}">Product summary</td>
-              <td dv:text="${product.price}">£29.00</td>
-              <td>
+        <div class="admin-card-grid">
+          <article class="admin-card" dv:each="product : ${productCards}">
+            <h2 dv:text="${product.name}">Harbor Cap</h2>
+            <p>
+              Storefront route:
+              <a href="/shop/products/harbor-cap" dv:attr="href=${product.url}">
+                <span dv:text="${product.url}">/shop/products/harbor-cap</span>
+              </a>
+            </p>
+            <form method="post" action="/admin/catalog/products">
+              <input type="hidden" name="catalog_entity" value="product" />
+              <input type="hidden" name="product_handle" dv:attr="value=${product.handle}" />
+
+              <label>
+                Product title
+                <input type="text" name="product_title" dv:attr="value=${product.titleInput}" />
+              </label>
+              <p class="field-error" dv:if="${product.hasTitleError}" dv:text="${product.titleError}">
+                Enter a product title.
+              </p>
+
+              <label>
+                Summary
+                <textarea name="product_summary" rows="4" dv:text="${product.summaryInput}">Product summary</textarea>
+              </label>
+              <p class="field-error" dv:if="${product.hasSummaryError}" dv:text="${product.summaryError}">
+                Enter a product summary.
+              </p>
+
+              <label>
+                List price (GBP)
+                <input type="text" name="product_price" dv:attr="value=${product.priceInput}" />
+              </label>
+              <p class="field-error" dv:if="${product.hasPriceError}" dv:text="${product.priceError}">
+                Enter a positive GBP price such as 29.00.
+              </p>
+
+              <label>
+                Collection
+                <select name="product_collection_handle">
+                  <option
+                    dv:each="option : ${product.collectionOptions}"
+                    dv:if="${option.selected}"
+                    selected="selected"
+                    dv:attr="value=${option.handle}"
+                    dv:text="${option.title}"
+                  >
+                    Featured
+                  </option>
+                  <option
+                    dv:each="option : ${product.collectionOptions}"
+                    dv:unless="${option.selected}"
+                    dv:attr="value=${option.handle}"
+                    dv:text="${option.title}"
+                  >
+                    Featured
+                  </option>
+                </select>
+              </label>
+              <p class="field-error" dv:if="${product.hasCollectionError}" dv:text="${product.collectionError}">
+                Choose a collection for this product.
+              </p>
+
+              <div class="admin-page__actions">
+                <button class="button" type="submit">Save product</button>
                 <a class="button button--secondary" href="/shop/products/harbor-cap" dv:attr="href=${product.url}">
                   View storefront page
                 </a>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </div>
+            </form>
+          </article>
+        </div>
       </section>
 
       <section class="admin-panel" dv:if="${hasCatalogSections}">
         <p class="admin-panel__eyebrow">Collections</p>
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th scope="col">Collection</th>
-              <th scope="col">Merchandising focus</th>
-              <th scope="col">Summary</th>
-              <th scope="col">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr dv:each="section : ${catalogSections}">
-              <td>
-                <strong dv:text="${section.title}">Featured</strong>
-              </td>
-              <td dv:text="${section.label}">Featured edit</td>
-              <td dv:text="${section.summary}">Collection summary</td>
-              <td>
+        <div class="admin-card-grid">
+          <article class="admin-card" dv:each="section : ${catalogSections}">
+            <h2 dv:text="${section.title}">Featured</h2>
+            <p>
+              Storefront route:
+              <a href="/shop/collections/featured" dv:attr="href=${section.url}">
+                <span dv:text="${section.url}">/shop/collections/featured</span>
+              </a>
+            </p>
+            <form method="post" action="/admin/catalog/products">
+              <input type="hidden" name="catalog_entity" value="collection" />
+              <input type="hidden" name="collection_handle" dv:attr="value=${section.handle}" />
+
+              <label>
+                Collection title
+                <input type="text" name="collection_title" dv:attr="value=${section.titleInput}" />
+              </label>
+              <p class="field-error" dv:if="${section.hasTitleError}" dv:text="${section.titleError}">
+                Enter a collection title.
+              </p>
+
+              <label>
+                Merchandising label
+                <input type="text" name="collection_label" dv:attr="value=${section.labelInput}" />
+              </label>
+              <p class="field-error" dv:if="${section.hasLabelError}" dv:text="${section.labelError}">
+                Enter a merchandising label.
+              </p>
+
+              <label>
+                Summary
+                <textarea name="collection_summary" rows="4" dv:text="${section.summaryInput}">Collection summary</textarea>
+              </label>
+              <p class="field-error" dv:if="${section.hasSummaryError}" dv:text="${section.summaryError}">
+                Enter a collection summary.
+              </p>
+
+              <div class="admin-page__actions">
+                <button class="button" type="submit">Save collection</button>
                 <a class="button button--secondary" href="/shop/collections/featured" dv:attr="href=${section.url}">
                   Open collection
                 </a>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </div>
+            </form>
+          </article>
+        </div>
       </section>
 
       <section class="admin-panel" dv:unless="${hasProductCards}">
@@ -145,14 +225,6 @@
           Operators should not advertise storefront launches until products and collections appear
           here and the linked storefront routes render correctly.
         </p>
-        <div class="admin-page__actions">
-          <a class="button button--secondary" href="/shop" dv:attr="href=${links.catalog}">
-            Open storefront catalog
-          </a>
-          <a class="button button--secondary" href="/shop/collections" dv:attr="href=${links.collections}">
-            Open storefront collections
-          </a>
-        </div>
       </section>
     </main>
     <footer class="site-footer">

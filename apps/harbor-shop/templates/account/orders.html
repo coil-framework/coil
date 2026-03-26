@@ -30,6 +30,11 @@
           This order history currently follows the browser session you are using right now. Orders
           placed from another browser will not appear here yet.
         </p>
+        <p dv:if="${account.hasLatestOrder}">
+          If you have just returned from the payment provider, the latest order can remain in
+          <strong>Pending Payment</strong>
+          until settlement is confirmed for this same browser session.
+        </p>
         <p dv:if="${account.hasCustomerEmail}">
           Receipt email for this account view:
           <strong dv:text="${customer.email}">member@example.com</strong>.
@@ -102,8 +107,8 @@
               is
               <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
               Membership access only appears here after a qualifying membership purchase is
-              captured for this account view. Use order history to confirm the latest status, then
-              return to memberships once payment has settled.
+              captured for this account view. After a provider return, use this order history to
+              confirm the latest status, then return to memberships once payment has settled.
             </p>
             <a class="button" href="/account/memberships">View memberships</a>
             <a class="button button--secondary" href="/account/orders">
@@ -129,7 +134,8 @@
           <p dv:if="${account.hasRecentOrders}">
             Review order status, then continue shopping or return to checkout if you still have
             work to finish on this browser session. If you bought membership access, the
-            memberships page updates from the same session after payment capture.
+            memberships page updates from the same session after payment capture. Pending Payment
+            after a provider return means settlement is still completing.
           </p>
           <p dv:unless="${account.hasRecentOrders}">
             Start from the storefront, then come back here once checkout has completed on this

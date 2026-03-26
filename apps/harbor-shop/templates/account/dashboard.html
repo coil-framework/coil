@@ -44,6 +44,11 @@
             is
             <span dv:text="${account.latestOrderStatus}">Paid</span>.
           </p>
+          <p dv:if="${account.hasLatestOrder}">
+            If you have just returned from the payment provider, this dashboard can show
+            <strong>Pending Payment</strong>
+            until the settlement callback updates the same browser session.
+          </p>
           <div dv:if="${account.hasCustomerEmail}">
             <p dv:if="${account.hasPrincipal}">
               Account email: <strong dv:text="${customer.email}">member@example.com</strong>
@@ -67,7 +72,8 @@
               is
               <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
               Membership access moves into this account area after a qualifying membership purchase
-              is captured for this browser session.
+              is captured for this browser session. Returning from Stripe does not make that access
+              live until settlement completes.
             </p>
             <p dv:if="${account.needsMembershipPurchase}">
               No active membership is attached to this account view yet. Open the membership area
@@ -90,7 +96,8 @@
             <h2>Orders and storefront</h2>
             <p dv:if="${account.hasRecentOrders}">
               Review payment status, receipt details, and post-checkout next steps before heading
-              back into the storefront.
+              back into the storefront. If the latest order still says Pending Payment, wait for
+              the provider callback before retrying checkout.
             </p>
             <p dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
               Continue browsing the public catalog and landing content.

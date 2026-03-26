@@ -47,8 +47,8 @@
         </p>
         <p>
           Membership access appears here only after a qualifying membership purchase is captured for
-          this account view. Review order history first, then return here once the payment state
-          settles for this browser session.
+          this account view. After returning from the payment provider, review order history first,
+          then return here once the payment state settles for this browser session.
         </p>
         <a class="button" href="/account/memberships">
           View memberships
@@ -77,6 +77,12 @@
       <p dv:if="${account.hasCustomerEmail}">
         Use this account area to review orders, retry checkout, or check membership access for
         <strong dv:text="${customer.email}">member@example.com</strong>.
+      </p>
+      <p dv:if="${account.hasLatestOrder}">
+        If the latest order still shows
+        <strong>Pending Payment</strong>
+        after you return from the provider, keep this browser session and refresh the account
+        surfaces before contacting support.
       </p>
       <p dv:if="${account.hasPrincipal}">
         This browser is already attached to a live customer identity for this account view.

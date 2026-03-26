@@ -33,6 +33,12 @@
           This view is for day-one support and launch checks. It currently exposes only the order
           reference, order status, and total that the checked-in runtime can prove here.
         </p>
+        <p>
+          A customer can return from the payment provider before settlement has completed. Treat a
+          visible
+          <strong>Pending Payment</strong>
+          order as an awaiting-confirmation state first, not as proof that checkout failed.
+        </p>
       </section>
 
       <section class="admin-panel">
@@ -43,12 +49,12 @@
             <p>Use the order status to distinguish pending storefront checkout from captured or completed customer purchases.</p>
           </article>
           <article class="admin-card">
-            <h2>Current data contract</h2>
-            <p>This screen does not yet expose payment references, receipt email, or line-item detail, so use it as an honest queue rather than a full order console.</p>
+            <h2>Post-return checks</h2>
+            <p>After a Stripe handoff, compare this queue with the customer account view before escalating. Pending orders can still be waiting for provider confirmation.</p>
           </article>
           <article class="admin-card">
-            <h2>Current limitation</h2>
-            <p>Capture, refund, and full order detail actions are not wired here yet, so treat this as an inspection queue rather than a mutation console.</p>
+            <h2>Current data contract</h2>
+            <p>This screen does not yet expose payment references, receipt email, or line-item detail, so use it as an honest queue rather than a full order console.</p>
           </article>
         </div>
       </section>
@@ -66,7 +72,7 @@
           </article>
           <article class="admin-card">
             <h2>Escalation path</h2>
-            <p>If checkout succeeds for the customer but the order does not appear here, escalate to runtime logs and payment/provider diagnostics immediately.</p>
+            <p>If checkout succeeds for the customer but the order never appears here or stays unchanged after the provider return window, escalate to runtime logs and payment/provider diagnostics.</p>
           </article>
         </div>
       </section>
@@ -90,8 +96,9 @@
               <td dv:text="${order.status}">Paid</td>
               <td dv:text="${order.total}">£0.00</td>
               <td>
-                Review the matching storefront history and confirmation path before escalating
-                support or payment issues.
+                Review the matching storefront history and confirmation path first. If the
+                customer has just returned from Stripe, wait for provider confirmation before
+                treating Pending Payment as a failure.
               </td>
             </tr>
           </tbody>

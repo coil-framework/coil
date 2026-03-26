@@ -44,6 +44,12 @@
             is
             <span dv:text="${account.latestOrderStatus}">Paid</span>.
           </p>
+          <p dv:if="${account.hasLatestOrder}">
+            If you have just returned from the payment provider, this account can keep that order
+            in
+            <strong>Pending Payment</strong>
+            until the provider callback settles for this same browser session.
+          </p>
           <div dv:if="${account.hasCustomerEmail}">
             <p dv:if="${account.hasPrincipal}">
               Account email: <strong dv:text="${customer.email}">member@example.com</strong>.
@@ -76,7 +82,8 @@
             <h2>Orders and storefront</h2>
             <p dv:if="${account.hasRecentOrders}">
               Review payment status, receipt details, and post-checkout next steps before heading
-              back into the storefront.
+              back into the storefront. Pending Payment after a provider return means settlement is
+              still in flight.
             </p>
             <p dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
               Continue browsing the public catalog and landing content.

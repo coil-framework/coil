@@ -36,6 +36,11 @@
           is
           <span dv:text="${account.latestOrderStatus}">Paid</span>.
         </p>
+        <p dv:if="${account.hasLatestOrder}">
+          After returning from the payment provider, this page can keep that order in
+          <strong>Pending Payment</strong>
+          until settlement updates the same browser session.
+        </p>
         <div dv:if="${account.hasCustomerEmail}">
           <p dv:if="${account.hasPrincipal}">
             Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
@@ -70,8 +75,8 @@
             is
             <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
             Membership access only appears here after a qualifying membership purchase is captured
-            for this account view. Check order history for the latest payment state, then return
-            here once this browser session shows the order as captured.
+            for this account view. After a Stripe return, check order history for the latest
+            payment state, then return here once this browser session shows the order as captured.
           </p>
           <a class="button button--secondary" href="/account/orders">
             View order history

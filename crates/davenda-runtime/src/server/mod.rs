@@ -15,6 +15,7 @@ use davenda_config::{PlatformConfig, SecretRef};
 
 mod auth;
 mod backend;
+mod devtools;
 mod diagnostics;
 mod observability;
 mod request;
@@ -27,6 +28,7 @@ pub use backend::{
     JobsClientTarget, ObjectStoreClientTarget, SecretResolutionError, SecretResolver,
     SessionStoreClientTarget, SharedBackendClients, StaticSecretResolver,
 };
+use devtools::development_router;
 use diagnostics::privileged_router as diagnostics_router;
 use observability::public_router as observability_router;
 pub(crate) use request::HostedCheckoutClient;
@@ -388,12 +390,15 @@ impl HttpServerHost {
         let public_router = observability_router();
         let privileged_router =
             diagnostics_router(state.clone()).merge(auth_explain_router(state.clone()));
-        let router = Router::new()
+        let mut router = Router::new()
             .merge(public_router)
             .merge(privileged_router)
             .route("/", any(serve_runtime_request))
-            .fallback(any(serve_runtime_request))
-            .with_state(state.clone());
+            .fallback(any(serve_runtime_request));
+        if state.is_development() {
+            router = router.merge(development_router());
+        }
+        let router = router.with_state(state.clone());
 
         Self { state, router }
     }
@@ -457,6 +462,33 @@ impl HttpServerHost {
         .await
         .map_err(std::io::Error::other)
     }
+}
+
+impl RuntimeServerState {
+    pub(crate) fn is_development(&self) -> bool {
+        matches!(
+            self.plan.config.app.environment,
+            davenda_config::Environment::Development
+        )
+    }
+
+    pub(crate) fn uses_development_hosted_checkout_stub(&self) -> bool {
+        self.is_development()
+            && self
+                .payment_provider_api_key
+                .as_deref()
+                .is_none_or(is_placeholder_stripe_secret_key)
+    }
+}
+
+fn is_placeholder_stripe_secret_key(api_key: &str) -> bool {
+    let normalized = api_key.trim();
+    normalized.is_empty()
+        || matches!(
+            normalized,
+            "sk_test_replace_me" | "replace-me" | "changeme" | "change-me"
+        )
+        || normalized.contains("replace_me")
 }
 
 pub(crate) fn resolve_commerce_payment_webhook_secret<R: SecretResolver>(

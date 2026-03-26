@@ -41,6 +41,6 @@ platform assets publish --config "$CONFIG_PATH" --yes
 
 echo "Launching Harbor Shop dev server"
 if [ "${STRIPE_SECRET_KEY:-sk_test_replace_me}" = "sk_test_replace_me" ]; then
-  echo "warning: STRIPE_SECRET_KEY is still the placeholder value; hosted checkout bootstraps, but real Stripe redirects will fail until you override it"
+  echo "info: STRIPE_SECRET_KEY is still the placeholder value; Harbor Shop will use the built-in local checkout stub until you override it with a real Stripe test key"
 fi
 exec platform dev server --config "$CONFIG_PATH"

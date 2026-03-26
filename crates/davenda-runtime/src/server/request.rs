@@ -103,7 +103,9 @@ impl HostedCheckoutClient for LiveStripeHostedCheckoutClient {
                     .into_string()
                     .map_err(|error| format!("failed to read Stripe Checkout response: {error}"))?;
                 let session = serde_json::from_str::<StripeCheckoutSessionResponse>(&body)
-                    .map_err(|error| format!("failed to decode Stripe Checkout response: {error}"))?;
+                    .map_err(|error| {
+                        format!("failed to decode Stripe Checkout response: {error}")
+                    })?;
                 Ok(HostedCheckoutSession {
                     id: session.id,
                     url: session.url,
@@ -843,8 +845,7 @@ fn validated_storefront_payment_input_from_execution(
             intent_reference,
         )
     };
-    payment
-    .map_err(|error| {
+    payment.map_err(|error| {
         let mut form_state = storefront_checkout_form_state_from_execution(
             execution,
             "There is a problem with your checkout details.",
@@ -1216,6 +1217,19 @@ async fn launch_stripe_checkout_handoff(
     execution: &RequestExecution,
     order: &StorefrontOrderSnapshot,
 ) -> Result<String, String> {
+    let payment_reference = order
+        .payment
+        .reference
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("order {} is missing a payment reference", order.order_id))?;
+    if state.uses_development_hosted_checkout_stub() {
+        return Ok(provider_checkout_return_url(
+            execution,
+            payment_reference,
+            "return",
+        ));
+    }
     let api_key = state
         .payment_provider_api_key
         .as_deref()
@@ -1358,6 +1372,27 @@ fn redirect_failed_checkout_confirmation(
     response_cookies: &mut Vec<String>,
 ) -> Result<Option<String>, RuntimeServerError> {
     if route_name != "commerce.checkout-confirmation" || method != HttpMethod::Get {
+        return Ok(None);
+    }
+    if provider_result == Some("return")
+        && state.uses_development_hosted_checkout_stub()
+        && let Some(payment_reference) = payment_reference
+    {
+        let receipt = state.storefront.apply_payment_webhook(
+            payment_reference,
+            "payment.succeeded",
+            now.as_unix_seconds(),
+        )?;
+        dispatch_paid_order_event(state, &receipt.order, now)?;
+        push_storefront_flash(
+            state,
+            response_cookies,
+            FlashLevel::Success,
+            format!(
+                "Local checkout completed for order {} using the built-in development payment stub.",
+                receipt.order.order_id
+            ),
+        )?;
         return Ok(None);
     }
     if provider_result == Some("cancel") {

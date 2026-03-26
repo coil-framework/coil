@@ -30,7 +30,7 @@ services:
     volumes:
       - harbor-shop-appdata:/var/lib/davenda/harbor-shop
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/en-GB/pages/home >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 20

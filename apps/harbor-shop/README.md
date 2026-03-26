@@ -22,9 +22,11 @@ What `docker compose up` does for you:
 - applies migrations automatically
 - publishes theme assets automatically
 - starts the Davenda dev server on `http://localhost:8080`
+- keeps localhost checkout usable with the built-in development payment stub until real Stripe test keys are supplied
+- exposes development-only login shortcuts so you can inspect customer and admin flows immediately
 
 The first boot will take longer because the image has to compile the workspace.
-The default compose file boots with placeholder Stripe keys, so the hosted checkout path renders and the store starts cleanly, but an actual Stripe redirect will still require you to override those placeholders with real test credentials.
+The default compose file boots with placeholder Stripe keys. That keeps the checked-in hosted checkout path active, but localhost testing still works because the runtime swaps in a built-in development checkout stub until you override those placeholders with real Stripe test credentials.
 
 ## What To Open
 
@@ -39,6 +41,9 @@ Once the app is up, these are the main URLs to verify:
 - `http://localhost:8080/checkout`
 - `http://localhost:8080/checkout/confirmation`
 - `http://localhost:8080/en-GB/events`
+- `http://localhost:8080/__dev`
+- `http://localhost:8080/__dev/login/customer?next=/account`
+- `http://localhost:8080/__dev/login/admin?next=/admin`
 
 The compose stack also exposes local backing services:
 
@@ -49,7 +54,7 @@ The compose stack also exposes local backing services:
   - username: `minio`
   - password: `minio123`
 
-To exercise a real Stripe Checkout redirect instead of the placeholder boot values, export your test keys before starting the stack:
+To exercise a real Stripe Checkout redirect instead of the built-in local stub, export your test keys before starting the stack:
 
 ```bash
 export STRIPE_PUBLISHABLE_KEY=pk_test_your_key
@@ -65,9 +70,21 @@ This stack uses [platform.dev.toml](/Users/zcourts/projects/worka/davenda/apps/h
 - cookie `secure` flags are disabled so the site works on plain `http://localhost:8080`
 - TLS is marked `external` so local startup does not pretend to run ACME
 - `assets.cdn_base_url` points at the local MinIO bucket
-- `wasm.secret_bindings` exposes the Stripe secret key the hosted checkout handoff actually reads at runtime
+- `wasm.secret_bindings` exposes the Stripe secret key the hosted checkout handoff actually reads at runtime when you replace the placeholder key
+- development-only `__dev` session routes let you enter the checked-in customer and admin journeys without manual auth bootstrap
 
 The production-shaped sample config remains in [platform.toml](/Users/zcourts/projects/worka/davenda/apps/harbor-shop/platform.toml). The compose stack does not modify it.
+
+## Local Personas
+
+For a fast browser check of the authenticated surfaces, use these development-only shortcuts:
+
+- `http://localhost:8080/__dev/login/customer?next=/account`
+  - issues a local browser session for the sample customer principal and lands on the account area
+- `http://localhost:8080/__dev/login/admin?next=/admin`
+  - issues a local browser session for the sample admin principal and lands on the admin area
+
+These routes exist only in the local development config. They are not present in the production sample config.
 
 ## Common Commands
 
@@ -88,13 +105,3 @@ Stop the stack and wipe all local state:
 ```bash
 docker compose down -v
 ```
-
-## Current Limits
-
-This stack is meant to get a developer into the real checked-in app quickly, not to hide product gaps.
-
-- Checkout is still provider-aware but not a full live Stripe handoff.
-- There is no turnkey seeded admin login in this compose flow.
-- Account and admin routes exist, but authenticated flows still need explicit session/bootstrap work outside this quick-start stack.
-
-That said, the public storefront loop is real enough to inspect templates, route coverage, asset delivery, cart state, checkout state, event pages, and the local infrastructure contract in one run.

@@ -108,6 +108,31 @@ fn live_backend_secret_resolver_with_payment_webhook() -> StaticSecretResolver {
         .unwrap()
 }
 
+fn live_backend_secret_resolver_with_placeholder_stripe() -> StaticSecretResolver {
+    live_backend_secret_resolver()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "PAYMENT_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "STRIPE_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "STRIPE_SECRET_KEY".to_string(),
+            },
+            "sk_test_replace_me",
+        )
+        .unwrap()
+}
+
 fn with_payment_webhook_secret(config: PlatformConfig) -> PlatformConfig {
     PlatformConfig::from_toml_str(&format!(
         "{}\n[modules.commerce]\npayment_webhook_secret = {{ kind = \"env\", var = \"PAYMENT_WEBHOOK_SECRET\" }}\n",
@@ -487,6 +512,74 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
     assert!(diagnostics_body.contains("\"verification_failed\""));
     assert!(diagnostics_body.contains("\"backend\":\"local-sqlite\""));
     assert!(diagnostics_body.contains("\"path\""));
+}
+
+#[tokio::test]
+async fn server_router_bootstraps_development_admin_session_from_dev_route() {
+    let app_name = unique_app_name("harbor-shop-runtime-dev-login");
+    let template_root = checked_in_harbor_shop_root();
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    config.app.environment = davenda_config::Environment::Development;
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(AdminModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(StaticLiveRouteCapabilityAuthorizer::new()),
+    )
+    .unwrap();
+    let mut login_request = Request::builder()
+        .method("GET")
+        .uri("/__dev/login/admin?next=/admin")
+        .header("host", "localhost:8080")
+        .body(Body::empty())
+        .unwrap();
+    login_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(
+            "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+    let login_response = server.router().oneshot(login_request).await.unwrap();
+    assert_eq!(login_response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(response_header(&login_response, "location"), "/admin");
+    let session_cookie =
+        cookie_pair_from_response(&login_response, "davenda_session").expect("dev login cookie");
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin")
+                .header("host", "localhost:8080")
+                .header("cookie", session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let admin_status = admin_response.status();
+    let admin_body = String::from_utf8(
+        to_bytes(admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(admin_status, StatusCode::OK, "{admin_body}");
+    assert!(admin_body.contains("Harbor Shop Admin"), "{admin_body}");
+    assert!(admin_body.contains("dev-admin"), "{admin_body}");
 }
 
 #[tokio::test]
@@ -3322,7 +3415,10 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
         ),
         "{checkout_body}"
     );
-    assert!(checkout_body.contains("Continue to Stripe"), "{checkout_body}");
+    assert!(
+        checkout_body.contains("Continue to Stripe"),
+        "{checkout_body}"
+    );
 
     let complete_response = server
         .respond(
@@ -3405,7 +3501,10 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
         ),
         "{confirmation_body}"
     );
-    assert!(confirmation_body.contains("Stripe hosted checkout"), "{confirmation_body}");
+    assert!(
+        confirmation_body.contains("Stripe hosted checkout"),
+        "{confirmation_body}"
+    );
 
     fs::remove_dir_all(&template_root).unwrap();
 }
@@ -5236,7 +5335,10 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
         ),
         "{checkout_body}"
     );
-    assert!(checkout_body.contains("Continue to Stripe"), "{checkout_body}");
+    assert!(
+        checkout_body.contains("Continue to Stripe"),
+        "{checkout_body}"
+    );
     assert!(
         checkout_body.contains("Ready for payment"),
         "{checkout_body}"
@@ -5450,6 +5552,189 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
 }
 
 #[tokio::test]
+async fn server_host_completes_checked_in_harbor_shop_local_checkout_stub_with_placeholder_stripe_key()
+ {
+    let app_name = unique_app_name("harbor-shop-runtime-local-checkout-stub");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    config.app.environment = davenda_config::Environment::Development;
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_module(davenda_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_placeholder_stripe();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("dev-customer")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "localhost:8080")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "localhost:8080")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "gold-membership")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "localhost:8080")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "localhost:8080")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "localhost:8080")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "localhost:8080")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&complete_response, "location"),
+        "http://localhost:8080/checkout/confirmation?provider_result=return&payment_reference=PAY-50001"
+    );
+
+    let confirmation_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout/confirmation?provider_result=return&payment_reference=PAY-50001")
+                .header("host", "localhost:8080")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let confirmation_body = String::from_utf8(
+        to_bytes(confirmation_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        confirmation_body.contains("Status <strong>Paid</strong>"),
+        "{confirmation_body}"
+    );
+    assert!(
+        confirmation_body.contains("Stripe hosted checkout"),
+        "{confirmation_body}"
+    );
+}
+
+#[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliation_requires_signed_webhook()
  {
     let app_name = unique_app_name("harbor-shop-runtime-stripe-reconciliation");
@@ -5602,7 +5887,10 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
         ),
         "{checkout_body}"
     );
-    assert!(checkout_body.contains("Continue to Stripe"), "{checkout_body}");
+    assert!(
+        checkout_body.contains("Continue to Stripe"),
+        "{checkout_body}"
+    );
 
     let complete_response = server
         .respond(

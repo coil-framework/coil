@@ -73,6 +73,7 @@ Useful routes:
 - `GET http://localhost:8081/`
 - `GET http://localhost:8081/health`
 - `POST http://localhost:8081/api/loyalty/preview`
+- `POST http://localhost:8081/api/orders/review`
 - `POST http://localhost:8081/webhooks/crm/contact-updated`
 
 ## Exercise The Example
@@ -96,6 +97,15 @@ curl -sS \
   --data @apps/harbor-shop/backend/harbor-loyalty-backend/requests/contact-updated.json
 ```
 
+Exercise a second Harbor Shop-specific Rust rule for fulfilment/ops routing:
+
+```bash
+curl -sS \
+  -X POST http://localhost:8081/api/orders/review \
+  -H 'content-type: application/json' \
+  --data @apps/harbor-shop/backend/harbor-loyalty-backend/requests/order-review.json
+```
+
 ## Add Your Own Custom Rule
 
 The shortest safe path is:
@@ -107,6 +117,24 @@ The shortest safe path is:
 5. add unit tests for the rule and HTTP-level tests for the route
 
 That keeps the service maintainable. Pure rules stay easy to test, and the HTTP adapter stays thin.
+
+The checked-in `POST /api/orders/review` route is the example to copy:
+
+- `src/lib.rs`
+  - `OrderReviewRequest`
+  - `OrderReviewResponse`
+  - `review_order(...)`
+- `src/http.rs`
+  - `order_review(...)`
+  - `.route("/api/orders/review", post(order_review))`
+- `requests/order-review.json`
+  - a ready-made payload for local curl testing
+
+That example shows the intended Harbor Shop customization pattern:
+
+- keep the business rule pure and deterministic in Rust
+- keep request validation and HTTP concerns in the adapter
+- keep a checked-in sample payload next to the code so another developer can exercise the rule immediately
 
 ## When Not To Copy This Pattern
 

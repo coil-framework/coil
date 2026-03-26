@@ -9,8 +9,8 @@ use axum::{
 };
 
 use crate::{
-    CrmContactUpdate, LoyaltyPreviewRequest, compute_loyalty_preview, health_response,
-    route_crm_contact, service_overview, webhook_secret_matches,
+    CrmContactUpdate, LoyaltyPreviewRequest, OrderReviewRequest, compute_loyalty_preview,
+    health_response, review_order, route_crm_contact, service_overview, webhook_secret_matches,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +41,7 @@ pub fn build_router(config: BackendConfig) -> Router {
         .route("/", get(index))
         .route("/health", get(health))
         .route("/api/loyalty/preview", post(loyalty_preview))
+        .route("/api/orders/review", post(order_review))
         .route("/webhooks/crm/contact-updated", post(contact_updated))
         .with_state(state)
 }
@@ -79,6 +80,42 @@ async fn loyalty_preview(
     Ok((StatusCode::OK, Json(compute_loyalty_preview(&request))))
 }
 
+async fn order_review(
+    ExtractJson(request): ExtractJson<OrderReviewRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if request.customer_email.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_request".to_string(),
+                detail: "customer_email must not be empty".to_string(),
+            }),
+        ));
+    }
+
+    if request.subtotal_gbp.is_sign_negative() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_request".to_string(),
+                detail: "subtotal_gbp must be zero or greater".to_string(),
+            }),
+        ));
+    }
+
+    if request.shipping_country.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_request".to_string(),
+                detail: "shipping_country must not be empty".to_string(),
+            }),
+        ));
+    }
+
+    Ok((StatusCode::OK, Json(review_order(&request))))
+}
+
 async fn contact_updated(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -112,7 +149,7 @@ mod tests {
     use tower::util::ServiceExt;
 
     use super::*;
-    use crate::{CrmContactRoute, HealthResponse, ServiceOverview};
+    use crate::{CrmContactRoute, HealthResponse, OrderReviewResponse, ServiceOverview};
 
     fn config() -> BackendConfig {
         BackendConfig {
@@ -140,6 +177,11 @@ mod tests {
             overview
                 .endpoints
                 .contains(&"POST /api/loyalty/preview".to_string())
+        );
+        assert!(
+            overview
+                .endpoints
+                .contains(&"POST /api/orders/review".to_string())
         );
         assert!(
             overview
@@ -217,6 +259,65 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let error: ErrorResponse = response_json(response).await;
         assert_eq!(error.error, "webhook_verification_failed");
+    }
+
+    #[tokio::test]
+    async fn order_review_rejects_missing_shipping_country() {
+        let request = serde_json::json!({
+            "customer_email": "member@harbor.test",
+            "membership_tier": "standard",
+            "subtotal_gbp": 64.0,
+            "cart_skus": ["harbor-cap"],
+            "shipping_country": "",
+            "expedited_requested": false
+        });
+
+        let response = build_router(config())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/orders/review")
+                    .header("content-type", "application/json")
+                    .body(Body::from(request.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let error: ErrorResponse = response_json(response).await;
+        assert_eq!(error.error, "invalid_request");
+        assert!(error.detail.contains("shipping_country"));
+    }
+
+    #[tokio::test]
+    async fn order_review_returns_customer_specific_fulfilment_decision() {
+        let request = serde_json::json!({
+            "customer_email": "captain@harbor.test",
+            "membership_tier": "gold",
+            "subtotal_gbp": 240.0,
+            "cart_skus": ["cellar-tour-pass"],
+            "shipping_country": "GB",
+            "expedited_requested": true
+        });
+
+        let response = build_router(config())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/orders/review")
+                    .header("content-type", "application/json")
+                    .body(Body::from(request.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let review: OrderReviewResponse = response_json(response).await;
+        assert!(review.review_required);
+        assert_eq!(review.assigned_queue, "ops-manual-review");
+        assert!(review.tags.contains(&"ops:manual-review".to_string()));
     }
 
     #[tokio::test]

@@ -1,0 +1,8 @@
+{
+  "customer_email": "captain@harbor.test",
+  "membership_tier": "gold",
+  "subtotal_gbp": 240.0,
+  "cart_skus": ["cellar-tour-pass", "harbor-cap"],
+  "shipping_country": "GB",
+  "expedited_requested": true
+}

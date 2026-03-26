@@ -49,6 +49,27 @@ pub struct CrmContactRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderReviewRequest {
+    pub customer_email: String,
+    pub membership_tier: MembershipTier,
+    pub subtotal_gbp: f64,
+    #[serde(default)]
+    pub cart_skus: Vec<String>,
+    pub shipping_country: String,
+    #[serde(default)]
+    pub expedited_requested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderReviewResponse {
+    pub review_required: bool,
+    pub assigned_queue: String,
+    pub service_level: String,
+    pub operator_note: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServiceOverview {
     pub service: String,
     pub brand: String,
@@ -69,6 +90,7 @@ pub fn service_overview(brand: &str) -> ServiceOverview {
             "GET /".to_string(),
             "GET /health".to_string(),
             "POST /api/loyalty/preview".to_string(),
+            "POST /api/orders/review".to_string(),
             "POST /webhooks/crm/contact-updated".to_string(),
         ],
     }
@@ -185,6 +207,70 @@ pub fn route_crm_contact(update: &CrmContactUpdate) -> CrmContactRoute {
     }
 }
 
+pub fn review_order(request: &OrderReviewRequest) -> OrderReviewResponse {
+    let international = !matches!(request.shipping_country.as_str(), "GB" | "UK");
+    let contains_event_pass = request
+        .cart_skus
+        .iter()
+        .any(|sku| sku == "tasting-pass" || sku == "cellar-tour-pass");
+    let high_value = request.subtotal_gbp >= 200.0;
+    let review_required =
+        international || high_value || (request.expedited_requested && contains_event_pass);
+
+    let assigned_queue = if review_required {
+        "ops-manual-review".to_string()
+    } else if matches!(request.membership_tier, MembershipTier::Gold) {
+        "vip-fulfilment".to_string()
+    } else {
+        "storefront-standard".to_string()
+    };
+
+    let service_level = if review_required {
+        "manual-clearance".to_string()
+    } else if matches!(request.membership_tier, MembershipTier::Gold) {
+        "priority".to_string()
+    } else if request.expedited_requested {
+        "expedited".to_string()
+    } else {
+        "standard".to_string()
+    };
+
+    let operator_note = if international {
+        "Check customs-safe packing and confirm the carrier lane before capture.".to_string()
+    } else if high_value && matches!(request.membership_tier, MembershipTier::Gold) {
+        "Gold high-value order: route to concierge packing and same-day follow-up.".to_string()
+    } else if request.expedited_requested && contains_event_pass {
+        "Expedited event order needs manual arrival coordination before release.".to_string()
+    } else if matches!(request.membership_tier, MembershipTier::Gold) {
+        "Gold member order qualifies for the priority fulfilment lane.".to_string()
+    } else {
+        "Standard storefront fulfilment rules apply.".to_string()
+    };
+
+    let mut tags = vec![
+        "customer-app:harbor-shop".to_string(),
+        format!("queue:{assigned_queue}"),
+        format!("service-level:{service_level}"),
+    ];
+    if review_required {
+        tags.push("ops:manual-review".to_string());
+    }
+    if international {
+        tags.push("shipping:international".to_string());
+    }
+    if contains_event_pass {
+        tags.push("catalog:event-pass".to_string());
+    }
+
+    OrderReviewResponse {
+        review_required,
+        assigned_queue,
+        service_level,
+        operator_note,
+        tags,
+    }
+}
+
 pub fn webhook_secret_matches(expected: &str, provided: Option<&str>) -> bool {
     match provided {
         Some(value) => value == expected,
@@ -253,6 +339,38 @@ mod tests {
             "{}",
             route.follow_up_reason
         );
+    }
+
+    #[test]
+    fn international_order_requires_manual_review() {
+        let review = review_order(&OrderReviewRequest {
+            customer_email: "captain@harbor.test".to_string(),
+            membership_tier: MembershipTier::Standard,
+            subtotal_gbp: 88.0,
+            cart_skus: vec!["harbor-cap".to_string()],
+            shipping_country: "IE".to_string(),
+            expedited_requested: false,
+        });
+
+        assert!(review.review_required);
+        assert_eq!(review.assigned_queue, "ops-manual-review");
+        assert!(review.operator_note.contains("customs-safe packing"));
+    }
+
+    #[test]
+    fn gold_member_domestic_order_uses_priority_lane() {
+        let review = review_order(&OrderReviewRequest {
+            customer_email: "gold@harbor.test".to_string(),
+            membership_tier: MembershipTier::Gold,
+            subtotal_gbp: 110.0,
+            cart_skus: vec!["harbor-cap".to_string()],
+            shipping_country: "GB".to_string(),
+            expedited_requested: false,
+        });
+
+        assert!(!review.review_required);
+        assert_eq!(review.assigned_queue, "vip-fulfilment");
+        assert_eq!(review.service_level, "priority");
     }
 
     #[test]

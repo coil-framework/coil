@@ -163,6 +163,8 @@ If you started the optional backend-example profile, also visit:
 
 - `http://localhost:8081/`
 - `http://localhost:8081/health`
+- `POST http://localhost:8081/api/loyalty/preview`
+- `POST http://localhost:8081/api/orders/review`
 
 ## Local Stripe Testing
 
@@ -282,6 +284,7 @@ This example is intentionally small but real:
 
 - it is a standalone Rust HTTP service
 - it exposes Harbor Shop-specific loyalty logic at `POST /api/loyalty/preview`
+- it exposes a Harbor Shop-specific fulfilment review rule at `POST /api/orders/review`
 - it exposes a fail-closed signed webhook consumer at `POST /webhooks/crm/contact-updated`
 - it demonstrates the customer-app-owned native backend path without modifying Davenda core
 - it shows the internal split a third-party developer should copy:
@@ -293,6 +296,8 @@ Read these files first if you want to add custom backend logic:
 
 - `backend/README.md`
 - `backend/harbor-loyalty-backend/README.md`
+- `backend/harbor-loyalty-backend/src/lib.rs`
+- `backend/harbor-loyalty-backend/src/http.rs`
 
 To run it with the local stack:
 
@@ -311,6 +316,13 @@ curl -sS \
 
 ```bash
 curl -sS \
+  -X POST http://localhost:8081/api/orders/review \
+  -H 'content-type: application/json' \
+  --data @backend/harbor-loyalty-backend/requests/order-review.json
+```
+
+```bash
+curl -sS \
   -X POST http://localhost:8081/webhooks/crm/contact-updated \
   -H 'content-type: application/json' \
   -H "x-harbor-backend-secret: ${HARBOR_BACKEND_WEBHOOK_SECRET:-harbor-backend-dev-secret}" \
@@ -319,6 +331,14 @@ curl -sS \
 
 The example is meant to be copied and reshaped by third-party developers who need customer-owned
 Rust/backend logic that sits next to Harbor Shop rather than leaking into platform core.
+
+If you want the shortest “how do I add my own Rust rule?” path, start with the checked-in
+`review_order(...)` example:
+
+- define request/response types and a pure rule in `src/lib.rs`
+- add the thin HTTP adapter in `src/http.rs`
+- add a sample payload under `requests/`
+- add tests for both the pure rule and the route
 
 To work on the example without Docker Compose:
 

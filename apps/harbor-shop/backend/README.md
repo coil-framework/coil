@@ -44,6 +44,7 @@ Useful routes:
 - `GET http://localhost:8081/`
 - `GET http://localhost:8081/health`
 - `POST http://localhost:8081/api/loyalty/preview`
+- `POST http://localhost:8081/api/orders/review`
 - `POST http://localhost:8081/webhooks/crm/contact-updated`
 
 You can also run just the example service without Docker Compose:
@@ -61,6 +62,15 @@ curl -sS \
   -X POST http://localhost:8081/api/loyalty/preview \
   -H 'content-type: application/json' \
   --data @backend/harbor-loyalty-backend/requests/loyalty-preview.json
+```
+
+Preview a Harbor Shop-specific fulfilment decision:
+
+```bash
+curl -sS \
+  -X POST http://localhost:8081/api/orders/review \
+  -H 'content-type: application/json' \
+  --data @backend/harbor-loyalty-backend/requests/order-review.json
 ```
 
 Exercise the signed webhook path:
@@ -83,6 +93,10 @@ The example intentionally demonstrates three things:
 - Harbor Shop-specific business rules written in plain Rust
 - a small HTTP API that another system or frontend can call directly
 - a fail-closed signed webhook entrypoint for customer-specific integration work
+
+The new `POST /api/orders/review` example is the clearest “copy this” path for developers who need
+to add one more Harbor Shop-specific backend rule. It is a plain Rust decision function plus a thin
+Axum route, with a checked-in request payload and tests.
 
 It also demonstrates the code split we want third-party developers to copy:
 

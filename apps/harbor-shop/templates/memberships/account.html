@@ -63,7 +63,7 @@
       <section class="memberships-page__summary" dv:unless="${account.hasMembership}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
-          <h2 dv:if="${account.hasLatestOrder}">Membership not active yet</h2>
+          <h2 dv:if="${account.hasLatestOrder}">Pending activation</h2>
           <h2 dv:unless="${account.hasLatestOrder}">Membership not active yet</h2>
           <p dv:if="${account.hasLatestOrder}">
             Your latest order
@@ -71,7 +71,8 @@
             is
             <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
             Membership access only appears here after a qualifying membership purchase is captured
-            for this account view.
+            for this account view. Check order history for the latest payment state, then return
+            here once this browser session shows the order as captured.
           </p>
           <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
             Join to unlock early access, subscriber-only bundles, and concierge support.

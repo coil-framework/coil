@@ -3391,11 +3391,12 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
     )
     .unwrap();
     assert_eq!(account_status, StatusCode::OK, "{account_body}");
+    assert!(account_body.contains("Latest order"), "{account_body}");
+    assert!(account_body.contains("Pending Payment"), "{account_body}");
     assert!(
-        account_body.contains("No active membership is attached"),
+        account_body.contains("Membership access moves into this account area"),
         "{account_body}"
     );
-    assert!(account_body.contains("Pending Payment"), "{account_body}");
     assert!(account_body.contains("View memberships"), "{account_body}");
     assert!(
         account_body.contains("View order history"),
@@ -3435,6 +3436,10 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         "{memberships_body}"
     );
     assert!(
+        memberships_body.contains("Included with order ORD-10042."),
+        "{memberships_body}"
+    );
+    assert!(
         memberships_body.contains("Pending Payment"),
         "{memberships_body}"
     );
@@ -3444,6 +3449,10 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
     );
     assert!(
         memberships_body.contains("View order history"),
+        "{memberships_body}"
+    );
+    assert!(
+        memberships_body.contains("View membership details"),
         "{memberships_body}"
     );
 
@@ -3480,7 +3489,7 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         "{order_history_body}"
     );
     assert!(
-        order_history_body.contains("Membership access only appears here"),
+        order_history_body.contains("Use order history to confirm the latest status"),
         "{order_history_body}"
     );
 
@@ -3648,6 +3657,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
     );
     assert!(account_body.contains("Open checkout"), "{account_body}");
     assert!(account_body.contains("Continue shopping"), "{account_body}");
+    assert!(account_body.contains("Explore memberships"), "{account_body}");
 
     let order_history_response = server
         .respond(

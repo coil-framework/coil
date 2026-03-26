@@ -102,12 +102,16 @@
               is
               <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
               Membership access only appears here after a qualifying membership purchase is
-              captured for this account view.
+              captured for this account view. Use order history to confirm the latest status, then
+              return to memberships once payment has settled.
             </p>
             <p dv:unless="${account.hasLatestOrder}" dv:text="${account.membershipEmptyText}">
               No active membership is attached yet.
             </p>
             <a class="button" href="/account/memberships">View memberships</a>
+            <a class="button button--secondary" href="/account/orders" dv:if="${account.hasLatestOrder}">
+              Review this order
+            </a>
             <a
               class="button button--secondary"
               href="/shop/collections/memberships"
@@ -122,7 +126,8 @@
           <h2>Next steps</h2>
           <p dv:if="${account.hasRecentOrders}">
             Review order status, then continue shopping or return to checkout if you still have
-            work to finish on this browser session.
+            work to finish on this browser session. If you bought membership access, the
+            memberships page updates from the same session after payment capture.
           </p>
           <p dv:unless="${account.hasRecentOrders}">
             Start from the storefront, then come back here once checkout has completed on this

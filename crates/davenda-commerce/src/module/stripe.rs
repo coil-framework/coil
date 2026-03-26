@@ -15,12 +15,14 @@ pub const STRIPE_PAYMENT_WEBHOOK_ROUTE: &str = "/webhooks/commerce/payment-provi
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StripeCheckoutMode {
     WebhookConfirmation,
+    HostedCheckout,
 }
 
 impl StripeCheckoutMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::WebhookConfirmation => "webhook-confirmation",
+            Self::HostedCheckout => "hosted-checkout",
         }
     }
 }
@@ -113,6 +115,9 @@ impl CommercePaymentsStripeConfig {
         let checkout_mode_raw = module_string_setting(table, "checkout_mode")?.to_ascii_lowercase();
         let checkout_mode = match checkout_mode_raw.as_str() {
             "webhook-confirmation" => StripeCheckoutMode::WebhookConfirmation,
+            "hosted-checkout" | "hosted_checkout" | "stripe-hosted-checkout" => {
+                StripeCheckoutMode::HostedCheckout
+            }
             other => {
                 return Err(CommerceModelError::UnsupportedModuleSetting {
                     module: STRIPE_MODULE_NAME.to_string(),

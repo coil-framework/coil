@@ -13,6 +13,7 @@ secret_access_key = "runtime-secret"
 signed_url_ttl_secs = 900
 "#;
 const PAYMENT_WEBHOOK_SECRET: &str = "harbor-shop-webhook-secret";
+const STRIPE_SECRET_KEY: &str = "sk_test_runtime_placeholder";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -48,6 +49,13 @@ fn live_backend_secret_resolver_with_payment_webhook() -> StaticSecretResolver {
                 var: "STRIPE_WEBHOOK_SECRET".to_string(),
             },
             PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap()
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "STRIPE_SECRET_KEY".to_string(),
+            },
+            STRIPE_SECRET_KEY,
         )
         .unwrap()
 }
@@ -100,6 +108,20 @@ fn checked_in_harbor_shop_config(app_name: &str) -> PlatformConfig {
         .join(format!("davenda-runtime-{app_name}"))
         .display()
         .to_string();
+    // Keep checked-in Harbor Shop server tests deterministic. The checked-in app now advertises
+    // hosted Stripe checkout, but the server tests exercise local request flows without a live
+    // Stripe session API seam.
+    if let Some(settings) = config
+        .modules
+        .settings
+        .get_mut("commerce-payments-stripe")
+        .and_then(toml::Value::as_table_mut)
+    {
+        settings.insert(
+            "checkout_mode".to_string(),
+            toml::Value::String("webhook-confirmation".to_string()),
+        );
+    }
     config
 }
 
@@ -3843,7 +3865,7 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         "{order_history_body}"
     );
     assert!(
-        order_history_body.contains("Use order history to confirm the latest status"),
+        order_history_body.contains("confirm the latest status, then return to memberships"),
         "{order_history_body}"
     );
 
@@ -4763,10 +4785,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
     .unwrap();
     assert!(checkout_body.contains("Gold Membership"), "{checkout_body}");
     assert!(checkout_body.contains("PAY-50001"), "{checkout_body}");
-    assert!(
-        checkout_body.contains("Payment reference"),
-        "{checkout_body}"
-    );
+    assert!(checkout_body.contains("Intent"), "{checkout_body}");
 
     let complete_response = server
         .respond(
@@ -4971,7 +4990,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         "{admin_orders_body}"
     );
     assert!(
-        admin_orders_body.contains("returned from the payment provider"),
+        admin_orders_body.contains("returned from Stripe"),
         "{admin_orders_body}"
     );
 }

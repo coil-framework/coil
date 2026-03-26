@@ -282,6 +282,102 @@ cdn_base_url = "https://cdn.example.com"
 }
 
 #[test]
+fn commerce_payments_stripe_config_accepts_hosted_checkout_mode() {
+    let config = PlatformConfig::from_toml_str(
+        r#"
+[app]
+name = "shop"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = []
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "external"
+
+[storage]
+default_class = "public_upload"
+local_root = "/tmp/davenda"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB"]
+fallback_locale = "en-GB"
+
+[seo]
+canonical_host = "shop.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 101
+
+[modules]
+enabled = ["commerce", "commerce-payments-stripe"]
+
+[modules."commerce-payments-stripe"]
+provider = "stripe"
+checkout_mode = "hosted-checkout"
+publishable_key = { kind = "env", var = "STRIPE_PUBLISHABLE_KEY" }
+webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#,
+    )
+    .unwrap();
+
+    let stripe = CommercePaymentsStripeConfig::from_platform_config(&config)
+        .unwrap()
+        .expect("stripe config");
+    assert_eq!(stripe.provider, "stripe");
+    assert_eq!(stripe.checkout_mode, StripeCheckoutMode::HostedCheckout);
+}
+
+#[test]
 fn commerce_payments_stripe_config_fails_closed_when_handoff_contract_is_incomplete() {
     let config = PlatformConfig::from_toml_str(
         r#"
@@ -387,10 +483,7 @@ fn checked_in_harbor_shop_declares_the_stripe_handoff_contract() {
         .expect("checked-in stripe config");
 
     assert_eq!(stripe.provider, "stripe");
-    assert_eq!(
-        stripe.checkout_mode,
-        StripeCheckoutMode::WebhookConfirmation
-    );
+    assert_eq!(stripe.checkout_mode, StripeCheckoutMode::HostedCheckout);
     assert_eq!(
         stripe.publishable_key.redacted(),
         "env:STRIPE_PUBLISHABLE_KEY"
@@ -398,6 +491,15 @@ fn checked_in_harbor_shop_declares_the_stripe_handoff_contract() {
     assert_eq!(
         stripe.webhook_secret.redacted(),
         "env:STRIPE_WEBHOOK_SECRET"
+    );
+    assert_eq!(
+        config
+            .wasm
+            .secret_bindings
+            .get("commerce_payments_stripe_secret_key")
+            .expect("hosted checkout should declare a Stripe secret-key binding")
+            .redacted(),
+        "env:STRIPE_SECRET_KEY"
     );
 }
 

@@ -16,7 +16,8 @@ services:
       REDIS_URL: redis://redis:6379
       DAVENDA_COOKIE_SECRET: "01234567012345670123456701234567"
       DAVENDA_CSRF_SECRET: "76543210765432107654321076543210"
-      STRIPE_PUBLISHABLE_KEY: pk_test_replace_me
+      STRIPE_PUBLISHABLE_KEY: "${STRIPE_PUBLISHABLE_KEY:-pk_test_replace_me}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_test_replace_me}"
       STRIPE_WEBHOOK_SECRET: replace-me
       OBJECT_STORE_URL: |-
         endpoint_url="http://minio:9000"

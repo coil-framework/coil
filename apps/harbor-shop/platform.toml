@@ -74,7 +74,7 @@ enabled = ["cms", "media", "commerce", "commerce-payments-stripe", "memberships"
 
 [modules."commerce-payments-stripe"]
 provider = "stripe"
-checkout_mode = "webhook-confirmation"
+checkout_mode = "hosted-checkout"
 publishable_key = { kind = "env", var = "STRIPE_PUBLISHABLE_KEY" }
 webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
 
@@ -82,6 +82,9 @@ webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
 directory = "apps/harbor-shop/extensions"
 default_time_limit_ms = 50
 allow_network = false
+
+[wasm.secret_bindings]
+commerce_payments_stripe_secret_key = { kind = "env", var = "STRIPE_SECRET_KEY" }
 
 [jobs]
 backend = "redis"

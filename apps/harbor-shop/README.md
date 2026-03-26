@@ -24,6 +24,7 @@ What `docker compose up` does for you:
 - starts the Davenda dev server on `http://localhost:8080`
 
 The first boot will take longer because the image has to compile the workspace.
+The default compose file boots with placeholder Stripe keys, so the hosted checkout path renders and the store starts cleanly, but an actual Stripe redirect will still require you to override those placeholders with real test credentials.
 
 ## What To Open
 
@@ -48,6 +49,14 @@ The compose stack also exposes local backing services:
   - username: `minio`
   - password: `minio123`
 
+To exercise a real Stripe Checkout redirect instead of the placeholder boot values, export your test keys before starting the stack:
+
+```bash
+export STRIPE_PUBLISHABLE_KEY=pk_test_your_key
+export STRIPE_SECRET_KEY=sk_test_your_key
+docker compose up --build
+```
+
 ## Local Dev Contract
 
 This stack uses [platform.dev.toml](/Users/zcourts/projects/worka/davenda/apps/harbor-shop/platform.dev.toml), which is intentionally local-friendly:
@@ -56,6 +65,7 @@ This stack uses [platform.dev.toml](/Users/zcourts/projects/worka/davenda/apps/h
 - cookie `secure` flags are disabled so the site works on plain `http://localhost:8080`
 - TLS is marked `external` so local startup does not pretend to run ACME
 - `assets.cdn_base_url` points at the local MinIO bucket
+- `wasm.secret_bindings` exposes the Stripe secret key the hosted checkout handoff actually reads at runtime
 
 The production-shaped sample config remains in [platform.toml](/Users/zcourts/projects/worka/davenda/apps/harbor-shop/platform.toml). The compose stack does not modify it.
 

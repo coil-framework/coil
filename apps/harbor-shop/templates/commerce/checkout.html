@@ -21,17 +21,17 @@
         <p class="checkout-page__eyebrow">Checkout</p>
         <h1>Review your order before the Stripe handoff.</h1>
         <p>
-          Harbor Shop records the order details here, then keeps the order visible while the Stripe
-          payment result settles.
+          Harbor Shop records the order details here, then hands the customer off to Stripe
+          Checkout for payment collection.
         </p>
         <p>
-          After you place the order, this browser returns to the order-status screen so you can
-          track the same payment reference until the signed Stripe confirmation arrives.
+          After Stripe sends the browser back, Harbor Shop keeps the order visible while the signed
+          Stripe webhook settles the final payment state.
         </p>
         <ol class="checkout-list">
           <li>Confirm the receipt email and order summary.</li>
-          <li>Place the order to start the Stripe-backed confirmation flow.</li>
-          <li>Return to order status while Harbor Shop waits for the provider result.</li>
+          <li>Place the order to open the Stripe Checkout handoff.</li>
+          <li>Return to order status while Harbor Shop waits for the signed provider result.</li>
         </ol>
       </section>
       <section class="storefront-flash" dv:if="${hasFlashMessages}">
@@ -69,16 +69,16 @@
 
           <h2>Payment</h2>
           <p>
-            This screen prepares the Stripe-backed order confirmation route. Full payment
-            confirmation is resolved after submission, not directly on this page.
+            This screen prepares the hosted Stripe Checkout handoff. Final payment confirmation is
+            still resolved by the signed Stripe webhook after the hosted session completes.
           </p>
           <div class="checkout-provider">
             <p>
-              <strong dv:text="${checkout.providerLabel}">Stripe payment confirmation</strong>
+              <strong dv:text="${checkout.providerLabel}">Stripe hosted checkout</strong>
             </p>
             <p dv:text="${checkout.providerSummary}">
-              This checkout uses the installed Stripe payment provider and waits for its signed
-              webhook confirmation before the order moves forward.
+              This checkout reserves the order in Davenda, then redirects to Stripe Checkout for
+              payment collection.
             </p>
             <p>
               Intent
@@ -88,7 +88,8 @@
             </p>
             <p>
               Harbor Shop keeps this payment reference and local order state visible so the return
-              screen and account history can reconcile the final Stripe result.
+              screen and account history can reconcile the final Stripe result after Stripe sends
+              the customer back.
             </p>
             <p>
               If confirmation fails, the basket is restored so another checkout attempt can start

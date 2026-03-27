@@ -1,5 +1,6 @@
 use super::*;
 use davenda_template::TemplateModelError;
+use std::path::PathBuf;
 
 #[derive(Debug, Error)]
 pub enum RuntimeBuildError {
@@ -122,6 +123,20 @@ pub enum RuntimeBootstrapError {
     Build(#[from] RuntimeBuildError),
     #[error(transparent)]
     Server(#[from] RuntimeServerError),
+    #[error("failed to resolve the current working directory: {0}")]
+    CurrentDirectory(std::io::Error),
+    #[error(
+        "could not discover a platform config under `{app_root}`; set `DAVENDA_CONFIG` or add `platform.toml` / `platform.dev.toml`"
+    )]
+    ConfigNotFound { app_root: PathBuf },
+    #[error("platform config `{path}` could not be loaded: {reason}")]
+    ConfigLoad { path: PathBuf, reason: String },
+    #[error("auth package `{package}` could not be loaded from `{app_root}`: {reason}")]
+    AuthPackageLoad {
+        package: String,
+        app_root: PathBuf,
+        reason: String,
+    },
     #[error("required environment variable `{name}` is missing or empty")]
     MissingEnvironmentVariable { name: &'static str },
     #[error("failed to bind the customer server to `{bind}`: {reason}")]

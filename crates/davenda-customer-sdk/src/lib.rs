@@ -48,7 +48,8 @@ mod tests {
             &mut self,
             _hooks: Arc<dyn VerifiedWebhookAssetHooks>,
         ) -> Result<(), BackendError> {
-            self.hook_kinds.push(RegisteredHookKind::VerifiedWebhookAssets);
+            self.hook_kinds
+                .push(RegisteredHookKind::VerifiedWebhookAssets);
             Ok(())
         }
     }

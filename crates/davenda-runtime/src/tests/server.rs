@@ -1,13 +1,13 @@
 use super::*;
 use axum::response::Response;
+use davenda_config::Environment;
 use davenda_customer_sdk::{
     AssetWriteRequest, AssetsFacade, AuditFacade, AuthFacade, BackendError, CheckoutHooks,
-    CmsHooks, CmsPageDraft, CmsPublishDecision, CommerceFacade, CustomerPluginDescriptor,
+    CmsHooks, CmsPageDraft, CmsPublishDecision, CommerceFacade, CustomerPluginDescriptor, Headers,
     JobsFacade, OrderDraft, OrderReviewDecision, OutboundHttpFacade, RepositoryFacade,
     RepositoryQuery, RepositoryWrite, RequestContext, VerifiedWebhook, VerifiedWebhookAssetHooks,
     VerifiedWebhookHooks, WebhookHandlingResult,
 };
-use davenda_config::Environment;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::collections::BTreeMap;
@@ -47,19 +47,21 @@ impl ObjectStoreTestServer {
         let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
         let stop_thread = Arc::clone(&stop);
         let store_thread = Arc::clone(&store);
-        let handle = thread::spawn(move || loop {
-            if stop_thread.load(Ordering::SeqCst) {
-                break;
-            }
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    let store = Arc::clone(&store_thread);
-                    handle_object_store_request(stream, &store);
+        let handle = thread::spawn(move || {
+            loop {
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(10));
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let store = Arc::clone(&store_thread);
+                        handle_object_store_request(stream, &store);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("object-store test server failed: {error}"),
                 }
-                Err(error) => panic!("object-store test server failed: {error}"),
             }
         });
         thread::sleep(Duration::from_millis(25));
@@ -274,6 +276,12 @@ struct RewriteCmsPublishPlugin;
 #[derive(Debug)]
 struct RewriteCmsPublishHooks;
 
+#[derive(Debug)]
+struct RewriteCmsWorkspacePublishPlugin;
+
+#[derive(Debug)]
+struct RewriteCmsWorkspacePublishHooks;
+
 impl CmsHooks for RejectCmsPublishHooks {
     fn validate_page_publish(
         &self,
@@ -330,6 +338,55 @@ impl CmsHooks for RewriteCmsPublishHooks {
     }
 }
 
+impl CmsHooks for RewriteCmsWorkspacePublishHooks {
+    fn validate_page_publish(
+        &self,
+        _ctx: &RequestContext,
+        draft: &CmsPageDraft,
+        repositories: &dyn RepositoryFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<CmsPublishDecision, BackendError> {
+        let navigation = repositories.read(&RepositoryQuery::new("cms.navigation"))?;
+        if navigation.records.is_empty() {
+            return Err(BackendError::new(
+                davenda_customer_sdk::BackendErrorKind::Conflict,
+                "cms.navigation.missing",
+                "linked CMS hook expected the live primary navigation to exist",
+            ));
+        }
+        let redirects = repositories.read(&RepositoryQuery::new("cms.redirects"))?;
+        if redirects
+            .records
+            .iter()
+            .any(|record| record.fields.get("from") == Some(&"/legacy/shipping".to_string()))
+        {
+            return Err(BackendError::new(
+                davenda_customer_sdk::BackendErrorKind::Conflict,
+                "cms.redirects.duplicate",
+                "linked CMS hook found an unexpected legacy shipping redirect before publish",
+            ));
+        }
+        repositories.write(RepositoryWrite {
+            repository: "cms.navigation".to_string(),
+            record_id: "append".to_string(),
+            fields: BTreeMap::from([
+                ("label".to_string(), "Shipping".to_string()),
+                ("href".to_string(), format!("/pages/{}", draft.slug)),
+            ]),
+        })?;
+        repositories.write(RepositoryWrite {
+            repository: "cms.redirects".to_string(),
+            record_id: "append".to_string(),
+            fields: BTreeMap::from([
+                ("from".to_string(), "/legacy/shipping".to_string()),
+                ("to".to_string(), format!("/pages/{}", draft.slug)),
+                ("permanent".to_string(), "true".to_string()),
+            ]),
+        })?;
+        Ok(CmsPublishDecision::Allow)
+    }
+}
+
 impl CustomerBackendPlugin for RejectCmsPublishPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new("harbor-shop-cms-policy", "Harbor Shop CMS Policy", "0.1.0")
@@ -354,10 +411,25 @@ impl CustomerBackendPlugin for RewriteCmsPublishPlugin {
     }
 }
 
+impl CustomerBackendPlugin for RewriteCmsWorkspacePublishPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-cms-workspace-rewriter",
+            "Harbor Shop CMS Workspace Rewriter",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_cms_hooks(Arc::new(RewriteCmsWorkspacePublishHooks))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RecordedVerifiedWebhook {
     source: String,
     event: String,
+    headers: Headers,
     content_type: Option<String>,
     payload: String,
 }
@@ -371,6 +443,8 @@ struct RecordingVerifiedWebhookPlugin {
 struct RecordedVerifiedWebhookAssetWrite {
     logical_path: String,
     storage_class: String,
+    storage_path: String,
+    bytes_written: u64,
     public_url: Option<String>,
 }
 
@@ -402,6 +476,7 @@ impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
         self.calls.lock().unwrap().push(RecordedVerifiedWebhook {
             source: webhook.source.clone(),
             event: webhook.event.clone(),
+            headers: webhook.headers.clone(),
             content_type: webhook.content_type.clone(),
             payload: String::from_utf8_lossy(&webhook.payload).into_owned(),
         });
@@ -426,7 +501,7 @@ impl VerifiedWebhookAssetHooks for RecordingVerifiedWebhookAssetPlugin {
             "uploads/customer-hooks/{}/{}.json",
             ctx.customer_app.app_id, webhook.event
         );
-        assets.publish(AssetWriteRequest {
+        let receipt = assets.publish(AssetWriteRequest {
             logical_path: logical_path.clone(),
             storage_class: "public_upload".to_string(),
             content_type: Some("application/json".to_string()),
@@ -446,6 +521,8 @@ impl VerifiedWebhookAssetHooks for RecordingVerifiedWebhookAssetPlugin {
             .push(RecordedVerifiedWebhookAssetWrite {
                 logical_path: asset.logical_path.clone(),
                 storage_class: asset.storage_class.clone(),
+                storage_path: receipt.storage_path,
+                bytes_written: receipt.bytes_written,
                 public_url: asset.public_url.clone(),
             });
         Ok(WebhookHandlingResult::accepted(Some(format!(
@@ -3658,7 +3735,7 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from(webhook_body))
+                .body(Body::from(webhook_body.clone()))
                 .unwrap(),
         )
         .await
@@ -4532,8 +4609,9 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
                 .uri("/webhooks/commerce/payment-provider")
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
+                .header("x-stripe-delivery", "evt_test_verified_hook")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from(webhook_body))
+                .body(Body::from(webhook_body.clone()))
                 .unwrap(),
         )
         .await
@@ -6060,8 +6138,9 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
                 .uri("/webhooks/commerce/payment-provider")
                 .header("host", "www.example.com")
                 .header("x-forwarded-proto", "https")
+                .header("x-stripe-delivery", "evt_test_verified_hook")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from(webhook_body))
+                .body(Body::from(webhook_body.clone()))
                 .unwrap(),
         )
         .await
@@ -6076,17 +6155,27 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
         recorded[0].content_type.as_deref(),
         Some("application/x-www-form-urlencoded")
     );
-    assert!(
+    assert_eq!(recorded[0].payload, webhook_body);
+    assert_eq!(
         recorded[0]
-            .payload
-            .contains("\"payment_reference\":[\"PAY-50001\"]"),
-        "{}",
-        recorded[0].payload
+            .headers
+            .get("x-davenda-verified-webhook-source")
+            .map(String::as_str),
+        Some("stripe")
     );
-    assert!(
-        recorded[0].payload.contains("\"provider\":[\"stripe\"]"),
-        "{}",
-        recorded[0].payload
+    assert_eq!(
+        recorded[0]
+            .headers
+            .get("x-davenda-verified-webhook-event")
+            .map(String::as_str),
+        Some("payment.captured")
+    );
+    assert_eq!(
+        recorded[0]
+            .headers
+            .get("x-davenda-route")
+            .map(String::as_str),
+        Some("commerce.payment-provider-webhook")
     );
 }
 
@@ -6115,10 +6204,9 @@ async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payme
         .with_template_root(&template_root)
         .build()
         .unwrap();
-    let resolver =
-        live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
-            &object_store_secret,
-        );
+    let resolver = live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
+        &object_store_secret,
+    );
     let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
         "https://checkout.stripe.test/session/cs_test_harbor_shop_verified_hook_assets",
     ));
@@ -6307,12 +6395,11 @@ async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payme
         "{writes:?}"
     );
     assert!(
-        writes[0]
-            .public_url
-            .as_deref()
-            .is_some_and(|url| url.contains("uploads/customer-hooks/")),
+        writes[0].storage_path.contains("uploads/customer-hooks/"),
         "{writes:?}"
     );
+    assert!(writes[0].bytes_written > 0, "{writes:?}");
+    assert!(writes[0].public_url.is_none(), "{writes:?}");
 }
 
 #[tokio::test]
@@ -9129,6 +9216,181 @@ async fn server_host_creates_and_publishes_new_checked_in_harbor_shop_cms_page()
     assert!(
         live_page_body.contains("Returns can be started from support after the parcel arrives."),
         "{live_page_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_allows_linked_cms_hooks_to_update_navigation_and_redirects_before_publish() {
+    let app_name = unique_app_name("harbor-shop-runtime-cms-workspace-hook");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .register_customer_plugin(RewriteCmsWorkspacePublishPlugin)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let new_page_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?new=1")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let draft_token = response_header(
+        &new_page_response,
+        "x-davenda-cms-csrf-cms-pages-save-draft",
+    );
+
+    let draft_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &draft_token)
+        .append_pair("page_title", "Shipping & Returns")
+        .append_pair("page_slug", "shipping-returns")
+        .append_pair(
+            "page_summary",
+            "Explains delivery windows, returns, and what customers should expect after checkout.",
+        )
+        .append_pair(
+            "page_body_html",
+            "<p>Orders dispatch within two working days.</p><p>Returns can be started from support after the parcel arrives.</p>",
+        )
+        .finish();
+    let draft_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/draft")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(draft_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(draft_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&draft_response, "location"),
+        "/admin/pages?page=page-shipping-returns"
+    );
+
+    let saved_admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-shipping-returns")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let publish_token = response_header(
+        &saved_admin_response,
+        "x-davenda-cms-csrf-cms-pages-publish",
+    );
+
+    let publish_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &publish_token)
+        .append_pair("page_id", "page-shipping-returns")
+        .finish();
+    let publish_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/publish")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(publish_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&publish_response, "location"),
+        "/admin/pages?page=page-shipping-returns"
+    );
+
+    let home_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let home_body = String::from_utf8(
+        to_bytes(home_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(home_body.contains(">Shipping<"), "{home_body}");
+    assert!(home_body.contains("/pages/shipping-returns"), "{home_body}");
+
+    let redirect_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/legacy/shipping")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(redirect_response.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        response_header(&redirect_response, "location"),
+        "/pages/shipping-returns"
     );
 }
 

@@ -11,8 +11,11 @@ pub struct RequestInput {
     pub method: HttpMethod,
     pub host: String,
     pub path: String,
+    pub headers: BTreeMap<String, String>,
     pub query_params: RequestFieldMap,
     pub form_fields: RequestFieldMap,
+    pub content_type: Option<String>,
+    pub raw_body: Vec<u8>,
     pub scheme: String,
     pub forwarded_proto: Option<String>,
     pub request_id: Option<String>,
@@ -36,8 +39,11 @@ impl RequestInput {
             method,
             host: validate_host(host.into())?,
             path: validate_route_path(path.into())?,
+            headers: BTreeMap::new(),
             query_params: RequestFieldMap::new(),
             form_fields: RequestFieldMap::new(),
+            content_type: None,
+            raw_body: Vec::new(),
             scheme: "https".to_string(),
             forwarded_proto: None,
             request_id: None,
@@ -130,6 +136,21 @@ impl RequestInput {
         self
     }
 
+    pub fn with_headers(mut self, headers: BTreeMap<String, String>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    pub fn with_content_type(mut self, content_type: impl Into<String>) -> Self {
+        self.content_type = Some(content_type.into());
+        self
+    }
+
+    pub fn with_raw_body(mut self, raw_body: Vec<u8>) -> Self {
+        self.raw_body = raw_body;
+        self
+    }
+
     pub fn query_param(&self, name: &str) -> Option<&str> {
         self.query_params
             .get(name)
@@ -197,8 +218,11 @@ pub struct RequestExecution {
     pub method: HttpMethod,
     pub host: String,
     pub path: String,
+    pub headers: BTreeMap<String, String>,
     pub query_params: RequestFieldMap,
     pub form_fields: RequestFieldMap,
+    pub content_type: Option<String>,
+    pub raw_body: Vec<u8>,
     pub route: ResolvedRoute,
     pub route_area: RouteArea,
     pub locale: String,

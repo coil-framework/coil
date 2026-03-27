@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
@@ -66,6 +66,45 @@ fn spawn_http_server(
     });
 
     (endpoint, handle)
+}
+
+fn read_full_http_request(stream: &mut TcpStream) {
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 1024];
+    let mut content_length = None;
+    let mut header_end = None;
+
+    loop {
+        let bytes_read = match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(bytes_read) => bytes_read,
+            Err(_) => break,
+        };
+        request.extend_from_slice(&buffer[..bytes_read]);
+
+        if header_end.is_none() {
+            if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                let end = end + 4;
+                header_end = Some(end);
+                let headers = String::from_utf8_lossy(&request[..end]);
+                content_length = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
+                });
+            }
+        }
+
+        if let Some(end) = header_end {
+            let body_len = request.len().saturating_sub(end);
+            if body_len >= content_length.unwrap_or(0) {
+                break;
+            }
+        }
+    }
 }
 
 #[test]
@@ -140,8 +179,7 @@ fn runtime_outbound_http_backend_serves_linked_customer_hook_requests_through_th
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        let mut request = [0u8; 2048];
-        let _ = stream.read(&mut request);
+        read_full_http_request(&mut stream);
         let response = concat!(
             "HTTP/1.1 200 OK\r\n",
             "Content-Type: application/json\r\n",
@@ -151,6 +189,8 @@ fn runtime_outbound_http_backend_serves_linked_customer_hook_requests_through_th
             "{\"status\":\"ok\"}"
         );
         let _ = stream.write_all(response.as_bytes());
+        let _ = stream.flush();
+        let _ = stream.shutdown(Shutdown::Both);
     });
     let mapped_endpoint = Url::parse(&endpoint).unwrap().to_string();
     let mut targets = BTreeMap::new();

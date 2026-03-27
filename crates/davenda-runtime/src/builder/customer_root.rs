@@ -1,4 +1,7 @@
 use super::*;
+use davenda_auth::{LoadedAuthModelPackage, load_auth_model_package_at};
+use std::env;
+use std::path::Path;
 use std::path::PathBuf;
 
 /// Explicit runtime bootstrap entrypoint for ADR 96 customer-root binaries/workspaces.
@@ -17,6 +20,20 @@ where
     P: AuthModelPackage + 'static,
 {
     CustomerRootRuntimeBuilder::new(config, auth_package)
+}
+
+pub fn customer_root_runtime_from_env(
+    auth_package_name: impl AsRef<str>,
+) -> Result<CustomerRootRuntimeBuilder<LoadedAuthModelPackage>, RuntimeBootstrapError> {
+    CustomerRootRuntimeBuilder::from_env(auth_package_name)
+}
+
+pub fn customer_root_runtime_from_paths(
+    app_root: impl AsRef<Path>,
+    config_path: impl AsRef<Path>,
+    auth_package_name: impl AsRef<str>,
+) -> Result<CustomerRootRuntimeBuilder<LoadedAuthModelPackage>, RuntimeBootstrapError> {
+    CustomerRootRuntimeBuilder::from_paths(app_root, config_path, auth_package_name)
 }
 
 impl<P> CustomerRootRuntimeBuilder<P>
@@ -145,4 +162,69 @@ where
     pub fn run_from_env(self) -> Result<(), RuntimeBootstrapError> {
         self.inner.run_from_env()
     }
+}
+
+impl CustomerRootRuntimeBuilder<LoadedAuthModelPackage> {
+    pub fn from_env(auth_package_name: impl AsRef<str>) -> Result<Self, RuntimeBootstrapError> {
+        let app_root = env::current_dir().map_err(RuntimeBootstrapError::CurrentDirectory)?;
+        let config_path = discover_default_config_path(&app_root).ok_or_else(|| {
+            RuntimeBootstrapError::ConfigNotFound {
+                app_root: app_root.clone(),
+            }
+        })?;
+        Self::from_paths(app_root, config_path, auth_package_name)
+    }
+
+    pub fn from_paths(
+        app_root: impl AsRef<Path>,
+        config_path: impl AsRef<Path>,
+        auth_package_name: impl AsRef<str>,
+    ) -> Result<Self, RuntimeBootstrapError> {
+        let app_root = app_root.as_ref().to_path_buf();
+        let config_path = resolve_path(&app_root, config_path.as_ref());
+        let config = PlatformConfig::from_file(&config_path).map_err(|error| {
+            RuntimeBootstrapError::ConfigLoad {
+                path: config_path.clone(),
+                reason: error.to_string(),
+            }
+        })?;
+        let auth_package_name = auth_package_name.as_ref().to_string();
+        let auth_package =
+            load_auth_model_package_at(&auth_package_name, &app_root).map_err(|error| {
+                RuntimeBootstrapError::AuthPackageLoad {
+                    package: auth_package_name,
+                    app_root: app_root.clone(),
+                    reason: error.to_string(),
+                }
+            })?;
+        Ok(Self::new(config, auth_package).with_customer_root(app_root))
+    }
+}
+
+fn resolve_path(app_root: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        app_root.join(path)
+    }
+}
+
+fn discover_default_config_path(app_root: &Path) -> Option<PathBuf> {
+    env::var("DAVENDA_CONFIG")
+        .ok()
+        .map(PathBuf::from)
+        .map(|path| resolve_path(app_root, &path))
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            [
+                PathBuf::from("platform.toml"),
+                PathBuf::from("platform.dev.toml"),
+                PathBuf::from("config/platform.toml"),
+                PathBuf::from("davenda.toml"),
+                PathBuf::from("config/davenda.toml"),
+            ]
+            .into_iter()
+            .map(|path| app_root.join(path))
+            .find(|path| path.is_file())
+        })
 }

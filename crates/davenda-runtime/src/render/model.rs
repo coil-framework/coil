@@ -1361,12 +1361,13 @@ fn customer_order_review(
     if plan.customer_hooks.checkout.is_empty() {
         return Ok(None);
     }
+    let replay_principal_id = customer_replay_principal_id(order, principal);
     let request = CustomerPluginRequestContext::new(
         CustomerPluginAppContext::new(
             plan.config.app.name.clone(),
             format!("{:?}", plan.config.app.environment).to_ascii_lowercase(),
         ),
-        customer_plugin_principal(principal),
+        customer_plugin_principal(replay_principal_id),
         CustomerPluginTraceContext::new(format!("order-detail:{}", order.order_id)),
     );
     let review_notes = Arc::new(Mutex::new(Vec::new()));
@@ -1377,11 +1378,11 @@ fn customer_order_review(
     };
     let auth = RuntimeCustomerAuthFacade {
         plan,
-        principal_id: principal.and_then(|ctx| ctx.principal_id.as_deref()),
+        principal_id: replay_principal_id,
     };
     let audit = RuntimeCustomerAuditFacade {
         plan,
-        principal_id: principal.and_then(|ctx| ctx.principal_id.as_deref()),
+        principal_id: replay_principal_id,
     };
     let order = customer_order_draft(order, &plan.storefront_catalog);
     let mut adjustment_messages = Vec::new();
@@ -1478,13 +1479,19 @@ fn customer_order_draft(
     }
 }
 
-fn customer_plugin_principal(
-    principal: Option<&PrincipalContext>,
-) -> CustomerPluginPrincipalContext {
-    if let Some(principal) = principal {
-        if let Some(principal_id) = principal.principal_id.as_ref() {
-            return CustomerPluginPrincipalContext::user(principal_id.clone());
-        }
+fn customer_replay_principal_id<'a>(
+    order: &'a StorefrontOrderSnapshot,
+    principal: Option<&'a PrincipalContext>,
+) -> Option<&'a str> {
+    order
+        .principal_id
+        .as_deref()
+        .or_else(|| principal.and_then(|principal| principal.principal_id.as_deref()))
+}
+
+fn customer_plugin_principal(principal_id: Option<&str>) -> CustomerPluginPrincipalContext {
+    if let Some(principal_id) = principal_id {
+        return CustomerPluginPrincipalContext::user(principal_id.to_string());
     }
     CustomerPluginPrincipalContext {
         kind: CustomerPluginPrincipalKind::Anonymous,
@@ -4274,10 +4281,28 @@ cdn_base_url = "https://cdn.example.com"
     struct MetadataReplayCheckoutHooks;
 
     #[derive(Debug)]
+    struct StoredPrincipalReplayCheckoutPlugin;
+
+    #[derive(Debug)]
+    struct StoredPrincipalReplayCheckoutHooks;
+
+    #[derive(Debug)]
+    struct ViewerFallbackPrincipalReplayCheckoutPlugin;
+
+    #[derive(Debug)]
+    struct ViewerFallbackPrincipalReplayCheckoutHooks;
+
+    #[derive(Debug)]
     struct AdjustedMetadataCheckoutPlugin;
 
     #[derive(Debug)]
     struct AdjustedMetadataCheckoutHooks;
+
+    #[derive(Debug)]
+    struct ReplayPrincipalCheckoutPlugin;
+
+    #[derive(Debug)]
+    struct ReplayPrincipalCheckoutHooks;
 
     impl CheckoutHooks for WrongOrderNoteCheckoutHooks {
         fn review_order(
@@ -4327,6 +4352,46 @@ cdn_base_url = "https://cdn.example.com"
                     BackendErrorKind::InvalidInput,
                     "checkout.metadata.missing",
                     "Render replay lost linked checkout metadata.",
+                ));
+            }
+            Ok(OrderReviewDecision::approved())
+        }
+    }
+
+    impl CheckoutHooks for StoredPrincipalReplayCheckoutHooks {
+        fn review_order(
+            &self,
+            ctx: &RequestContext,
+            _order: &OrderDraft,
+            _commerce: &dyn CommerceFacade,
+            _auth: &dyn AuthFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<OrderReviewDecision, BackendError> {
+            if ctx.principal.id.as_deref() != Some("member@example.com") {
+                return Err(BackendError::new(
+                    BackendErrorKind::InvalidInput,
+                    "checkout.principal.mismatch",
+                    "Render replay did not use the stored order principal.",
+                ));
+            }
+            Ok(OrderReviewDecision::approved())
+        }
+    }
+
+    impl CheckoutHooks for ViewerFallbackPrincipalReplayCheckoutHooks {
+        fn review_order(
+            &self,
+            ctx: &RequestContext,
+            _order: &OrderDraft,
+            _commerce: &dyn CommerceFacade,
+            _auth: &dyn AuthFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<OrderReviewDecision, BackendError> {
+            if ctx.principal.id.as_deref() != Some("operator@example.com") {
+                return Err(BackendError::new(
+                    BackendErrorKind::InvalidInput,
+                    "checkout.principal.fallback_mismatch",
+                    "Render replay did not fall back to the current viewer principal.",
                 ));
             }
             Ok(OrderReviewDecision::approved())
@@ -4383,6 +4448,70 @@ cdn_base_url = "https://cdn.example.com"
 
         fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
             registry.register_checkout_hooks(Arc::new(AdjustedMetadataCheckoutHooks))
+        }
+    }
+
+    impl CustomerBackendPlugin for StoredPrincipalReplayCheckoutPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "render-order-stored-principal-replay",
+                "Render Order Stored Principal Replay",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_checkout_hooks(Arc::new(StoredPrincipalReplayCheckoutHooks))
+        }
+    }
+
+    impl CustomerBackendPlugin for ViewerFallbackPrincipalReplayCheckoutPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "render-order-viewer-principal-fallback",
+                "Render Order Viewer Principal Fallback",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_checkout_hooks(Arc::new(ViewerFallbackPrincipalReplayCheckoutHooks))
+        }
+    }
+
+    impl CheckoutHooks for ReplayPrincipalCheckoutHooks {
+        fn review_order(
+            &self,
+            ctx: &RequestContext,
+            order: &OrderDraft,
+            _commerce: &dyn CommerceFacade,
+            _auth: &dyn AuthFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<OrderReviewDecision, BackendError> {
+            let replay_principal_id = ctx.principal.id.as_deref();
+            let stored_principal_id = order.metadata.get("order_principal_id").map(String::as_str);
+            if replay_principal_id != stored_principal_id {
+                return Err(BackendError::new(
+                    BackendErrorKind::InvalidInput,
+                    "checkout.replay.principal_mismatch",
+                    "Render replay should use the stored order principal.",
+                ));
+            }
+            Ok(OrderReviewDecision::approved())
+        }
+    }
+
+    impl CustomerBackendPlugin for ReplayPrincipalCheckoutPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "render-order-replay-principal",
+                "Render Order Replay Principal",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_checkout_hooks(Arc::new(ReplayPrincipalCheckoutHooks))
         }
     }
 
@@ -4839,6 +4968,42 @@ cdn_base_url = "https://cdn.example.com"
     }
 
     #[test]
+    fn customer_order_review_prefers_stored_order_principal_over_current_viewer() {
+        let plan = render_test_plan_with_customer_plugin(StoredPrincipalReplayCheckoutPlugin);
+        let operator = PrincipalContext {
+            principal_id: Some("operator@example.com".to_string()),
+            granted_capabilities: HashSet::new(),
+        };
+        let review = customer_order_review(
+            &plan,
+            &sample_storefront_order_snapshot(),
+            None,
+            Some(&operator),
+        )
+        .unwrap()
+        .expect("stored principal review should exist");
+
+        assert!(matches!(review.decision, OrderReviewDecision::Approved));
+    }
+
+    #[test]
+    fn customer_order_review_falls_back_to_viewer_principal_when_order_identity_is_absent() {
+        let plan =
+            render_test_plan_with_customer_plugin(ViewerFallbackPrincipalReplayCheckoutPlugin);
+        let operator = PrincipalContext {
+            principal_id: Some("operator@example.com".to_string()),
+            granted_capabilities: HashSet::new(),
+        };
+        let mut order = sample_storefront_order_snapshot();
+        order.principal_id = None;
+        let review = customer_order_review(&plan, &order, None, Some(&operator))
+            .unwrap()
+            .expect("viewer fallback review should exist");
+
+        assert!(matches!(review.decision, OrderReviewDecision::Approved));
+    }
+
+    #[test]
     fn customer_order_review_surfaces_adjustment_metadata() {
         let plan = render_test_plan_with_customer_plugin(AdjustedMetadataCheckoutPlugin);
         let review = customer_order_review(&plan, &sample_storefront_order_snapshot(), None, None)
@@ -4890,6 +5055,26 @@ cdn_base_url = "https://cdn.example.com"
         assert!(html.contains("priority"), "{html}");
         assert!(html.contains("assigned_queue"), "{html}");
         assert!(html.contains("service_level"), "{html}");
+    }
+
+    #[test]
+    fn customer_order_review_replays_using_the_stored_order_principal() {
+        let plan = render_test_plan_with_customer_plugin(ReplayPrincipalCheckoutPlugin);
+        let operator = PrincipalContext {
+            principal_id: Some("ops.admin@example.com".to_string()),
+            granted_capabilities: HashSet::new(),
+        };
+
+        let review = customer_order_review(
+            &plan,
+            &sample_storefront_order_snapshot(),
+            None,
+            Some(&operator),
+        )
+        .unwrap()
+        .expect("principal-aware review should exist");
+
+        assert!(matches!(review.decision, OrderReviewDecision::Approved));
     }
 }
 #[derive(Clone)]

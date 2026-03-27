@@ -190,3 +190,25 @@ where
         }
     }
 }
+
+impl RuntimeBuilder<davenda_auth::LoadedAuthModelPackage> {
+    pub fn for_customer_root_from_env(
+        auth_package_name: impl AsRef<str>,
+    ) -> Result<
+        CustomerRootRuntimeBuilder<davenda_auth::LoadedAuthModelPackage>,
+        RuntimeBootstrapError,
+    > {
+        CustomerRootRuntimeBuilder::from_env(auth_package_name)
+    }
+
+    pub fn for_customer_root_from_paths(
+        app_root: impl AsRef<std::path::Path>,
+        config_path: impl AsRef<std::path::Path>,
+        auth_package_name: impl AsRef<str>,
+    ) -> Result<
+        CustomerRootRuntimeBuilder<davenda_auth::LoadedAuthModelPackage>,
+        RuntimeBootstrapError,
+    > {
+        CustomerRootRuntimeBuilder::from_paths(app_root, config_path, auth_package_name)
+    }
+}

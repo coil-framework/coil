@@ -5,6 +5,9 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
+use davenda_assets::{
+    AssetId, ContentFingerprint, FingerprintAlgorithm, ManagedAssetRevision, RevisionId,
+};
 use davenda_config::StorageClass;
 use davenda_customer_sdk::{
     AssetWriteReceipt, AssetWriteRequest, AssetsFacade, AuditEntry, AuditFacade, AuthCheckRequest,
@@ -22,7 +25,7 @@ use davenda_jobs::JobInstant;
 use davenda_storage::{StoragePlanRequest, execution::StorageExecutionError};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -134,9 +137,9 @@ const CMS_ADMIN_CSRF_ACTIONS: &[(&str, &str)] = &[
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct VerifiedPaymentWebhook {
-    event: String,
-    payment_reference: String,
+struct VerifiedIngressWebhook {
+    webhook: VerifiedWebhook,
+    payment_reference: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,8 +220,11 @@ pub struct LiveHttpRequest {
     pub method: HttpMethod,
     pub host: String,
     pub path: String,
+    pub headers: Headers,
     pub query_params: RequestFieldMap,
     pub form_fields: RequestFieldMap,
+    pub content_type: Option<String>,
+    pub raw_body: Vec<u8>,
     pub scheme: String,
     pub forwarded_proto: Option<String>,
     pub request_id: Option<String>,
@@ -226,6 +232,13 @@ pub struct LiveHttpRequest {
     pub flash_cookie: Option<String>,
     pub csrf_token: Option<String>,
     pub maintenance_bypass_token: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ParsedRequestBody {
+    content_type: Option<String>,
+    raw_body: Vec<u8>,
+    form_fields: RequestFieldMap,
 }
 
 impl LiveHttpRequest {
@@ -253,10 +266,13 @@ impl LiveHttpRequest {
             method: map_http_method(request.method())?,
             host,
             path: request.uri().path().to_string(),
+            headers: normalized_request_headers(headers)?,
             query_params: parse_request_fields(
                 request.uri().query().unwrap_or_default().as_bytes(),
             ),
             form_fields: RequestFieldMap::new(),
+            content_type: None,
+            raw_body: Vec::new(),
             scheme,
             forwarded_proto,
             request_id,
@@ -269,10 +285,15 @@ impl LiveHttpRequest {
 
     pub fn into_request_input(self) -> Result<RequestInput, RuntimeServerError> {
         let mut request = RequestInput::new(self.method, self.host, self.path)?
+            .with_headers(self.headers)
             .with_query_params(self.query_params)
             .with_form_fields(self.form_fields)
+            .with_raw_body(self.raw_body)
             .with_scheme(self.scheme);
 
+        if let Some(content_type) = self.content_type {
+            request = request.with_content_type(content_type);
+        }
         if let Some(proto) = self.forwarded_proto {
             request = request.with_forwarded_proto(proto);
         }
@@ -320,7 +341,10 @@ pub(super) async fn execute_live_request(
         &state.plan.config.server,
         remote_addr,
     )?;
-    live_request.form_fields = parse_form_fields(live_request.method, raw_request).await?;
+    let parsed_body = parse_request_body(live_request.method, raw_request).await?;
+    live_request.content_type = parsed_body.content_type;
+    live_request.raw_body = parsed_body.raw_body;
+    live_request.form_fields = parsed_body.form_fields;
     let mut request = live_request.into_request_input()?;
     if request.method == HttpMethod::Get
         && state
@@ -577,18 +601,34 @@ fn header_value(
     ))
 }
 
-async fn parse_form_fields(
+fn normalized_request_headers(headers: &HeaderMap) -> Result<Headers, RuntimeServerError> {
+    let mut normalized = Headers::new();
+    for (name, value) in headers {
+        normalized.insert(
+            name.as_str().to_ascii_lowercase(),
+            value
+                .to_str()
+                .map_err(|_| RuntimeServerError::InvalidHeaderValue {
+                    header: Box::leak(name.as_str().to_string().into_boxed_str()),
+                })?
+                .to_string(),
+        );
+    }
+    Ok(normalized)
+}
+
+async fn parse_request_body(
     request_method: HttpMethod,
     request: Request<Body>,
-) -> Result<RequestFieldMap, RuntimeServerError> {
+) -> Result<ParsedRequestBody, RuntimeServerError> {
     if !matches!(
         request_method,
         HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch | HttpMethod::Delete
     ) {
-        return Ok(RequestFieldMap::new());
+        return Ok(ParsedRequestBody::default());
     }
 
-    let is_form = request
+    let content_type = request
         .headers()
         .get(CONTENT_TYPE)
         .map(|value| {
@@ -597,28 +637,28 @@ async fn parse_form_fields(
                 .map_err(|_| RuntimeServerError::InvalidHeaderValue {
                     header: "content-type",
                 })
-                .map(|content_type| {
-                    content_type
-                        .split(';')
-                        .next()
-                        .map(str::trim)
-                        .is_some_and(|mime| {
-                            mime.eq_ignore_ascii_case("application/x-www-form-urlencoded")
-                        })
-                })
+                .map(str::to_string)
         })
-        .transpose()?
-        .unwrap_or(false);
-
-    if !is_form {
-        return Ok(RequestFieldMap::new());
-    }
+        .transpose()?;
+    let is_form = content_type
+        .as_deref()
+        .and_then(|value| value.split(';').next().map(str::trim))
+        .is_some_and(|mime| mime.eq_ignore_ascii_case("application/x-www-form-urlencoded"));
 
     let (_, body) = request.into_parts();
     let bytes = to_bytes(body, usize::MAX)
         .await
         .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit: usize::MAX })?;
-    Ok(parse_request_fields(&bytes))
+    let form_fields = if is_form {
+        parse_request_fields(&bytes)
+    } else {
+        RequestFieldMap::new()
+    };
+    Ok(ParsedRequestBody {
+        content_type,
+        raw_body: bytes.to_vec(),
+        form_fields,
+    })
 }
 
 fn parse_request_fields(bytes: &[u8]) -> RequestFieldMap {
@@ -1211,17 +1251,6 @@ struct RuntimeCmsRepositoryFacade<'a> {
 
 impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
     fn read(&self, query: &RepositoryQuery) -> Result<RepositoryRecordSet, BackendError> {
-        if query.repository != "cms.pages" {
-            return Err(BackendError::new(
-                BackendErrorKind::Unsupported,
-                "repository.read.unsupported",
-                format!(
-                    "Runtime customer CMS hooks only expose `cms.pages` reads; `{}` is not available.",
-                    query.repository
-                ),
-            ));
-        }
-
         let workspace = self.workspace.lock().map_err(|_| {
             BackendError::new(
                 BackendErrorKind::Internal,
@@ -1229,32 +1258,81 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
                 "Runtime could not acquire the CMS workspace lock.",
             )
         })?;
-        let records = workspace
-            .pages
-            .iter()
-            .filter(|page| {
-                query.key.as_deref().map_or(true, |key| {
-                    page.id == key
-                        || page.draft.slug == key
-                        || page.live.as_ref().is_some_and(|live| live.slug == key)
+        let records = match query.repository.as_str() {
+            "cms.pages" => workspace
+                .pages
+                .iter()
+                .filter(|page| {
+                    query.key.as_deref().map_or(true, |key| {
+                        page.id == key
+                            || page.draft.slug == key
+                            || page.live.as_ref().is_some_and(|live| live.slug == key)
+                    })
                 })
-            })
-            .map(|page| {
-                let mut fields = BTreeMap::new();
-                fields.insert("title".to_string(), page.draft.title.clone());
-                fields.insert("slug".to_string(), page.draft.slug.clone());
-                fields.insert("summary".to_string(), page.draft.summary.clone());
-                fields.insert("body_html".to_string(), page.draft.body_html.clone());
-                fields.insert("status".to_string(), page.status_label().to_string());
-                if let Some(live_path) = page.live_path() {
-                    fields.insert("live_path".to_string(), live_path);
-                }
-                RepositoryRecord {
-                    id: page.id.clone(),
-                    fields,
-                }
-            })
-            .collect();
+                .map(|page| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("title".to_string(), page.draft.title.clone());
+                    fields.insert("slug".to_string(), page.draft.slug.clone());
+                    fields.insert("summary".to_string(), page.draft.summary.clone());
+                    fields.insert("body_html".to_string(), page.draft.body_html.clone());
+                    fields.insert("status".to_string(), page.status_label().to_string());
+                    if let Some(live_path) = page.live_path() {
+                        fields.insert("live_path".to_string(), live_path);
+                    }
+                    RepositoryRecord {
+                        id: page.id.clone(),
+                        fields,
+                    }
+                })
+                .collect(),
+            "cms.navigation" => workspace
+                .navigation
+                .iter()
+                .enumerate()
+                .filter(|(index, item)| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| key == index.to_string() || key == item.href)
+                })
+                .map(|(index, item)| RepositoryRecord {
+                    id: index.to_string(),
+                    fields: BTreeMap::from([
+                        ("label".to_string(), item.label.clone()),
+                        ("href".to_string(), item.href.clone()),
+                    ]),
+                })
+                .collect(),
+            "cms.redirects" => workspace
+                .redirects
+                .iter()
+                .enumerate()
+                .filter(|(index, redirect)| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| key == index.to_string() || key == redirect.from)
+                })
+                .map(|(index, redirect)| RepositoryRecord {
+                    id: index.to_string(),
+                    fields: BTreeMap::from([
+                        ("from".to_string(), redirect.from.clone()),
+                        ("to".to_string(), redirect.to.clone()),
+                        ("permanent".to_string(), redirect.permanent.to_string()),
+                    ]),
+                })
+                .collect(),
+            _ => {
+                return Err(BackendError::new(
+                    BackendErrorKind::Unsupported,
+                    "repository.read.unsupported",
+                    format!(
+                        "Runtime customer CMS hooks only expose `cms.pages`, `cms.navigation`, and `cms.redirects` reads; `{}` is not available.",
+                        query.repository
+                    ),
+                ));
+            }
+        };
 
         Ok(RepositoryRecordSet {
             repository: query.repository.clone(),
@@ -1263,17 +1341,6 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
     }
 
     fn write(&self, change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
-        if change.repository != "cms.pages" {
-            return Err(BackendError::new(
-                BackendErrorKind::Unsupported,
-                "repository.write.unsupported",
-                format!(
-                    "Runtime customer CMS hooks only expose `cms.pages` writes; `{}` is not available.",
-                    change.repository
-                ),
-            ));
-        }
-
         let mut workspace = self.workspace.lock().map_err(|_| {
             BackendError::new(
                 BackendErrorKind::Internal,
@@ -1281,58 +1348,214 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
                 "Runtime could not acquire the CMS workspace lock.",
             )
         })?;
-        let existing = workspace
-            .selected_page(Some(change.record_id.as_str()))
-            .cloned()
-            .ok_or_else(|| {
-                BackendError::new(
-                    BackendErrorKind::InvalidInput,
-                    "repository.write.unknown_record",
-                    format!(
-                        "Customer CMS hook tried to write unknown page `{}`.",
-                        change.record_id
-                    ),
-                )
-            })?;
-        let input = CmsAdminPageInput {
-            page_id: Some(change.record_id.clone()),
-            title: change
-                .fields
-                .get("title")
-                .cloned()
-                .unwrap_or(existing.draft.title),
-            slug: change
-                .fields
-                .get("slug")
-                .cloned()
-                .unwrap_or(existing.draft.slug),
-            summary: change
-                .fields
-                .get("summary")
-                .cloned()
-                .unwrap_or(existing.draft.summary),
-            body_html: change
-                .fields
-                .get("body_html")
-                .cloned()
-                .unwrap_or(existing.draft.body_html),
-        };
-        let page_id = workspace
-            .save_page_draft(input, self.recorded_at_unix_seconds)
-            .map_err(|reason| {
-                BackendError::new(
-                    BackendErrorKind::InvalidInput,
-                    "repository.write.invalid_page",
-                    "Customer CMS hook submitted an invalid page draft update.",
-                )
-                .with_detail(reason)
-            })?;
+        match change.repository.as_str() {
+            "cms.pages" => {
+                let existing = workspace
+                    .selected_page(Some(change.record_id.as_str()))
+                    .cloned()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer CMS hook tried to write unknown page `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                let input = CmsAdminPageInput {
+                    page_id: Some(change.record_id.clone()),
+                    title: change
+                        .fields
+                        .get("title")
+                        .cloned()
+                        .unwrap_or(existing.draft.title),
+                    slug: change
+                        .fields
+                        .get("slug")
+                        .cloned()
+                        .unwrap_or(existing.draft.slug),
+                    summary: change
+                        .fields
+                        .get("summary")
+                        .cloned()
+                        .unwrap_or(existing.draft.summary),
+                    body_html: change
+                        .fields
+                        .get("body_html")
+                        .cloned()
+                        .unwrap_or(existing.draft.body_html),
+                };
+                let page_id = workspace
+                    .save_page_draft(input, self.recorded_at_unix_seconds)
+                    .map_err(|reason| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.invalid_page",
+                            "Customer CMS hook submitted an invalid page draft update.",
+                        )
+                        .with_detail(reason)
+                    })?;
 
-        Ok(RepositoryWriteReceipt {
-            repository: change.repository,
-            record_id: page_id,
-            version: Some(self.recorded_at_unix_seconds.to_string()),
-        })
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id: page_id,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            "cms.navigation" => {
+                let mut items = workspace.navigation.clone();
+                let record_id = if change.record_id == "append" || change.record_id == "new" {
+                    let item = CmsAdminNavigationItem {
+                        label: change.fields.get("label").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_navigation",
+                                "Customer CMS hook must provide a label when appending navigation.",
+                            )
+                        })?,
+                        href: change.fields.get("href").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_navigation",
+                                "Customer CMS hook must provide an href when appending navigation.",
+                            )
+                        })?,
+                    };
+                    items.push(item);
+                    (items.len() - 1).to_string()
+                } else {
+                    let index = change.record_id.parse::<usize>().map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.invalid_navigation_record",
+                            format!(
+                                "Customer CMS hook must target a numeric navigation record id or `append`; `{}` is not valid.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    let existing = items.get_mut(index).ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer CMS hook tried to write unknown navigation item `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    if let Some(label) = change.fields.get("label") {
+                        existing.label = label.clone();
+                    }
+                    if let Some(href) = change.fields.get("href") {
+                        existing.href = href.clone();
+                    }
+                    change.record_id.clone()
+                };
+                workspace.save_navigation(items).map_err(|reason| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "repository.write.invalid_navigation",
+                        "Customer CMS hook submitted an invalid navigation update.",
+                    )
+                    .with_detail(reason)
+                })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            "cms.redirects" => {
+                let mut redirects = workspace.redirects.clone();
+                let record_id = if change.record_id == "append" || change.record_id == "new" {
+                    let redirect = CmsAdminRedirect {
+                        from: change.fields.get("from").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_redirect",
+                                "Customer CMS hook must provide a `from` path when appending a redirect.",
+                            )
+                        })?,
+                        to: change.fields.get("to").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_redirect",
+                                "Customer CMS hook must provide a `to` path when appending a redirect.",
+                            )
+                        })?,
+                        permanent: change
+                            .fields
+                            .get("permanent")
+                            .map(|value| {
+                                matches!(
+                                    value.trim().to_ascii_lowercase().as_str(),
+                                    "1" | "true" | "yes" | "on"
+                                )
+                            })
+                            .unwrap_or(false),
+                    };
+                    redirects.push(redirect);
+                    (redirects.len() - 1).to_string()
+                } else {
+                    let index = change.record_id.parse::<usize>().map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.invalid_redirect_record",
+                            format!(
+                                "Customer CMS hook must target a numeric redirect record id or `append`; `{}` is not valid.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    let existing = redirects.get_mut(index).ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer CMS hook tried to write unknown redirect `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    if let Some(from) = change.fields.get("from") {
+                        existing.from = from.clone();
+                    }
+                    if let Some(to) = change.fields.get("to") {
+                        existing.to = to.clone();
+                    }
+                    if let Some(permanent) = change.fields.get("permanent") {
+                        existing.permanent = matches!(
+                            permanent.trim().to_ascii_lowercase().as_str(),
+                            "1" | "true" | "yes" | "on"
+                        );
+                    }
+                    change.record_id.clone()
+                };
+                workspace.save_redirects(redirects).map_err(|reason| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "repository.write.invalid_redirect",
+                        "Customer CMS hook submitted an invalid redirect update.",
+                    )
+                    .with_detail(reason)
+                })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            _ => Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "repository.write.unsupported",
+                format!(
+                    "Runtime customer CMS hooks only expose `cms.pages`, `cms.navigation`, and `cms.redirects` writes; `{}` is not available.",
+                    change.repository
+                ),
+            )),
+        }
     }
 }
 
@@ -1454,30 +1677,63 @@ impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade<'_> {
 #[derive(Debug, Clone)]
 struct RuntimeCustomerAssetsFacade {
     storage: StorageHost,
+    managed_assets: Arc<Mutex<BTreeMap<String, davenda_assets::ManagedAsset>>>,
 }
 
 impl AssetsFacade for RuntimeCustomerAssetsFacade {
     fn publish(&self, request: AssetWriteRequest) -> Result<AssetWriteReceipt, BackendError> {
         let storage_class = parse_customer_storage_class(request.storage_class.as_str())?;
-        let plan = self
-            .storage
-            .plan_single_node_escape_hatch_write(
-                StoragePlanRequest::new(request.logical_path.clone())
-                    .with_storage_class(storage_class),
-            )
-            .map_err(customer_hook_storage_backend_error)?;
+        let content_type = request
+            .content_type
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let revision = plan_customer_hook_asset_revision(
+            &self.storage,
+            &request.logical_path,
+            storage_class,
+            &content_type,
+            &request.bytes,
+        )?;
         let receipt = self
             .storage
-            .execute_write_with_content_type(&plan, request.bytes, request.content_type.as_deref())
+            .execute_write_with_content_type(
+                revision.storage_plan(),
+                &request.bytes,
+                Some(&content_type),
+            )
             .map_err(customer_hook_storage_backend_error)?;
+        let asset = davenda_assets::ManagedAsset::new(
+            customer_hook_asset_id(&request.logical_path)?,
+            request.logical_path.clone(),
+            revision,
+        )
+        .map_err(customer_hook_asset_model_error)?;
+        self.managed_assets
+            .lock()
+            .map_err(|_| {
+                customer_hook_asset_internal_error("failed to record the managed asset revision")
+            })?
+            .insert(request.logical_path.clone(), asset);
         Ok(AssetWriteReceipt {
-            logical_path: plan.logical_path,
+            logical_path: request.logical_path,
             storage_path: receipt.path.display().to_string(),
             bytes_written: receipt.bytes_written,
         })
     }
 
     fn inspect(&self, logical_path: &str) -> Result<Option<ManagedAsset>, BackendError> {
+        if let Some(asset) = self
+            .managed_assets
+            .lock()
+            .map_err(|_| {
+                customer_hook_asset_internal_error("failed to inspect the managed asset revision")
+            })?
+            .get(logical_path)
+            .cloned()
+        {
+            return sdk_managed_asset_from_runtime_asset(&self.storage, &asset).map(Some);
+        }
+
         let mut deferred_error = None;
         for storage_class in [
             StorageClass::PublicUpload,
@@ -1485,27 +1741,16 @@ impl AssetsFacade for RuntimeCustomerAssetsFacade {
             StorageClass::PrivateShared,
             StorageClass::LocalOnlySensitive,
         ] {
-            let Ok(plan) = self.storage.plan_single_node_escape_hatch_write(
-                StoragePlanRequest::new(logical_path).with_storage_class(storage_class),
-            ) else {
+            let Ok(plan) = customer_hook_storage_plan(&self.storage, logical_path, storage_class)
+            else {
                 continue;
             };
             match self.storage.execute_read(&plan) {
                 Ok(_) => {
-                    let public_url = match self
-                        .storage
-                        .delivery_location(&plan)
-                        .map_err(customer_hook_storage_backend_error)?
-                    {
-                        davenda_storage::StorageDeliveryLocation::PublicCdn { public_url, .. } => {
-                            Some(public_url)
-                        }
-                        _ => None,
-                    };
                     return Ok(Some(ManagedAsset {
                         logical_path: plan.logical_path,
                         storage_class: customer_storage_class_name(plan.storage_class).to_string(),
-                        public_url,
+                        public_url: None,
                     }));
                 }
                 Err(crate::storage::RuntimeStorageError::Execution(
@@ -1681,20 +1926,20 @@ fn customer_cms_publish_error_summary(error: &BackendError) -> Cow<'static, str>
 }
 
 fn customer_hook_request_headers(execution: &RequestExecution) -> Headers {
-    BTreeMap::from([
-        (
-            "x-davenda-customer-app".to_string(),
-            execution.customer_app.clone(),
-        ),
-        (
-            "x-davenda-request-id".to_string(),
-            execution.trace.request_id.clone(),
-        ),
-        (
-            "x-davenda-route".to_string(),
-            execution.route.route_name.clone(),
-        ),
-    ])
+    let mut headers = execution.headers.clone();
+    headers.insert(
+        "x-davenda-customer-app".to_string(),
+        execution.customer_app.clone(),
+    );
+    headers.insert(
+        "x-davenda-request-id".to_string(),
+        execution.trace.request_id.clone(),
+    );
+    headers.insert(
+        "x-davenda-route".to_string(),
+        execution.route.route_name.clone(),
+    );
+    headers
 }
 
 fn cms_page_draft_from_workspace(page: &CmsAdminPage, locale: &str) -> CmsPageDraft {
@@ -1807,6 +2052,7 @@ fn execute_verified_webhook_customer_hooks(
                 .as_ref()
                 .and_then(|backend| backend.object_store_client_config()),
         ),
+        managed_assets: Arc::new(Mutex::new(BTreeMap::new())),
     };
     let audit = RuntimeRequestAuditFacade {
         plan: &state.plan,
@@ -2351,10 +2597,35 @@ fn validated_storefront_payment_input_from_execution(
     })
 }
 
-fn validated_payment_webhook_from_execution(
+fn verified_webhook_headers(execution: &RequestExecution, source: &str, event: &str) -> Headers {
+    let mut headers = customer_hook_request_headers(execution);
+    headers.insert(
+        "x-davenda-verified-webhook-source".to_string(),
+        source.to_string(),
+    );
+    headers.insert(
+        "x-davenda-verified-webhook-event".to_string(),
+        event.to_string(),
+    );
+    if let Some(content_type) = execution.content_type.clone() {
+        headers.insert("content-type".to_string(), content_type);
+    }
+    headers
+}
+
+fn verified_webhook_payload(execution: &RequestExecution) -> Result<Vec<u8>, RuntimeServerError> {
+    if !execution.raw_body.is_empty() {
+        return Ok(execution.raw_body.clone());
+    }
+    serde_json::to_vec(&execution.form_fields).map_err(|error| RuntimeServerError::Configuration {
+        reason: format!("failed to encode verified webhook payload for customer hooks: {error}"),
+    })
+}
+
+fn validated_verified_payment_webhook_from_execution(
     state: &RuntimeServerState,
     execution: &RequestExecution,
-) -> Result<VerifiedPaymentWebhook, RuntimeServerError> {
+) -> Result<VerifiedIngressWebhook, RuntimeServerError> {
     let provider = execution_form_field(execution, "provider")
         .unwrap_or("generic")
         .trim()
@@ -2418,10 +2689,29 @@ fn validated_payment_webhook_from_execution(
             StorefrontStateError::InvalidPaymentWebhookSignature,
         ));
     }
-    Ok(VerifiedPaymentWebhook {
-        event,
-        payment_reference,
+    let payload = verified_webhook_payload(execution)?;
+    Ok(VerifiedIngressWebhook {
+        webhook: VerifiedWebhook {
+            source: provider.clone(),
+            event: event.clone(),
+            headers: verified_webhook_headers(execution, &provider, &event),
+            content_type: execution.content_type.clone(),
+            payload,
+        },
+        payment_reference: Some(payment_reference),
     })
+}
+
+fn verified_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<Option<VerifiedIngressWebhook>, RuntimeServerError> {
+    match execution.route.route_name.as_str() {
+        "commerce.payment-provider-webhook" => {
+            validated_verified_payment_webhook_from_execution(state, execution).map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 fn storefront_payment_input_from_execution(
@@ -2707,30 +2997,22 @@ async fn apply_native_storefront_mutations(
     now: BrowserInstant,
     response_cookies: &mut Vec<String>,
 ) -> Result<Option<String>, RuntimeServerError> {
-    if execution.route.route_name.as_str() == "commerce.payment-provider-webhook" {
-        let verified = validated_payment_webhook_from_execution(state, execution)?;
-        let provider = execution_form_field(execution, "provider")
-            .unwrap_or("generic")
-            .trim()
-            .to_ascii_lowercase();
-        let payload = serde_json::to_vec(&execution.form_fields).map_err(|error| {
+    if let Some(verified) = verified_webhook_from_execution(state, execution)? {
+        execute_verified_webhook_customer_hooks(state, execution, &verified.webhook, now)?;
+        if execution.route.route_name.as_str() != "commerce.payment-provider-webhook" {
+            return Ok(None);
+        }
+        let payment_reference = verified.payment_reference.as_deref().ok_or_else(|| {
             RuntimeServerError::Configuration {
                 reason: format!(
-                    "failed to encode verified webhook payload for customer hooks: {error}"
+                    "verified webhook route `{}` did not provide a required payment reference",
+                    execution.route.route_name
                 ),
             }
         })?;
-        let webhook = VerifiedWebhook {
-            source: provider,
-            event: verified.event.clone(),
-            headers: customer_hook_request_headers(execution),
-            content_type: Some("application/x-www-form-urlencoded".to_string()),
-            payload,
-        };
-        execute_verified_webhook_customer_hooks(state, execution, &webhook, now)?;
         let receipt = state.storefront.apply_payment_webhook(
-            verified.payment_reference.as_str(),
-            verified.event.as_str(),
+            payment_reference,
+            verified.webhook.event.as_str(),
             now.as_unix_seconds(),
         )?;
         if receipt.needs_paid_event_dispatch {
@@ -3567,6 +3849,23 @@ fn customer_hook_auth_backend_error(error: RuntimeServerError) -> BackendError {
     .with_detail(error.to_string())
 }
 
+fn customer_hook_asset_internal_error(message: &'static str) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Unavailable,
+        "storage.asset.state_unavailable",
+        message,
+    )
+}
+
+fn customer_hook_asset_model_error(error: davenda_assets::AssetModelError) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::InvalidInput,
+        "storage.asset.invalid",
+        "Customer webhook requested an invalid managed asset write.",
+    )
+    .with_detail(error.to_string())
+}
+
 fn customer_hook_storage_backend_error(error: crate::storage::RuntimeStorageError) -> BackendError {
     BackendError::new(
         BackendErrorKind::Unavailable,
@@ -3574,6 +3873,103 @@ fn customer_hook_storage_backend_error(error: crate::storage::RuntimeStorageErro
         "Runtime could not complete the linked customer asset operation.",
     )
     .with_detail(error.to_string())
+}
+
+fn customer_hook_asset_id(logical_path: &str) -> Result<AssetId, BackendError> {
+    AssetId::new(format!("customer-hook:{logical_path}")).map_err(customer_hook_asset_model_error)
+}
+
+fn customer_hook_asset_revision_id(
+    logical_path: &str,
+    bytes: &[u8],
+) -> Result<RevisionId, BackendError> {
+    let mut hasher = Sha256::new();
+    hasher.update(logical_path.as_bytes());
+    hasher.update([0]);
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    RevisionId::new(format!(
+        "customer-hook:{}",
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ))
+    .map_err(customer_hook_asset_model_error)
+}
+
+fn customer_hook_asset_fingerprint(bytes: &[u8]) -> Result<ContentFingerprint, BackendError> {
+    let digest = Sha256::digest(bytes);
+    ContentFingerprint::new(
+        FingerprintAlgorithm::Sha256,
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    )
+    .map_err(customer_hook_asset_model_error)
+}
+
+fn customer_hook_storage_plan(
+    storage: &StorageHost,
+    logical_path: &str,
+    storage_class: StorageClass,
+) -> Result<davenda_storage::StoragePlan, crate::storage::RuntimeStorageError> {
+    let request = StoragePlanRequest::new(logical_path).with_storage_class(storage_class);
+    match storage_class {
+        StorageClass::LocalOnlySensitive => storage.plan_single_node_escape_hatch_write(request),
+        StorageClass::PublicAsset | StorageClass::PublicUpload | StorageClass::PrivateShared => {
+            storage.plan_write(request)
+        }
+    }
+}
+
+fn plan_customer_hook_asset_revision(
+    storage: &StorageHost,
+    logical_path: &str,
+    storage_class: StorageClass,
+    content_type: &str,
+    bytes: &[u8],
+) -> Result<ManagedAssetRevision, BackendError> {
+    let revision_id = customer_hook_asset_revision_id(logical_path, bytes)?;
+    let fingerprint = customer_hook_asset_fingerprint(bytes)?;
+    let plan = customer_hook_storage_plan(storage, logical_path, storage_class)
+        .map_err(customer_hook_storage_backend_error)?;
+    ManagedAssetRevision::new(
+        revision_id,
+        plan,
+        content_type,
+        bytes.len() as u64,
+        fingerprint,
+    )
+    .map_err(customer_hook_asset_model_error)
+}
+
+fn sdk_managed_asset_from_runtime_asset(
+    storage: &StorageHost,
+    asset: &davenda_assets::ManagedAsset,
+) -> Result<ManagedAsset, BackendError> {
+    let public_url = if asset.publication().is_published() {
+        match storage
+            .plan_public_asset_delivery(asset)
+            .map_err(customer_hook_storage_backend_error)?
+            .target()
+        {
+            davenda_assets::AssetDeliveryTarget::Cdn { public_url, .. } => Some(public_url.clone()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    Ok(ManagedAsset {
+        logical_path: asset.current_revision().storage_plan().logical_path.clone(),
+        storage_class: customer_storage_class_name(
+            asset.current_revision().storage_plan().storage_class,
+        )
+        .to_string(),
+        public_url,
+    })
 }
 
 fn parse_customer_storage_class(value: &str) -> Result<StorageClass, BackendError> {

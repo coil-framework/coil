@@ -89,8 +89,11 @@ impl RuntimePlan {
             method: request.method,
             host: request.host,
             path: request.path,
+            headers: request.headers,
             query_params: request.query_params,
             form_fields: request.form_fields,
+            content_type: request.content_type,
+            raw_body: request.raw_body,
             route: matched.resolved.clone(),
             route_area: matched.route.area,
             locale: matched

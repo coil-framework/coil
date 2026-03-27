@@ -5,6 +5,7 @@ use davenda_customer_sdk::{
 };
 use davenda_storage::StoragePolicyOverride;
 use davenda_template::{DocumentRenderRequest, RenderModel, TemplateName, TemplateSelector};
+use std::path::Path;
 use std::{fs, sync::Arc};
 
 #[derive(Debug)]
@@ -47,6 +48,20 @@ impl CustomerBackendPlugin for DuplicateCustomerPlugin {
 
     fn register(&self, _registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
         Ok(())
+    }
+}
+
+fn copy_directory(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if source.is_dir() {
+            copy_directory(&source, &target);
+        } else {
+            fs::copy(&source, &target).unwrap();
+        }
     }
 }
 
@@ -237,6 +252,84 @@ fn customer_root_runtime_builder_supports_register_aliases() {
 
     assert!(plan.modules.iter().any(|module| module.name == "cms"));
     assert_eq!(plan.linked_customer_plugins.len(), 1);
+}
+
+#[test]
+fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
+    let customer_root = unique_temp_template_root("customer-root-runtime-path-bootstrap");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>bootstrapped-from-paths</main></body>
+</html>"#,
+    );
+    fs::write(
+        customer_root.join("platform.toml"),
+        VALID_CONFIG.replace(
+            "package = \"platform-default-auth\"",
+            "package = \"harbor-auth\"",
+        ),
+    )
+    .unwrap();
+    let harbor_auth =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
+    copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
+
+    let plan = customer_root_runtime_from_paths(&customer_root, "platform.toml", "harbor-auth")
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let html = plan
+        .template
+        .runtime
+        .render_document(
+            &plan.template.namespace_chain(None),
+            DocumentRenderRequest::new(
+                TemplateSelector::new(TemplateName::new("pages/home").unwrap()),
+                RenderModel::new(),
+            ),
+        )
+        .unwrap()
+        .html;
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert_eq!(plan.auth_package_name, "harbor-auth");
+    assert!(html.contains("bootstrapped-from-paths"), "{html}");
+}
+
+#[test]
+fn customer_root_runtime_builder_reports_missing_auth_packages_from_paths() {
+    let customer_root = unique_temp_template_root("customer-root-runtime-missing-auth");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>missing-auth</main></body>
+</html>"#,
+    );
+    fs::write(customer_root.join("platform.toml"), VALID_CONFIG).unwrap();
+
+    let error = match customer_root_runtime_from_paths(
+        &customer_root,
+        "platform.toml",
+        "missing-auth-package",
+    ) {
+        Ok(_) => panic!("expected missing auth package to fail"),
+        Err(error) => error,
+    };
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert!(matches!(
+        error,
+        RuntimeBootstrapError::AuthPackageLoad { package, .. }
+            if package == "missing-auth-package"
+    ));
 }
 
 #[test]

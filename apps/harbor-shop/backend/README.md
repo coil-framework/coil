@@ -41,16 +41,29 @@ and exposes a `plugin()` entrypoint that matches the direction in
 High-level intended shape:
 
 ```rust
-davenda_runtime::Builder::new()
-    .register_customer_plugin(harbor_loyalty_backend::plugin())
+davenda_all::builder()
+    .with_customer_plugin(harbor_loyalty_backend::plugin())
     .run_from_env()
 ```
 
 Harbor Shop now exposes that linked plugin shape in two concrete places:
 
 - the customer workspace registers the plugin into its runtime composition
+- the customer workspace can run the linked backend sample requests directly with `cargo run -p harbor-shop -- linked-backend demo`
 - the Harbor Shop admin dashboard renders the linked plugin metadata from the runtime plan itself
 - `cargo run -p harbor-shop -- describe` prints the linked plugin ids from the customer workspace
+
+Before you touch the optional sidecar adapter, use the customer-root demo path:
+
+```bash
+cd apps/harbor-shop
+./scripts/prepare-local-dev.sh
+cargo run -p harbor-shop -- linked-backend describe
+cargo run -p harbor-shop -- linked-backend demo
+```
+
+That exercises the same linked Rust crate Harbor Shop compiles into its customer binary. It makes
+the chapter 96 path concrete without forcing a separate process.
 
 ## Optional Sidecar Adapter
 

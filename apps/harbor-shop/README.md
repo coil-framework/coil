@@ -80,14 +80,29 @@ Harbor Shop now has its own nested Cargo workspace in this folder.
 That is the chapter 96 shape in repo form:
 
 - Davenda is modeled here as normal upstream `0.1.0` dependencies
-- this in-repo reference workspace patches those upstream coordinates back to `../../crates/*` through `patch.crates-io`
 - Harbor Shop owns a binary crate that links the official modules it needs
 - Harbor Shop owns a linked backend crate that registers customer-specific behavior through public Davenda APIs
 - the optional sidecar adapter still exists, but it is no longer the primary Rust integration story
 
+The committed workspace is intentionally free of `patch.crates-io` overlays and other repo-local
+dependency rewrites. Harbor Shop is checked in as a normal customer project that can resolve
+Davenda from an upstream registry or pinned git source.
+
+If you are iterating on Harbor Shop from inside the Davenda repository before those upstream crates
+are published, keep that override local and uncommitted. The supported maintainer path is:
+
+```bash
+./scripts/prepare-local-dev.sh
+```
+
+That writes `apps/harbor-shop/.cargo/config.toml` with repo-local path patches. The file is
+ignored by git and exists only so this checked-in example can build against the current Davenda
+workspace without polluting the committed customer manifest.
+
 From `apps/harbor-shop`:
 
 ```bash
+./scripts/prepare-local-dev.sh
 cargo run -p harbor-shop -- describe
 ```
 
@@ -102,6 +117,19 @@ Once Harbor Shop is running, the same linked-backend shape is visible inside the
 
 - `/admin` now renders the linked customer plugin metadata from the runtime plan itself
 - `cargo run -p harbor-shop -- describe` prints the linked plugin ids in the customer workspace
+- `cargo run -p harbor-shop -- linked-backend demo` executes the checked-in linked backend rules directly from the customer workspace without the optional sidecar
+
+From `apps/harbor-shop`, the shortest concrete linked-backend walkthrough is:
+
+```bash
+./scripts/prepare-local-dev.sh
+cargo run -p harbor-shop -- linked-backend describe
+cargo run -p harbor-shop -- linked-backend demo
+```
+
+That path stays entirely inside the customer-root workspace. It exercises the exact linked Rust
+crate Harbor Shop compiles into the app and prints real loyalty-preview, checkout-review, and
+CRM-contact routing outputs from the checked-in sample requests.
 
 ## Prerequisites
 
@@ -115,10 +143,9 @@ You do not need to install Postgres, Redis, or MinIO manually for the default lo
 
 ## Quick Start
 
-From the repo root:
+From this folder:
 
 ```bash
-cd apps/harbor-shop
 cp .env.example .env
 docker compose up --build
 ```
@@ -157,6 +184,11 @@ The `app` container then does four things:
 2. applies migrations
 3. publishes theme assets
 4. starts the Harbor Shop customer binary
+
+The committed Cargo workspace stays upstream-clean, but the checked-in `docker compose up` path is
+an in-repo maintainer convenience. It uses the Davenda repository as the Docker build context and
+generates an uncommitted local Cargo override inside the image so Harbor Shop can build before the
+`davenda-*` crates are published upstream.
 
 If startup stalls or restarts, check:
 
@@ -202,6 +234,15 @@ If you started the optional backend-example profile, also visit:
 - `http://localhost:8081/health`
 - `POST http://localhost:8081/api/loyalty/preview`
 - `POST http://localhost:8081/api/orders/review`
+
+If you want to inspect the same linked backend behavior without running the optional sidecar, use:
+
+```bash
+./scripts/prepare-local-dev.sh
+cargo run -p harbor-shop -- linked-backend loyalty-preview
+cargo run -p harbor-shop -- linked-backend order-review
+cargo run -p harbor-shop -- linked-backend crm-contact
+```
 
 ## Local Stripe Testing
 
@@ -256,6 +297,7 @@ If you want to use the nested Harbor Shop workspace directly instead of Docker C
 
 ```bash
 cd apps/harbor-shop
+./scripts/prepare-local-dev.sh
 cargo run -p harbor-shop -- describe
 DATABASE_URL=postgres://davenda:devpass@127.0.0.1:5438/davenda_harbor_shop \
 REDIS_URL=redis://127.0.0.1:6379 \
@@ -276,6 +318,7 @@ reference app, not the intended long-term customer command surface.
 The linked customer backend currently surfaces in two honest places:
 
 - `cargo run -p harbor-shop -- describe`
+- `cargo run -p harbor-shop -- linked-backend demo`
 - the `/admin` dashboard section that renders linked plugin metadata from the runtime plan
 
 ## How Published Assets Work

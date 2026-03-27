@@ -8,7 +8,10 @@ use davenda_customer_sdk::{
 };
 use std::sync::Arc;
 
-pub use harbor_loyalty_backend::{OrderReviewRequest, OrderReviewResponse};
+pub use harbor_loyalty_backend::{
+    CrmContactRoute, CrmContactUpdate, LoyaltyPreviewRequest, LoyaltyPreviewResponse,
+    OrderReviewRequest, OrderReviewResponse,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HarborShopBackend {
@@ -18,6 +21,20 @@ pub struct HarborShopBackend {
 pub fn plugin() -> HarborShopBackend {
     HarborShopBackend {
         inner: harbor_loyalty_backend::plugin(),
+    }
+}
+
+impl HarborShopBackend {
+    pub fn preview_loyalty(&self, request: &LoyaltyPreviewRequest) -> LoyaltyPreviewResponse {
+        self.inner.preview_loyalty(request)
+    }
+
+    pub fn review_checkout_order(&self, request: &OrderReviewRequest) -> OrderReviewResponse {
+        self.inner.review_checkout_order(request)
+    }
+
+    pub fn route_crm_contact_update(&self, update: &CrmContactUpdate) -> CrmContactRoute {
+        self.inner.route_crm_contact_update(update)
     }
 }
 

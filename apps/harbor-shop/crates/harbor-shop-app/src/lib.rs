@@ -35,6 +35,15 @@ pub struct HarborShopSummary {
 
 impl HarborShopWorkspace {
     pub fn default() -> Result<Self> {
+        if let Ok(app_root) = std::env::var("HARBOUR_SHOP_APP_ROOT") {
+            return Self::at(app_root);
+        }
+        if let Ok(app_root) = std::env::var("HARBOR_SHOP_APP_ROOT") {
+            return Self::at(app_root);
+        }
+        if let Some(app_root) = discover_workspace_root(std::env::current_dir().ok().as_deref()) {
+            return Self::at(app_root);
+        }
         Self::at(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
     }
 
@@ -150,6 +159,20 @@ impl HarborShopWorkspace {
             config,
             linked_plugin_ids: vec![harbor_shop_backend::plugin().descriptor().id],
         })
+    }
+}
+
+fn discover_workspace_root(start: Option<&Path>) -> Option<PathBuf> {
+    let mut current = start?.to_path_buf();
+    loop {
+        if current.join("app.toml").is_file()
+            && (current.join("platform.dev.toml").is_file() || current.join("platform.toml").is_file())
+        {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
     }
 }
 

@@ -6,14 +6,16 @@ ENV CARGO_HTTP_TIMEOUT=600
 ENV CARGO_NET_RETRY=10
 ENV CARGO_TARGET_DIR=/tmp/cargo-target
 
-COPY apps/harbor-shop/backend/harbor-loyalty-backend ./harbor-loyalty-backend
+COPY . .
 
-WORKDIR /workspace/harbor-loyalty-backend
+RUN sh apps/harbor-shop/scripts/prepare-local-dev.sh
+
+WORKDIR /workspace/apps/harbor-shop
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/tmp/cargo-target \
-    cargo build --release \
+    cargo build -p harbor-loyalty-backend --release \
     && cp /tmp/cargo-target/release/harbor-loyalty-backend /workspace/harbor-loyalty-backend-bin
 
 FROM debian:bookworm-slim

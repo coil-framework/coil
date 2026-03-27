@@ -20,16 +20,35 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         dashboard.contains("Workspace-owned Rust hook path"),
         "{dashboard}"
     );
+    assert!(
+        dashboard.contains("cargo run -p harbor-shop -- linked-backend demo"),
+        "{dashboard}"
+    );
 
     assert!(
         app_readme.contains("cargo run -p harbor-shop -- describe"),
         "{app_readme}"
     );
-    assert!(app_readme.contains("patch.crates-io"), "{app_readme}");
+    assert!(
+        app_readme.contains("cargo run -p harbor-shop -- linked-backend demo"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("./scripts/prepare-local-dev.sh"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("free of `patch.crates-io` overlays"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("writes `apps/harbor-shop/.cargo/config.toml`"),
+        "{app_readme}"
+    );
     assert!(
         app_readme.contains("Harbor Shop Linked Backend"),
         "{app_readme}"
     );
-    assert!(cargo_toml.contains("[patch.crates-io]"), "{cargo_toml}");
+    assert!(!cargo_toml.contains("[patch.crates-io]"), "{cargo_toml}");
     assert!(cargo_toml.contains("davenda-all = \"0.1.0\""), "{cargo_toml}");
 }

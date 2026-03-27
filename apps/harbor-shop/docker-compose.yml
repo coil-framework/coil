@@ -28,7 +28,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - harbor-shop-appdata:/app/apps/harbor-shop/.davenda
+      - harbor-shop-appdata:/app/.davenda
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
       interval: 10s

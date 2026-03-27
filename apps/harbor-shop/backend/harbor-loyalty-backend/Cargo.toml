@@ -7,7 +7,7 @@ rust-version = "1.85"
 
 [dependencies]
 axum = { version = "0.8", features = ["json"] }
-davenda-customer-sdk = { path = "../../../../crates/davenda-customer-sdk" }
+davenda-customer-sdk.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }

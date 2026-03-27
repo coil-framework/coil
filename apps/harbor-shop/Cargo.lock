@@ -1550,6 +1550,8 @@ dependencies = [
  "davenda-all",
  "harbor-shop-app",
  "harbor-shop-backend",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

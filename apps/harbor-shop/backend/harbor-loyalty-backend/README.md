@@ -65,22 +65,34 @@ Read `src/lib.rs` first. It is the primary example.
 High-level intended registration shape:
 
 ```rust
-davenda_runtime::Builder::new()
-    .register_customer_plugin(harbor_loyalty_backend::plugin())
+davenda_all::builder()
+    .with_customer_plugin(harbor_loyalty_backend::plugin())
     .run_from_env()
 ```
 
 The exact stable SDK/bootstrap layer is still platform work, but this example crate is already
 structured around that ownership model. In the current Harbor Shop workspace, the linked plugin is
-visible through the Harbor customer binary’s `describe` command and through the admin dashboard’s
-runtime-backed plugin metadata panel once the app is running.
+visible through the Harbor customer binary’s `describe` command, the
+`cargo run -p harbor-shop -- linked-backend demo` customer-workspace walkthrough, and the admin
+dashboard’s runtime-backed plugin metadata panel once the app is running.
+
+From `apps/harbor-shop`, the linked-crate-first path is:
+
+```bash
+./scripts/prepare-local-dev.sh
+cargo run -p harbor-shop -- linked-backend describe
+cargo run -p harbor-shop -- linked-backend demo
+```
+
+That path does not need the optional sidecar. It loads the checked-in sample requests and executes
+the linked backend directly through the Harbor customer workspace.
 
 ## Optional Sidecar Adapter
 
-From the repo root:
+From `apps/harbor-shop`:
 
 ```bash
-cargo run --manifest-path apps/harbor-shop/backend/harbor-loyalty-backend/Cargo.toml
+cargo run -p harbor-loyalty-backend
 ```
 
 By default the optional sidecar binds to `0.0.0.0:8081`.

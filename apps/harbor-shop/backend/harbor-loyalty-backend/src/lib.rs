@@ -8,8 +8,8 @@
 //!
 //! ```rust,ignore
 //! fn main() -> Result<(), anyhow::Error> {
-//!     davenda_runtime::Builder::new()
-//!         .register_customer_plugin(harbor_loyalty_backend::plugin())
+//!     davenda_all::builder()
+//!         .with_customer_plugin(harbor_loyalty_backend::plugin())
 //!         .run_from_env()
 //! }
 //! ```

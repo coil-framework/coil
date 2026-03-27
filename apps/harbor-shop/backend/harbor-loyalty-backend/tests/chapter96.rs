@@ -50,9 +50,14 @@ fn customer_root_workspace_shape_matches_chapter_96_model() {
     );
     assert!(sidecar_cargo.contains("publish = false"), "{sidecar_cargo}");
     assert!(
+        sidecar_cargo.contains("davenda-customer-sdk.workspace = true"),
+        "{sidecar_cargo}"
+    );
+    assert!(
         workspace_cargo.contains("\"backend/harbor-loyalty-backend\""),
         "{workspace_cargo}"
     );
+    assert!(!workspace_cargo.contains("[patch.crates-io]"), "{workspace_cargo}");
     assert!(
         app_manifest.contains("name = \"harbor-shop\""),
         "{app_manifest}"
@@ -91,17 +96,41 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         app_readme.contains("linked customer plugin ids"),
         "{app_readme}"
     );
+    assert!(
+        app_readme.contains("cargo run -p harbor-shop -- linked-backend demo"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("./scripts/prepare-local-dev.sh"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("The committed workspace is intentionally free of `patch.crates-io` overlays"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("uses the Davenda repository as the Docker build context"),
+        "{app_readme}"
+    );
 
     assert!(
         folder_readme.contains("The primary path here is the chapter 96 model"),
         "{folder_readme}"
     );
     assert!(
-        folder_readme.contains("register_customer_plugin(harbor_loyalty_backend::plugin())"),
+        folder_readme.contains("with_customer_plugin(harbor_loyalty_backend::plugin())"),
         "{folder_readme}"
     );
     assert!(
         folder_readme.contains("admin dashboard renders the linked plugin metadata"),
+        "{folder_readme}"
+    );
+    assert!(
+        folder_readme.contains("cargo run -p harbor-shop -- linked-backend demo"),
+        "{folder_readme}"
+    );
+    assert!(
+        folder_readme.contains("./scripts/prepare-local-dev.sh"),
         "{folder_readme}"
     );
     assert!(
@@ -115,6 +144,14 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
     );
     assert!(
         crate_readme.contains("`plugin()` is the intended registration point"),
+        "{crate_readme}"
+    );
+    assert!(
+        crate_readme.contains("cargo run -p harbor-shop -- linked-backend demo"),
+        "{crate_readme}"
+    );
+    assert!(
+        crate_readme.contains("./scripts/prepare-local-dev.sh"),
         "{crate_readme}"
     );
     assert!(
@@ -135,7 +172,7 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{backend_lib}"
     );
     assert!(
-        backend_lib.contains("register_customer_plugin(harbor_loyalty_backend::plugin())"),
+        backend_lib.contains("with_customer_plugin(harbor_loyalty_backend::plugin())"),
         "{backend_lib}"
     );
     assert!(
@@ -157,9 +194,15 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{bin_main}"
     );
     assert!(bin_main.contains("linked plugins:"), "{bin_main}");
+    assert!(bin_main.contains("LinkedBackendCommand"), "{bin_main}");
+    assert!(bin_main.contains("linked_backend_demo_output"), "{bin_main}");
 
     assert!(
         compose.contains("profiles: [\"backend-example\"]"),
+        "{compose}"
+    );
+    assert!(
+        compose.contains("context: ../.."),
         "{compose}"
     );
     assert!(

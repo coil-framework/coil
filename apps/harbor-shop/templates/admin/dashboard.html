@@ -132,6 +132,11 @@
           This is the primary first-party Rust customization path for Harbor Shop. The optional
           sidecar and WASM paths still exist, but they are secondary and bounded.
         </p>
+        <p>
+          From the Harbor Shop workspace itself, run
+          <code>cargo run -p harbor-shop -- linked-backend demo</code> to execute the checked-in
+          linked backend rules without the optional sidecar.
+        </p>
         <div class="admin-card-grid" dv:if="${hasLinkedCustomerPlugins}">
           <article class="admin-card" dv:each="plugin : ${linkedCustomerPlugins}">
             <h3 dv:text="${plugin.displayName}">Harbor Shop Linked Backend</h3>

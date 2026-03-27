@@ -17,17 +17,17 @@ RUN git config --global --add url."https://github.com/".insteadOf "ssh://git@git
     && git config --global --add url."https://github.com/".insteadOf "git@github.com:" \
     && git config --global --add url."https://github.com/worka-ai/".insteadOf "ssh://git@github.com/worka-ai/"
 
-COPY .cargo ./.cargo
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
-COPY apps ./apps
-COPY third_party ./third_party
+COPY . .
+
+RUN sh apps/harbor-shop/scripts/prepare-local-dev.sh
+
+WORKDIR /workspace/apps/harbor-shop
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/tmp/cargo-target \
-    cargo build --locked -p davenda-cli --release \
-    && cargo build --manifest-path apps/harbor-shop/Cargo.toml -p harbor-shop --release \
+    cargo build --locked --manifest-path /workspace/Cargo.toml -p davenda-cli --release \
+    && cargo build --locked -p harbor-shop --release \
     && cp /tmp/cargo-target/release/platform /workspace/platform \
     && cp /tmp/cargo-target/release/harbor-shop /workspace/harbor-shop
 

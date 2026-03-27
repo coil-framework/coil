@@ -46,6 +46,13 @@ impl LocalMetadataAuditStore {
                 );
                 CREATE INDEX IF NOT EXISTS metadata_audit_entries_recent
                     ON metadata_audit_entries (recorded_at_unix_seconds DESC, id DESC);
+                CREATE TABLE IF NOT EXISTS customer_managed_assets (
+                    logical_path TEXT PRIMARY KEY,
+                    record_json TEXT NOT NULL,
+                    updated_at_unix_seconds INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS customer_managed_assets_recent
+                    ON customer_managed_assets (updated_at_unix_seconds DESC, logical_path DESC);
                 "#,
             )
             .unwrap_or_else(|error| {
@@ -166,6 +173,62 @@ impl LocalMetadataAuditStore {
         records.reverse();
         Ok(records)
     }
+
+    pub(super) fn upsert_customer_managed_asset(
+        &self,
+        logical_path: &str,
+        record_json: &str,
+        updated_at_unix_seconds: i64,
+    ) -> Result<(), String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| "metadata audit store is poisoned".to_string())?;
+        let tx = connection.transaction().map_err(|error| {
+            format!("failed to start local customer managed asset transaction: {error}")
+        })?;
+        tx.execute(
+            r#"
+            INSERT INTO customer_managed_assets (
+                logical_path,
+                record_json,
+                updated_at_unix_seconds
+            ) VALUES (?1, ?2, ?3)
+            ON CONFLICT(logical_path) DO UPDATE SET
+                record_json = excluded.record_json,
+                updated_at_unix_seconds = excluded.updated_at_unix_seconds
+            "#,
+            params![logical_path, record_json, updated_at_unix_seconds],
+        )
+        .map_err(|error| format!("failed to write local customer managed asset entry: {error}"))?;
+        tx.commit().map_err(|error| {
+            format!("failed to commit local customer managed asset entry: {error}")
+        })?;
+        Ok(())
+    }
+
+    pub(super) fn customer_managed_asset(
+        &self,
+        logical_path: &str,
+    ) -> Result<Option<String>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "metadata audit store is poisoned".to_string())?;
+        connection
+            .query_row(
+                "SELECT record_json FROM customer_managed_assets WHERE logical_path = ?1",
+                params![logical_path],
+                |row| row.get::<_, String>(0),
+            )
+            .map(Some)
+            .or_else(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(format!(
+                    "failed to query local customer managed asset `{logical_path}`: {other}"
+                )),
+            })
+    }
 }
 
 fn database_path(root: &Path, namespace: &str) -> PathBuf {
@@ -275,5 +338,32 @@ mod tests {
             "FULL synchronous mode should be enabled for local audit durability"
         );
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+    }
+
+    #[test]
+    fn local_metadata_backend_persists_customer_managed_assets() {
+        let root = shared_state_root("managed-assets");
+        let backend = LocalMetadataAuditStore::open(root, "audit-suite".to_string());
+
+        backend
+            .upsert_customer_managed_asset(
+                "uploads/customer-hooks/demo/payment.captured.json",
+                r#"{"logical_path":"uploads/customer-hooks/demo/payment.captured.json"}"#,
+                42,
+            )
+            .unwrap();
+
+        assert_eq!(
+            backend
+                .customer_managed_asset("uploads/customer-hooks/demo/payment.captured.json")
+                .unwrap(),
+            Some(r#"{"logical_path":"uploads/customer-hooks/demo/payment.captured.json"}"#.to_string())
+        );
+        assert_eq!(
+            backend
+                .customer_managed_asset("uploads/customer-hooks/demo/missing.json")
+                .unwrap(),
+            None
+        );
     }
 }

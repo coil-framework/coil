@@ -22,9 +22,9 @@ use davenda_customer_sdk::{
     WebhookHandlingResult,
 };
 use davenda_jobs::JobInstant;
-use davenda_storage::{StoragePlanRequest, execution::StorageExecutionError};
+use davenda_storage::StoragePlanRequest;
 use hmac::{Hmac, Mac};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -140,6 +140,18 @@ type HmacSha256 = Hmac<Sha256>;
 struct VerifiedIngressWebhook {
     webhook: VerifiedWebhook,
     payment_reference: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PersistedCustomerManagedAssetRecord {
+    logical_path: String,
+    storage_class: String,
+    revision_id: String,
+    content_type: String,
+    byte_length: u64,
+    fingerprint_algorithm: String,
+    fingerprint_digest: String,
+    published_current: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1787,7 +1799,8 @@ impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade<'_> {
 #[derive(Debug, Clone)]
 struct RuntimeCustomerAssetsFacade {
     storage: StorageHost,
-    managed_assets: Arc<Mutex<BTreeMap<String, davenda_assets::ManagedAsset>>>,
+    wasm_host: WasmHost,
+    recorded_at_unix_seconds: i64,
 }
 
 impl AssetsFacade for RuntimeCustomerAssetsFacade {
@@ -1812,18 +1825,32 @@ impl AssetsFacade for RuntimeCustomerAssetsFacade {
                 Some(&content_type),
             )
             .map_err(customer_hook_storage_backend_error)?;
-        let asset = davenda_assets::ManagedAsset::new(
+        let mut asset = davenda_assets::ManagedAsset::new(
             customer_hook_asset_id(&request.logical_path)?,
             request.logical_path.clone(),
             revision,
         )
         .map_err(customer_hook_asset_model_error)?;
-        self.managed_assets
-            .lock()
-            .map_err(|_| {
-                customer_hook_asset_internal_error("failed to record the managed asset revision")
-            })?
-            .insert(request.logical_path.clone(), asset);
+        asset.publish_current();
+        let persisted = persisted_customer_managed_asset_record(&asset)?;
+        let record_json = serde_json::to_string(&persisted).map_err(|error| {
+            customer_hook_asset_internal_error_with_detail(
+                "failed to serialize the managed asset record",
+                error.to_string(),
+            )
+        })?;
+        self.wasm_host
+            .upsert_customer_managed_asset(
+                request.logical_path.as_str(),
+                &record_json,
+                self.recorded_at_unix_seconds,
+            )
+            .map_err(|reason| {
+                customer_hook_asset_internal_error_with_detail(
+                    "failed to persist the managed asset record",
+                    reason,
+                )
+            })?;
         Ok(AssetWriteReceipt {
             logical_path: request.logical_path,
             storage_path: receipt.path.display().to_string(),
@@ -1832,49 +1859,27 @@ impl AssetsFacade for RuntimeCustomerAssetsFacade {
     }
 
     fn inspect(&self, logical_path: &str) -> Result<Option<ManagedAsset>, BackendError> {
-        if let Some(asset) = self
-            .managed_assets
-            .lock()
-            .map_err(|_| {
-                customer_hook_asset_internal_error("failed to inspect the managed asset revision")
+        let Some(record_json) = self
+            .wasm_host
+            .customer_managed_asset(logical_path)
+            .map_err(|reason| {
+                customer_hook_asset_internal_error_with_detail(
+                    "failed to inspect the persisted managed asset record",
+                    reason,
+                )
             })?
-            .get(logical_path)
-            .cloned()
-        {
-            return sdk_managed_asset_from_runtime_asset(&self.storage, &asset).map(Some);
-        }
-
-        let mut deferred_error = None;
-        for storage_class in [
-            StorageClass::PublicUpload,
-            StorageClass::PublicAsset,
-            StorageClass::PrivateShared,
-            StorageClass::LocalOnlySensitive,
-        ] {
-            let Ok(plan) = customer_hook_storage_plan(&self.storage, logical_path, storage_class)
-            else {
-                continue;
-            };
-            match self.storage.execute_read(&plan) {
-                Ok(_) => {
-                    return Ok(Some(ManagedAsset {
-                        logical_path: plan.logical_path,
-                        storage_class: customer_storage_class_name(plan.storage_class).to_string(),
-                        public_url: None,
-                    }));
-                }
-                Err(crate::storage::RuntimeStorageError::Execution(
-                    StorageExecutionError::ReadFailed { .. },
-                )) => continue,
-                Err(error) => {
-                    deferred_error = Some(error);
-                }
-            }
-        }
-        match deferred_error {
-            Some(error) => Err(customer_hook_storage_backend_error(error)),
-            None => Ok(None),
-        }
+        else {
+            return Ok(None);
+        };
+        let record = serde_json::from_str::<PersistedCustomerManagedAssetRecord>(&record_json)
+            .map_err(|error| {
+                customer_hook_asset_internal_error_with_detail(
+                    "failed to decode the persisted managed asset record",
+                    error.to_string(),
+                )
+            })?;
+        let asset = runtime_asset_from_persisted_customer_managed_asset(&self.storage, &record)?;
+        sdk_managed_asset_from_runtime_asset(&self.storage, &asset).map(Some)
     }
 }
 
@@ -2169,7 +2174,8 @@ fn execute_verified_webhook_customer_hooks(
                 .as_ref()
                 .and_then(|backend| backend.object_store_client_config()),
         ),
-        managed_assets: Arc::new(Mutex::new(BTreeMap::new())),
+        wasm_host: state.wasm_host.clone(),
+        recorded_at_unix_seconds: now.as_unix_seconds() as i64,
     };
     let audit = RuntimeRequestAuditFacade {
         plan: &state.plan,
@@ -2752,6 +2758,20 @@ fn validated_verified_payment_webhook_from_execution(
     state: &RuntimeServerState,
     execution: &RequestExecution,
 ) -> Result<VerifiedIngressWebhook, RuntimeServerError> {
+    if configured_commerce_payment_provider(&state.plan.config)
+        .as_ref()
+        .is_some_and(|provider| provider.code == "stripe")
+        && execution.headers.contains_key("stripe-signature")
+    {
+        return validated_stripe_payment_webhook_from_execution(state, execution);
+    }
+    validated_generic_verified_payment_webhook_from_execution(state, execution)
+}
+
+fn validated_generic_verified_payment_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<VerifiedIngressWebhook, RuntimeServerError> {
     let provider = execution_form_field(execution, "provider")
         .unwrap_or("generic")
         .trim()
@@ -2826,6 +2846,139 @@ fn validated_verified_payment_webhook_from_execution(
         },
         payment_reference: Some(payment_reference),
     })
+}
+
+fn validated_stripe_payment_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<VerifiedIngressWebhook, RuntimeServerError> {
+    let secret = state
+        .payment_webhook_secret
+        .as_deref()
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::MissingPaymentWebhookSecret,
+        ))?;
+    let signature = execution
+        .headers
+        .get("stripe-signature")
+        .map(String::as_str)
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ))?;
+    let payload = verified_webhook_payload(execution)?;
+    verify_stripe_webhook_signature(secret, signature, &payload)?;
+    let event = serde_json::from_slice::<serde_json::Value>(&payload).map_err(|error| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to decode Stripe webhook payload: {error}"),
+        }
+    })?;
+    let event_name = event
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentWebhookEvent {
+                event: "<missing>".to_string(),
+            })
+        })?
+        .to_string();
+    let payment_reference = stripe_payment_reference_from_event(&event)?;
+    Ok(VerifiedIngressWebhook {
+        webhook: VerifiedWebhook {
+            source: "stripe".to_string(),
+            event: event_name.clone(),
+            headers: verified_webhook_headers(execution, "stripe", &event_name),
+            content_type: execution.content_type.clone(),
+            payload,
+        },
+        payment_reference: Some(payment_reference),
+    })
+}
+
+fn verify_stripe_webhook_signature(
+    secret: &str,
+    signature_header: &str,
+    payload: &[u8],
+) -> Result<(), RuntimeServerError> {
+    let mut timestamp = None;
+    let mut signatures = Vec::new();
+    for segment in signature_header.split(',') {
+        let Some((name, value)) = segment.trim().split_once('=') else {
+            continue;
+        };
+        match name.trim() {
+            "t" => timestamp = Some(value.trim().to_string()),
+            "v1" => signatures.push(value.trim().to_string()),
+            _ => {}
+        }
+    }
+    let timestamp = timestamp.ok_or(RuntimeServerError::Storefront(
+        StorefrontStateError::InvalidPaymentWebhookSignature,
+    ))?;
+    if signatures.is_empty() {
+        return Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ));
+    }
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| {
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret)
+    })?;
+    mac.update(timestamp.as_bytes());
+    mac.update(b".");
+    mac.update(payload);
+    let expected = mac.finalize().into_bytes();
+    let matches = signatures.iter().any(|candidate| {
+        decode_hex_signature(candidate)
+            .map(|provided| provided == expected.as_slice())
+            .unwrap_or(false)
+    });
+    if matches {
+        Ok(())
+    } else {
+        Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ))
+    }
+}
+
+fn stripe_payment_reference_from_event(
+    event: &serde_json::Value,
+) -> Result<String, RuntimeServerError> {
+    let object = event
+        .get("data")
+        .and_then(|value| value.get("object"))
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentReference {
+                payment_reference: "<missing>".to_string(),
+            })
+        })?;
+    let metadata = object
+        .get("metadata")
+        .and_then(serde_json::Value::as_object);
+    let payment_reference = metadata
+        .and_then(|metadata| {
+            [
+                "payment_reference",
+                "paymentReference",
+                "checkout_intent",
+                "checkoutIntent",
+            ]
+            .iter()
+            .find_map(|key| metadata.get(*key).and_then(serde_json::Value::as_str))
+        })
+        .or_else(|| object.get("client_reference_id").and_then(serde_json::Value::as_str))
+        .or_else(|| object.get("payment_intent").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentReference {
+                payment_reference: "<missing>".to_string(),
+            })
+        })?;
+    Ok(payment_reference)
 }
 
 fn verified_webhook_from_execution(
@@ -3117,6 +3270,19 @@ fn apply_native_cms_admin_mutations(
     Ok(None)
 }
 
+fn normalized_payment_webhook_event<'a>(source: &str, event: &'a str) -> Cow<'a, str> {
+    match (source, event) {
+        ("stripe", "checkout.session.completed") => Cow::Borrowed("payment.captured"),
+        ("stripe", "payment_intent.succeeded") => Cow::Borrowed("payment.captured"),
+        ("stripe", "payment_intent.amount_capturable_updated") => {
+            Cow::Borrowed("payment.authorized")
+        }
+        ("stripe", "checkout.session.expired") => Cow::Borrowed("payment.failed"),
+        ("stripe", "payment_intent.payment_failed") => Cow::Borrowed("payment.failed"),
+        _ => Cow::Borrowed(event),
+    }
+}
+
 async fn apply_native_storefront_mutations(
     state: &RuntimeServerState,
     execution: &RequestExecution,
@@ -3138,7 +3304,11 @@ async fn apply_native_storefront_mutations(
         })?;
         let receipt = state.storefront.apply_payment_webhook(
             payment_reference,
-            verified.webhook.event.as_str(),
+            normalized_payment_webhook_event(
+                verified.webhook.source.as_str(),
+                verified.webhook.event.as_str(),
+            )
+            .as_ref(),
             now.as_unix_seconds(),
         )?;
         if receipt.needs_paid_event_dispatch {
@@ -3983,6 +4153,13 @@ fn customer_hook_asset_internal_error(message: &'static str) -> BackendError {
     )
 }
 
+fn customer_hook_asset_internal_error_with_detail(
+    message: &'static str,
+    detail: impl Into<String>,
+) -> BackendError {
+    customer_hook_asset_internal_error(message).with_detail(detail.into())
+}
+
 fn customer_hook_asset_model_error(error: davenda_assets::AssetModelError) -> BackendError {
     BackendError::new(
         BackendErrorKind::InvalidInput,
@@ -4096,6 +4273,70 @@ fn sdk_managed_asset_from_runtime_asset(
         .to_string(),
         public_url,
     })
+}
+
+fn persisted_customer_managed_asset_record(
+    asset: &davenda_assets::ManagedAsset,
+) -> Result<PersistedCustomerManagedAssetRecord, BackendError> {
+    Ok(PersistedCustomerManagedAssetRecord {
+        logical_path: asset.current_revision().storage_plan().logical_path.clone(),
+        storage_class: customer_storage_class_name(
+            asset.current_revision().storage_plan().storage_class,
+        )
+        .to_string(),
+        revision_id: asset.current_revision().id().as_str().to_string(),
+        content_type: asset.current_revision().content_type().to_string(),
+        byte_length: asset.current_revision().byte_length(),
+        fingerprint_algorithm: asset.current_revision().fingerprint().algorithm().to_string(),
+        fingerprint_digest: asset.current_revision().fingerprint().digest().to_string(),
+        published_current: asset.publication().is_published(),
+    })
+}
+
+fn runtime_asset_from_persisted_customer_managed_asset(
+    storage: &StorageHost,
+    record: &PersistedCustomerManagedAssetRecord,
+) -> Result<davenda_assets::ManagedAsset, BackendError> {
+    let storage_class = parse_customer_storage_class(record.storage_class.as_str())?;
+    let revision = ManagedAssetRevision::new(
+        RevisionId::new(record.revision_id.clone()).map_err(customer_hook_asset_model_error)?,
+        customer_hook_storage_plan(storage, &record.logical_path, storage_class)
+            .map_err(customer_hook_storage_backend_error)?,
+        record.content_type.clone(),
+        record.byte_length,
+        ContentFingerprint::new(
+            parse_customer_hook_fingerprint_algorithm(record.fingerprint_algorithm.as_str())?,
+            record.fingerprint_digest.clone(),
+        )
+        .map_err(customer_hook_asset_model_error)?,
+    )
+    .map_err(customer_hook_asset_model_error)?;
+    let mut asset = davenda_assets::ManagedAsset::new(
+        customer_hook_asset_id(&record.logical_path)?,
+        record.logical_path.clone(),
+        revision,
+    )
+    .map_err(customer_hook_asset_model_error)?;
+    if record.published_current {
+        asset.publish_current();
+    }
+    Ok(asset)
+}
+
+fn parse_customer_hook_fingerprint_algorithm(
+    value: &str,
+) -> Result<FingerprintAlgorithm, BackendError> {
+    match value {
+        "sha256" => Ok(FingerprintAlgorithm::Sha256),
+        "sha384" => Ok(FingerprintAlgorithm::Sha384),
+        "sha512" => Ok(FingerprintAlgorithm::Sha512),
+        other => Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "storage.asset.invalid_fingerprint_algorithm",
+            "Persisted customer managed asset record declares an unsupported fingerprint algorithm.",
+        )
+        .with_detail(format!("unsupported fingerprint algorithm `{other}`"))),
+    }
 }
 
 fn parse_customer_storage_class(value: &str) -> Result<StorageClass, BackendError> {

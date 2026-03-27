@@ -453,6 +453,24 @@ struct RecordingVerifiedWebhookAssetPlugin {
     writes: Arc<Mutex<Vec<RecordedVerifiedWebhookAssetWrite>>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedInspectedManagedAsset {
+    logical_path: String,
+    storage_class: String,
+    public_url: Option<String>,
+}
+
+#[derive(Debug)]
+struct InspectingVerifiedWebhookAssetPlugin {
+    inspected: Arc<Mutex<Vec<RecordedInspectedManagedAsset>>>,
+}
+
+#[derive(Debug)]
+struct WritingThenInspectingVerifiedWebhookAssetPlugin {
+    writes: Arc<Mutex<Vec<RecordedVerifiedWebhookAssetWrite>>>,
+    inspected: Arc<Mutex<Vec<RecordedInspectedManagedAsset>>>,
+}
+
 impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
     fn handle_verified_webhook(
         &self,
@@ -529,6 +547,105 @@ impl VerifiedWebhookAssetHooks for RecordingVerifiedWebhookAssetPlugin {
             });
         Ok(WebhookHandlingResult::accepted(Some(format!(
             "asset:{}",
+            asset.logical_path
+        ))))
+    }
+}
+
+impl VerifiedWebhookAssetHooks for InspectingVerifiedWebhookAssetPlugin {
+    fn handle_verified_webhook(
+        &self,
+        ctx: &RequestContext,
+        _webhook: &VerifiedWebhook,
+        _http: &dyn OutboundHttpFacade,
+        _jobs: &dyn JobsFacade,
+        _repositories: &dyn RepositoryFacade,
+        _audit: &dyn AuditFacade,
+        assets: &dyn AssetsFacade,
+    ) -> Result<WebhookHandlingResult, BackendError> {
+        let logical_path = format!(
+            "uploads/customer-hooks/{}/payment.captured.json",
+            ctx.customer_app.app_id
+        );
+        let asset = assets.inspect(&logical_path)?.ok_or_else(|| {
+            BackendError::new(
+                davenda_customer_sdk::BackendErrorKind::Internal,
+                "asset.inspect.missing",
+                "linked customer asset hook could not inspect the persisted asset",
+            )
+        })?;
+        self.inspected.lock().unwrap().push(RecordedInspectedManagedAsset {
+            logical_path: asset.logical_path.clone(),
+            storage_class: asset.storage_class.clone(),
+            public_url: asset.public_url.clone(),
+        });
+        Ok(WebhookHandlingResult::accepted(Some(format!(
+            "inspected:{}",
+            asset.logical_path
+        ))))
+    }
+}
+
+impl VerifiedWebhookAssetHooks for WritingThenInspectingVerifiedWebhookAssetPlugin {
+    fn handle_verified_webhook(
+        &self,
+        ctx: &RequestContext,
+        webhook: &VerifiedWebhook,
+        _http: &dyn OutboundHttpFacade,
+        _jobs: &dyn JobsFacade,
+        _repositories: &dyn RepositoryFacade,
+        _audit: &dyn AuditFacade,
+        assets: &dyn AssetsFacade,
+    ) -> Result<WebhookHandlingResult, BackendError> {
+        let written_path = format!(
+            "uploads/customer-hooks/{}/payment.captured.json",
+            ctx.customer_app.app_id
+        );
+        if webhook.event == "payment.captured" {
+            let receipt = assets.publish(AssetWriteRequest {
+                logical_path: written_path.clone(),
+                storage_class: "public_upload".to_string(),
+                content_type: Some("application/json".to_string()),
+                bytes: webhook.payload.clone(),
+                metadata: BTreeMap::new(),
+            })?;
+            let asset = assets.inspect(&written_path)?.ok_or_else(|| {
+                BackendError::new(
+                    davenda_customer_sdk::BackendErrorKind::Internal,
+                    "asset.inspect.missing",
+                    "linked customer asset hook could not inspect the asset it just wrote",
+                )
+            })?;
+            self.writes
+                .lock()
+                .unwrap()
+                .push(RecordedVerifiedWebhookAssetWrite {
+                    logical_path: asset.logical_path.clone(),
+                    storage_class: asset.storage_class.clone(),
+                    storage_path: receipt.storage_path,
+                    bytes_written: receipt.bytes_written,
+                    public_url: asset.public_url.clone(),
+                });
+            return Ok(WebhookHandlingResult::accepted(Some(format!(
+                "asset:{}",
+                asset.logical_path
+            ))));
+        }
+
+        let asset = assets.inspect(&written_path)?.ok_or_else(|| {
+            BackendError::new(
+                davenda_customer_sdk::BackendErrorKind::Internal,
+                "asset.inspect.missing",
+                "linked customer asset hook could not inspect the persisted asset",
+            )
+        })?;
+        self.inspected.lock().unwrap().push(RecordedInspectedManagedAsset {
+            logical_path: asset.logical_path.clone(),
+            storage_class: asset.storage_class.clone(),
+            public_url: asset.public_url.clone(),
+        });
+        Ok(WebhookHandlingResult::accepted(Some(format!(
+            "inspected:{}",
             asset.logical_path
         ))))
     }
@@ -715,6 +832,39 @@ impl CustomerBackendPlugin for RecordingVerifiedWebhookAssetPlugin {
     }
 }
 
+impl CustomerBackendPlugin for InspectingVerifiedWebhookAssetPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-verified-webhook-asset-inspector",
+            "Harbor Shop Verified Webhook Asset Inspector",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_verified_webhook_asset_hooks(Arc::new(Self {
+            inspected: self.inspected.clone(),
+        }))
+    }
+}
+
+impl CustomerBackendPlugin for WritingThenInspectingVerifiedWebhookAssetPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-verified-webhook-asset-write-inspect",
+            "Harbor Shop Verified Webhook Asset Write And Inspect",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_verified_webhook_asset_hooks(Arc::new(Self {
+            writes: self.writes.clone(),
+            inspected: self.inspected.clone(),
+        }))
+    }
+}
+
 fn live_backend_secret_resolver_with_object_store_secret(
     object_store_secret: &str,
 ) -> StaticSecretResolver {
@@ -857,6 +1007,15 @@ fn payment_webhook_signature(provider: &str, event: &str, payment_reference: &st
     mac.update(b":");
     mac.update(payment_reference.as_bytes());
     format!("{:x}", mac.finalize().into_bytes())
+}
+
+fn stripe_webhook_signature(timestamp: i64, payload: &str) -> String {
+    let mut mac =
+        HmacSha256::new_from_slice(PAYMENT_WEBHOOK_SECRET.as_bytes()).expect("valid hmac key");
+    mac.update(timestamp.to_string().as_bytes());
+    mac.update(b".");
+    mac.update(payload.as_bytes());
+    format!("t={timestamp},v1={:x}", mac.finalize().into_bytes())
 }
 
 fn response_header(response: &Response<Body>, name: &str) -> String {
@@ -3717,6 +3876,70 @@ async fn server_host_rejects_payment_webhooks_with_invalid_signatures() {
 }
 
 #[tokio::test]
+async fn server_host_rejects_native_stripe_webhooks_with_invalid_stripe_signatures() {
+    let app_name = unique_app_name("harbor-shop-runtime-invalid-native-stripe-webhook");
+    let config = with_stripe_payment_provider(config_with_app_name(&app_name));
+    let template_root = checked_in_harbor_shop_root();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let payload = serde_json::json!({
+        "id": "evt_test_invalid",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_invalid",
+                "client_reference_id": "PAY-50001",
+                "metadata": {
+                    "payment_reference": "PAY-50001"
+                }
+            }
+        }
+    })
+    .to_string();
+    let response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/json")
+                .header("stripe-signature", "t=1712345678,v1=not-valid")
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.contains("payment webhook verification failed"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn server_host_rejects_payment_webhooks_for_an_unconfigured_provider() {
     let app_name = unique_app_name("harbor-shop-runtime-payment-provider-mismatch");
     let config = with_stripe_payment_provider(config_with_app_name(&app_name));
@@ -6471,6 +6694,127 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
 }
 
 #[tokio::test]
+async fn server_host_accepts_native_stripe_webhooks_and_exposes_raw_json_to_customer_hooks() {
+    let app_name = unique_app_name("harbor-shop-runtime-native-stripe-webhook-hooks");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RecordingVerifiedWebhookPlugin {
+            calls: calls.clone(),
+        })
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_module(AdminModule::new())
+        .with_module(OpsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-native-stripe-hooks";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("buyer@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let payload = serde_json::json!({
+        "id": "evt_test_native_checkout_complete",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_native_checkout_complete",
+                "client_reference_id": "PAY-50001",
+                "metadata": {
+                    "payment_reference": "PAY-50001"
+                }
+            }
+        }
+    })
+    .to_string();
+    let signature = stripe_webhook_signature(1_712_345_678, &payload);
+    let response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature)
+                .body(Body::from(payload.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let snapshot = store.snapshot(&issued.record.session_id, Some(principal_id)).unwrap();
+    assert_eq!(snapshot.payment.status, "captured");
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
+            .map(|order| order.status.as_str()),
+        Some("paid")
+    );
+
+    let recorded = calls.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    assert_eq!(recorded[0].source, "stripe");
+    assert_eq!(recorded[0].event, "checkout.session.completed");
+    assert_eq!(recorded[0].content_type.as_deref(), Some("application/json"));
+    assert_eq!(recorded[0].payload, payload);
+    assert_eq!(
+        recorded[0]
+            .headers
+            .get("x-davenda-verified-webhook-event")
+            .map(String::as_str),
+        Some("checkout.session.completed")
+    );
+}
+
+#[tokio::test]
 async fn server_host_exposes_persisted_commerce_orders_to_verified_webhook_hooks() {
     let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-orders");
     let mut config = checked_in_harbor_shop_config(&app_name);
@@ -6674,6 +7018,7 @@ async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payme
     let object_store_server = ObjectStoreTestServer::spawn();
     let object_store_secret = object_store_secret(object_store_server.endpoint());
     config.app.environment = Environment::Development;
+    config.storage.deployment = StorageDeployment::SingleNode;
     config.auth.package = "harbor-auth".to_string();
     let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
         .expect("checked-in harbor auth package should load");
@@ -6886,7 +7231,149 @@ async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payme
         "{writes:?}"
     );
     assert!(writes[0].bytes_written > 0, "{writes:?}");
-    assert!(writes[0].public_url.is_none(), "{writes:?}");
+    assert!(
+        writes[0]
+            .public_url
+            .as_deref()
+            .is_some_and(|url| url.contains("uploads/customer-hooks/")),
+        "{writes:?}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_persists_linked_customer_managed_assets_across_requests() {
+    let app_name = unique_app_name("harbor-shop-runtime-persisted-verified-webhook-assets");
+    let object_store_server = ObjectStoreTestServer::spawn();
+    let object_store_secret = object_store_secret(object_store_server.endpoint());
+    let template_root = checked_in_harbor_shop_root();
+
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    config.app.environment = Environment::Development;
+    config.storage.deployment = StorageDeployment::SingleNode;
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let writes = Arc::new(Mutex::new(Vec::new()));
+    let inspected = Arc::new(Mutex::new(Vec::new()));
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(WritingThenInspectingVerifiedWebhookAssetPlugin {
+            writes: writes.clone(),
+            inspected: inspected.clone(),
+        })
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
+        &object_store_secret,
+    );
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-persisted-verified-hook-assets";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("buyer@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let webhook_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("provider", "stripe")
+        .append_pair("event", "payment.captured")
+        .append_pair("payment_reference", "PAY-50001")
+        .append_pair(
+            "signature",
+            &payment_webhook_signature("stripe", "payment.captured", "PAY-50001"),
+        )
+        .finish();
+    let first_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(webhook_body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first_response.status(), StatusCode::OK);
+
+    let second_webhook_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("provider", "stripe")
+        .append_pair("event", "payment.failed")
+        .append_pair("payment_reference", "PAY-50001")
+        .append_pair(
+            "signature",
+            &payment_webhook_signature("stripe", "payment.failed", "PAY-50001"),
+        )
+        .finish();
+    let second_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(second_webhook_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second_response.status(), StatusCode::OK);
+
+    let inspected = inspected.lock().unwrap().clone();
+    assert_eq!(inspected.len(), 1, "{inspected:?}");
+    assert_eq!(
+        inspected[0].logical_path,
+        format!("uploads/customer-hooks/{app_name}/payment.captured.json")
+    );
+    assert_eq!(inspected[0].storage_class, "public_upload");
+    assert!(
+        inspected[0]
+            .public_url
+            .as_deref()
+            .is_some_and(|url| url.contains("uploads/customer-hooks/")),
+        "{inspected:?}"
+    );
 }
 
 #[tokio::test]

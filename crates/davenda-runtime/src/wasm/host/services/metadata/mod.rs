@@ -101,6 +101,23 @@ impl RuntimeMetadataBackend {
         })
     }
 
+    pub(super) fn upsert_customer_managed_asset(
+        &self,
+        logical_path: &str,
+        record_json: &str,
+        updated_at_unix_seconds: i64,
+    ) -> Result<(), String> {
+        self.backend.upsert_customer_managed_asset(
+            logical_path,
+            record_json,
+            updated_at_unix_seconds,
+        )
+    }
+
+    pub(super) fn customer_managed_asset(&self, logical_path: &str) -> Result<Option<String>, String> {
+        self.backend.customer_managed_asset(logical_path)
+    }
+
     pub(super) fn backend_kind(&self) -> MetadataAuditBackendKind {
         self.backend.kind()
     }
@@ -225,6 +242,29 @@ impl MetadataAuditBackend {
         match self {
             Self::Local(store) => store.recent(limit),
             Self::Shared(store) => store.recent(limit),
+        }
+    }
+
+    fn upsert_customer_managed_asset(
+        &self,
+        logical_path: &str,
+        record_json: &str,
+        updated_at_unix_seconds: i64,
+    ) -> Result<(), String> {
+        match self {
+            Self::Local(store) => {
+                store.upsert_customer_managed_asset(logical_path, record_json, updated_at_unix_seconds)
+            }
+            Self::Shared(store) => {
+                store.upsert_customer_managed_asset(logical_path, record_json, updated_at_unix_seconds)
+            }
+        }
+    }
+
+    fn customer_managed_asset(&self, logical_path: &str) -> Result<Option<String>, String> {
+        match self {
+            Self::Local(store) => store.customer_managed_asset(logical_path),
+            Self::Shared(store) => store.customer_managed_asset(logical_path),
         }
     }
 }

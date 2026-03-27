@@ -124,6 +124,64 @@ impl SharedMetadataAuditStore {
         })
     }
 
+    pub(super) fn upsert_customer_managed_asset(
+        &self,
+        logical_path: &str,
+        record_json: &str,
+        updated_at_unix_seconds: i64,
+    ) -> Result<(), String> {
+        self.ensure_initialized()?;
+        let client = self.client()?.clone();
+        let table = self.qualified_customer_managed_assets_table();
+        let logical_path = logical_path.to_string();
+        let record_json = record_json.to_string();
+        run_blocking(async move {
+            sqlx::query(&format!(
+                "INSERT INTO {} (logical_path, record_json, updated_at_unix_seconds) VALUES ($1, $2, $3)
+                 ON CONFLICT (logical_path) DO UPDATE SET
+                    record_json = EXCLUDED.record_json,
+                    updated_at_unix_seconds = EXCLUDED.updated_at_unix_seconds",
+                table
+            ))
+            .bind(&logical_path)
+            .bind(&record_json)
+            .bind(updated_at_unix_seconds)
+            .execute(&client.pool)
+            .await
+            .map_err(|error| {
+                format!("failed to write shared customer managed asset `{logical_path}`: {error}")
+            })?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn customer_managed_asset(&self, logical_path: &str) -> Result<Option<String>, String> {
+        self.ensure_initialized()?;
+        let client = self.client()?.clone();
+        let table = self.qualified_customer_managed_assets_table();
+        let logical_path = logical_path.to_string();
+        run_blocking(async move {
+            let row = sqlx::query(&format!(
+                "SELECT record_json FROM {} WHERE logical_path = $1",
+                table
+            ))
+            .bind(&logical_path)
+            .fetch_optional(&client.pool)
+            .await
+            .map_err(|error| {
+                format!("failed to query shared customer managed asset `{logical_path}`: {error}")
+            })?;
+            match row {
+                Some(row) => row.try_get(0).map(Some).map_err(|error| {
+                    format!(
+                        "failed to decode shared customer managed asset `{logical_path}`: {error}"
+                    )
+                }),
+                None => Ok(None),
+            }
+        })
+    }
+
     fn client(&self) -> Result<&PostgresDataClient, String> {
         self.client
             .get_or_init(|| {
@@ -170,6 +228,25 @@ impl SharedMetadataAuditStore {
                     .await
                     .map_err(|error| format!("failed to initialize shared metadata audit index: {error}"))?;
 
+                    sqlx::query(&format!(
+                        "CREATE TABLE IF NOT EXISTS {schema_ident}.customer_managed_assets (
+                            logical_path TEXT PRIMARY KEY,
+                            record_json TEXT NOT NULL,
+                            updated_at_unix_seconds BIGINT NOT NULL
+                        )"
+                    ))
+                    .execute(&client.pool)
+                    .await
+                    .map_err(|error| format!("failed to initialize shared customer managed assets table: {error}"))?;
+
+                    sqlx::query(&format!(
+                        "CREATE INDEX IF NOT EXISTS customer_managed_assets_recent
+                            ON {schema_ident}.customer_managed_assets (updated_at_unix_seconds DESC, logical_path DESC)"
+                    ))
+                    .execute(&client.pool)
+                    .await
+                    .map_err(|error| format!("failed to initialize shared customer managed assets index: {error}"))?;
+
                     Ok(())
                 })
             })
@@ -181,6 +258,14 @@ impl SharedMetadataAuditStore {
             "{}.{}",
             quote_identifier(&self.schema),
             quote_identifier("metadata_audit_entries")
+        )
+    }
+
+    fn qualified_customer_managed_assets_table(&self) -> String {
+        format!(
+            "{}.{}",
+            quote_identifier(&self.schema),
+            quote_identifier("customer_managed_assets")
         )
     }
 }

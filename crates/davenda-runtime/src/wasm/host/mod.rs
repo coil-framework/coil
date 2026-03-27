@@ -135,6 +135,26 @@ impl WasmHost {
         self.host_services.metadata_location()
     }
 
+    pub(crate) fn upsert_customer_managed_asset(
+        &self,
+        logical_path: &str,
+        record_json: &str,
+        updated_at_unix_seconds: i64,
+    ) -> Result<(), String> {
+        self.host_services.upsert_customer_managed_asset(
+            logical_path,
+            record_json,
+            updated_at_unix_seconds,
+        )
+    }
+
+    pub(crate) fn customer_managed_asset(
+        &self,
+        logical_path: &str,
+    ) -> Result<Option<String>, String> {
+        self.host_services.customer_managed_asset(logical_path)
+    }
+
     pub(crate) fn record_operator_audit(
         &self,
         kind: impl Into<String>,

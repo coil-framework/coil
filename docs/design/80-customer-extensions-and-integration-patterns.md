@@ -3,7 +3,16 @@
 **Part:** Customer Apps  
 **Chapter:** 80
 
-Customer apps incorporate custom behavior primarily through WASM extensions. That is the default path for work that is specific to one customer, one deployment, or one integration and does not deserve promotion into a supported native module. The intent is to give customer apps real flexibility while keeping platform assumptions clean.
+Customer apps incorporate custom behavior through two different mechanisms, and they should not be
+treated as interchangeable.
+
+Customer-owned first-party behavior that ships with the store's own source tree belongs in
+customer-linked native Rust crates composed into the customer workspace and binary. WASM
+extensions remain the default path for third-party, runtime-installed, or otherwise bounded
+customization that should participate only through explicit extension contracts.
+
+This chapter therefore focuses on the WASM side of the model, not on all customer-owned logic in
+general. See chapter 96 for the accepted customer-root workspace and linked-Rust-backend model.
 
 ## Common Extension Patterns
 

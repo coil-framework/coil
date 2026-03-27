@@ -31,6 +31,12 @@ Official batteries should live in their own crates or crate families, such as `m
 
 ## Customer App Crates
 
-Each customer app should have its own top-level application crate or binary package. That package selects official modules, provides configuration, owns templates and theme assets, binds capabilities to the chosen authorization model, and registers any customer-specific native adapters or extension packages. Treating the customer app as a first-class package reinforces that it is a real product layer, not a configuration folder buried inside the framework.
+Each customer app should have its own top-level application crate or binary package, and the
+preferred long-term model is that the customer project becomes the real workspace root while
+Davenda is consumed as a normal dependency. That package selects official modules, provides
+configuration, owns templates and theme assets, binds capabilities to the chosen authorization
+model, and registers any customer-specific native adapters or extension packages. Treating the
+customer app as a first-class package reinforces that it is a real product layer, not a
+configuration folder buried inside the framework.
 
 The workspace layout is therefore one of the platform's first guardrails. It reminds contributors that core, official modules, and customer apps are different things, and it keeps "just import it directly" from becoming the default answer to every integration problem.

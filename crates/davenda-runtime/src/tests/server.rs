@@ -185,7 +185,7 @@ impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
         let receipt = jobs.enqueue(
             davenda_customer_sdk::JobRequest::new(
                 "jobs.work",
-                "customer.webhook.follow-up",
+                "ops.report.export",
                 "record verified payment webhook",
             )
             .with_idempotency_key(format!(
@@ -203,6 +203,39 @@ impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
             "{}:{}",
             receipt.queue, receipt.job_id
         ))))
+    }
+}
+
+#[derive(Debug)]
+struct RejectVerifiedWebhookPlugin;
+
+impl VerifiedWebhookHooks for RejectVerifiedWebhookPlugin {
+    fn handle_verified_webhook(
+        &self,
+        _ctx: &RequestContext,
+        webhook: &VerifiedWebhook,
+        _http: &dyn OutboundHttpFacade,
+        _jobs: &dyn JobsFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<WebhookHandlingResult, BackendError> {
+        Ok(WebhookHandlingResult::rejected(
+            "customer.policy.rejected",
+            format!("linked customer policy rejected {}:{}", webhook.source, webhook.event),
+        ))
+    }
+}
+
+impl CustomerBackendPlugin for RejectVerifiedWebhookPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-verified-webhook-rejector",
+            "Harbor Shop Verified Webhook Rejector",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_verified_webhook_hooks(Arc::new(Self))
     }
 }
 
@@ -5576,6 +5609,8 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
         .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_module(AdminModule::new())
+        .with_module(OpsModule::new())
         .with_template_root(&template_root)
         .build()
         .unwrap();
@@ -5770,6 +5805,103 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
         recorded[0].payload.contains("\"provider\":[\"stripe\"]"),
         "{}",
         recorded[0].payload
+    );
+}
+
+#[tokio::test]
+async fn server_host_rejects_payment_webhook_mutation_when_sdk_hook_rejects_it() {
+    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-rejection");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RejectVerifiedWebhookPlugin)
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-verified-rejection";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("buyer@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let webhook_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("provider", "stripe")
+        .append_pair("event", "payment.captured")
+        .append_pair("payment_reference", "PAY-50001")
+        .append_pair(
+            "signature",
+            &payment_webhook_signature("stripe", "payment.captured", "PAY-50001"),
+        )
+        .finish();
+    let webhook_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(webhook_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(webhook_response.status(), StatusCode::CONFLICT);
+
+    let snapshot = store
+        .snapshot(&issued.record.session_id, Some(principal_id))
+        .unwrap();
+    assert_eq!(snapshot.payment.status, "provider_pending");
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
+            .map(|order| order.status.as_str()),
+        Some("pending_payment")
     );
 }
 

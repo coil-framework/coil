@@ -146,6 +146,13 @@ impl WasmHost {
             .record_operator_audit(kind, app_id, request_id, principal_id)
     }
 
+    pub(crate) fn send_outbound_http(
+        &self,
+        request: &davenda_customer_sdk::OutboundHttpRequest,
+    ) -> Result<davenda_customer_sdk::OutboundHttpResponse, String> {
+        self.host_services.send_outbound_http(request)
+    }
+
     pub fn webhook_observation_snapshot(
         &self,
         limit: usize,

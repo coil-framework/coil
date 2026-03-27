@@ -112,6 +112,13 @@ impl RuntimeWasmHostServices {
             .submit_outbound_http_to_blocking_pool(integration, response_bytes_hint, context)
     }
 
+    pub(crate) fn send_outbound_http(
+        &self,
+        request: &davenda_customer_sdk::OutboundHttpRequest,
+    ) -> Result<davenda_customer_sdk::OutboundHttpResponse, String> {
+        self.http.send(request)
+    }
+
     pub(crate) fn read_secret(
         &self,
         secret: &str,

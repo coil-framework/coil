@@ -11,7 +11,7 @@ use davenda_commerce::{
 };
 use davenda_customer_sdk::{
     AuditEntry, AuditFacade, AuthCheckRequest, AuthCheckResult, AuthExplainRequest,
-    AuthExplanation, AuthFacade, BackendError, CommerceFacade,
+    AuthExplanation, AuthFacade, BackendError, BackendErrorKind, CommerceFacade,
     CustomerAppContext as CustomerPluginAppContext, MoneyAmount, OrderDraft, OrderLineDraft,
     OrderReviewDecision, PrincipalContext as CustomerPluginPrincipalContext,
     PrincipalKind as CustomerPluginPrincipalKind, RequestContext as CustomerPluginRequestContext,
@@ -25,20 +25,37 @@ use davenda_template::{
     RenderModel, RenderValue, TemplateModelError, TemplateNamespace, TrustedHtml,
 };
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
-struct RuntimeCustomerCommerceFacade;
+struct RuntimeCustomerCommerceFacade<'a> {
+    catalog: &'a StorefrontCatalog,
+}
 
-impl CommerceFacade for RuntimeCustomerCommerceFacade {
+impl CommerceFacade for RuntimeCustomerCommerceFacade<'_> {
     fn product(
         &self,
-        _sku: &str,
+        sku: &str,
     ) -> Result<Option<davenda_customer_sdk::CommerceProduct>, BackendError> {
-        Ok(None)
+        Ok(self
+            .catalog
+            .product_by_sku_or_handle(sku)
+            .map(|product| davenda_customer_sdk::CommerceProduct {
+                sku: product.sku.clone(),
+                handle: product.handle.clone(),
+                title: product.title.clone(),
+                current_price: MoneyAmount::new(product.currency.clone(), product.price_minor),
+                collection_handle: Some(product.collection_handle.clone()),
+                metadata: BTreeMap::new(),
+            }))
     }
 
     fn add_order_note(&self, _order_id: &str, _note: &str) -> Result<(), BackendError> {
-        Ok(())
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "commerce.order_note.unsupported",
+            "Render-time customer review does not support persisting order notes.",
+        ))
     }
 }
 
@@ -49,33 +66,61 @@ impl AuthFacade for RuntimeCustomerAuthFacade {
         &self,
         _request: &AuthCheckRequest,
     ) -> Result<AuthCheckResult, BackendError> {
-        Ok(AuthCheckResult {
-            allowed: false,
-            explanation: Some(
-                "runtime customer auth facade is not wired for direct checks".to_string(),
-            ),
-        })
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "auth.render_check.unsupported",
+            "Render-time customer review cannot perform live auth checks.",
+        ))
     }
 
     fn explain_denial(
         &self,
-        request: &AuthExplainRequest,
+        _request: &AuthExplainRequest,
     ) -> Result<AuthExplanation, BackendError> {
-        Ok(AuthExplanation {
-            summary: format!(
-                "No denial explainer is wired for `{}` on `{}`",
-                request.capability, request.object
-            ),
-            traces: Vec::new(),
-        })
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "auth.render_explain.unsupported",
+            "Render-time customer review cannot produce live auth explanations.",
+        ))
     }
 }
 
-struct RuntimeCustomerAuditFacade;
+struct RuntimeCustomerAuditFacade<'a> {
+    plan: &'a RuntimePlan,
+    principal_id: Option<&'a str>,
+}
 
-impl AuditFacade for RuntimeCustomerAuditFacade {
-    fn record(&self, _entry: AuditEntry) -> Result<(), BackendError> {
-        Ok(())
+impl AuditFacade for RuntimeCustomerAuditFacade<'_> {
+    fn record(&self, entry: AuditEntry) -> Result<(), BackendError> {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer
+            .append_pair("action", entry.action.as_str())
+            .append_pair("resource_kind", entry.resource_kind.as_str())
+            .append_pair("resource_id", entry.resource_id.as_str())
+            .append_pair("outcome", entry.outcome.as_str());
+        if let Some(detail) = entry.detail.as_deref() {
+            serializer.append_pair("detail", detail);
+        }
+        for (key, value) in &entry.metadata {
+            serializer.append_pair(&format!("meta.{key}"), value);
+        }
+        record_admin_audit_entry(
+            self.plan,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
+            self.principal_id.unwrap_or("anonymous"),
+            serializer.finish(),
+        )
+        .map_err(|reason| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "audit.record.failed",
+                "Failed to persist the customer hook audit entry during render.",
+            )
+            .with_detail(reason)
+        })
     }
 }
 
@@ -1217,9 +1262,9 @@ fn customer_order_review(
     _session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
 ) -> Result<Option<OrderReviewDecision>, TemplateModelError> {
-    let Some(hook) = plan.customer_hooks.checkout.first() else {
+    if plan.customer_hooks.checkout.is_empty() {
         return Ok(None);
-    };
+    }
     let request = CustomerPluginRequestContext::new(
         CustomerPluginAppContext::new(
             plan.config.app.name.clone(),
@@ -1228,19 +1273,42 @@ fn customer_order_review(
         customer_plugin_principal(principal, &order.principal_id),
         CustomerPluginTraceContext::new(format!("order-detail:{}", order.order_id)),
     );
-    let review = hook
-        .review_order(
-            &request,
-            &customer_order_draft(order),
-            &RuntimeCustomerCommerceFacade,
-            &RuntimeCustomerAuthFacade,
-            &RuntimeCustomerAuditFacade,
-        )
-        .map_err(customer_plugin_template_error)?;
-    Ok(Some(review))
+    let commerce = RuntimeCustomerCommerceFacade {
+        catalog: &plan.storefront_catalog,
+    };
+    let auth = RuntimeCustomerAuthFacade;
+    let audit = RuntimeCustomerAuditFacade {
+        plan,
+        principal_id: principal.and_then(|ctx| ctx.principal_id.as_deref()),
+    };
+    let order = customer_order_draft(order, &plan.storefront_catalog);
+    let mut adjustment_messages = Vec::new();
+
+    for hook in &plan.customer_hooks.checkout {
+        match hook
+            .review_order(&request, &order, &commerce, &auth, &audit)
+            .map_err(customer_plugin_template_error)?
+        {
+            OrderReviewDecision::Approved => {}
+            OrderReviewDecision::Adjusted(adjustment) => {
+                adjustment_messages.push(adjustment.reason);
+            }
+            OrderReviewDecision::Rejected(rejection) => {
+                return Ok(Some(OrderReviewDecision::Rejected(rejection)));
+            }
+        }
+    }
+
+    if adjustment_messages.is_empty() {
+        Ok(Some(OrderReviewDecision::Approved))
+    } else {
+        Ok(Some(OrderReviewDecision::Adjusted(
+            davenda_customer_sdk::OrderAdjustment::new(adjustment_messages.join("; ")),
+        )))
+    }
 }
 
-fn customer_order_draft(order: &StorefrontOrderSnapshot) -> OrderDraft {
+fn customer_order_draft(order: &StorefrontOrderSnapshot, catalog: &StorefrontCatalog) -> OrderDraft {
     let subtotal = MoneyAmount::new(order.currency.clone(), order.subtotal_minor);
     let total = MoneyAmount::new(order.currency.clone(), order.total_minor);
     let lines = order
@@ -1252,7 +1320,9 @@ fn customer_order_draft(order: &StorefrontOrderSnapshot) -> OrderDraft {
             quantity: line.quantity,
             unit_price: MoneyAmount::new(line.currency.clone(), line.unit_price_minor),
             product_kind: line.product_kind.clone(),
-            collection_handle: None,
+            collection_handle: catalog
+                .product_by_sku_or_handle(&line.sku)
+                .map(|product| product.collection_handle.clone()),
             entitlement_key: line.entitlement_key.clone(),
             metadata: BTreeMap::new(),
         })

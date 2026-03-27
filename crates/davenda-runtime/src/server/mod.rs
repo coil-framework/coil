@@ -77,6 +77,17 @@ pub enum RuntimeServerError {
     Authorization { reason: String },
     #[error("auth explain failed: {reason}")]
     Explain { reason: String },
+    #[error("linked customer hook rejected `{surface}`: {code}: {message}")]
+    CustomerHookRejected {
+        surface: &'static str,
+        code: String,
+        message: String,
+    },
+    #[error("linked customer hook failed during `{surface}`: {reason}")]
+    CustomerHookFailed {
+        surface: &'static str,
+        reason: String,
+    },
 }
 
 pub(crate) struct RuntimeServerState {

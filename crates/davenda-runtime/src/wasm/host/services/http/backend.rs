@@ -3,6 +3,7 @@ use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
+use davenda_customer_sdk::{OutboundHttpRequest, OutboundHttpResponse};
 use davenda_wasm::NetworkExecution;
 use ureq::{Agent, AgentBuilder};
 use url::Url;
@@ -84,6 +85,41 @@ impl RuntimeOutboundHttpBackend {
         })
     }
 
+    pub(crate) fn send(&self, request: &OutboundHttpRequest) -> Result<OutboundHttpResponse, String> {
+        if !self.allow_network {
+            return Err("outbound network is disabled for this runtime".to_string());
+        }
+
+        let endpoint = self.resolve_endpoint(&request.integration)?;
+        if request.url != endpoint.as_str() {
+            return Err(format!(
+                "integration `{}` must target the approved endpoint `{}`",
+                request.integration,
+                endpoint
+            ));
+        }
+
+        let method = normalized_method(&request.method)?;
+        let byte_limit = self.response_byte_limit(0)?;
+        let endpoint_string = endpoint.to_string();
+        let headers = request.headers.clone();
+        let body = request.body.clone();
+        let client = self.client.clone();
+        let request_timeout = self.request_timeout;
+        offload_outbound_http_to_blocking_pool(move || {
+            perform_sdk_request(
+                client,
+                method,
+                endpoint,
+                endpoint_string,
+                headers,
+                body,
+                request_timeout,
+                byte_limit,
+            )
+        })
+    }
+
     fn resolve_endpoint(&self, integration: &str) -> Result<Url, String> {
         // The guest only names an integration here; the backend resolves it to an approved
         // endpoint declared in config. Raw absolute URLs are rejected to keep guest-controlled
@@ -146,5 +182,72 @@ fn perform_request(
         endpoint: endpoint_string,
         status,
         response_bytes: response_bytes.len() as u64,
+    })
+}
+
+fn normalized_method(method: &str) -> Result<String, String> {
+    let normalized = method.trim().to_ascii_uppercase();
+    match normalized.as_str() {
+        "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" => Ok(normalized),
+        _ => Err(format!("unsupported outbound HTTP method `{method}`")),
+    }
+}
+
+fn perform_sdk_request(
+    client: Agent,
+    method: String,
+    endpoint: Url,
+    endpoint_string: String,
+    headers: BTreeMap<String, String>,
+    body: Vec<u8>,
+    request_timeout: Duration,
+    byte_limit: u64,
+) -> Result<OutboundHttpResponse, String> {
+    let mut builder = client
+        .request(&method, &endpoint_string)
+        .timeout(request_timeout);
+    for (name, value) in &headers {
+        if name.eq_ignore_ascii_case("host") || name.eq_ignore_ascii_case("content-length") {
+            return Err(format!(
+                "outbound HTTP request cannot override reserved header `{name}`"
+            ));
+        }
+        builder = builder.set(name, value);
+    }
+
+    let response = if body.is_empty() {
+        builder
+            .call()
+            .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?
+    } else {
+        builder
+            .send_bytes(&body)
+            .map_err(|error| format!("failed to call `{endpoint}`: {error}"))?
+    };
+    let status = response.status();
+    let mut response_headers = BTreeMap::new();
+    for name in response.headers_names() {
+        let values = response.all(&name);
+        if !values.is_empty() {
+            response_headers.insert(name, values.join(", "));
+        }
+    }
+
+    let mut reader = response.into_reader().take(byte_limit.saturating_add(1));
+    let mut response_bytes = Vec::new();
+    reader
+        .read_to_end(&mut response_bytes)
+        .map_err(|error| format!("failed to read `{endpoint}` response body: {error}"))?;
+
+    if response_bytes.len() as u64 > byte_limit {
+        return Err(format!(
+            "response from `{endpoint}` exceeded the configured limit of {byte_limit} bytes"
+        ));
+    }
+
+    Ok(OutboundHttpResponse {
+        status,
+        headers: response_headers,
+        body: response_bytes,
     })
 }

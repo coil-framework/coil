@@ -113,8 +113,9 @@ fn runtime_outbound_http_backend_ignores_environment_fallbacks() {
 #[test]
 fn runtime_outbound_http_backend_uses_explicit_endpoint_mappings() {
     let (endpoint, server) = spawn_http_server("mapped-response", None);
+    let mapped_endpoint = Url::parse(&endpoint).unwrap().to_string();
     let mut targets = BTreeMap::new();
-    targets.insert("crm".to_string(), Url::parse(&endpoint).unwrap());
+    targets.insert("crm".to_string(), Url::parse(&mapped_endpoint).unwrap());
 
     let backend =
         RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
@@ -131,6 +132,85 @@ fn runtime_outbound_http_backend_uses_explicit_endpoint_mappings() {
     assert_eq!(execution.response_bytes, "mapped-response".len() as u64);
 
     server.join().unwrap();
+}
+
+#[test]
+fn runtime_outbound_http_backend_serves_linked_customer_hook_requests_through_the_same_mapping() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0u8; 2048];
+        let _ = stream.read(&mut request);
+        let response = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Content-Type: application/json\r\n",
+            "X-Trace: linked-hook\r\n",
+            "Content-Length: 15\r\n",
+            "Connection: close\r\n\r\n",
+            "{\"status\":\"ok\"}"
+        );
+        let _ = stream.write_all(response.as_bytes());
+    });
+    let mapped_endpoint = Url::parse(&endpoint).unwrap().to_string();
+    let mut targets = BTreeMap::new();
+    targets.insert("crm".to_string(), Url::parse(&mapped_endpoint).unwrap());
+
+    let backend =
+        RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
+    let response = backend
+        .send(&davenda_customer_sdk::OutboundHttpRequest {
+            integration: "crm".to_string(),
+            method: "POST".to_string(),
+            url: mapped_endpoint,
+            headers: BTreeMap::from([(
+                "content-type".to_string(),
+                "application/json".to_string(),
+            )]),
+            body: br#"{"ping":true}"#.to_vec(),
+        })
+        .expect("mapped linked-hook request should succeed");
+    let normalized_headers = response
+        .headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        normalized_headers.get("content-type").map(String::as_str),
+        Some("application/json")
+    );
+    assert_eq!(
+        normalized_headers.get("x-trace").map(String::as_str),
+        Some("linked-hook")
+    );
+    assert_eq!(response.body, br#"{"status":"ok"}"#);
+
+    handle.join().unwrap();
+}
+
+#[test]
+fn runtime_outbound_http_backend_rejects_url_drift_for_linked_customer_hooks() {
+    let mut targets = BTreeMap::new();
+    targets.insert(
+        "crm".to_string(),
+        Url::parse("https://crm.example.com/api").unwrap(),
+    );
+
+    let backend =
+        RuntimeOutboundHttpBackend::with_settings(true, targets, Duration::from_secs(1), 1024);
+    let error = backend
+        .send(&davenda_customer_sdk::OutboundHttpRequest {
+            integration: "crm".to_string(),
+            method: "GET".to_string(),
+            url: "https://crm.example.com/api/customers".to_string(),
+            headers: BTreeMap::new(),
+            body: Vec::new(),
+        })
+        .unwrap_err();
+
+    assert!(error.contains("approved endpoint"), "unexpected error: {error}");
 }
 
 #[test]

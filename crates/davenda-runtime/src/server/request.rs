@@ -16,15 +16,15 @@ use davenda_customer_sdk::{
     RepositoryWriteReceipt, RequestContext as SdkRequestContext, TraceContext as SdkTraceContext,
     VerifiedWebhook, WebhookHandlingResult,
 };
-use davenda_jobs::{IdempotencyKey, JobId, JobInstant, JobName, JobQueueName, JobSpec};
+use davenda_jobs::JobInstant;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
@@ -78,8 +78,6 @@ const CMS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
         "x-davenda-cms-csrf-cms-redirects-save",
     ),
 ];
-static CUSTOMER_HOOK_JOB_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-
 const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.cart",
     "commerce.add-to-cart",
@@ -506,6 +504,12 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
         RuntimeServerError::RequestBodyTooLarge { .. } => {
             (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
         }
+        RuntimeServerError::CustomerHookRejected { .. } => {
+            (StatusCode::CONFLICT, error.to_string()).into_response()
+        }
+        RuntimeServerError::CustomerHookFailed { .. } => {
+            (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response()
+        }
         RuntimeServerError::MissingHost | RuntimeServerError::InvalidHeaderValue { .. } => {
             (StatusCode::BAD_REQUEST, error.to_string()).into_response()
         }
@@ -869,30 +873,75 @@ impl CommerceFacade for RuntimeCheckoutCommerceFacade<'_> {
     }
 }
 
-#[derive(Debug, Default)]
-struct RuntimeCheckoutAuthFacade;
+#[derive(Debug)]
+struct RuntimeCheckoutAuthFacade<'a> {
+    state: &'a RuntimeServerState,
+    execution: &'a RequestExecution,
+}
 
-impl AuthFacade for RuntimeCheckoutAuthFacade {
+impl AuthFacade for RuntimeCheckoutAuthFacade<'_> {
     fn check_capability(
         &self,
-        _request: &AuthCheckRequest,
+        request: &AuthCheckRequest,
     ) -> Result<AuthCheckResult, BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "auth.live_check.unsupported",
-            "Runtime auth capability checks are not implemented for customer checkout hooks yet.",
-        ))
+        let capability = parse_customer_capability(&request.capability)?;
+        let object = parse_customer_auth_entity(&request.object)?;
+        let subject = customer_hook_auth_subject(self.execution.principal.principal_id.as_deref());
+        let authorizer = Arc::clone(&self.state.route_authorizer);
+        let allowed = run_customer_hook_future(async move {
+            authorizer.check_capability(&subject, capability, &object).await
+        })
+        .map_err(customer_hook_auth_backend_error)?;
+
+        Ok(AuthCheckResult {
+            allowed,
+            explanation: (!allowed).then(|| {
+                format!(
+                    "live auth denied `{}` for `{}`",
+                    capability.as_str(),
+                    request.object
+                )
+            }),
+        })
     }
 
     fn explain_denial(
         &self,
-        _request: &AuthExplainRequest,
+        request: &AuthExplainRequest,
     ) -> Result<AuthExplanation, BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "auth.explain.unsupported",
-            "Runtime auth denial explanations are not implemented for customer checkout hooks yet.",
-        ))
+        let capability = parse_customer_capability(&request.capability)?;
+        let object = parse_customer_auth_entity(&request.object)?;
+        let Some(explainer) = self.state.auth_explainer.clone() else {
+            return Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "auth.explain.unavailable",
+                "Runtime auth explanations are disabled for this installation.",
+            ));
+        };
+        let explain_request = davenda_auth::LiveAuthExplainRequest {
+            subject: customer_hook_auth_subject(self.execution.principal.principal_id.as_deref()),
+            capability,
+            object,
+            options: davenda_auth::ExplainOptions::default(),
+        };
+        let explanation = run_customer_hook_future(async move {
+            explainer.explain_capability(&explain_request).await
+        })
+        .map_err(customer_hook_auth_backend_error)?;
+
+        Ok(AuthExplanation {
+            summary: format!(
+                "{} `{}` on `{}`",
+                if explanation.decision.is_allowed() {
+                    "allow"
+                } else {
+                    "deny"
+                },
+                explanation.capability.as_str(),
+                explanation.object
+            ),
+            traces: vec![format!("{:?}", explanation.trace)],
+        })
     }
 }
 
@@ -1189,58 +1238,6 @@ impl JobsFacade for RuntimeCustomerJobsFacade<'_> {
         &self,
         request: davenda_customer_sdk::JobRequest,
     ) -> Result<JobReceipt, BackendError> {
-        let queue = JobQueueName::new(request.queue.clone()).map_err(|error| {
-            BackendError::new(
-                BackendErrorKind::InvalidInput,
-                "jobs.queue.invalid",
-                "Customer webhook requested an invalid jobs queue.",
-            )
-            .with_detail(error.to_string())
-        })?;
-        let job_name = JobName::new(request.job_name.clone()).map_err(|error| {
-            BackendError::new(
-                BackendErrorKind::InvalidInput,
-                "jobs.name.invalid",
-                "Customer webhook requested an invalid job name.",
-            )
-            .with_detail(error.to_string())
-        })?;
-        let sequence = CUSTOMER_HOOK_JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let job_id = JobId::new(format!("customer-hook-{sequence}")).map_err(|error| {
-            BackendError::new(
-                BackendErrorKind::Internal,
-                "jobs.id.invalid",
-                "Runtime could not allocate a valid job id for the customer webhook.",
-            )
-            .with_detail(error.to_string())
-        })?;
-        let mut spec = JobSpec::new(
-            job_id.clone(),
-            job_name,
-            queue.clone(),
-            request.payload_description,
-        )
-        .map_err(|error| {
-            BackendError::new(
-                BackendErrorKind::InvalidInput,
-                "jobs.spec.invalid",
-                "Customer webhook requested an invalid job spec.",
-            )
-            .with_detail(error.to_string())
-        })?;
-        if let Some(idempotency_key) = request.idempotency_key {
-            spec = spec.with_idempotency_key(IdempotencyKey::new(idempotency_key).map_err(
-                |error| {
-                    BackendError::new(
-                        BackendErrorKind::InvalidInput,
-                        "jobs.idempotency.invalid",
-                        "Customer webhook requested an invalid idempotency key.",
-                    )
-                    .with_detail(error.to_string())
-                },
-            )?);
-        }
-
         let mut host = self
             .plan
             .jobs_host(format!("customer-hooks-{}", self.trace_id))
@@ -1252,9 +1249,58 @@ impl JobsFacade for RuntimeCustomerJobsFacade<'_> {
                 )
                 .with_detail(error.to_string())
             })?;
+        let Some(definition) = host
+            .registered_jobs
+            .iter()
+            .find(|definition| definition.contract.name == request.job_name)
+            .cloned()
+        else {
+            return Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "jobs.name.unknown",
+                format!(
+                    "Customer webhook requested unknown runtime job `{}`.",
+                    request.job_name
+                ),
+            ));
+        };
+        if definition.queue.as_str() != request.queue {
+            return Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "jobs.queue.mismatch",
+                format!(
+                    "Customer webhook requested queue `{}` for `{}`, but the registered runtime job uses `{}`.",
+                    request.queue,
+                    request.job_name,
+                    definition.queue
+                ),
+            ));
+        }
+
+        let mut dispatch =
+            JobDispatchRequest::new(request.job_name.clone(), request.payload_description).map_err(
+                |error| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "jobs.dispatch.invalid",
+                        "Customer webhook requested an invalid runtime job dispatch.",
+                    )
+                    .with_detail(error.to_string())
+                },
+            )?;
+        if let Some(idempotency_key) = request.idempotency_key {
+            dispatch = dispatch.with_idempotency_key(idempotency_key).map_err(|error| {
+                BackendError::new(
+                    BackendErrorKind::InvalidInput,
+                    "jobs.idempotency.invalid",
+                    "Customer webhook requested an invalid idempotency key.",
+                )
+                .with_detail(error.to_string())
+            })?;
+        }
         let enqueued = host
-            .enqueue_spec(
-                spec,
+            .enqueue_job(
+                dispatch,
                 JobInstant::from_unix_seconds(self.now.as_unix_seconds()),
             )
             .map_err(|error| {
@@ -1267,25 +1313,30 @@ impl JobsFacade for RuntimeCustomerJobsFacade<'_> {
             })?;
 
         Ok(JobReceipt {
-            queue: queue.to_string(),
+            queue: definition.queue.to_string(),
             job_id: enqueued.to_string(),
         })
     }
 }
 
 #[derive(Debug)]
-struct RuntimeCustomerOutboundHttpFacade;
+struct RuntimeCustomerOutboundHttpFacade<'a> {
+    wasm_host: &'a WasmHost,
+}
 
-impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade {
+impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade<'_> {
     fn send(&self, request: OutboundHttpRequest) -> Result<OutboundHttpResponse, BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "http.send.unsupported",
-            format!(
-                "Runtime outbound HTTP is not implemented for linked customer hooks yet (integration `{}`).",
-                request.integration
-            ),
-        ))
+        self.wasm_host.send_outbound_http(&request).map_err(|reason| {
+            BackendError::new(
+                BackendErrorKind::Unavailable,
+                "http.send.failed",
+                format!(
+                    "Runtime could not execute approved outbound HTTP integration `{}`.",
+                    request.integration
+                ),
+            )
+            .with_detail(reason)
+        })
     }
 }
 
@@ -1459,13 +1510,15 @@ fn execute_verified_webhook_customer_hooks(
     execution: &RequestExecution,
     webhook: &VerifiedWebhook,
     now: BrowserInstant,
-) {
+) -> Result<(), RuntimeServerError> {
     if state.plan.customer_hooks.verified_webhooks.is_empty() {
-        return;
+        return Ok(());
     }
 
     let context = runtime_customer_request_context(state, execution);
-    let http = RuntimeCustomerOutboundHttpFacade;
+    let http = RuntimeCustomerOutboundHttpFacade {
+        wasm_host: &state.wasm_host,
+    };
     let jobs = RuntimeCustomerJobsFacade {
         plan: &state.plan,
         trace_id: execution.trace.request_id.as_str(),
@@ -1478,33 +1531,67 @@ fn execute_verified_webhook_customer_hooks(
     };
 
     for hook in &state.plan.customer_hooks.verified_webhooks {
-        let outcome = match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &audit) {
-            Ok(WebhookHandlingResult::Accepted { detail }) => AuditEntry::new(
-                "customer-plugin.verified-webhook",
-                "webhook",
-                format!("{}:{}", webhook.source, webhook.event),
-                "accepted",
-            )
-            .with_detail(
-                detail.unwrap_or_else(|| "customer hook accepted verified webhook".to_string()),
-            ),
-            Ok(WebhookHandlingResult::Rejected { code, message }) => AuditEntry::new(
-                "customer-plugin.verified-webhook",
-                "webhook",
-                format!("{}:{}", webhook.source, webhook.event),
-                "rejected",
-            )
-            .with_detail(format!("{code}: {message}")),
-            Err(error) => AuditEntry::new(
-                "customer-plugin.verified-webhook",
-                "webhook",
-                format!("{}:{}", webhook.source, webhook.event),
-                "failed",
-            )
-            .with_detail(error.to_string()),
-        };
-        let _ = audit.record(outcome);
+        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &audit) {
+            Ok(WebhookHandlingResult::Accepted { detail }) => {
+                audit.record(
+                    AuditEntry::new(
+                        "customer-plugin.verified-webhook",
+                        "webhook",
+                        format!("{}:{}", webhook.source, webhook.event),
+                        "accepted",
+                    )
+                    .with_detail(detail.unwrap_or_else(|| {
+                        "customer hook accepted verified webhook".to_string()
+                    })),
+                )
+                .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                    surface: "verified-webhook",
+                    reason: error.to_string(),
+                })?;
+            }
+            Ok(WebhookHandlingResult::Rejected { code, message }) => {
+                audit.record(
+                    AuditEntry::new(
+                        "customer-plugin.verified-webhook",
+                        "webhook",
+                        format!("{}:{}", webhook.source, webhook.event),
+                        "rejected",
+                    )
+                    .with_detail(format!("{code}: {message}")),
+                )
+                .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                    surface: "verified-webhook",
+                    reason: error.to_string(),
+                })?;
+                return Err(RuntimeServerError::CustomerHookRejected {
+                    surface: "verified-webhook",
+                    code,
+                    message,
+                });
+            }
+            Err(error) => {
+                audit.record(
+                    AuditEntry::new(
+                        "customer-plugin.verified-webhook",
+                        "webhook",
+                        format!("{}:{}", webhook.source, webhook.event),
+                        "failed",
+                    )
+                    .with_detail(error.to_string()),
+                )
+                .map_err(|audit_error| RuntimeServerError::CustomerHookFailed {
+                    surface: "verified-webhook",
+                    reason: audit_error.to_string(),
+                })?;
+                return Err(RuntimeServerError::CustomerHookFailed {
+                    surface: "verified-webhook",
+                    reason: error.to_string(),
+                });
+            }
+        }
     }
+
+    Ok(())
 }
 
 fn review_checkout_with_customer_hooks(
@@ -1529,7 +1616,7 @@ fn review_checkout_with_customer_hooks(
     let commerce = RuntimeCheckoutCommerceFacade {
         catalog: &state.plan.storefront_catalog,
     };
-    let auth = RuntimeCheckoutAuthFacade;
+    let auth = RuntimeCheckoutAuthFacade { state, execution };
     let audit = RuntimeRequestAuditFacade {
         plan: &state.plan,
         principal_id: execution.principal.principal_id.as_deref(),
@@ -2285,17 +2372,6 @@ async fn apply_native_storefront_mutations(
             .unwrap_or("generic")
             .trim()
             .to_ascii_lowercase();
-        let receipt = state.storefront.apply_payment_webhook(
-            verified.payment_reference.as_str(),
-            verified.event.as_str(),
-            now.as_unix_seconds(),
-        )?;
-        if receipt.needs_paid_event_dispatch {
-            dispatch_paid_order_event(state, &receipt.order, now)?;
-            state
-                .storefront
-                .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())?;
-        }
         let payload = serde_json::to_vec(&execution.form_fields).map_err(|error| {
             RuntimeServerError::Configuration {
                 reason: format!(
@@ -2310,7 +2386,18 @@ async fn apply_native_storefront_mutations(
             content_type: Some("application/x-www-form-urlencoded".to_string()),
             payload,
         };
-        execute_verified_webhook_customer_hooks(state, execution, &webhook, now);
+        execute_verified_webhook_customer_hooks(state, execution, &webhook, now)?;
+        let receipt = state.storefront.apply_payment_webhook(
+            verified.payment_reference.as_str(),
+            verified.event.as_str(),
+            now.as_unix_seconds(),
+        )?;
+        if receipt.needs_paid_event_dispatch {
+            dispatch_paid_order_event(state, &receipt.order, now)?;
+            state
+                .storefront
+                .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())?;
+        }
         return Ok(None);
     }
 
@@ -3076,6 +3163,118 @@ fn execution_query_field<'a>(execution: &'a RequestExecution, name: &str) -> Opt
         .query_params
         .get(name)
         .and_then(|values| values.first().map(String::as_str))
+}
+
+fn run_customer_hook_future<T>(
+    future: impl Future<Output = Result<T, RuntimeServerError>> + Send + 'static,
+) -> Result<T, RuntimeServerError>
+where
+    T: Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if matches!(handle.runtime_flavor(), tokio::runtime::RuntimeFlavor::MultiThread) => {
+            tokio::task::block_in_place(|| handle.block_on(future))
+        }
+        Ok(_) => std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                    surface: "auth",
+                    reason: format!("failed to build runtime bridge for customer hooks: {error}"),
+                })?
+                .block_on(future)
+        })
+        .join()
+        .map_err(|_| RuntimeServerError::CustomerHookFailed {
+            surface: "auth",
+            reason: "customer hook runtime bridge thread panicked".to_string(),
+        })?,
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                surface: "auth",
+                reason: format!("failed to build runtime bridge for customer hooks: {error}"),
+            })?
+            .block_on(future),
+    }
+}
+
+fn customer_hook_auth_backend_error(error: RuntimeServerError) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Unavailable,
+        "auth.live_check.failed",
+        "Runtime could not complete the linked customer auth check.",
+    )
+    .with_detail(error.to_string())
+}
+
+fn parse_customer_capability(value: &str) -> Result<davenda_auth::Capability, BackendError> {
+    davenda_auth::Capability::from_str(value).ok_or_else(|| {
+        BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.capability.invalid",
+            format!("Unknown capability `{value}`."),
+        )
+    })
+}
+
+fn parse_customer_auth_entity(value: &str) -> Result<davenda_auth::Entity, BackendError> {
+    let Some((namespace, id)) = value.split_once(':') else {
+        return Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Invalid auth object `{value}`."),
+        ));
+    };
+    if id.trim().is_empty() {
+        return Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Invalid auth object `{value}`."),
+        ));
+    }
+    match namespace {
+        "tenant" => Ok(davenda_auth::Entity::tenant(id)),
+        "site" => Ok(davenda_auth::Entity::site(id)),
+        "brand" => Ok(davenda_auth::Entity::brand(id)),
+        "storefront" => Ok(davenda_auth::Entity::storefront(id)),
+        "user" => Ok(davenda_auth::Entity::user(id)),
+        "group" => Ok(davenda_auth::Entity::group(id)),
+        "team" => Ok(davenda_auth::Entity::team(id)),
+        "service_account" => Ok(davenda_auth::Entity::service_account(id)),
+        "page" => Ok(davenda_auth::Entity::page(id)),
+        "navigation" => Ok(davenda_auth::Entity::navigation(id)),
+        "product" => Ok(davenda_auth::Entity::product(id)),
+        "collection" => Ok(davenda_auth::Entity::collection(id)),
+        "order" => Ok(davenda_auth::Entity::order(id)),
+        "subscription" => Ok(davenda_auth::Entity::subscription(id)),
+        "membership_tier" => Ok(davenda_auth::Entity::membership_tier(id)),
+        "event" => Ok(davenda_auth::Entity::event(id)),
+        "event_slot" => Ok(davenda_auth::Entity::event_slot(id)),
+        "booking" => Ok(davenda_auth::Entity::booking(id)),
+        "media" => Ok(davenda_auth::Entity::media(id)),
+        "media_library" => Ok(davenda_auth::Entity::media_library(id)),
+        "asset" => Ok(davenda_auth::Entity::asset(id)),
+        "asset_folder" => Ok(davenda_auth::Entity::asset_folder(id)),
+        "theme_asset_bundle" => Ok(davenda_auth::Entity::theme_asset_bundle(id)),
+        "admin_module" => Ok(davenda_auth::Entity::admin_module(id)),
+        _ => Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Unknown auth object namespace `{namespace}`."),
+        )),
+    }
+}
+
+fn customer_hook_auth_subject(principal_id: Option<&str>) -> davenda_auth::DefaultSubject {
+    match principal_id {
+        Some(principal_id) => {
+            davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(principal_id.to_string()))
+        }
+        None => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::any_user()),
+    }
 }
 
 fn decode_hex_signature(signature: &str) -> Option<Vec<u8>> {

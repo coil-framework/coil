@@ -1,7 +1,7 @@
 use crate::{
-    AuditFacade, AuthFacade, BackendError, CmsPageDraft, CmsPublishDecision, CommerceFacade,
-    JobsFacade, OrderDraft, OrderReviewDecision, OutboundHttpFacade, RepositoryFacade,
-    RequestContext, VerifiedWebhook, WebhookHandlingResult,
+    AssetsFacade, AuditFacade, AuthFacade, BackendError, CmsPageDraft, CmsPublishDecision,
+    CommerceFacade, JobsFacade, OrderDraft, OrderReviewDecision, OutboundHttpFacade,
+    RepositoryFacade, RequestContext, VerifiedWebhook, WebhookHandlingResult,
 };
 
 pub trait CheckoutHooks: Send + Sync {
@@ -33,5 +33,17 @@ pub trait VerifiedWebhookHooks: Send + Sync {
         http: &dyn OutboundHttpFacade,
         jobs: &dyn JobsFacade,
         audit: &dyn AuditFacade,
+    ) -> Result<WebhookHandlingResult, BackendError>;
+}
+
+pub trait VerifiedWebhookAssetHooks: Send + Sync {
+    fn handle_verified_webhook(
+        &self,
+        ctx: &RequestContext,
+        webhook: &VerifiedWebhook,
+        http: &dyn OutboundHttpFacade,
+        jobs: &dyn JobsFacade,
+        audit: &dyn AuditFacade,
+        assets: &dyn AssetsFacade,
     ) -> Result<WebhookHandlingResult, BackendError>;
 }

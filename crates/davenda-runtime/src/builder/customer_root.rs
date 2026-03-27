@@ -65,9 +65,23 @@ where
         self
     }
 
+    pub fn register_module<M>(self, module: M) -> Self
+    where
+        M: PlatformModule + 'static,
+    {
+        self.with_module(module)
+    }
+
     pub fn with_boxed_module(mut self, module: Box<dyn PlatformModule>) -> Self {
         self.inner = self.inner.with_boxed_module(module);
         self
+    }
+
+    pub fn register_customer_plugin<C>(self, plugin: C) -> Self
+    where
+        C: CustomerBackendPlugin,
+    {
+        self.with_linked_customer_plugin(plugin)
     }
 
     pub fn with_installed_extension(mut self, extension: InstalledExtension) -> Self {
@@ -126,5 +140,9 @@ where
 
     pub fn build(self) -> Result<RuntimePlan, RuntimeBuildError> {
         self.inner.build()
+    }
+
+    pub fn run_from_env(self) -> Result<(), RuntimeBootstrapError> {
+        self.inner.run_from_env()
     }
 }

@@ -195,6 +195,27 @@ impl OrderAdjustment {
             metadata: MetadataMap::new(),
         }
     }
+
+    pub fn with_metadata(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_metadata_entries<I, K, V>(mut self, entries: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        for (key, value) in entries {
+            self.metadata.insert(key.into(), value.into());
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

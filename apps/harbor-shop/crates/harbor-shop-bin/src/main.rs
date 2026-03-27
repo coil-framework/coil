@@ -82,6 +82,22 @@ fn describe(workspace: &HarborShopWorkspace, config_path: &PathBuf) -> Result<()
             .join(", ")
     );
     println!("linked plugins: {}", summary.linked_plugin_ids.join(", "));
+    for plugin in &summary.linked_plugins {
+        let hooks = plugin
+            .hook_kinds
+            .iter()
+            .map(|kind| kind.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "  - {} ({}) [{}]",
+            plugin.display_name, plugin.id, plugin.version
+        );
+        println!("    hooks: {hooks}");
+        if let Some(documentation_url) = plugin.documentation_url.as_deref() {
+            println!("    docs: {documentation_url}");
+        }
+    }
     println!("server bind: {}", summary.config.server.bind);
     Ok(())
 }
@@ -129,14 +145,20 @@ fn linked_backend(workspace: &HarborShopWorkspace, command: LinkedBackendCommand
 }
 
 fn linked_backend_describe_output() -> String {
-    let descriptor = davenda_all::CustomerBackendPlugin::descriptor(&harbor_shop_backend::plugin());
+    let summary = harbor_shop_backend::linked_plugin_summary();
+    let hooks = summary
+        .hook_kinds
+        .iter()
+        .map(|kind| kind.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
-        "Harbor Shop linked backend\nplugin id: {}\ndisplay name: {}\ndocumentation: {}\nreal demo surfaces:\n- checkout review hooks in the customer runtime\n- verified webhook hooks in the customer runtime\n- direct customer-workspace demo commands via `harbor-shop linked-backend ...`",
-        descriptor.id,
-        descriptor.display_name,
-        descriptor
-            .documentation_url
-            .unwrap_or_else(|| "none".to_string()),
+        "Harbor Shop linked backend\nplugin id: {}\ndisplay name: {}\nversion: {}\ndocumentation: {}\nregistered hooks: {}\nreal demo surfaces:\n- checkout review hooks in the customer runtime\n- verified webhook hooks in the customer runtime\n- direct customer-workspace demo commands via `harbor-shop linked-backend ...`",
+        summary.id,
+        summary.display_name,
+        summary.version,
+        summary.documentation_url.unwrap_or_else(|| "none".to_string()),
+        hooks,
     )
 }
 
@@ -200,6 +222,7 @@ mod tests {
         let output = linked_backend_demo_output(&workspace).unwrap();
 
         assert!(output.contains("Harbor Shop linked backend"), "{output}");
+        assert!(output.contains("registered hooks: checkout, verified_webhook"), "{output}");
         assert!(output.contains("\"segment\": \"harbor-vip\""), "{output}");
         assert!(
             output.contains("\"assigned_queue\": \"ops-manual-review\""),
@@ -224,6 +247,19 @@ mod tests {
             ),
             "{}",
             path.display()
+        );
+    }
+
+    #[test]
+    fn linked_backend_describe_output_reports_registered_hook_summary() {
+        let output = linked_backend_describe_output();
+
+        assert!(output.contains("plugin id: harbor-shop-backend"), "{output}");
+        assert!(output.contains("display name: Harbor Shop Linked Backend"), "{output}");
+        assert!(output.contains("registered hooks: checkout, verified_webhook"), "{output}");
+        assert!(
+            output.contains("documentation: apps/harbor-shop/backend/README.md"),
+            "{output}"
         );
     }
 }

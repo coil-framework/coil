@@ -82,6 +82,7 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
     let app_lib = include_str!("../../../crates/harbor-shop-app/src/lib.rs");
     let bin_main = include_str!("../../../crates/harbor-shop-bin/src/main.rs");
     let compose = include_str!("../../../docker-compose.yml");
+    let repo_compose = include_str!("../../../docker-compose.repo.yml");
 
     assert!(
         app_readme.contains("Harbor Shop As A Customer-Root Workspace"),
@@ -109,7 +110,11 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{app_readme}"
     );
     assert!(
-        app_readme.contains("uses the Davenda repository as the Docker build context"),
+        app_readme.contains("uses `apps/harbor-shop` as the Docker build context"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build"),
         "{app_readme}"
     );
 
@@ -131,6 +136,10 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
     );
     assert!(
         folder_readme.contains("./scripts/prepare-local-dev.sh"),
+        "{folder_readme}"
+    );
+    assert!(
+        folder_readme.contains("docker compose -f docker-compose.yml -f docker-compose.repo.yml --profile backend-example up --build"),
         "{folder_readme}"
     );
     assert!(
@@ -202,11 +211,11 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{compose}"
     );
     assert!(
-        compose.contains("context: ../.."),
+        compose.contains("context: ."),
         "{compose}"
     );
     assert!(
-        compose.contains("dockerfile: apps/harbor-shop/backend/harbor-loyalty-backend/Dockerfile"),
+        compose.contains("dockerfile: backend/harbor-loyalty-backend/Dockerfile"),
         "{compose}"
     );
     assert!(
@@ -216,6 +225,18 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
     assert!(
         compose.contains("HARBOR_BACKEND_WEBHOOK_SECRET"),
         "{compose}"
+    );
+    assert!(
+        repo_compose.contains("context: ../.."),
+        "{repo_compose}"
+    );
+    assert!(
+        repo_compose.contains("apps/harbor-shop/Dockerfile.repo"),
+        "{repo_compose}"
+    );
+    assert!(
+        repo_compose.contains("apps/harbor-shop/backend/harbor-loyalty-backend/Dockerfile.repo"),
+        "{repo_compose}"
     );
 }
 

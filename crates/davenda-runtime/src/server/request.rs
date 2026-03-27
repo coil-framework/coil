@@ -5,18 +5,21 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
+use davenda_config::StorageClass;
 use davenda_customer_sdk::{
-    AuditEntry, AuditFacade, AuthCheckRequest, AuthCheckResult, AuthExplainRequest,
-    AuthExplanation, AuthFacade, BackendError, BackendErrorKind, CmsPageDraft, CmsPublishDecision,
-    CommerceFacade, CommerceProduct, CustomerAppContext as SdkCustomerAppContext, Headers,
-    JobReceipt, JobsFacade, MoneyAmount, OrderDraft, OrderLineDraft, OrderReviewDecision,
-    OutboundHttpFacade, OutboundHttpRequest, OutboundHttpResponse,
-    PrincipalContext as SdkPrincipalContext, PrincipalKind as SdkPrincipalKind, RepositoryFacade,
-    RepositoryQuery, RepositoryRecord, RepositoryRecordSet, RepositoryWrite,
-    RepositoryWriteReceipt, RequestContext as SdkRequestContext, TraceContext as SdkTraceContext,
-    VerifiedWebhook, WebhookHandlingResult,
+    AssetWriteReceipt, AssetWriteRequest, AssetsFacade, AuditEntry, AuditFacade, AuthCheckRequest,
+    AuthCheckResult, AuthExplainRequest, AuthExplanation, AuthFacade, BackendError,
+    BackendErrorKind, CmsPageDraft, CmsPublishDecision, CommerceFacade, CommerceProduct,
+    CustomerAppContext as SdkCustomerAppContext, Headers, JobReceipt, JobsFacade, ManagedAsset,
+    MoneyAmount, OrderDraft, OrderLineDraft, OrderReviewDecision, OutboundHttpFacade,
+    OutboundHttpRequest, OutboundHttpResponse, PrincipalContext as SdkPrincipalContext,
+    PrincipalKind as SdkPrincipalKind, RepositoryFacade, RepositoryQuery, RepositoryRecord,
+    RepositoryRecordSet, RepositoryWrite, RepositoryWriteReceipt,
+    RequestContext as SdkRequestContext, TraceContext as SdkTraceContext, VerifiedWebhook,
+    WebhookHandlingResult,
 };
 use davenda_jobs::JobInstant;
+use davenda_storage::{StoragePlanRequest, execution::StorageExecutionError};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
@@ -1448,6 +1451,78 @@ impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade<'_> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeCustomerAssetsFacade {
+    storage: StorageHost,
+}
+
+impl AssetsFacade for RuntimeCustomerAssetsFacade {
+    fn publish(&self, request: AssetWriteRequest) -> Result<AssetWriteReceipt, BackendError> {
+        let storage_class = parse_customer_storage_class(request.storage_class.as_str())?;
+        let plan = self
+            .storage
+            .plan_single_node_escape_hatch_write(
+                StoragePlanRequest::new(request.logical_path.clone())
+                    .with_storage_class(storage_class),
+            )
+            .map_err(customer_hook_storage_backend_error)?;
+        let receipt = self
+            .storage
+            .execute_write_with_content_type(&plan, request.bytes, request.content_type.as_deref())
+            .map_err(customer_hook_storage_backend_error)?;
+        Ok(AssetWriteReceipt {
+            logical_path: plan.logical_path,
+            storage_path: receipt.path.display().to_string(),
+            bytes_written: receipt.bytes_written,
+        })
+    }
+
+    fn inspect(&self, logical_path: &str) -> Result<Option<ManagedAsset>, BackendError> {
+        let mut deferred_error = None;
+        for storage_class in [
+            StorageClass::PublicUpload,
+            StorageClass::PublicAsset,
+            StorageClass::PrivateShared,
+            StorageClass::LocalOnlySensitive,
+        ] {
+            let Ok(plan) = self.storage.plan_single_node_escape_hatch_write(
+                StoragePlanRequest::new(logical_path).with_storage_class(storage_class),
+            ) else {
+                continue;
+            };
+            match self.storage.execute_read(&plan) {
+                Ok(_) => {
+                    let public_url = match self
+                        .storage
+                        .delivery_location(&plan)
+                        .map_err(customer_hook_storage_backend_error)?
+                    {
+                        davenda_storage::StorageDeliveryLocation::PublicCdn { public_url, .. } => {
+                            Some(public_url)
+                        }
+                        _ => None,
+                    };
+                    return Ok(Some(ManagedAsset {
+                        logical_path: plan.logical_path,
+                        storage_class: customer_storage_class_name(plan.storage_class).to_string(),
+                        public_url,
+                    }));
+                }
+                Err(crate::storage::RuntimeStorageError::Execution(
+                    StorageExecutionError::ReadFailed { .. },
+                )) => continue,
+                Err(error) => {
+                    deferred_error = Some(error);
+                }
+            }
+        }
+        match deferred_error {
+            Some(error) => Err(customer_hook_storage_backend_error(error)),
+            None => Ok(None),
+        }
+    }
+}
+
 fn checkout_order_draft(
     state: &RuntimeServerState,
     execution: &RequestExecution,
@@ -1522,7 +1597,10 @@ fn storefront_checkout_order_metadata(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        metadata.insert("shipping_country".to_string(), shipping_country.to_ascii_uppercase());
+        metadata.insert(
+            "shipping_country".to_string(),
+            shipping_country.to_ascii_uppercase(),
+        );
     }
     if let Some(expedited_requested) = execution_form_field(execution, "expedited_requested")
         .or_else(|| execution_form_field(execution, "expedited"))
@@ -1549,7 +1627,10 @@ fn storefront_membership_tier<'a>(
     snapshot: &'a StorefrontStateSnapshot,
 ) -> Option<&'static str> {
     snapshot.cart.lines.iter().find_map(|line| {
-        let product = state.plan.storefront_catalog.product_by_sku_or_handle(&line.sku)?;
+        let product = state
+            .plan
+            .storefront_catalog
+            .product_by_sku_or_handle(&line.sku)?;
         match product.entitlement_key.as_deref() {
             Some("membership.gold") => Some("gold"),
             Some(entitlement) if entitlement.starts_with("membership.") => Some("standard"),
@@ -1703,7 +1784,9 @@ fn execute_verified_webhook_customer_hooks(
     webhook: &VerifiedWebhook,
     now: BrowserInstant,
 ) -> Result<(), RuntimeServerError> {
-    if state.plan.customer_hooks.verified_webhooks.is_empty() {
+    if state.plan.customer_hooks.verified_webhooks.is_empty()
+        && state.plan.customer_hooks.verified_webhook_assets.is_empty()
+    {
         return Ok(());
     }
 
@@ -1715,6 +1798,15 @@ fn execute_verified_webhook_customer_hooks(
         plan: &state.plan,
         trace_id: execution.trace.request_id.as_str(),
         now,
+    };
+    let assets = RuntimeCustomerAssetsFacade {
+        storage: state.plan.storage_host_with_object_store(
+            state
+                .backends
+                .object_store
+                .as_ref()
+                .and_then(|backend| backend.object_store_client_config()),
+        ),
     };
     let audit = RuntimeRequestAuditFacade {
         plan: &state.plan,
@@ -1778,6 +1870,56 @@ fn execute_verified_webhook_customer_hooks(
                         surface: "verified-webhook",
                         reason: audit_error.to_string(),
                     })?;
+                return Err(RuntimeServerError::CustomerHookFailed {
+                    surface: "verified-webhook",
+                    reason: error.to_string(),
+                });
+            }
+        }
+    }
+
+    for hook in &state.plan.customer_hooks.verified_webhook_assets {
+        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &audit, &assets) {
+            Ok(WebhookHandlingResult::Accepted { detail }) => {
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook.assets",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "accepted",
+                        )
+                        .with_detail(detail.unwrap_or_else(|| {
+                            "customer asset-aware hook accepted verified webhook".to_string()
+                        })),
+                    )
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
+            }
+            Ok(WebhookHandlingResult::Rejected { code, message }) => {
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook.assets",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "rejected",
+                        )
+                        .with_detail(format!("{code}: {message}")),
+                    )
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
+                return Err(RuntimeServerError::CustomerHookRejected {
+                    surface: "verified-webhook",
+                    code,
+                    message,
+                });
+            }
+            Err(error) => {
                 return Err(RuntimeServerError::CustomerHookFailed {
                     surface: "verified-webhook",
                     reason: error.to_string(),
@@ -2698,10 +2840,9 @@ async fn apply_native_storefront_mutations(
             let checkout_metadata = storefront_checkout_order_metadata(
                 state,
                 execution,
-                &state.storefront.snapshot(
-                    session_id,
-                    execution.principal.principal_id.as_deref(),
-                )?,
+                &state
+                    .storefront
+                    .snapshot(session_id, execution.principal.principal_id.as_deref())?,
                 session_id,
                 execution.principal.principal_id.as_deref(),
                 &payment,
@@ -3424,6 +3565,38 @@ fn customer_hook_auth_backend_error(error: RuntimeServerError) -> BackendError {
         "Runtime could not complete the linked customer auth check.",
     )
     .with_detail(error.to_string())
+}
+
+fn customer_hook_storage_backend_error(error: crate::storage::RuntimeStorageError) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Unavailable,
+        "storage.asset.failed",
+        "Runtime could not complete the linked customer asset operation.",
+    )
+    .with_detail(error.to_string())
+}
+
+fn parse_customer_storage_class(value: &str) -> Result<StorageClass, BackendError> {
+    match value {
+        "public_asset" => Ok(StorageClass::PublicAsset),
+        "public_upload" => Ok(StorageClass::PublicUpload),
+        "private_shared" => Ok(StorageClass::PrivateShared),
+        "local_only_sensitive" => Ok(StorageClass::LocalOnlySensitive),
+        other => Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "storage.class.invalid",
+            format!("Unknown storage class `{other}`."),
+        )),
+    }
+}
+
+fn customer_storage_class_name(storage_class: StorageClass) -> &'static str {
+    match storage_class {
+        StorageClass::PublicAsset => "public_asset",
+        StorageClass::PublicUpload => "public_upload",
+        StorageClass::PrivateShared => "private_shared",
+        StorageClass::LocalOnlySensitive => "local_only_sensitive",
+    }
 }
 
 fn parse_customer_capability(value: &str) -> Result<davenda_auth::Capability, BackendError> {

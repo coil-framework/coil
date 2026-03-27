@@ -43,6 +43,14 @@ mod tests {
             self.hook_kinds.push(RegisteredHookKind::VerifiedWebhook);
             Ok(())
         }
+
+        fn register_verified_webhook_asset_hooks(
+            &mut self,
+            _hooks: Arc<dyn VerifiedWebhookAssetHooks>,
+        ) -> Result<(), BackendError> {
+            self.hook_kinds.push(RegisteredHookKind::VerifiedWebhookAssets);
+            Ok(())
+        }
     }
 
     struct ExamplePlugin;
@@ -101,6 +109,20 @@ mod tests {
         }
     }
 
+    impl VerifiedWebhookAssetHooks for ExampleHooks {
+        fn handle_verified_webhook(
+            &self,
+            _ctx: &RequestContext,
+            _webhook: &VerifiedWebhook,
+            _http: &dyn OutboundHttpFacade,
+            _jobs: &dyn JobsFacade,
+            _audit: &dyn AuditFacade,
+            _assets: &dyn AssetsFacade,
+        ) -> Result<WebhookHandlingResult, BackendError> {
+            Ok(WebhookHandlingResult::accepted(None))
+        }
+    }
+
     #[test]
     fn customer_plugin_registers_explicit_hook_kinds() {
         let plugin = ExamplePlugin;
@@ -127,6 +149,21 @@ mod tests {
         assert_eq!(
             OrderReviewDecision::rejected("checkout.policy", "blocked"),
             OrderReviewDecision::Rejected(OrderRejection::new("checkout.policy", "blocked"))
+        );
+    }
+
+    #[test]
+    fn registry_can_record_asset_capable_verified_webhook_hooks() {
+        let hooks = Arc::new(ExampleHooks);
+        let mut registry = RecordingRegistry::default();
+
+        registry
+            .register_verified_webhook_asset_hooks(hooks)
+            .unwrap();
+
+        assert_eq!(
+            registry.hook_kinds,
+            vec![RegisteredHookKind::VerifiedWebhookAssets]
         );
     }
 }

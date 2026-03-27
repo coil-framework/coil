@@ -1,4 +1,6 @@
-use davenda_customer_sdk::{BackendError, CheckoutHooks, CmsHooks, VerifiedWebhookHooks};
+use davenda_customer_sdk::{
+    BackendError, CheckoutHooks, CmsHooks, VerifiedWebhookAssetHooks, VerifiedWebhookHooks,
+};
 use std::fmt;
 use std::sync::Arc;
 
@@ -9,6 +11,7 @@ pub(crate) struct CustomerHookSet {
     pub(crate) checkout: Vec<Arc<dyn CheckoutHooks>>,
     pub(crate) cms: Vec<Arc<dyn CmsHooks>>,
     pub(crate) verified_webhooks: Vec<Arc<dyn VerifiedWebhookHooks>>,
+    pub(crate) verified_webhook_assets: Vec<Arc<dyn VerifiedWebhookAssetHooks>>,
 }
 
 impl fmt::Debug for CustomerHookSet {
@@ -17,6 +20,10 @@ impl fmt::Debug for CustomerHookSet {
             .field("checkout", &self.checkout.len())
             .field("cms", &self.cms.len())
             .field("verified_webhooks", &self.verified_webhooks.len())
+            .field(
+                "verified_webhook_assets",
+                &self.verified_webhook_assets.len(),
+            )
             .finish()
     }
 }
@@ -65,6 +72,16 @@ impl CustomerHookRegistry for RuntimeCustomerHookRegistry {
         self.hooks.verified_webhooks.push(hooks);
         self.registered_hooks
             .push(RegisteredHookKind::VerifiedWebhook);
+        Ok(())
+    }
+
+    fn register_verified_webhook_asset_hooks(
+        &mut self,
+        hooks: Arc<dyn VerifiedWebhookAssetHooks>,
+    ) -> Result<(), BackendError> {
+        self.hooks.verified_webhook_assets.push(hooks);
+        self.registered_hooks
+            .push(RegisteredHookKind::VerifiedWebhookAssets);
         Ok(())
     }
 }

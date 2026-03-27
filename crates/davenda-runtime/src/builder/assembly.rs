@@ -83,6 +83,9 @@ where
         customer_hooks
             .verified_webhooks
             .extend(registered_hooks.verified_webhooks);
+        customer_hooks
+            .verified_webhook_assets
+            .extend(registered_hooks.verified_webhook_assets);
         linked_customer_plugins.push(LinkedCustomerPluginSummary {
             plugin_id,
             display_name: descriptor.display_name,

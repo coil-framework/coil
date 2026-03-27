@@ -427,6 +427,41 @@ impl RuntimePlan {
         )
     }
 
+    pub fn serve_from_env(
+        self,
+        bind_override: Option<String>,
+    ) -> Result<(), RuntimeBootstrapError> {
+        let cookie_secret = required_env_bytes("DAVENDA_COOKIE_SECRET")?;
+        let csrf_secret = required_env_bytes("DAVENDA_CSRF_SECRET")?;
+        let bind = bind_override.unwrap_or_else(|| self.config.server.bind.clone());
+        let server = self.server_host(
+            &crate::server::EnvironmentSecretResolver,
+            &cookie_secret,
+            &csrf_secret,
+        )?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| RuntimeBootstrapError::Serve {
+                reason: error.to_string(),
+            })?;
+
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::bind(&bind)
+                .await
+                .map_err(|error| RuntimeBootstrapError::Bind {
+                    bind: bind.clone(),
+                    reason: error.to_string(),
+                })?;
+            server
+                .serve(listener)
+                .await
+                .map_err(|error| RuntimeBootstrapError::Serve {
+                    reason: error.to_string(),
+                })
+        })
+    }
+
     pub(crate) fn cache_namespace(&self) -> Result<CacheNamespace, CacheModelError> {
         CacheNamespace::new(format!("customer-app:{}", self.config.app.name))
     }
@@ -476,4 +511,11 @@ fn shared_cache_runtime(
     namespace: String,
 ) -> Arc<dyn davenda_cache::DistributedCacheRuntime> {
     davenda_cache::DistributedCacheClient::live_shared_runtime(backend, namespace, PathBuf::new())
+}
+
+fn required_env_bytes(name: &'static str) -> Result<Vec<u8>, RuntimeBootstrapError> {
+    match std::env::var(name) {
+        Ok(value) if !value.is_empty() => Ok(value.into_bytes()),
+        _ => Err(RuntimeBootstrapError::MissingEnvironmentVariable { name }),
+    }
 }

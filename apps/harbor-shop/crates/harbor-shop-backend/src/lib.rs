@@ -3,7 +3,7 @@
 use davenda_customer_sdk::{
     AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade, CustomerBackendPlugin,
     CustomerHookRegistry, CustomerPluginDescriptor, OrderDraft, OrderReviewDecision,
-    OutboundHttpFacade, RequestContext, VerifiedWebhook, VerifiedWebhookHooks,
+    OutboundHttpFacade, RegisteredHookKind, RequestContext, VerifiedWebhook, VerifiedWebhookHooks,
     WebhookHandlingResult,
 };
 use std::sync::Arc;
@@ -16,6 +16,15 @@ pub use harbor_loyalty_backend::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HarborShopBackend {
     inner: harbor_loyalty_backend::HarborCustomerBackend,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarborLinkedPluginSummary {
+    pub id: String,
+    pub display_name: String,
+    pub version: String,
+    pub documentation_url: Option<String>,
+    pub hook_kinds: Vec<RegisteredHookKind>,
 }
 
 pub fn plugin() -> HarborShopBackend {
@@ -35,6 +44,61 @@ impl HarborShopBackend {
 
     pub fn route_crm_contact_update(&self, update: &CrmContactUpdate) -> CrmContactRoute {
         self.inner.route_crm_contact_update(update)
+    }
+}
+
+#[derive(Default)]
+struct RecordingRegistry {
+    hook_kinds: Vec<RegisteredHookKind>,
+}
+
+impl CustomerHookRegistry for RecordingRegistry {
+    fn register_checkout_hooks(
+        &mut self,
+        _hooks: Arc<dyn CheckoutHooks>,
+    ) -> Result<(), BackendError> {
+        self.hook_kinds.push(RegisteredHookKind::Checkout);
+        Ok(())
+    }
+
+    fn register_cms_hooks(
+        &mut self,
+        _hooks: Arc<dyn davenda_customer_sdk::CmsHooks>,
+    ) -> Result<(), BackendError> {
+        self.hook_kinds.push(RegisteredHookKind::CmsPagePublish);
+        Ok(())
+    }
+
+    fn register_verified_webhook_hooks(
+        &mut self,
+        _hooks: Arc<dyn VerifiedWebhookHooks>,
+    ) -> Result<(), BackendError> {
+        self.hook_kinds.push(RegisteredHookKind::VerifiedWebhook);
+        Ok(())
+    }
+
+    fn register_verified_webhook_asset_hooks(
+        &mut self,
+        _hooks: Arc<dyn davenda_customer_sdk::VerifiedWebhookAssetHooks>,
+    ) -> Result<(), BackendError> {
+        self.hook_kinds.push(RegisteredHookKind::VerifiedWebhookAssets);
+        Ok(())
+    }
+}
+
+pub fn linked_plugin_summary() -> HarborLinkedPluginSummary {
+    let plugin = plugin();
+    let descriptor = plugin.descriptor();
+    let mut registry = RecordingRegistry::default();
+    plugin
+        .register(&mut registry)
+        .expect("Harbor linked backend registration should succeed");
+    HarborLinkedPluginSummary {
+        id: descriptor.id,
+        display_name: descriptor.display_name,
+        version: descriptor.version,
+        documentation_url: descriptor.documentation_url,
+        hook_kinds: registry.hook_kinds,
     }
 }
 
@@ -94,5 +158,24 @@ mod tests {
         assert_eq!(descriptor.id, "harbor-shop-backend");
         assert_eq!(descriptor.display_name, "Harbor Shop Linked Backend");
         assert_eq!(descriptor.version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn linked_customer_backend_summary_reports_registered_hook_kinds() {
+        let summary = linked_plugin_summary();
+
+        assert_eq!(summary.id, "harbor-shop-backend");
+        assert_eq!(summary.display_name, "Harbor Shop Linked Backend");
+        assert_eq!(
+            summary.hook_kinds,
+            vec![
+                RegisteredHookKind::Checkout,
+                RegisteredHookKind::VerifiedWebhook,
+            ]
+        );
+        assert_eq!(
+            summary.documentation_url.as_deref(),
+            Some("apps/harbor-shop/backend/README.md")
+        );
     }
 }

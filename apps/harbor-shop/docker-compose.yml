@@ -1,8 +1,8 @@
 services:
   app:
     build:
-      context: ../..
-      dockerfile: apps/harbor-shop/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,8 +39,8 @@ services:
   harbor-backend-example:
     profiles: ["backend-example"]
     build:
-      context: ../..
-      dockerfile: apps/harbor-shop/backend/harbor-loyalty-backend/Dockerfile
+      context: .
+      dockerfile: backend/harbor-loyalty-backend/Dockerfile
     environment:
       HARBOR_BACKEND_BIND: "0.0.0.0:8081"
       HARBOR_BACKEND_BRAND: "Harbor Shop"

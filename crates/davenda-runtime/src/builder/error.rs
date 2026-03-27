@@ -115,3 +115,17 @@ pub enum RuntimeBuildError {
         trigger: JobTriggerKind,
     },
 }
+
+#[derive(Debug, Error)]
+pub enum RuntimeBootstrapError {
+    #[error(transparent)]
+    Build(#[from] RuntimeBuildError),
+    #[error(transparent)]
+    Server(#[from] RuntimeServerError),
+    #[error("required environment variable `{name}` is missing or empty")]
+    MissingEnvironmentVariable { name: &'static str },
+    #[error("failed to bind the customer server to `{bind}`: {reason}")]
+    Bind { bind: String, reason: String },
+    #[error("customer server exited with an error: {reason}")]
+    Serve { reason: String },
+}

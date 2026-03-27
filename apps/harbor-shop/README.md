@@ -88,6 +88,14 @@ The committed workspace is intentionally free of `patch.crates-io` overlays and 
 dependency rewrites. Harbor Shop is checked in as a normal customer project that can resolve
 Davenda from an upstream registry or pinned git source.
 
+The Docker story now follows the same split:
+
+- `docker compose up --build` uses `apps/harbor-shop` as the Docker build context and expects
+  Davenda crates plus `davenda-cli` to resolve like normal upstream dependencies
+- `docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build` is the explicit
+  repo-maintainer override when you are building Harbor Shop against this monorepo before those
+  upstream packages are published
+
 If you are iterating on Harbor Shop from inside the Davenda repository before those upstream crates
 are published, keep that override local and uncommitted. The supported maintainer path is:
 
@@ -150,6 +158,16 @@ cp .env.example .env
 docker compose up --build
 ```
 
+That is the honest customer-project path. It builds Harbor Shop from this folder only.
+
+If you are a Davenda maintainer building Harbor Shop from inside this repository before upstream
+crate publication, use the explicit repo override:
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build
+```
+
 If you also want the optional sidecar adapter for the checked-in Rust backend example running locally:
 
 ```bash
@@ -185,10 +203,11 @@ The `app` container then does four things:
 3. publishes theme assets
 4. starts the Harbor Shop customer binary
 
-The committed Cargo workspace stays upstream-clean, but the checked-in `docker compose up` path is
-an in-repo maintainer convenience. It uses the Davenda repository as the Docker build context and
-generates an uncommitted local Cargo override inside the image so Harbor Shop can build before the
-`davenda-*` crates are published upstream.
+The committed Cargo workspace stays upstream-clean. The default checked-in `docker compose up`
+path now uses only the Harbor Shop folder as its Docker build context. The separate
+`docker-compose.repo.yml` override is the only in-repo maintainer convenience path, and it is
+explicit about using the Davenda monorepo plus local Cargo patching before the `davenda-*` crates
+are published upstream.
 
 If startup stalls or restarts, check:
 
@@ -355,12 +374,30 @@ Examples:
 - a reporting export
 - a background reconciliation job
 
-The Harbor Shop app does not currently ship a ready-made extension package generator inside this
+Harbor Shop now includes a concrete bounded example under:
+
+- `extensions/harbor-waitlist-tools/`
+
+That example is intentionally not installed by default. It exists to demonstrate the chapter 80
+runtime-installed path without pretending Harbor Shop's first-party store logic belongs in WASM.
+
+It shows:
+
+- a bounded admin widget contract
+- a scheduled reconciliation job contract
+- package/config shape for a capability-scoped extension
+- explicit separation from the linked Rust backend path in chapter 96
+
+The Harbor Shop app still does not ship a ready-made extension package generator inside this
 folder. The workflow today is:
 
 1. build a WASM extension package against Davenda’s extension contracts
 2. place the compiled artifact under `apps/harbor-shop/extensions/`
 3. keep the extension scoped to Harbor Shop rather than turning it into an undocumented platform dependency
+4. add it to `app.toml` only when you are ready to pin the final version and artifact checksum
+
+Use the checked-in `extensions/harbor-waitlist-tools/` example as the reference shape for that
+package boundary.
 
 If the customization starts owning shared data, deep transaction logic, or broadly reused product behavior, it is usually the wrong thing to keep in WASM.
 

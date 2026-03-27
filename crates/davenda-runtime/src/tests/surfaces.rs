@@ -214,6 +214,61 @@ fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
 }
 
 #[test]
+fn customer_root_runtime_builder_supports_register_aliases() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let customer_root = unique_temp_template_root("customer-root-runtime-register-aliases");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>customer-root-runtime</main></body>
+</html>"#,
+    );
+
+    let plan = customer_root_runtime(config, DefaultAuthModelPackage::default())
+        .with_customer_root(&customer_root)
+        .register_module(davenda_cms::CmsModule::new())
+        .register_customer_plugin(ExampleCheckoutPlugin)
+        .build()
+        .unwrap();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert!(plan.modules.iter().any(|module| module.name == "cms"));
+    assert_eq!(plan.linked_customer_plugins.len(), 1);
+}
+
+#[test]
+fn runtime_builder_run_from_env_requires_cookie_secret() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let previous_cookie = std::env::var("DAVENDA_COOKIE_SECRET").ok();
+    let previous_csrf = std::env::var("DAVENDA_CSRF_SECRET").ok();
+    unsafe {
+        std::env::remove_var("DAVENDA_COOKIE_SECRET");
+        std::env::remove_var("DAVENDA_CSRF_SECRET");
+    }
+
+    let result = RuntimeBuilder::new(config, DefaultAuthModelPackage::default()).run_from_env();
+
+    match previous_cookie {
+        Some(value) => unsafe { std::env::set_var("DAVENDA_COOKIE_SECRET", value) },
+        None => unsafe { std::env::remove_var("DAVENDA_COOKIE_SECRET") },
+    }
+    match previous_csrf {
+        Some(value) => unsafe { std::env::set_var("DAVENDA_CSRF_SECRET", value) },
+        None => unsafe { std::env::remove_var("DAVENDA_CSRF_SECRET") },
+    }
+
+    assert!(matches!(
+        result,
+        Err(RuntimeBootstrapError::MissingEnvironmentVariable {
+            name: "DAVENDA_COOKIE_SECRET"
+        })
+    ));
+}
+
+#[test]
 fn customer_root_runtime_builder_preserves_runtime_builder_escape_hatch() {
     let config = single_node_valid_config();
     let customer_root = unique_temp_template_root("customer-root-builder-escape-hatch");

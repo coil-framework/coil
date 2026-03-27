@@ -2464,8 +2464,11 @@ impl StorefrontStateStore {
                 order_id,
                 session_id: order_session_id,
                 principal_id: order_principal_id,
-                metadata: parse_storefront_metadata_json(metadata_json)
-                    .map_err(|reason| query_error(format!("failed to decode storefront order metadata: {reason}")))?,
+                metadata: parse_storefront_metadata_json(metadata_json).map_err(|reason| {
+                    query_error(format!(
+                        "failed to decode storefront order metadata: {reason}"
+                    ))
+                })?,
                 status,
                 payment: StorefrontPaymentSnapshot {
                     status: payment_status,
@@ -2768,8 +2771,13 @@ impl StorefrontStateStore {
             order_id,
             session_id,
             principal_id,
-            metadata: parse_storefront_metadata_json(metadata_json)
-                .map_err(|reason| rusqlite::Error::FromSqlConversionFailure(3, Type::Text, Box::new(std::io::Error::other(reason))))?,
+            metadata: parse_storefront_metadata_json(metadata_json).map_err(|reason| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    Type::Text,
+                    Box::new(std::io::Error::other(reason)),
+                )
+            })?,
             status,
             payment: StorefrontPaymentSnapshot {
                 status: payment_status,
@@ -2938,7 +2946,11 @@ fn storefront_metadata_json(
 fn parse_storefront_metadata_json(
     encoded: Option<String>,
 ) -> Result<BTreeMap<String, String>, String> {
-    match encoded.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    match encoded
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(value) => serde_json::from_str(value).map_err(|error| error.to_string()),
         None => Ok(BTreeMap::new()),
     }

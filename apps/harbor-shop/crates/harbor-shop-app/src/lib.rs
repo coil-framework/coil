@@ -9,6 +9,7 @@ use davenda_app::{CustomerAppComposition, CustomerAppManifest, CustomerAppRuntim
 use davenda_config::{Environment, PlatformConfig};
 use davenda_customer_sdk::CustomerBackendPlugin;
 use davenda_runtime::{EnvironmentSecretResolver, HttpServerHost, SecretResolver};
+pub use harbor_shop_backend::HarborLinkedPluginSummary;
 
 #[derive(Debug, Clone)]
 pub struct HarborShopWorkspace {
@@ -30,6 +31,7 @@ pub struct HarborShopSummary {
     pub config_path: PathBuf,
     pub manifest: CustomerAppManifest,
     pub config: PlatformConfig,
+    pub linked_plugins: Vec<HarborLinkedPluginSummary>,
     pub linked_plugin_ids: Vec<String>,
 }
 
@@ -152,12 +154,14 @@ impl HarborShopWorkspace {
             .validate_runtime_config_alignment(&config)
             .context("Harbor Shop manifest/config alignment failed")?;
 
+        let linked_plugins = vec![harbor_shop_backend::linked_plugin_summary()];
         Ok(HarborShopSummary {
             app_root: self.app_root.clone(),
             config_path,
             manifest,
             config,
-            linked_plugin_ids: vec![harbor_shop_backend::plugin().descriptor().id],
+            linked_plugin_ids: linked_plugins.iter().map(|plugin| plugin.id.clone()).collect(),
+            linked_plugins,
         })
     }
 }

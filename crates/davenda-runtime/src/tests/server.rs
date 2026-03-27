@@ -1,14 +1,22 @@
 use super::*;
 use axum::response::Response;
 use davenda_customer_sdk::{
-    AuditFacade, AuthFacade, BackendError, CheckoutHooks, CmsHooks, CmsPageDraft,
-    CmsPublishDecision, CommerceFacade, CustomerPluginDescriptor, JobsFacade, OrderDraft,
-    OrderReviewDecision, OutboundHttpFacade, RepositoryFacade, RepositoryQuery, RepositoryWrite,
-    RequestContext, VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
+    AssetWriteRequest, AssetsFacade, AuditFacade, AuthFacade, BackendError, CheckoutHooks,
+    CmsHooks, CmsPageDraft, CmsPublishDecision, CommerceFacade, CustomerPluginDescriptor,
+    JobsFacade, OrderDraft, OrderReviewDecision, OutboundHttpFacade, RepositoryFacade,
+    RepositoryQuery, RepositoryWrite, RequestContext, VerifiedWebhook, VerifiedWebhookAssetHooks,
+    VerifiedWebhookHooks, WebhookHandlingResult,
 };
+use davenda_config::Environment;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 const LIVE_DATABASE_URL: &str = "postgres://platform:secret@db.internal/platform";
 const LIVE_OBJECT_STORE_SECRET: &str = r#"
@@ -23,6 +31,146 @@ const PAYMENT_WEBHOOK_SECRET: &str = "harbor-shop-webhook-secret";
 const STRIPE_SECRET_KEY: &str = "sk_test_runtime_placeholder";
 
 type HmacSha256 = Hmac<Sha256>;
+
+struct ObjectStoreTestServer {
+    endpoint: String,
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl ObjectStoreTestServer {
+    fn spawn() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let store = Arc::new(Mutex::new(BTreeMap::<String, Vec<u8>>::new()));
+        let stop_thread = Arc::clone(&stop);
+        let store_thread = Arc::clone(&store);
+        let handle = thread::spawn(move || loop {
+            if stop_thread.load(Ordering::SeqCst) {
+                break;
+            }
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let store = Arc::clone(&store_thread);
+                    handle_object_store_request(stream, &store);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("object-store test server failed: {error}"),
+            }
+        });
+        thread::sleep(Duration::from_millis(25));
+
+        Self {
+            endpoint,
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+}
+
+impl Drop for ObjectStoreTestServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn handle_object_store_request(
+    mut stream: std::net::TcpStream,
+    store: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+) {
+    stream.set_nonblocking(false).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).unwrap();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("");
+    let path = parts
+        .next()
+        .unwrap_or("/")
+        .split('?')
+        .next()
+        .unwrap_or("/")
+        .trim_start_matches('/')
+        .trim_start_matches("runtime/")
+        .to_string();
+
+    let mut content_length = 0usize;
+    loop {
+        let mut header = String::new();
+        reader.read_line(&mut header).unwrap();
+        let trimmed = header.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse().unwrap_or(0);
+            }
+        }
+    }
+
+    let mut body = vec![0_u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body).unwrap();
+    }
+
+    let (status, headers, response_body) = match method {
+        "PUT" => {
+            store.lock().unwrap().insert(path, body);
+            (
+                "200 OK",
+                vec![("ETag", "\"davenda-test-etag\"".to_string())],
+                Vec::new(),
+            )
+        }
+        "GET" => match store.lock().unwrap().get(&path) {
+            Some(bytes) => (
+                "200 OK",
+                vec![("Content-Type", "application/octet-stream".to_string())],
+                bytes.clone(),
+            ),
+            None => ("404 Not Found", Vec::new(), Vec::new()),
+        },
+        _ => ("405 Method Not Allowed", Vec::new(), Vec::new()),
+    };
+
+    write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        response_body.len(),
+    )
+    .unwrap();
+    for (name, value) in headers {
+        write!(stream, "{name}: {value}\r\n").unwrap();
+    }
+    write!(stream, "\r\n").unwrap();
+    if !response_body.is_empty() {
+        stream.write_all(&response_body).unwrap();
+    }
+    stream.flush().unwrap();
+}
+
+fn object_store_secret(endpoint: &str) -> String {
+    format!(
+        "endpoint_url = \"{endpoint}\"\n\
+bucket = \"runtime\"\n\
+region = \"eu-west-2\"\n\
+access_key_id = \"runtime-access\"\n\
+secret_access_key = \"runtime-secret\"\n\
+signed_url_ttl_secs = 900\n"
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HostedCheckoutCall {
@@ -219,6 +367,18 @@ struct RecordingVerifiedWebhookPlugin {
     calls: Arc<Mutex<Vec<RecordedVerifiedWebhook>>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedVerifiedWebhookAssetWrite {
+    logical_path: String,
+    storage_class: String,
+    public_url: Option<String>,
+}
+
+#[derive(Debug)]
+struct RecordingVerifiedWebhookAssetPlugin {
+    writes: Arc<Mutex<Vec<RecordedVerifiedWebhookAssetWrite>>>,
+}
+
 impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
     fn handle_verified_webhook(
         &self,
@@ -248,6 +408,49 @@ impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
         Ok(WebhookHandlingResult::accepted(Some(format!(
             "{}:{}",
             receipt.queue, receipt.job_id
+        ))))
+    }
+}
+
+impl VerifiedWebhookAssetHooks for RecordingVerifiedWebhookAssetPlugin {
+    fn handle_verified_webhook(
+        &self,
+        ctx: &RequestContext,
+        webhook: &VerifiedWebhook,
+        _http: &dyn OutboundHttpFacade,
+        _jobs: &dyn JobsFacade,
+        _audit: &dyn AuditFacade,
+        assets: &dyn AssetsFacade,
+    ) -> Result<WebhookHandlingResult, BackendError> {
+        let logical_path = format!(
+            "uploads/customer-hooks/{}/{}.json",
+            ctx.customer_app.app_id, webhook.event
+        );
+        assets.publish(AssetWriteRequest {
+            logical_path: logical_path.clone(),
+            storage_class: "public_upload".to_string(),
+            content_type: Some("application/json".to_string()),
+            bytes: webhook.payload.clone(),
+            metadata: BTreeMap::new(),
+        })?;
+        let asset = assets.inspect(&logical_path)?.ok_or_else(|| {
+            BackendError::new(
+                davenda_customer_sdk::BackendErrorKind::Internal,
+                "asset.inspect.missing",
+                "linked customer asset hook could not inspect the asset it just wrote",
+            )
+        })?;
+        self.writes
+            .lock()
+            .unwrap()
+            .push(RecordedVerifiedWebhookAssetWrite {
+                logical_path: asset.logical_path.clone(),
+                storage_class: asset.storage_class.clone(),
+                public_url: asset.public_url.clone(),
+            });
+        Ok(WebhookHandlingResult::accepted(Some(format!(
+            "asset:{}",
+            asset.logical_path
         ))))
     }
 }
@@ -304,7 +507,25 @@ impl CustomerBackendPlugin for RecordingVerifiedWebhookPlugin {
     }
 }
 
-fn live_backend_secret_resolver() -> StaticSecretResolver {
+impl CustomerBackendPlugin for RecordingVerifiedWebhookAssetPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-verified-webhook-assets",
+            "Harbor Shop Verified Webhook Assets",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_verified_webhook_asset_hooks(Arc::new(Self {
+            writes: self.writes.clone(),
+        }))
+    }
+}
+
+fn live_backend_secret_resolver_with_object_store_secret(
+    object_store_secret: &str,
+) -> StaticSecretResolver {
     StaticSecretResolver::new()
         .with_secret(
             davenda_config::SecretRef::Env {
@@ -317,13 +538,19 @@ fn live_backend_secret_resolver() -> StaticSecretResolver {
             davenda_config::SecretRef::Env {
                 var: "OBJECT_STORE_URL".to_string(),
             },
-            LIVE_OBJECT_STORE_SECRET,
+            object_store_secret,
         )
         .unwrap()
 }
 
-fn live_backend_secret_resolver_with_payment_webhook() -> StaticSecretResolver {
-    live_backend_secret_resolver()
+fn live_backend_secret_resolver() -> StaticSecretResolver {
+    live_backend_secret_resolver_with_object_store_secret(LIVE_OBJECT_STORE_SECRET)
+}
+
+fn live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
+    object_store_secret: &str,
+) -> StaticSecretResolver {
+    live_backend_secret_resolver_with_object_store_secret(object_store_secret)
         .with_secret(
             davenda_config::SecretRef::Env {
                 var: "PAYMENT_WEBHOOK_SECRET".to_string(),
@@ -345,6 +572,12 @@ fn live_backend_secret_resolver_with_payment_webhook() -> StaticSecretResolver {
             STRIPE_SECRET_KEY,
         )
         .unwrap()
+}
+
+fn live_backend_secret_resolver_with_payment_webhook() -> StaticSecretResolver {
+    live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
+        LIVE_OBJECT_STORE_SECRET,
+    )
 }
 
 fn live_backend_secret_resolver_with_placeholder_stripe() -> StaticSecretResolver {
@@ -5854,6 +6087,231 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
         recorded[0].payload.contains("\"provider\":[\"stripe\"]"),
         "{}",
         recorded[0].payload
+    );
+}
+
+#[tokio::test]
+async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payment_webhook_flow() {
+    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-assets");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let object_store_server = ObjectStoreTestServer::spawn();
+    let object_store_secret = object_store_secret(object_store_server.endpoint());
+    config.app.environment = Environment::Development;
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let writes = Arc::new(Mutex::new(Vec::new()));
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RecordingVerifiedWebhookAssetPlugin {
+            writes: writes.clone(),
+        })
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_module(AdminModule::new())
+        .with_module(OpsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver =
+        live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
+            &object_store_secret,
+        );
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_verified_hook_assets",
+    ));
+    let server = plan
+        .server_host_with_checkout_client(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+            checkout_client.clone(),
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-verified-hook-assets";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "harbor-cap")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&checkout_start, "location"), "/checkout");
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("payment_last4", "4242")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&complete_response, "location"),
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_verified_hook_assets"
+    );
+    assert_eq!(checkout_client.take_calls().len(), 1);
+
+    let webhook_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("provider", "stripe")
+        .append_pair("event", "payment.captured")
+        .append_pair("payment_reference", "PAY-50001")
+        .append_pair(
+            "signature",
+            &payment_webhook_signature("stripe", "payment.captured", "PAY-50001"),
+        )
+        .finish();
+    let webhook_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(webhook_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let webhook_status = webhook_response.status();
+    let webhook_response_body = String::from_utf8(
+        to_bytes(webhook_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(webhook_status, StatusCode::OK, "{webhook_response_body}");
+
+    let writes = writes.lock().unwrap().clone();
+    assert_eq!(writes.len(), 1, "{writes:?}");
+    assert_eq!(writes[0].storage_class, "public_upload");
+    assert!(
+        writes[0].logical_path.contains("uploads/customer-hooks/"),
+        "{writes:?}"
+    );
+    assert!(
+        writes[0]
+            .public_url
+            .as_deref()
+            .is_some_and(|url| url.contains("uploads/customer-hooks/")),
+        "{writes:?}"
     );
 }
 

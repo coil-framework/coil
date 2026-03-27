@@ -386,6 +386,7 @@ fn registered_hook_label(kind: &RegisteredHookKind) -> &'static str {
         RegisteredHookKind::Checkout => "checkout",
         RegisteredHookKind::CmsPagePublish => "cms-page-publish",
         RegisteredHookKind::VerifiedWebhook => "verified-webhook",
+        RegisteredHookKind::VerifiedWebhookAssets => "verified-webhook-assets",
     }
 }
 
@@ -1384,6 +1385,7 @@ fn customer_order_review(
     };
     let order = customer_order_draft(order, &plan.storefront_catalog);
     let mut adjustment_messages = Vec::new();
+    let mut adjustment_metadata = BTreeMap::new();
 
     for hook in &plan.customer_hooks.checkout {
         match hook
@@ -1393,6 +1395,7 @@ fn customer_order_review(
             OrderReviewDecision::Approved => {}
             OrderReviewDecision::Adjusted(adjustment) => {
                 adjustment_messages.push(adjustment.reason);
+                adjustment_metadata.extend(adjustment.metadata);
             }
             OrderReviewDecision::Rejected(rejection) => {
                 return Ok(Some(CustomerOrderReviewOutcome {
@@ -1406,9 +1409,10 @@ fn customer_order_review(
     let decision = if adjustment_messages.is_empty() {
         OrderReviewDecision::Approved
     } else {
-        OrderReviewDecision::Adjusted(davenda_customer_sdk::OrderAdjustment::new(
-            adjustment_messages.join("; "),
-        ))
+        OrderReviewDecision::Adjusted(
+            davenda_customer_sdk::OrderAdjustment::new(adjustment_messages.join("; "))
+                .with_metadata_entries(adjustment_metadata),
+        )
     };
 
     Ok(Some(CustomerOrderReviewOutcome {
@@ -1443,15 +1447,17 @@ fn customer_order_draft(
     metadata
         .entry("session_id".to_string())
         .or_insert_with(|| order.session_id.clone());
-    metadata.entry("payment_method".to_string()).or_insert_with(|| {
-        order
-            .payment
-            .method
-            .clone()
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase()
-    });
+    metadata
+        .entry("payment_method".to_string())
+        .or_insert_with(|| {
+            order
+                .payment
+                .method
+                .clone()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+        });
     if let Some(checkout_email) = order.payment.checkout_email.as_ref() {
         metadata
             .entry("checkout_email".to_string())
@@ -1621,6 +1627,18 @@ fn customer_order_review_model(
         .iter()
         .map(|note| RenderModel::new().with_value("text", RenderValue::text(note.clone())))
         .collect::<Result<Vec<_>, _>>()?;
+    let adjustment_metadata = match &review.decision {
+        OrderReviewDecision::Adjusted(adjustment) => adjustment
+            .metadata
+            .iter()
+            .map(|(key, value)| {
+                RenderModel::new()
+                    .with_value("key", RenderValue::text(key.clone()))?
+                    .with_value("value", RenderValue::text(value.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => Vec::new(),
+    };
     let base = match review.decision {
         OrderReviewDecision::Approved => RenderModel::new()
             .with_value("status", RenderValue::text("Approved"))?
@@ -1645,12 +1663,42 @@ fn customer_order_review_model(
             .with_value("status", RenderValue::text("Adjusted"))?
             .with_value("summary", RenderValue::text(adjustment.reason.clone()))?
             .with_value("code", RenderValue::text("adjusted"))?
+            .with_value(
+                "assignedQueue",
+                RenderValue::text(
+                    adjustment
+                        .metadata
+                        .get("assigned_queue")
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+            )?
+            .with_value(
+                "serviceLevel",
+                RenderValue::text(
+                    adjustment
+                        .metadata
+                        .get("service_level")
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+            )?
+            .with_bool(
+                "hasAssignedQueue",
+                adjustment.metadata.contains_key("assigned_queue"),
+            )?
+            .with_bool(
+                "hasServiceLevel",
+                adjustment.metadata.contains_key("service_level"),
+            )?
             .with_bool("isApproved", false)?
             .with_bool("isRejected", false)?
             .with_bool("isAdjusted", true)?,
     };
     base.with_bool("hasNotes", !notes.is_empty())?
+        .with_bool("hasMetadata", !adjustment_metadata.is_empty())?
         .with_value("noteCount", RenderValue::text(notes.len().to_string()))?
+        .with_list("metadataEntries", adjustment_metadata)?
         .with_list("notes", notes)
 }
 
@@ -4225,6 +4273,12 @@ cdn_base_url = "https://cdn.example.com"
     #[derive(Debug)]
     struct MetadataReplayCheckoutHooks;
 
+    #[derive(Debug)]
+    struct AdjustedMetadataCheckoutPlugin;
+
+    #[derive(Debug)]
+    struct AdjustedMetadataCheckoutHooks;
+
     impl CheckoutHooks for WrongOrderNoteCheckoutHooks {
         fn review_order(
             &self,
@@ -4279,6 +4333,31 @@ cdn_base_url = "https://cdn.example.com"
         }
     }
 
+    impl CheckoutHooks for AdjustedMetadataCheckoutHooks {
+        fn review_order(
+            &self,
+            _ctx: &RequestContext,
+            _order: &OrderDraft,
+            _commerce: &dyn CommerceFacade,
+            _auth: &dyn AuthFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<OrderReviewDecision, BackendError> {
+            Ok(OrderReviewDecision::Adjusted(
+                davenda_customer_sdk::OrderAdjustment::new(
+                    "Gold high-value order: route to concierge packing and same-day follow-up.",
+                )
+                .with_metadata_entries([
+                    ("assigned_queue", "vip-fulfilment"),
+                    ("service_level", "priority"),
+                    (
+                        "tags",
+                        "customer-app:harbor-shop,queue:vip-fulfilment,service-level:priority",
+                    ),
+                ]),
+            ))
+        }
+    }
+
     impl CustomerBackendPlugin for MetadataReplayCheckoutPlugin {
         fn descriptor(&self) -> CustomerPluginDescriptor {
             CustomerPluginDescriptor::new(
@@ -4290,6 +4369,20 @@ cdn_base_url = "https://cdn.example.com"
 
         fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
             registry.register_checkout_hooks(Arc::new(MetadataReplayCheckoutHooks))
+        }
+    }
+
+    impl CustomerBackendPlugin for AdjustedMetadataCheckoutPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "render-order-adjusted-metadata",
+                "Render Order Adjusted Metadata",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_checkout_hooks(Arc::new(AdjustedMetadataCheckoutHooks))
         }
     }
 
@@ -4743,6 +4836,60 @@ cdn_base_url = "https://cdn.example.com"
             .expect("metadata-aware review should exist");
 
         assert!(matches!(review.decision, OrderReviewDecision::Approved));
+    }
+
+    #[test]
+    fn customer_order_review_surfaces_adjustment_metadata() {
+        let plan = render_test_plan_with_customer_plugin(AdjustedMetadataCheckoutPlugin);
+        let review = customer_order_review(&plan, &sample_storefront_order_snapshot(), None, None)
+            .unwrap()
+            .expect("adjusted review should exist");
+        let review_model = customer_order_review_model(review).unwrap();
+        let html = TemplateRuntime::new({
+            let namespace = TemplateNamespace::new("customer-app").unwrap();
+            let mut registry = TemplateRegistry::new();
+            registry
+                .register(
+                    TemplateSourceParser::new()
+                        .parse_layout(
+                            namespace.clone(),
+                            TemplateName::new("page").unwrap(),
+                            r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <p dv:text="${review.assignedQueue}">vip-fulfilment</p>
+    <p dv:text="${review.serviceLevel}">priority</p>
+    <ul dv:if="${review.hasMetadata}">
+      <li dv:each="entry : ${review.metadataEntries}">
+        <span dv:text="${entry.key}">assigned_queue</span>
+        <span>=</span>
+        <span dv:text="${entry.value}">vip-fulfilment</span>
+      </li>
+    </ul>
+  </body>
+</html>"#,
+                        )
+                        .unwrap(),
+                )
+                .unwrap();
+            registry
+        })
+        .render_document(
+            &[TemplateNamespace::new("customer-app").unwrap()],
+            DocumentRenderRequest::new(
+                TemplateSelector::new(TemplateName::new("page").unwrap()),
+                RenderModel::new()
+                    .with_object("review", review_model)
+                    .unwrap(),
+            ),
+        )
+        .unwrap()
+        .html;
+
+        assert!(html.contains("vip-fulfilment"), "{html}");
+        assert!(html.contains("priority"), "{html}");
+        assert!(html.contains("assigned_queue"), "{html}");
+        assert!(html.contains("service_level"), "{html}");
     }
 }
 #[derive(Clone)]

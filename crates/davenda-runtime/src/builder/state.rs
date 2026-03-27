@@ -1,6 +1,7 @@
 use super::*;
 use crate::builder::assembly;
 use davenda_template::TemplateDefinition;
+use std::env;
 use std::path::PathBuf;
 
 pub type Builder<P> = RuntimeBuilder<P>;
@@ -166,6 +167,10 @@ where
 
     pub fn build(self) -> Result<RuntimePlan, RuntimeBuildError> {
         assembly::build_runtime_plan(self)
+    }
+
+    pub fn run_from_env(self) -> Result<(), RuntimeBootstrapError> {
+        self.build()?.serve_from_env(env::var("DAVENDA_BIND").ok())
     }
 
     pub(crate) fn into_parts(self) -> RuntimeBuilderParts<P> {

@@ -73,8 +73,16 @@ From `apps/harbor-shop`:
 docker compose --profile backend-example up --build
 ```
 
-That starts the normal Harbor Shop stack plus the optional sidecar adapter on
+That uses Harbor Shop itself as the Docker build context and starts the normal Harbor Shop stack
+plus the optional sidecar adapter on
 `http://localhost:8081`.
+
+If you are building Harbor Shop against the live Davenda monorepo before upstream publication, use
+the explicit repo override instead:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.repo.yml --profile backend-example up --build
+```
 
 Useful routes:
 

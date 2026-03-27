@@ -136,6 +136,23 @@
               Decision code
               <code dv:text="${selectedOrder.customerReview.code}">approved</code>
             </p>
+            <p dv:if="${selectedOrder.customerReview.hasAssignedQueue}">
+              Assigned queue
+              <strong dv:text="${selectedOrder.customerReview.assignedQueue}">vip-fulfilment</strong>
+            </p>
+            <p dv:if="${selectedOrder.customerReview.hasServiceLevel}">
+              Service level
+              <strong dv:text="${selectedOrder.customerReview.serviceLevel}">priority</strong>
+            </p>
+            <div dv:if="${selectedOrder.customerReview.hasMetadata}">
+              <p>Adjustment metadata</p>
+              <ul>
+                <li dv:each="entry : ${selectedOrder.customerReview.metadataEntries}">
+                  <code dv:text="${entry.key}">assigned_queue</code>:
+                  <span dv:text="${entry.value}">vip-fulfilment</span>
+                </li>
+              </ul>
+            </div>
           </article>
         </div>
       </section>

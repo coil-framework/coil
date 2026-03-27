@@ -1,0 +1,20 @@
+schema_version = 1
+
+[[fields]]
+key = "partner_crm_integration"
+type = "string"
+required = true
+description = "Named outbound HTTP mapping granted by the host runtime."
+
+[[fields]]
+key = "report_bucket_prefix"
+type = "string"
+required = true
+description = "Storage prefix for bounded waitlist reconciliation exports."
+
+[[fields]]
+key = "show_exception_only"
+type = "boolean"
+required = false
+default = true
+description = "Whether the admin widget defaults to exception rows only."

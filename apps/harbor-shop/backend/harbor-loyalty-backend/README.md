@@ -104,6 +104,14 @@ cd apps/harbor-shop
 docker compose --profile backend-example up --build
 ```
 
+If you are building Harbor Shop against the live Davenda monorepo before upstream publication, use
+the explicit repo override:
+
+```bash
+cd apps/harbor-shop
+docker compose -f docker-compose.yml -f docker-compose.repo.yml --profile backend-example up --build
+```
+
 Useful routes:
 
 - `GET http://localhost:8081/`

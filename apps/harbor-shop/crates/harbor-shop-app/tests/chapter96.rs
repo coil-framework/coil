@@ -1,4 +1,89 @@
 use davenda_all::CustomerBackendPlugin;
+use davenda_customer_sdk::RegisteredHookKind;
+use harbor_shop_app::HarborShopWorkspace;
+use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+}
+
+fn set_env_var(key: &'static str, value: &str) -> EnvVarGuard {
+    let previous = std::env::var_os(key);
+    unsafe {
+        std::env::set_var(key, value);
+    }
+    EnvVarGuard { key, previous }
+}
+
+struct TempAppRoot {
+    path: PathBuf,
+}
+
+impl Drop for TempAppRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn unique_temp_app_root(label: &str) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!("harbor-shop-{label}-{unique}"))
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if source.is_dir() {
+            copy_dir_recursive(&source, &target);
+        } else {
+            fs::copy(&source, &target).unwrap();
+        }
+    }
+}
+
+fn temp_workspace_without_theme_assets() -> TempAppRoot {
+    let source_root = HarborShopWorkspace::default().unwrap().app_root().to_path_buf();
+    let temp_root = unique_temp_app_root("chapter96");
+    fs::create_dir_all(&temp_root).unwrap();
+    copy_dir_recursive(&source_root.join("auth"), &temp_root.join("auth"));
+    copy_dir_recursive(&source_root.join("templates"), &temp_root.join("templates"));
+    if source_root.join("theme").is_dir() {
+        copy_dir_recursive(&source_root.join("theme"), &temp_root.join("theme"));
+    }
+    fs::copy(
+        source_root.join("platform.dev.toml"),
+        temp_root.join("platform.dev.toml"),
+    )
+    .unwrap();
+    let app_manifest = fs::read_to_string(source_root.join("app.toml")).unwrap();
+    let app_manifest = app_manifest.replace(
+        "asset_roots = [\"theme/assets\"]",
+        "asset_roots = []",
+    );
+    fs::write(temp_root.join("app.toml"), app_manifest).unwrap();
+    TempAppRoot { path: temp_root }
+}
 
 #[test]
 fn linked_customer_backend_descriptor_stays_stable() {
@@ -38,6 +123,14 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         "{app_readme}"
     );
     assert!(
+        app_readme.contains("docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("uses only the Harbor Shop folder as its Docker build context"),
+        "{app_readme}"
+    );
+    assert!(
         app_readme.contains("free of `patch.crates-io` overlays"),
         "{app_readme}"
     );
@@ -51,4 +144,58 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
     );
     assert!(!cargo_toml.contains("[patch.crates-io]"), "{cargo_toml}");
     assert!(cargo_toml.contains("davenda-all = \"0.1.0\""), "{cargo_toml}");
+}
+
+#[test]
+fn workspace_summary_reports_real_linked_plugin_details() {
+    let workspace = HarborShopWorkspace::default().unwrap();
+    let summary = workspace.describe("platform.dev.toml").unwrap();
+
+    assert_eq!(summary.linked_plugin_ids, vec!["harbor-shop-backend"]);
+    assert_eq!(summary.linked_plugins.len(), 1);
+    let plugin = &summary.linked_plugins[0];
+    assert_eq!(plugin.id, "harbor-shop-backend");
+    assert_eq!(plugin.display_name, "Harbor Shop Linked Backend");
+    assert_eq!(
+        plugin.documentation_url.as_deref(),
+        Some("apps/harbor-shop/backend/README.md")
+    );
+    assert_eq!(
+        plugin.hook_kinds,
+        vec![
+            RegisteredHookKind::Checkout,
+            RegisteredHookKind::VerifiedWebhook,
+        ]
+    );
+}
+
+#[test]
+fn workspace_bootstrap_registers_the_linked_backend_into_the_runtime_plan() {
+    let _object_store = set_env_var(
+        "OBJECT_STORE_URL",
+        r#"
+endpoint_url = "https://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#,
+    );
+    let temp_root = temp_workspace_without_theme_assets();
+    let workspace = HarborShopWorkspace::at(&temp_root.path).unwrap();
+    let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
+
+    assert_eq!(bootstrap.linked_plugin_ids(), vec!["harbor-shop-backend"]);
+    assert_eq!(bootstrap.runtime_plan.runtime.linked_customer_plugins.len(), 1);
+    let plugin = &bootstrap.runtime_plan.runtime.linked_customer_plugins[0];
+    assert_eq!(plugin.plugin_id, "harbor-shop-backend");
+    assert_eq!(plugin.display_name, "Harbor Shop Linked Backend");
+    assert_eq!(
+        plugin.registered_hooks,
+        vec![
+            RegisteredHookKind::Checkout,
+            RegisteredHookKind::VerifiedWebhook,
+        ]
+    );
 }

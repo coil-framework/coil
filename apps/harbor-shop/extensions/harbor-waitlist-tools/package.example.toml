@@ -1,0 +1,36 @@
+# Checked-in reference descriptor for Harbor Shop's bounded WASM path.
+# This file documents package shape and intended grants; it is not yet a loader input.
+
+publisher = "harbor-marketplace"
+artifact = "extensions/harbor-waitlist-tools/harbor-waitlist-tools.wasm"
+artifact_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+[manifest]
+id = "harbor-waitlist-tools"
+display_name = "Harbor Waitlist Tools"
+version = "0.1.0"
+host_api_version = "1.0.0"
+default_point_kind = "admin-widget"
+
+[[handlers]]
+id = "events.waitlist.pressure"
+export = "exports.waitlist_pressure_widget"
+point = "admin-widget"
+target = "events.waitlist.pressure"
+description = "Bounded admin widget showing partner waitlist pressure and exception counts."
+grants = [
+  "auth-check",
+  "data-read:events.waitlist",
+]
+
+[[handlers]]
+id = "events.waitlist.reconcile"
+export = "exports.reconcile_waitlist"
+point = "scheduled-job"
+target = "0 */2 * * *"
+description = "Bounded scheduled reconciliation job for partner waitlist sync."
+grants = [
+  "outbound-http:partner_crm",
+  "job-enqueue",
+  "storage-write:ops/reports",
+]

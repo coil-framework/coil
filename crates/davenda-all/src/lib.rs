@@ -7,6 +7,7 @@ use davenda_events::EventsModule;
 use davenda_media::MediaModule;
 use davenda_memberships::MembershipsModule;
 use davenda_ops::OpsModule;
+use davenda_runtime::RuntimeBuilder;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,8 +30,6 @@ pub use davenda_events as events;
 pub use davenda_media as media;
 pub use davenda_memberships as memberships;
 pub use davenda_ops as ops;
-pub use davenda_runtime as runtime;
-pub use davenda_runtime::{RuntimeBuildError, RuntimeBuilder};
 
 #[derive(Debug, Error)]
 pub enum DavendaAllError {
@@ -42,14 +41,10 @@ pub enum DavendaAllError {
     ManifestLoad { path: PathBuf, reason: String },
     #[error("platform config `{path}` could not be loaded: {reason}")]
     ConfigLoad { path: PathBuf, reason: String },
-    #[error("required environment variable `{name}` is missing or empty")]
-    MissingEnvironmentVariable { name: &'static str },
     #[error("customer runtime build failed: {reason}")]
     RuntimeBuild { reason: String },
-    #[error("failed to bind the customer server to `{bind}`: {reason}")]
-    Bind { bind: String, reason: String },
-    #[error("customer server exited with an error: {reason}")]
-    Serve { reason: String },
+    #[error("customer runtime bootstrap failed: {reason}")]
+    Bootstrap { reason: String },
 }
 
 pub const OFFICIAL_MODULE_NAMES: &[&str] = &[
@@ -178,40 +173,13 @@ impl DavendaAllBuilder {
                 reason: error.to_string(),
             })?;
 
-        let cookie_secret = required_env_bytes("DAVENDA_COOKIE_SECRET")?;
-        let csrf_secret = required_env_bytes("DAVENDA_CSRF_SECRET")?;
-        let bind = bind_override.unwrap_or_else(|| runtime_plan.runtime.config.server.bind.clone());
-        let server = runtime_plan
+        runtime_plan
             .runtime
-            .server_host(
-                &davenda_runtime::EnvironmentSecretResolver,
-                &cookie_secret,
-                &csrf_secret,
-            )
-            .map_err(|error| DavendaAllError::RuntimeBuild {
+            .serve_from_env(bind_override)
+            .map_err(|error| DavendaAllError::Bootstrap {
                 reason: error.to_string(),
             })?;
-
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| DavendaAllError::Serve {
-                reason: error.to_string(),
-            })?;
-        runtime.block_on(async move {
-            let listener = tokio::net::TcpListener::bind(&bind)
-                .await
-                .map_err(|error| DavendaAllError::Bind {
-                    bind: bind.clone(),
-                    reason: error.to_string(),
-                })?;
-            server
-                .serve(listener)
-                .await
-                .map_err(|error| DavendaAllError::Serve {
-                    reason: error.to_string(),
-                })
-        })
+        Ok(())
     }
 }
 
@@ -269,13 +237,6 @@ fn discover_default_config_path(app_root: &Path) -> Option<PathBuf> {
             .map(|path| app_root.join(path))
             .find(|path| path.is_file())
         })
-}
-
-fn required_env_bytes(name: &'static str) -> Result<Vec<u8>, DavendaAllError> {
-    match env::var(name) {
-        Ok(value) if !value.is_empty() => Ok(value.into_bytes()),
-        _ => Err(DavendaAllError::MissingEnvironmentVariable { name }),
-    }
 }
 
 pub fn official_modules_from_config(
@@ -410,7 +371,7 @@ cdn_base_url = "https://cdn.example.com"
     fn builder_links_full_official_distribution() {
         let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
 
-        let plan = with_official_modules(RuntimeBuilder::new(
+        let plan = with_official_modules(davenda_runtime::RuntimeBuilder::new(
             config,
             DefaultAuthModelPackage::default(),
         ))

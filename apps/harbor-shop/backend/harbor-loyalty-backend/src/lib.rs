@@ -23,8 +23,8 @@ mod http;
 use davenda_customer_sdk::{
     AuditEntry, AuditFacade, AuthFacade, BackendError, BackendErrorKind, CheckoutHooks,
     CommerceFacade, CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor,
-    JobsFacade, OrderDraft, OrderReviewDecision, RegisteredHookKind, RequestContext,
-    VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
+    JobsFacade, OrderAdjustment, OrderDraft, OrderReviewDecision, RegisteredHookKind,
+    RequestContext, VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
 };
 pub use http::{BackendConfig, build_router};
 use std::sync::Arc;
@@ -107,10 +107,14 @@ impl CheckoutHooks for HarborCustomerBackend {
         )?;
 
         if review.review_required {
-            Ok(OrderReviewDecision::adjusted(format!(
-                "{}:{}",
-                review.assigned_queue, review.service_level
-            )))
+            Ok(OrderReviewDecision::Adjusted(
+                OrderAdjustment::new(review.operator_note.clone()).with_metadata_entries([
+                    ("assigned_queue", review.assigned_queue.clone()),
+                    ("service_level", review.service_level.clone()),
+                    ("review_required", "true".to_string()),
+                    ("tags", review.tags.join(",")),
+                ]),
+            ))
         } else {
             Ok(OrderReviewDecision::approved())
         }
@@ -808,7 +812,20 @@ mod tests {
 
         assert_eq!(
             decision,
-            OrderReviewDecision::adjusted("ops-manual-review:manual-clearance")
+            OrderReviewDecision::Adjusted(
+                OrderAdjustment::new(
+                    "Check customs-safe packing and confirm the carrier lane before capture."
+                )
+                .with_metadata_entries([
+                    ("assigned_queue", "ops-manual-review"),
+                    ("service_level", "manual-clearance"),
+                    ("review_required", "true"),
+                    (
+                        "tags",
+                        "customer-app:harbor-shop,queue:ops-manual-review,service-level:manual-clearance,ops:manual-review,shipping:international"
+                    ),
+                ])
+            )
         );
         assert_eq!(
             audit.actions.lock().unwrap().as_slice(),

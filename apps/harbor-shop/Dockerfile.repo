@@ -8,20 +8,27 @@ ENV CARGO_TARGET_DIR=/tmp/cargo-target
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        git \
         libssl-dev \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-ARG DAVENDA_CLI_VERSION=0.1.0
+RUN git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/" \
+    && git config --global --add url."https://github.com/".insteadOf "git@github.com:" \
+    && git config --global --add url."https://github.com/worka-ai/".insteadOf "ssh://git@github.com/worka-ai/"
 
 COPY . .
+
+RUN sh apps/harbor-shop/scripts/prepare-local-dev.sh
+
+WORKDIR /workspace/apps/harbor-shop
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/tmp/cargo-target \
-    cargo build --locked -p harbor-shop --release \
-    && cargo install --locked --root /tmp/davenda-cli "davenda-cli@${DAVENDA_CLI_VERSION}" \
-    && cp /tmp/davenda-cli/bin/platform /workspace/platform \
+    cargo build --locked --manifest-path /workspace/Cargo.toml -p davenda-cli --release \
+    && cargo build --locked -p harbor-shop --release \
+    && cp /tmp/cargo-target/release/platform /workspace/platform \
     && cp /tmp/cargo-target/release/harbor-shop /workspace/harbor-shop
 
 FROM debian:bookworm-slim
@@ -34,12 +41,12 @@ RUN apt-get update \
         postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/apps/harbor-shop
 
 COPY --from=builder /workspace/platform /usr/local/bin/platform
 COPY --from=builder /workspace/harbor-shop /usr/local/bin/harbor-shop
-COPY --from=builder /workspace /app
-COPY docker/entrypoint.sh /usr/local/bin/harbor-shop-entrypoint
+COPY --from=builder /workspace/apps /app/apps
+COPY apps/harbor-shop/docker/entrypoint.sh /usr/local/bin/harbor-shop-entrypoint
 
 RUN chmod +x /usr/local/bin/harbor-shop-entrypoint
 

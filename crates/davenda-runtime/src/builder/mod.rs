@@ -14,5 +14,5 @@ pub use customer_plugins::{
     CustomerBackendPlugin, CustomerHookRegistry, LinkedCustomerPluginSummary, RegisteredHookKind,
 };
 pub use customer_root::{CustomerRootRuntimeBuilder, customer_root_runtime};
-pub use error::RuntimeBuildError;
+pub use error::{RuntimeBootstrapError, RuntimeBuildError};
 pub use state::{Builder, RuntimeBuilder};

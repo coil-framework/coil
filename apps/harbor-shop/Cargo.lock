@@ -1560,6 +1560,7 @@ name = "harbor-shop-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "davenda-all",
  "davenda-app",
  "davenda-auth",
@@ -1567,8 +1568,14 @@ dependencies = [
  "davenda-customer-sdk",
  "davenda-data",
  "davenda-runtime",
+ "davenda-wasm",
  "harbor-shop-backend",
+ "hex",
+ "serde",
+ "sha2",
  "tokio",
+ "toml",
+ "wat",
 ]
 
 [[package]]

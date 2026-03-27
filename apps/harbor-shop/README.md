@@ -384,26 +384,26 @@ Harbor Shop now includes a concrete bounded example under:
 
 - `extensions/harbor-waitlist-tools/`
 
-That example is intentionally not installed by default. It exists to demonstrate the chapter 80
-runtime-installed path without pretending Harbor Shop's first-party store logic belongs in WASM.
+That example is installed in the checked-in Harbor app through the normal runtime extension path.
+It exists to demonstrate chapter 80 coexistence honestly: Harbor Shop still keeps its first-party
+checkout and webhook rules in linked Rust, while also running one bounded runtime-installed WASM
+extension from the app manifest.
 
 It shows:
 
-- a bounded admin widget contract
-- a scheduled reconciliation job contract
-- package/config shape for a capability-scoped extension
+- a real installed extension entry in `app.toml`
+- a real package descriptor in `extensions/harbor-waitlist-tools/package.toml`
+- a checked-in WAT source that Harbor compiles into the runtime-loaded `.wasm` artifact
+- a bounded public render hook that executes on the checked-in CMS home page
 - explicit separation from the linked Rust backend path in chapter 96
 
-The Harbor Shop app still does not ship a ready-made extension package generator inside this
-folder. The workflow today is:
+Harbor bootstrap now compiles the checked-in `harbor-waitlist-tools.wat` source into the pinned
+artifact path before the runtime plan is built, so the example is no longer package-shape only.
+The coexistence model is concrete:
 
-1. build a WASM extension package against Davenda’s extension contracts
-2. place the compiled artifact under `apps/harbor-shop/extensions/`
-3. keep the extension scoped to Harbor Shop rather than turning it into an undocumented platform dependency
-4. add it to `app.toml` only when you are ready to pin the final version and artifact checksum
-
-Use the checked-in `extensions/harbor-waitlist-tools/` example as the reference shape for that
-package boundary.
+1. linked Rust owns Harbor Shop's first-party checkout and verified-webhook logic
+2. the app manifest also installs a bounded runtime extension from `extensions/`
+3. the runtime serves both paths in the same checked-in app
 
 If the customization starts owning shared data, deep transaction logic, or broadly reused product behavior, it is usually the wrong thing to keep in WASM.
 

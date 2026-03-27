@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod extensions;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -129,12 +131,14 @@ impl HarborShopWorkspace {
     }
 
     pub fn load_manifest(&self) -> Result<CustomerAppManifest> {
-        CustomerAppManifest::from_file(self.manifest_path()).with_context(|| {
+        let manifest_path = self.manifest_path();
+        let manifest = CustomerAppManifest::from_file(&manifest_path).with_context(|| {
             format!(
                 "failed to load Harbor Shop manifest at `{}`",
-                self.manifest_path().display()
+                manifest_path.display()
             )
-        })
+        })?;
+        extensions::augment_manifest_with_extensions(&manifest_path, manifest)
     }
 
     pub fn load_platform_config(
@@ -151,7 +155,11 @@ impl HarborShopWorkspace {
 
     pub fn build_bootstrap(&self, config_path: impl AsRef<Path>) -> Result<HarborShopBootstrap> {
         let manifest = self.load_manifest()?;
-        let (config_path, config) = self.load_platform_config(config_path)?;
+        let (config_path, mut config) = self.load_platform_config(config_path)?;
+        config.wasm.directory = self
+            .resolve_path(&config.wasm.directory)
+            .display()
+            .to_string();
         manifest
             .validate_runtime_config_alignment(&config)
             .context("Harbor Shop manifest/config alignment failed")?;
@@ -167,13 +175,20 @@ impl HarborShopWorkspace {
 
         let modules = official_modules_from_config(&config)
             .context("failed to resolve Harbor Shop modules")?;
+        let extension_packages = extensions::load_extension_packages(
+            &self.app_root,
+            Path::new(&config.wasm.directory),
+            &self.manifest_path(),
+        )
+        .context("failed to resolve Harbor Shop runtime-installed extension packages")?;
         let customer_plugins: Vec<Box<dyn CustomerBackendPlugin>> =
             vec![Box::new(harbor_shop_backend::plugin())];
         let runtime_plan = manifest
-            .build_runtime_plan_with_customer_plugins(
+            .build_runtime_plan_with_extensions_and_customer_plugins_at(
                 config,
                 auth_package,
                 modules,
+                extension_packages,
                 customer_plugins,
                 &self.app_root,
             )
@@ -273,6 +288,10 @@ impl HarborShopWorkspace {
             linked_plugins,
         })
     }
+}
+
+pub fn harbor_waitlist_tools_demo_sha256(app_root: impl AsRef<Path>) -> Result<String> {
+    extensions::compiled_demo_artifact_sha256(app_root.as_ref(), "harbor-waitlist-tools")
 }
 
 fn discover_workspace_root(start: Option<&Path>) -> Option<PathBuf> {

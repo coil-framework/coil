@@ -21,3 +21,13 @@ package = "harbor-auth"
 
 [modules]
 enabled = ["cms", "media", "commerce", "commerce-payments-stripe", "memberships", "events", "admin", "ops"]
+
+[[extensions]]
+id = "harbor-waitlist-tools"
+package_version = "0.1.0"
+artifact_sha256 = "a86d1a1646e818bf600653ba6cf3585162157517acf74d76c20ecba3328694dc"
+customer_app_id = "harbor-shop"
+
+[[extensions.handlers]]
+id = "home.waitlist.banner"
+grants = []

@@ -70,6 +70,10 @@ fn temp_workspace_without_theme_assets() -> TempAppRoot {
     let temp_root = unique_temp_app_root("chapter96");
     fs::create_dir_all(&temp_root).unwrap();
     copy_dir_recursive(&source_root.join("auth"), &temp_root.join("auth"));
+    copy_dir_recursive(
+        &source_root.join("extensions"),
+        &temp_root.join("extensions"),
+    );
     copy_dir_recursive(&source_root.join("templates"), &temp_root.join("templates"));
     if source_root.join("theme").is_dir() {
         copy_dir_recursive(&source_root.join("theme"), &temp_root.join("theme"));

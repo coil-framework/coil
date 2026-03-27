@@ -17,11 +17,11 @@ customer workspace under `crates/harbor-shop-backend` and
 The checked-in example here is:
 
 - `harbor-waitlist-tools/`
-  - a bounded WASM package example for an events/admin waitlist widget and a scheduled
-    reconciliation job
-  - intentionally not installed by default in `app.toml`
-  - meant to show package shape, capability boundaries, and installation guidance without
-    pretending Harbor Shop ships a live marketplace package in this checkout
+  - a bounded runtime-installed WASM extension that is now pinned in `app.toml`
+  - loaded through `package.toml` and a checked-in WAT source, then compiled into the runtime
+    artifact path during Harbor bootstrap
+  - meant to show a real installed extension boundary without pretending Harbor Shop's first-party
+    business logic belongs in WASM
 
 That distinction is intentional:
 

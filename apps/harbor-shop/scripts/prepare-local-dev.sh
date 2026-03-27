@@ -25,6 +25,7 @@ davenda-media = { path = "../../crates/davenda-media" }
 davenda-memberships = { path = "../../crates/davenda-memberships" }
 davenda-ops = { path = "../../crates/davenda-ops" }
 davenda-runtime = { path = "../../crates/davenda-runtime" }
+davenda-wasm = { path = "../../crates/davenda-wasm" }
 EOF
 
 echo "wrote repo-local Cargo override to $CONFIG_PATH"

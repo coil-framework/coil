@@ -434,17 +434,20 @@ impl RuntimePlan {
         let cookie_secret = required_env_bytes("DAVENDA_COOKIE_SECRET")?;
         let csrf_secret = required_env_bytes("DAVENDA_CSRF_SECRET")?;
         let bind = bind_override.unwrap_or_else(|| self.config.server.bind.clone());
-        let server = self.server_host(
-            &crate::server::EnvironmentSecretResolver,
-            &cookie_secret,
-            &csrf_secret,
-        )?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .map_err(|error| RuntimeBootstrapError::Serve {
                 reason: error.to_string(),
             })?;
+        let server = {
+            let _runtime_guard = runtime.enter();
+            self.server_host(
+                &crate::server::EnvironmentSecretResolver,
+                &cookie_secret,
+                &csrf_secret,
+            )?
+        };
 
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::bind(&bind)

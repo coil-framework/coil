@@ -17,7 +17,8 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/tmp/cargo-target \
-    cargo build --locked -p harbor-shop --release \
+    cd /workspace/apps/harbor-shop \
+    && cargo build --locked -p harbor-shop --release \
     && cp /tmp/cargo-target/release/harbor-shop /workspace/harbor-shop
 
 FROM debian:bookworm-slim
@@ -33,8 +34,8 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder /workspace/harbor-shop /usr/local/bin/harbor-shop
-COPY --from=builder /workspace /app
-COPY docker/entrypoint.sh /usr/local/bin/harbor-shop-entrypoint
+COPY --from=builder /workspace/apps/harbor-shop /app
+COPY apps/harbor-shop/docker/entrypoint.sh /usr/local/bin/harbor-shop-entrypoint
 
 RUN chmod +x /usr/local/bin/harbor-shop-entrypoint
 

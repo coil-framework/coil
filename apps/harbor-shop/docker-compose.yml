@@ -1,8 +1,8 @@
 services:
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/harbor-shop/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy

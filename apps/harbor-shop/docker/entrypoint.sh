@@ -34,4 +34,4 @@ echo "Launching Harbor Shop dev server"
 if [ "${STRIPE_SECRET_KEY:-sk_test_replace_me}" = "sk_test_replace_me" ]; then
   echo "info: STRIPE_SECRET_KEY is still the placeholder value; Harbor Shop will use the built-in local checkout stub until you override it with a real Stripe test key"
 fi
-exec harbor-shop up --config "$CONFIG_PATH"
+exec harbor-shop --config "$CONFIG_PATH" up

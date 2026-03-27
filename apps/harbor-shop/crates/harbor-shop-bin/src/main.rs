@@ -79,8 +79,7 @@ enum LinkedBackendCommand {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
     let workspace = match cli.app_root {
         Some(path) => HarborShopWorkspace::at(path)?,

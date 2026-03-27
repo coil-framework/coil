@@ -6681,7 +6681,7 @@ fn update_cloudflare_load_balancer(
             ))
         })?;
     let envelope = response
-        .json::<CloudflareResponseEnvelope<CloudflareLoadBalancer>>()
+        .json::<CloudflareResponseEnvelope<Value>>()
         .map_err(|error| {
             CliRunError::execution(format!(
                 "failed to parse Cloudflare load balancer update for `{resource_id}`: {error}"
@@ -6693,7 +6693,19 @@ fn update_cloudflare_load_balancer(
             render_cloudflare_errors(&envelope.errors)
         )));
     }
-    Ok(envelope.result)
+
+    let confirmed = fetch_cloudflare_load_balancer(client, credentials, zone_id, resource_id)?;
+    if confirmed.default_pools.first().map(String::as_str) != Some(target) {
+        return Err(CliRunError::execution(format!(
+            "Cloudflare load balancer `{resource_id}` update acknowledged but now resolves to `{}` instead of `{target}`",
+            confirmed
+                .default_pools
+                .first()
+                .map(String::as_str)
+                .unwrap_or("<none>")
+        )));
+    }
+    Ok(confirmed)
 }
 
 fn fetch_cloudflare_origin_rule(
@@ -12024,6 +12036,7 @@ mod tests {
         stop: Arc<AtomicBool>,
         records: Arc<Mutex<BTreeMap<String, CloudflareTestRecord>>>,
         load_balancers: Arc<Mutex<BTreeMap<String, CloudflareTestLoadBalancer>>>,
+        load_balancer_update_results: Arc<Mutex<BTreeMap<String, CloudflareTestLoadBalancer>>>,
         origin_rules: Arc<Mutex<BTreeMap<String, CloudflareTestOriginRule>>>,
         routing_rules: Arc<Mutex<BTreeMap<String, CloudflareTestRoutingRule>>>,
         handle: Option<thread::JoinHandle<()>>,
@@ -12058,6 +12071,7 @@ mod tests {
                     .map(|resource| (resource.id.clone(), resource))
                     .collect::<BTreeMap<_, _>>(),
             ));
+            let load_balancer_update_results = Arc::new(Mutex::new(BTreeMap::new()));
             let origin_rules = Arc::new(Mutex::new(
                 origin_rules
                     .into_iter()
@@ -12073,6 +12087,7 @@ mod tests {
             let stop_thread = Arc::clone(&stop);
             let records_thread = Arc::clone(&records);
             let load_balancers_thread = Arc::clone(&load_balancers);
+            let load_balancer_update_results_thread = Arc::clone(&load_balancer_update_results);
             let origin_rules_thread = Arc::clone(&origin_rules);
             let routing_rules_thread = Arc::clone(&routing_rules);
             let zone_id_thread = zone_id.clone();
@@ -12087,6 +12102,7 @@ mod tests {
                             &zone_id_thread,
                             &records_thread,
                             &load_balancers_thread,
+                            &load_balancer_update_results_thread,
                             &origin_rules_thread,
                             &routing_rules_thread,
                         ),
@@ -12104,6 +12120,7 @@ mod tests {
                 stop,
                 records,
                 load_balancers,
+                load_balancer_update_results,
                 origin_rules,
                 routing_rules,
                 handle: Some(handle),
@@ -12129,6 +12146,13 @@ mod tests {
                 .get(resource_id)
                 .cloned()
                 .unwrap()
+        }
+
+        fn set_load_balancer_update_result(&self, resource: CloudflareTestLoadBalancer) {
+            self.load_balancer_update_results
+                .lock()
+                .unwrap()
+                .insert(resource.id.clone(), resource);
         }
 
         fn origin_rule(&self, resource_id: &str) -> CloudflareTestOriginRule {
@@ -12288,6 +12312,7 @@ mod tests {
         expected_zone_id: &str,
         records: &Arc<Mutex<BTreeMap<String, CloudflareTestRecord>>>,
         load_balancers: &Arc<Mutex<BTreeMap<String, CloudflareTestLoadBalancer>>>,
+        load_balancer_update_results: &Arc<Mutex<BTreeMap<String, CloudflareTestLoadBalancer>>>,
         origin_rules: &Arc<Mutex<BTreeMap<String, CloudflareTestOriginRule>>>,
         routing_rules: &Arc<Mutex<BTreeMap<String, CloudflareTestRoutingRule>>>,
     ) {
@@ -12400,10 +12425,16 @@ mod tests {
                 let mut guard = load_balancers.lock().unwrap();
                 let resource = guard.get_mut(resource_id).unwrap();
                 resource.default_pools = pools;
+                let response_resource = load_balancer_update_results
+                    .lock()
+                    .unwrap()
+                    .get(resource_id)
+                    .cloned()
+                    .unwrap_or_else(|| resource.clone());
                 serde_json::json!({
                     "success": true,
                     "errors": [],
-                    "result": resource.clone(),
+                    "result": response_resource,
                 })
                 .to_string()
                 .into_bytes()
@@ -14752,6 +14783,49 @@ expect = true
                 .load_balancer(&context.resource_id)
                 .default_pools,
             vec!["legacy-origin-pool".to_string()]
+        );
+    }
+
+    #[test]
+    fn run_from_args_confirms_load_balancer_switch_with_a_read_after_stale_put_response() {
+        let fixture = import_fixture();
+        enable_admin_and_ops_for_import_fixture(&fixture);
+        let context = configure_load_balancer_cutover_for_import_fixture(&fixture);
+        context
+            .server
+            .set_load_balancer_update_result(CloudflareTestLoadBalancer::new(
+                &context.resource_id,
+                "legacy-origin-pool",
+            ));
+        let cutover_manifest = write_cutover_observe_manifest_for_switch_method(
+            &fixture,
+            "cutover-switch-load-balancer-stale-put.toml",
+            60,
+            "load-balancer",
+            &["record_counts"],
+        );
+
+        run_from_args([
+            "import".to_string(),
+            "cutover".to_string(),
+            cutover_manifest.display().to_string(),
+            "--apply".to_string(),
+            "--yes".to_string(),
+        ])
+        .unwrap();
+
+        let switched = run_traffic_target_cutover_switch(
+            &cutover_manifest,
+            "https://shop.example.com",
+            &context,
+        );
+        assert!(switched.contains("Cutover switch"));
+        assert_eq!(
+            context
+                .server
+                .load_balancer(&context.resource_id)
+                .default_pools,
+            vec![context.target.clone()]
         );
     }
 

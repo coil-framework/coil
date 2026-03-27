@@ -7,9 +7,11 @@ use davenda_events::EventsModule;
 use davenda_media::MediaModule;
 use davenda_memberships::MembershipsModule;
 use davenda_ops::OpsModule;
-use davenda_runtime::RuntimeBuilder;
+use davenda_runtime::{
+    RuntimeBuilder, customer_root_bootstrap_inputs_from_env,
+    customer_root_bootstrap_inputs_from_paths,
+};
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -17,7 +19,6 @@ pub use davenda_admin as admin;
 pub use davenda_app as app;
 pub use davenda_app::CustomerAppManifest;
 pub use davenda_auth as auth;
-pub use davenda_auth::load_auth_model_package_at;
 pub use davenda_auth::{AuthModelPackage, DefaultAuthModelPackage};
 pub use davenda_cms as cms;
 pub use davenda_commerce as commerce;
@@ -114,13 +115,36 @@ impl DavendaAllBuilder {
 
     pub fn run_from_env(self) -> Result<(), DavendaAllError> {
         let app_root = env::current_dir().map_err(DavendaAllError::CurrentDirectory)?;
-        let config_path = discover_default_config_path(&app_root).ok_or_else(|| {
-            DavendaAllError::ConfigLoad {
-                path: app_root.join("platform.toml"),
-                reason: "set `DAVENDA_CONFIG` or add `platform.toml` / `platform.dev.toml` to the customer app root".to_string(),
-            }
-        })?;
-        self.run_from_paths(app_root, config_path, env::var("DAVENDA_BIND").ok())
+        let manifest_path = app_root.join("app.toml");
+        let manifest =
+            davenda_app::CustomerAppManifest::from_file(&manifest_path).map_err(|error| {
+                DavendaAllError::ManifestLoad {
+                    path: manifest_path.clone(),
+                    reason: error.to_string(),
+                }
+            })?;
+        let bootstrap = customer_root_bootstrap_inputs_from_env(&manifest.auth.package_name)
+            .map_err(|error| match error {
+                davenda_runtime::RuntimeBootstrapError::ConfigLoad { path, reason } => {
+                    DavendaAllError::ConfigLoad { path, reason }
+                }
+                davenda_runtime::RuntimeBootstrapError::ConfigNotFound { app_root } => {
+                    DavendaAllError::ConfigLoad {
+                        path: app_root.join("platform.toml"),
+                        reason:
+                            "set `DAVENDA_CONFIG` or add `platform.toml` / `platform.dev.toml` to the customer app root"
+                                .to_string(),
+                    }
+                }
+                other => DavendaAllError::RuntimeBuild {
+                    reason: other.to_string(),
+                },
+            })?;
+        self.run_from_paths(
+            app_root,
+            bootstrap.config_path,
+            env::var("DAVENDA_BIND").ok(),
+        )
     }
 
     pub fn run_from_paths(
@@ -139,32 +163,36 @@ impl DavendaAllBuilder {
                 }
             })?;
 
-        let config_path = resolve_path(app_root, config_path.as_ref());
-        let config_input =
-            fs::read_to_string(&config_path).map_err(|error| DavendaAllError::ConfigLoad {
-                path: config_path.clone(),
-                reason: error.to_string(),
-            })?;
-        let config = PlatformConfig::from_toml_str(&config_input).map_err(|error| {
-            DavendaAllError::ConfigLoad {
-                path: config_path.clone(),
-                reason: error.to_string(),
+        let bootstrap = customer_root_bootstrap_inputs_from_paths(
+            app_root,
+            config_path,
+            &manifest.auth.package_name,
+        )
+        .map_err(|error| match error {
+            davenda_runtime::RuntimeBootstrapError::ConfigLoad { path, reason } => {
+                DavendaAllError::ConfigLoad { path, reason }
             }
+            davenda_runtime::RuntimeBootstrapError::ConfigNotFound { app_root } => {
+                DavendaAllError::ConfigLoad {
+                    path: app_root.join("platform.toml"),
+                    reason:
+                        "set `DAVENDA_CONFIG` or add `platform.toml` / `platform.dev.toml` to the customer app root"
+                            .to_string(),
+                }
+            }
+            other => DavendaAllError::RuntimeBuild {
+                reason: other.to_string(),
+            },
         })?;
-
-        let auth_package = load_auth_model_package_at(&manifest.auth.package_name, app_root)
-            .map_err(|error| DavendaAllError::RuntimeBuild {
-                reason: error.to_string(),
-            })?;
-        let modules = official_modules_from_config(&config).map_err(|error| {
+        let modules = official_modules_from_config(&bootstrap.config).map_err(|error| {
             DavendaAllError::RuntimeBuild {
                 reason: error.to_string(),
             }
         })?;
         let runtime_plan = manifest
             .build_runtime_plan_with_customer_plugins(
-                config,
-                auth_package,
+                bootstrap.config,
+                bootstrap.auth_package,
                 modules,
                 self.customer_plugins,
                 app_root,
@@ -209,34 +237,6 @@ where
     fn with_official_modules(self) -> Self {
         with_official_modules(self)
     }
-}
-
-fn resolve_path(app_root: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        app_root.join(path)
-    }
-}
-
-fn discover_default_config_path(app_root: &Path) -> Option<PathBuf> {
-    env::var("DAVENDA_CONFIG")
-        .ok()
-        .map(PathBuf::from)
-        .map(|path| resolve_path(app_root, &path))
-        .filter(|path| path.is_file())
-        .or_else(|| {
-            [
-                PathBuf::from("platform.toml"),
-                PathBuf::from("platform.dev.toml"),
-                PathBuf::from("config/platform.toml"),
-                PathBuf::from("davenda.toml"),
-                PathBuf::from("config/davenda.toml"),
-            ]
-            .into_iter()
-            .map(|path| app_root.join(path))
-            .find(|path| path.is_file())
-        })
 }
 
 pub fn official_modules_from_config(

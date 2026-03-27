@@ -104,6 +104,7 @@ mod tests {
             _webhook: &VerifiedWebhook,
             _http: &dyn OutboundHttpFacade,
             _jobs: &dyn JobsFacade,
+            _repositories: &dyn RepositoryFacade,
             _audit: &dyn AuditFacade,
         ) -> Result<WebhookHandlingResult, BackendError> {
             Ok(WebhookHandlingResult::accepted(None))
@@ -117,6 +118,7 @@ mod tests {
             _webhook: &VerifiedWebhook,
             _http: &dyn OutboundHttpFacade,
             _jobs: &dyn JobsFacade,
+            _repositories: &dyn RepositoryFacade,
             _audit: &dyn AuditFacade,
             _assets: &dyn AssetsFacade,
         ) -> Result<WebhookHandlingResult, BackendError> {

@@ -169,6 +169,7 @@ pub struct StorefrontCartLine {
     pub variant_title: String,
     pub product_kind: String,
     pub entitlement_key: Option<String>,
+    pub metadata: BTreeMap<String, String>,
     pub quantity: u32,
     pub unit_price_minor: i64,
     pub total_minor: i64,
@@ -686,6 +687,7 @@ impl StorefrontStateStore {
                     variant_title TEXT NOT NULL,
                     product_kind TEXT NOT NULL,
                     entitlement_key TEXT,
+                    metadata_json TEXT,
                     quantity INTEGER NOT NULL,
                     unit_price_minor INTEGER NOT NULL,
                     currency TEXT NOT NULL,
@@ -998,14 +1000,15 @@ impl StorefrontStateStore {
             r#"
             INSERT INTO cart_lines (
                 session_id, sku, title, variant_title, product_kind, entitlement_key,
-                quantity, unit_price_minor, currency
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                metadata_json, quantity, unit_price_minor, currency
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ON CONFLICT(session_id, sku) DO UPDATE SET
                 quantity = cart_lines.quantity + excluded.quantity,
                 title = excluded.title,
                 variant_title = excluded.variant_title,
                 product_kind = excluded.product_kind,
                 entitlement_key = excluded.entitlement_key,
+                metadata_json = excluded.metadata_json,
                 unit_price_minor = excluded.unit_price_minor,
                 currency = excluded.currency
             "#,
@@ -1016,6 +1019,7 @@ impl StorefrontStateStore {
                 item.variant_title,
                 item.product_kind,
                 item.entitlement_key,
+                storefront_metadata_json(&cart_line_metadata(&self.catalog, &item))?,
                 i64::from(quantity),
                 item.unit_price_minor,
                 DEFAULT_CURRENCY,
@@ -1058,14 +1062,15 @@ impl StorefrontStateStore {
                 r#"
                 INSERT INTO cart_lines (
                     session_id, sku, title, variant_title, product_kind, entitlement_key,
-                    quantity, unit_price_minor, currency
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    metadata_json, quantity, unit_price_minor, currency
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                 ON CONFLICT(session_id, sku) DO UPDATE SET
                     quantity = excluded.quantity,
                     title = excluded.title,
                     variant_title = excluded.variant_title,
                     product_kind = excluded.product_kind,
                     entitlement_key = excluded.entitlement_key,
+                    metadata_json = excluded.metadata_json,
                     unit_price_minor = excluded.unit_price_minor,
                     currency = excluded.currency
                 "#,
@@ -1076,6 +1081,7 @@ impl StorefrontStateStore {
                     item.variant_title,
                     item.product_kind,
                     item.entitlement_key,
+                    storefront_metadata_json(&cart_line_metadata(&self.catalog, &item))?,
                     i64::from(quantity),
                     item.unit_price_minor,
                     DEFAULT_CURRENCY,
@@ -1409,7 +1415,6 @@ impl StorefrontStateStore {
         )
         .map_err(|error| query_error(format!("failed to create storefront order: {error}")))?;
         for line in &lines {
-            let line_metadata = storefront_order_line_metadata(&self.catalog, line);
             tx.execute(
                 r#"
                 INSERT INTO order_lines (
@@ -1424,7 +1429,7 @@ impl StorefrontStateStore {
                     line.variant_title,
                     line.product_kind,
                     line.entitlement_key,
-                    storefront_metadata_json(&line_metadata)?,
+                    storefront_metadata_json(&line.metadata)?,
                     i64::from(line.quantity),
                     line.unit_price_minor,
                     line.currency,
@@ -1521,6 +1526,35 @@ impl StorefrontStateStore {
         tx.commit().map_err(|error| {
             query_error(format!(
                 "failed to commit storefront admin order-detail transaction: {error}"
+            ))
+        })?;
+        Ok(order)
+    }
+
+    pub fn order_by_payment_reference(
+        &self,
+        payment_reference: &str,
+    ) -> Result<Option<StorefrontOrderSnapshot>, StorefrontStateError> {
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction().map_err(|error| {
+            query_error(format!(
+                "failed to start storefront payment-reference order lookup transaction: {error}"
+            ))
+        })?;
+        let order = if let Some((order_id, _, _, _, _, _)) =
+            self.load_order_header_by_payment_reference(&tx, payment_reference)?
+        {
+            self.load_order_by_id(&tx, order_id.as_str()).map_err(|error| {
+                query_error(format!(
+                    "failed to load storefront order detail for payment reference `{payment_reference}`: {error}"
+                ))
+            })?
+        } else {
+            None
+        };
+        tx.commit().map_err(|error| {
+            query_error(format!(
+                "failed to commit storefront payment-reference order lookup transaction: {error}"
             ))
         })?;
         Ok(order)
@@ -2170,7 +2204,7 @@ impl StorefrontStateStore {
                 r#"
                 SELECT
                     sku, title, variant_title, product_kind, entitlement_key,
-                    quantity, unit_price_minor, currency
+                    metadata_json, quantity, unit_price_minor, currency
                 FROM cart_lines
                 WHERE session_id = ?1
                 ORDER BY sku ASC
@@ -2183,10 +2217,18 @@ impl StorefrontStateStore {
             })?;
         statement
             .query_map(params![session_id], |row| {
-                let quantity_i64: i64 = row.get(5)?;
+                let metadata = parse_storefront_metadata_json(row.get::<_, Option<String>>(5)?)
+                    .map_err(|reason| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            5,
+                            Type::Text,
+                            Box::new(std::io::Error::other(reason)),
+                        )
+                    })?;
+                let quantity_i64: i64 = row.get(6)?;
                 let quantity = u32::try_from(quantity_i64)
-                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, quantity_i64))?;
-                let unit_price_minor: i64 = row.get(6)?;
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, quantity_i64))?;
+                let unit_price_minor: i64 = row.get(7)?;
                 let total_minor = unit_price_minor.saturating_mul(i64::from(quantity));
                 Ok(StorefrontCartLine {
                     sku: row.get(0)?,
@@ -2194,10 +2236,11 @@ impl StorefrontStateStore {
                     variant_title: row.get(2)?,
                     product_kind: row.get(3)?,
                     entitlement_key: row.get(4)?,
+                    metadata,
                     quantity,
                     unit_price_minor,
                     total_minor,
-                    currency: row.get(7)?,
+                    currency: row.get(8)?,
                     total: format_minor_currency(total_minor),
                 })
             })
@@ -2519,14 +2562,15 @@ impl StorefrontStateStore {
                 r#"
                 INSERT INTO cart_lines (
                     session_id, sku, title, variant_title, product_kind, entitlement_key,
-                    quantity, unit_price_minor, currency
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    metadata_json, quantity, unit_price_minor, currency
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                 ON CONFLICT(session_id, sku) DO UPDATE SET
                     quantity = excluded.quantity,
                     title = excluded.title,
                     variant_title = excluded.variant_title,
                     product_kind = excluded.product_kind,
                     entitlement_key = excluded.entitlement_key,
+                    metadata_json = excluded.metadata_json,
                     unit_price_minor = excluded.unit_price_minor,
                     currency = excluded.currency
                 "#,
@@ -2537,6 +2581,7 @@ impl StorefrontStateStore {
                     line.variant_title,
                     line.product_kind,
                     line.entitlement_key,
+                    storefront_metadata_json(&line.metadata)?,
                     i64::from(line.quantity),
                     line.unit_price_minor,
                     line.currency,
@@ -2918,6 +2963,7 @@ fn ensure_storefront_columns(connection: &Connection) -> Result<(), StorefrontSt
             "checkout_email TEXT",
         ],
     )?;
+    ensure_table_columns(connection, "cart_lines", &["metadata_json TEXT"])?;
     ensure_table_columns(
         connection,
         "orders",
@@ -2960,6 +3006,9 @@ fn storefront_order_line_metadata(
     catalog: &StorefrontCatalog,
     line: &StorefrontCartLine,
 ) -> BTreeMap<String, String> {
+    if !line.metadata.is_empty() {
+        return line.metadata.clone();
+    }
     let mut metadata = BTreeMap::new();
     metadata.insert("variant_title".to_string(), line.variant_title.clone());
     if let Some(product) = catalog.product_by_sku_or_handle(&line.sku) {
@@ -2969,6 +3018,21 @@ fn storefront_order_line_metadata(
         );
     }
     if let Some(entitlement_key) = line.entitlement_key.as_ref() {
+        metadata.insert("entitlement_key".to_string(), entitlement_key.clone());
+    }
+    metadata
+}
+
+fn cart_line_metadata(catalog: &StorefrontCatalog, item: &CatalogItem) -> BTreeMap<String, String> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("variant_title".to_string(), item.variant_title.clone());
+    if let Some(product) = catalog.product_by_sku_or_handle(&item.sku) {
+        metadata.insert(
+            "collection_handle".to_string(),
+            product.collection_handle.clone(),
+        );
+    }
+    if let Some(entitlement_key) = item.entitlement_key.as_ref() {
         metadata.insert("entitlement_key".to_string(), entitlement_key.clone());
     }
     metadata

@@ -32,6 +32,7 @@ pub trait VerifiedWebhookHooks: Send + Sync {
         webhook: &VerifiedWebhook,
         http: &dyn OutboundHttpFacade,
         jobs: &dyn JobsFacade,
+        repositories: &dyn RepositoryFacade,
         audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError>;
 }
@@ -43,6 +44,7 @@ pub trait VerifiedWebhookAssetHooks: Send + Sync {
         webhook: &VerifiedWebhook,
         http: &dyn OutboundHttpFacade,
         jobs: &dyn JobsFacade,
+        repositories: &dyn RepositoryFacade,
         audit: &dyn AuditFacade,
         assets: &dyn AssetsFacade,
     ) -> Result<WebhookHandlingResult, BackendError>;

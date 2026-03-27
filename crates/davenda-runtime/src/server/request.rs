@@ -1243,23 +1243,34 @@ fn record_customer_order_note(
 }
 
 #[derive(Debug)]
-struct RuntimeCmsRepositoryFacade<'a> {
-    workspace: Arc<Mutex<CmsAdminWorkspace>>,
+struct RuntimeCustomerRepositoryFacade<'a> {
+    storefront: &'a StorefrontStateStore,
+    workspace: Option<Arc<Mutex<CmsAdminWorkspace>>>,
     recorded_at_unix_seconds: u64,
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
+impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
     fn read(&self, query: &RepositoryQuery) -> Result<RepositoryRecordSet, BackendError> {
-        let workspace = self.workspace.lock().map_err(|_| {
-            BackendError::new(
-                BackendErrorKind::Internal,
-                "repository.workspace.lock_failed",
-                "Runtime could not acquire the CMS workspace lock.",
-            )
-        })?;
         let records = match query.repository.as_str() {
-            "cms.pages" => workspace
+            "cms.pages" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Runtime customer hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
                 .pages
                 .iter()
                 .filter(|page| {
@@ -1285,7 +1296,24 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
                     }
                 })
                 .collect(),
-            "cms.navigation" => workspace
+            "cms.navigation" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Runtime customer hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
                 .navigation
                 .iter()
                 .enumerate()
@@ -1303,7 +1331,24 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
                     ]),
                 })
                 .collect(),
-            "cms.redirects" => workspace
+            "cms.redirects" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Runtime customer hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
                 .redirects
                 .iter()
                 .enumerate()
@@ -1322,12 +1367,66 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
                     ]),
                 })
                 .collect(),
+            "commerce.orders" => {
+                let order = if let Some(key) = query.key.as_deref() {
+                    self.storefront.admin_order(key).map_err(|error| {
+                        BackendError::new(
+                            BackendErrorKind::Unavailable,
+                            "repository.read.failed",
+                            "Runtime could not load the requested commerce order.",
+                        )
+                        .with_detail(error.to_string())
+                    })?
+                } else if let Some(payment_reference) = query.filters.get("payment_reference") {
+                    self.storefront
+                        .order_by_payment_reference(payment_reference)
+                        .map_err(|error| {
+                            BackendError::new(
+                                BackendErrorKind::Unavailable,
+                                "repository.read.failed",
+                                "Runtime could not load the requested commerce order.",
+                            )
+                            .with_detail(error.to_string())
+                        })?
+                } else {
+                    None
+                };
+                order
+                    .into_iter()
+                    .map(|order| RepositoryRecord {
+                        id: order.order_id.clone(),
+                        fields: BTreeMap::from([
+                            ("status".to_string(), order.status),
+                            ("payment_status".to_string(), order.payment.status),
+                            (
+                                "payment_reference".to_string(),
+                                order.payment.reference.unwrap_or_default(),
+                            ),
+                            (
+                                "payment_method".to_string(),
+                                order.payment.method.unwrap_or_default(),
+                            ),
+                            (
+                                "checkout_email".to_string(),
+                                order.payment.checkout_email.unwrap_or_default(),
+                            ),
+                            (
+                                "principal_id".to_string(),
+                                order.principal_id.unwrap_or_default(),
+                            ),
+                            ("currency".to_string(), order.currency),
+                            ("total_minor".to_string(), order.total_minor.to_string()),
+                            ("line_count".to_string(), order.line_count.to_string()),
+                        ]),
+                    })
+                    .collect()
+            }
             _ => {
                 return Err(BackendError::new(
                     BackendErrorKind::Unsupported,
                     "repository.read.unsupported",
                     format!(
-                        "Runtime customer CMS hooks only expose `cms.pages`, `cms.navigation`, and `cms.redirects` reads; `{}` is not available.",
+                        "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, `cms.redirects`, and `commerce.orders` reads; `{}` is not available.",
                         query.repository
                     ),
                 ));
@@ -1341,13 +1440,24 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
     }
 
     fn write(&self, change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
-        let mut workspace = self.workspace.lock().map_err(|_| {
-            BackendError::new(
-                BackendErrorKind::Internal,
-                "repository.workspace.lock_failed",
-                "Runtime could not acquire the CMS workspace lock.",
-            )
-        })?;
+        let mut workspace = self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| {
+                BackendError::new(
+                    BackendErrorKind::Unsupported,
+                    "repository.write.unsupported",
+                    "Runtime customer hooks did not expose a CMS workspace for this request.",
+                )
+            })?
+            .lock()
+            .map_err(|_| {
+                BackendError::new(
+                    BackendErrorKind::Internal,
+                    "repository.workspace.lock_failed",
+                    "Runtime could not acquire the CMS workspace lock.",
+                )
+            })?;
         match change.repository.as_str() {
             "cms.pages" => {
                 let existing = workspace
@@ -1551,7 +1661,7 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
                 BackendErrorKind::Unsupported,
                 "repository.write.unsupported",
                 format!(
-                    "Runtime customer CMS hooks only expose `cms.pages`, `cms.navigation`, and `cms.redirects` writes; `{}` is not available.",
+                    "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, and `cms.redirects` writes; `{}` is not available.",
                     change.repository
                 ),
             )),
@@ -1794,7 +1904,7 @@ fn checkout_order_draft(
                 product_kind: line.product_kind.clone(),
                 collection_handle,
                 entitlement_key: line.entitlement_key.clone(),
-                metadata: BTreeMap::new(),
+                metadata: line.metadata.clone(),
             }
         })
         .collect::<Vec<_>>();
@@ -1983,8 +2093,9 @@ fn validate_cms_publish_with_customer_hooks(
     let context = runtime_customer_request_context(state, execution);
     let draft = cms_page_draft_from_workspace(page, execution.locale.as_str());
     let workspace_shadow = Arc::new(Mutex::new(workspace.clone()));
-    let repositories = RuntimeCmsRepositoryFacade {
-        workspace: Arc::clone(&workspace_shadow),
+    let repositories = RuntimeCustomerRepositoryFacade {
+        storefront: &state.storefront,
+        workspace: Some(Arc::clone(&workspace_shadow)),
         recorded_at_unix_seconds: now.as_unix_seconds(),
         _marker: std::marker::PhantomData,
     };
@@ -2044,6 +2155,12 @@ fn execute_verified_webhook_customer_hooks(
         trace_id: execution.trace.request_id.as_str(),
         now,
     };
+    let repositories = RuntimeCustomerRepositoryFacade {
+        storefront: &state.storefront,
+        workspace: None,
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+        _marker: std::marker::PhantomData,
+    };
     let assets = RuntimeCustomerAssetsFacade {
         storage: state.plan.storage_host_with_object_store(
             state
@@ -2061,7 +2178,8 @@ fn execute_verified_webhook_customer_hooks(
     };
 
     for hook in &state.plan.customer_hooks.verified_webhooks {
-        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &audit) {
+        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &repositories, &audit)
+        {
             Ok(WebhookHandlingResult::Accepted { detail }) => {
                 audit
                     .record(
@@ -2125,7 +2243,15 @@ fn execute_verified_webhook_customer_hooks(
     }
 
     for hook in &state.plan.customer_hooks.verified_webhook_assets {
-        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &audit, &assets) {
+        match hook.handle_verified_webhook(
+            &context,
+            webhook,
+            &http,
+            &jobs,
+            &repositories,
+            &audit,
+            &assets,
+        ) {
             Ok(WebhookHandlingResult::Accepted { detail }) => {
                 audit
                     .record(

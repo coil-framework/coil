@@ -460,6 +460,7 @@ impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
         webhook: &VerifiedWebhook,
         _http: &dyn OutboundHttpFacade,
         jobs: &dyn JobsFacade,
+        _repositories: &dyn RepositoryFacade,
         _audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
         let receipt = jobs.enqueue(
@@ -494,6 +495,7 @@ impl VerifiedWebhookAssetHooks for RecordingVerifiedWebhookAssetPlugin {
         webhook: &VerifiedWebhook,
         _http: &dyn OutboundHttpFacade,
         _jobs: &dyn JobsFacade,
+        _repositories: &dyn RepositoryFacade,
         _audit: &dyn AuditFacade,
         assets: &dyn AssetsFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
@@ -542,6 +544,7 @@ impl VerifiedWebhookHooks for RejectVerifiedWebhookPlugin {
         webhook: &VerifiedWebhook,
         _http: &dyn OutboundHttpFacade,
         _jobs: &dyn JobsFacade,
+        _repositories: &dyn RepositoryFacade,
         _audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
         Ok(WebhookHandlingResult::rejected(
@@ -565,6 +568,118 @@ impl CustomerBackendPlugin for RejectVerifiedWebhookPlugin {
 
     fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
         registry.register_verified_webhook_hooks(Arc::new(Self))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedWebhookOrderRead {
+    order_id: String,
+    status: String,
+    payment_reference: String,
+    checkout_email: String,
+}
+
+#[derive(Debug)]
+struct RecordingWebhookOrderRepositoryPlugin {
+    reads: Arc<Mutex<Vec<RecordedWebhookOrderRead>>>,
+}
+
+impl VerifiedWebhookHooks for RecordingWebhookOrderRepositoryPlugin {
+    fn handle_verified_webhook(
+        &self,
+        _ctx: &RequestContext,
+        webhook: &VerifiedWebhook,
+        _http: &dyn OutboundHttpFacade,
+        _jobs: &dyn JobsFacade,
+        repositories: &dyn RepositoryFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<WebhookHandlingResult, BackendError> {
+        let orders = repositories.read(
+            &RepositoryQuery::new("commerce.orders").with_filter("payment_reference", "PAY-50001"),
+        )?;
+        let order = orders.records.first().ok_or_else(|| {
+            BackendError::new(
+                davenda_customer_sdk::BackendErrorKind::Conflict,
+                "repository.order.missing",
+                "linked verified webhook hook did not see the persisted order",
+            )
+        })?;
+        self.reads.lock().unwrap().push(RecordedWebhookOrderRead {
+            order_id: order.id.clone(),
+            status: order.fields.get("status").cloned().unwrap_or_default(),
+            payment_reference: order
+                .fields
+                .get("payment_reference")
+                .cloned()
+                .unwrap_or_default(),
+            checkout_email: order
+                .fields
+                .get("checkout_email")
+                .cloned()
+                .unwrap_or_default(),
+        });
+        Ok(WebhookHandlingResult::accepted(Some(order.id.clone())))
+    }
+}
+
+impl CustomerBackendPlugin for RecordingWebhookOrderRepositoryPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-webhook-order-reader",
+            "Harbor Shop Webhook Order Reader",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_verified_webhook_hooks(Arc::new(Self {
+            reads: Arc::clone(&self.reads),
+        }))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedCheckoutLineMetadata {
+    sku: String,
+    metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug)]
+struct RecordingCheckoutLineMetadataPlugin {
+    calls: Arc<Mutex<Vec<RecordedCheckoutLineMetadata>>>,
+}
+
+impl CheckoutHooks for RecordingCheckoutLineMetadataPlugin {
+    fn review_order(
+        &self,
+        _ctx: &RequestContext,
+        order: &OrderDraft,
+        _commerce: &dyn CommerceFacade,
+        _auth: &dyn AuthFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<OrderReviewDecision, BackendError> {
+        let mut calls = self.calls.lock().unwrap();
+        calls.extend(order.lines.iter().map(|line| RecordedCheckoutLineMetadata {
+            sku: line.sku.clone(),
+            metadata: line.metadata.clone(),
+        }));
+        Ok(OrderReviewDecision::approved())
+    }
+}
+
+impl CustomerBackendPlugin for RecordingCheckoutLineMetadataPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-checkout-line-metadata-recorder",
+            "Harbor Shop Checkout Line Metadata Recorder",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_checkout_hooks(Arc::new(Self {
+            calls: Arc::clone(&self.calls),
+        }))
     }
 }
 
@@ -5953,6 +6068,182 @@ async fn server_host_runs_sdk_checkout_hooks_before_stripe_handoff() {
 }
 
 #[tokio::test]
+async fn server_host_preserves_checkout_line_metadata_for_live_customer_hooks() {
+    let app_name = unique_app_name("harbor-shop-runtime-checkout-line-metadata");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RecordingCheckoutLineMetadataPlugin {
+            calls: calls.clone(),
+        })
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_line_metadata",
+    ));
+    let server = plan
+        .server_host_with_checkout_client(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+            checkout_client,
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-checkout-line-metadata";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "harbor-cap")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+
+    let calls = calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].sku, "harbor-cap");
+    assert_eq!(
+        calls[0].metadata.get("variant_title").map(String::as_str),
+        Some("Standard")
+    );
+    assert_eq!(
+        calls[0].metadata.get("collection_handle").map(String::as_str),
+        Some("featured")
+    );
+}
+
+#[tokio::test]
 async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flow() {
     let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-hooks");
     let mut config = checked_in_harbor_shop_config(&app_name);
@@ -6177,6 +6468,202 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
             .map(String::as_str),
         Some("commerce.payment-provider-webhook")
     );
+}
+
+#[tokio::test]
+async fn server_host_exposes_persisted_commerce_orders_to_verified_webhook_hooks() {
+    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-orders");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let reads = Arc::new(Mutex::new(Vec::new()));
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RecordingWebhookOrderRepositoryPlugin {
+            reads: reads.clone(),
+        })
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_module(AdminModule::new())
+        .with_module(OpsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_order_reader",
+    ));
+    let server = plan
+        .server_host_with_checkout_client(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+            checkout_client.clone(),
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-verified-webhook-orders";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "harbor-cap")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(checkout_client.take_calls().len(), 1);
+
+    let webhook_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("provider", "stripe")
+                        .append_pair("event", "payment.captured")
+                        .append_pair("payment_reference", "PAY-50001")
+                        .append_pair(
+                            "signature",
+                            &payment_webhook_signature("stripe", "payment.captured", "PAY-50001"),
+                        )
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(webhook_response.status(), StatusCode::OK);
+
+    let reads = reads.lock().unwrap().clone();
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].payment_reference, "PAY-50001");
+    assert_eq!(reads[0].checkout_email, "buyer@example.com");
 }
 
 #[tokio::test]

@@ -302,6 +302,33 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
 }
 
 #[test]
+fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
+    let customer_root = unique_temp_template_root("customer-root-bootstrap-inputs");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>bootstrap-inputs</main></body>
+</html>"#,
+    );
+    fs::write(customer_root.join("platform.toml"), VALID_CONFIG).unwrap();
+    let harbor_auth =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
+    copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
+
+    let inputs =
+        customer_root_bootstrap_inputs_from_paths(&customer_root, "platform.toml", "harbor-auth")
+            .unwrap();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert_eq!(inputs.auth_package_name, "harbor-auth");
+    assert_eq!(inputs.config.app.name, "showcase-events");
+    assert!(inputs.config_path.ends_with("platform.toml"));
+}
+
+#[test]
 fn customer_root_runtime_builder_reports_missing_auth_packages_from_paths() {
     let customer_root = unique_temp_template_root("customer-root-runtime-missing-auth");
     write_template_file(

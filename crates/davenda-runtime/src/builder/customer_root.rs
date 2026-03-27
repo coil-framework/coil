@@ -12,6 +12,14 @@ pub struct CustomerRootRuntimeBuilder<P> {
     inner: RuntimeBuilder<P>,
 }
 
+pub struct CustomerRootBootstrapInputs {
+    pub app_root: PathBuf,
+    pub config_path: PathBuf,
+    pub config: PlatformConfig,
+    pub auth_package_name: String,
+    pub auth_package: LoadedAuthModelPackage,
+}
+
 pub fn customer_root_runtime<P>(
     config: PlatformConfig,
     auth_package: P,
@@ -34,6 +42,20 @@ pub fn customer_root_runtime_from_paths(
     auth_package_name: impl AsRef<str>,
 ) -> Result<CustomerRootRuntimeBuilder<LoadedAuthModelPackage>, RuntimeBootstrapError> {
     CustomerRootRuntimeBuilder::from_paths(app_root, config_path, auth_package_name)
+}
+
+pub fn customer_root_bootstrap_inputs_from_env(
+    auth_package_name: impl AsRef<str>,
+) -> Result<CustomerRootBootstrapInputs, RuntimeBootstrapError> {
+    CustomerRootBootstrapInputs::from_env(auth_package_name)
+}
+
+pub fn customer_root_bootstrap_inputs_from_paths(
+    app_root: impl AsRef<Path>,
+    config_path: impl AsRef<Path>,
+    auth_package_name: impl AsRef<str>,
+) -> Result<CustomerRootBootstrapInputs, RuntimeBootstrapError> {
+    CustomerRootBootstrapInputs::from_paths(app_root, config_path, auth_package_name)
 }
 
 impl<P> CustomerRootRuntimeBuilder<P>
@@ -180,6 +202,32 @@ impl CustomerRootRuntimeBuilder<LoadedAuthModelPackage> {
         config_path: impl AsRef<Path>,
         auth_package_name: impl AsRef<str>,
     ) -> Result<Self, RuntimeBootstrapError> {
+        let inputs =
+            CustomerRootBootstrapInputs::from_paths(app_root, config_path, auth_package_name)?;
+        Ok(Self::from_bootstrap_inputs(inputs))
+    }
+
+    pub fn from_bootstrap_inputs(inputs: CustomerRootBootstrapInputs) -> Self {
+        Self::new(inputs.config, inputs.auth_package).with_customer_root(inputs.app_root)
+    }
+}
+
+impl CustomerRootBootstrapInputs {
+    pub fn from_env(auth_package_name: impl AsRef<str>) -> Result<Self, RuntimeBootstrapError> {
+        let app_root = env::current_dir().map_err(RuntimeBootstrapError::CurrentDirectory)?;
+        let config_path = discover_default_config_path(&app_root).ok_or_else(|| {
+            RuntimeBootstrapError::ConfigNotFound {
+                app_root: app_root.clone(),
+            }
+        })?;
+        Self::from_paths(app_root, config_path, auth_package_name)
+    }
+
+    pub fn from_paths(
+        app_root: impl AsRef<Path>,
+        config_path: impl AsRef<Path>,
+        auth_package_name: impl AsRef<str>,
+    ) -> Result<Self, RuntimeBootstrapError> {
         let app_root = app_root.as_ref().to_path_buf();
         let config_path = resolve_path(&app_root, config_path.as_ref());
         let config = PlatformConfig::from_file(&config_path).map_err(|error| {
@@ -192,12 +240,19 @@ impl CustomerRootRuntimeBuilder<LoadedAuthModelPackage> {
         let auth_package =
             load_auth_model_package_at(&auth_package_name, &app_root).map_err(|error| {
                 RuntimeBootstrapError::AuthPackageLoad {
-                    package: auth_package_name,
+                    package: auth_package_name.clone(),
                     app_root: app_root.clone(),
                     reason: error.to_string(),
                 }
             })?;
-        Ok(Self::new(config, auth_package).with_customer_root(app_root))
+
+        Ok(Self {
+            app_root,
+            config_path,
+            config,
+            auth_package_name,
+            auth_package,
+        })
     }
 }
 

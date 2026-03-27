@@ -345,6 +345,11 @@ impl RepositoryQuery {
         self.key = Some(key.into());
         self
     }
+
+    pub fn with_filter(mut self, field: impl Into<String>, value: impl Into<String>) -> Self {
+        self.filters.insert(field.into(), value.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -221,12 +221,11 @@ fn runtime_builder_rejects_duplicate_linked_customer_plugins() {
 
 #[test]
 fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
-    let config =
-        PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
-            "enabled = [\"cms-pages\", \"admin-shell\"]",
-            "enabled = [\"cms\"]",
-        ))
-        .unwrap();
+    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+        "enabled = [\"cms-pages\", \"admin-shell\"]",
+        "enabled = [\"cms\"]",
+    ))
+    .unwrap();
     let customer_root = unique_temp_template_root("customer-root-runtime-builder");
     write_template_file(
         &customer_root,
@@ -275,12 +274,10 @@ fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
 
 #[test]
 fn customer_root_runtime_builder_supports_register_aliases() {
-    let config = PlatformConfig::from_toml_str(
-        &VALID_CONFIG.replace(
-            "enabled = [\"cms-pages\", \"admin-shell\"]",
-            "enabled = [\"cms\"]",
-        ),
-    )
+    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+        "enabled = [\"cms-pages\", \"admin-shell\"]",
+        "enabled = [\"cms\"]",
+    ))
     .unwrap();
     let customer_root = unique_temp_template_root("customer-root-runtime-register-aliases");
     write_template_file(
@@ -324,7 +321,10 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
                 "package = \"platform-default-auth\"",
                 "package = \"harbor-auth\"",
             )
-            .replace("enabled = [\"cms-pages\", \"admin-shell\"]", "enabled = [\"cms\"]"),
+            .replace(
+                "enabled = [\"cms-pages\", \"admin-shell\"]",
+                "enabled = [\"cms\"]",
+            ),
     )
     .unwrap();
     write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
@@ -375,7 +375,10 @@ fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
                 "package = \"platform-default-auth\"",
                 "package = \"harbor-auth\"",
             )
-            .replace("enabled = [\"cms-pages\", \"admin-shell\"]", "enabled = [\"cms\"]"),
+            .replace(
+                "enabled = [\"cms-pages\", \"admin-shell\"]",
+                "enabled = [\"cms\"]",
+            ),
     )
     .unwrap();
     write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
@@ -411,7 +414,10 @@ fn customer_root_runtime_builder_reports_missing_auth_packages_from_paths() {
                 "package = \"platform-default-auth\"",
                 "package = \"missing-auth-package\"",
             )
-            .replace("enabled = [\"cms-pages\", \"admin-shell\"]", "enabled = [\"cms\"]"),
+            .replace(
+                "enabled = [\"cms-pages\", \"admin-shell\"]",
+                "enabled = [\"cms\"]",
+            ),
     )
     .unwrap();
     write_customer_root_manifest(&customer_root, "missing-auth-package", &["cms"]);
@@ -577,12 +583,10 @@ fn runtime_builder_run_from_env_requires_cookie_secret() {
 
 #[test]
 fn customer_root_runtime_builder_requires_customer_root_before_build() {
-    let config = PlatformConfig::from_toml_str(
-        &VALID_CONFIG.replace(
-            "enabled = [\"cms-pages\", \"admin-shell\"]",
-            "enabled = [\"cms\"]",
-        ),
-    )
+    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+        "enabled = [\"cms-pages\", \"admin-shell\"]",
+        "enabled = [\"cms\"]",
+    ))
     .unwrap();
 
     let error = customer_root_runtime(config, DefaultAuthModelPackage::default())
@@ -590,7 +594,10 @@ fn customer_root_runtime_builder_requires_customer_root_before_build() {
         .build()
         .unwrap_err();
 
-    assert!(matches!(error, RuntimeBuildError::CustomerRootNotConfigured));
+    assert!(matches!(
+        error,
+        RuntimeBuildError::CustomerRootNotConfigured
+    ));
 }
 
 #[test]
@@ -605,12 +612,10 @@ fn customer_root_runtime_builder_run_from_env_honors_manifest_module_filtering()
 </html>"#,
     );
     write_customer_root_manifest(&customer_root, "platform-default-auth", &["admin"]);
-    let config = PlatformConfig::from_toml_str(
-        &VALID_CONFIG.replace(
-            "enabled = [\"cms-pages\", \"admin-shell\"]",
-            "enabled = [\"admin\"]",
-        ),
-    )
+    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+        "enabled = [\"cms-pages\", \"admin-shell\"]",
+        "enabled = [\"admin\"]",
+    ))
     .unwrap();
 
     let error = customer_root_runtime(config, DefaultAuthModelPackage::default())

@@ -1,8 +1,6 @@
 use davenda_auth::DefaultAuthModelPackage;
 use davenda_config::PlatformConfig;
-use davenda_runtime::{
-    RuntimeBootstrapError, RuntimeBuildError, customer_root_runtime,
-};
+use davenda_runtime::{RuntimeBootstrapError, RuntimeBuildError, customer_root_runtime};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -167,7 +165,10 @@ fn chapter96_customer_root_builder_requires_customer_root_context() {
         .build()
         .unwrap_err();
 
-    assert!(matches!(error, RuntimeBuildError::CustomerRootNotConfigured));
+    assert!(matches!(
+        error,
+        RuntimeBuildError::CustomerRootNotConfigured
+    ));
 }
 
 #[test]

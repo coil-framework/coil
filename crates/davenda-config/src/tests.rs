@@ -1,4 +1,5 @@
 use super::*;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const VALID_CONFIG: &str = r#"
 [app]
@@ -430,4 +431,103 @@ fn trusted_proxies_gate_forwarded_metadata_trust() {
             .trusts_forwarded_headers(Some(&SocketAddr::from(([192, 168, 1, 8], 443,))))
     );
     assert!(!config.server.trusts_forwarded_headers(None));
+}
+
+#[test]
+fn customer_bootstrap_manifest_validates_aligned_runtime_config() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let manifest = CustomerAppBootstrapManifest::new(
+        "showcase-events",
+        "www.example.com",
+        "en-GB",
+        vec!["en-GB".to_string(), "fr-FR".to_string()],
+        "platform-default-auth",
+        vec![
+            "cms-pages".to_string(),
+            "admin-shell".to_string(),
+            "memberships".to_string(),
+            "events".to_string(),
+            "media-library".to_string(),
+        ],
+    );
+
+    manifest.validate_runtime_config_alignment(&config).unwrap();
+}
+
+#[test]
+fn customer_bootstrap_manifest_reports_module_drift() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let manifest = CustomerAppBootstrapManifest::new(
+        "showcase-events",
+        "www.example.com",
+        "en-GB",
+        vec!["en-GB".to_string(), "fr-FR".to_string()],
+        "platform-default-auth",
+        vec!["cms-pages".to_string(), "memberships".to_string()],
+    );
+
+    let error = manifest
+        .validate_runtime_config_alignment(&config)
+        .unwrap_err();
+
+    match error {
+        CustomerAppBootstrapManifestError::ModulesMismatch {
+            manifest_only,
+            configured_only,
+        } => {
+            assert!(manifest_only.is_empty());
+            assert_eq!(
+                configured_only,
+                vec![
+                    "admin-shell".to_string(),
+                    "events".to_string(),
+                    "media-library".to_string(),
+                ]
+            );
+        }
+        other => panic!("expected modules mismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn customer_bootstrap_manifest_loads_from_file() {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir =
+        std::env::temp_dir().join(format!("davenda-config-customer-bootstrap-{timestamp}"));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let manifest_path = temp_dir.join("app.toml");
+    std::fs::write(
+        &manifest_path,
+        r#"
+[app]
+name = "showcase-events"
+
+[domains]
+canonical = "www.example.com"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[auth]
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+"#,
+    )
+    .unwrap();
+
+    let manifest = CustomerAppBootstrapManifest::from_file(&manifest_path).unwrap();
+
+    assert_eq!(
+        manifest.enabled_modules(),
+        &["cms-pages".to_string(), "admin-shell".to_string()]
+    );
+
+    std::fs::remove_file(&manifest_path).unwrap();
+    std::fs::remove_dir(&temp_dir).unwrap();
 }

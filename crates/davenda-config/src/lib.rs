@@ -1,4 +1,5 @@
 mod app;
+mod customer_app;
 mod http;
 mod infra;
 mod platform;
@@ -8,6 +9,7 @@ mod tests;
 mod validation;
 
 pub use app::{AppConfig, Environment, ServerConfig};
+pub use customer_app::{CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError};
 pub use http::{
     CookieConfig, CookieProtection, CsrfConfig, HttpConfig, SameSitePolicy, SessionConfig,
     SessionStore,

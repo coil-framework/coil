@@ -1,4 +1,5 @@
 use super::*;
+use davenda_config::{CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError};
 use davenda_customer_sdk::CustomerBackendPlugin;
 use std::path::Path;
 
@@ -295,36 +296,6 @@ impl CustomerAppManifest {
         &self,
         config: &PlatformConfig,
     ) -> Result<(), AppModelError> {
-        if config.app.name != self.id.as_str() {
-            return Err(AppModelError::ConfigAppMismatch {
-                manifest: self.id.to_string(),
-                configured: config.app.name.clone(),
-            });
-        }
-
-        if config.auth.package != self.auth.package_name {
-            return Err(AppModelError::ConfigAuthPackageMismatch {
-                manifest: self.auth.package_name.clone(),
-                configured: config.auth.package.clone(),
-            });
-        }
-
-        if config.i18n.default_locale != self.default_locale.as_str() {
-            return Err(AppModelError::ConfigDefaultLocaleMismatch {
-                manifest: self.default_locale.to_string(),
-                configured: config.i18n.default_locale.clone(),
-            });
-        }
-
-        let manifest_locales = sorted_locale_strings(&self.supported_locales);
-        let configured_locales = sorted_strings(config.i18n.supported_locales.clone());
-        if manifest_locales != configured_locales {
-            return Err(AppModelError::ConfigSupportedLocalesMismatch {
-                manifest: manifest_locales,
-                configured: configured_locales,
-            });
-        }
-
         let canonical_domain = self
             .domains
             .iter()
@@ -332,30 +303,20 @@ impl CustomerAppManifest {
             .expect("validated manifests always declare a canonical domain")
             .hostname
             .clone();
-        if config.seo.canonical_host != canonical_domain {
-            return Err(AppModelError::ConfigCanonicalHostMismatch {
-                manifest: canonical_domain,
-                configured: config.seo.canonical_host.clone(),
-            });
-        }
-
-        let manifest_modules = sorted_strings(
+        let bootstrap_manifest = CustomerAppBootstrapManifest::new(
+            self.id.to_string(),
+            canonical_domain,
+            self.default_locale.to_string(),
+            sorted_locale_strings(&self.supported_locales),
+            self.auth.package_name.clone(),
             self.modules
                 .iter()
                 .map(|module| module.id.to_string())
                 .collect::<Vec<_>>(),
         );
-        let configured_modules = sorted_strings(config.modules.enabled.clone());
-        let manifest_only = difference(&manifest_modules, &configured_modules);
-        let configured_only = difference(&configured_modules, &manifest_modules);
-        if !manifest_only.is_empty() || !configured_only.is_empty() {
-            return Err(AppModelError::ConfigModulesMismatch {
-                manifest_only,
-                configured_only,
-            });
-        }
-
-        Ok(())
+        bootstrap_manifest
+            .validate_runtime_config_alignment(config)
+            .map_err(customer_bootstrap_manifest_error_into_app_model)
     }
 
     fn publish_theme_assets<A>(
@@ -393,6 +354,64 @@ impl CustomerAppManifest {
             })?;
 
         Ok(Some(receipt))
+    }
+}
+
+fn customer_bootstrap_manifest_error_into_app_model(
+    error: CustomerAppBootstrapManifestError,
+) -> AppModelError {
+    match error {
+        CustomerAppBootstrapManifestError::AppMismatch {
+            manifest,
+            configured,
+        } => AppModelError::ConfigAppMismatch {
+            manifest,
+            configured,
+        },
+        CustomerAppBootstrapManifestError::AuthPackageMismatch {
+            manifest,
+            configured,
+        } => AppModelError::ConfigAuthPackageMismatch {
+            manifest,
+            configured,
+        },
+        CustomerAppBootstrapManifestError::DefaultLocaleMismatch {
+            manifest,
+            configured,
+        } => AppModelError::ConfigDefaultLocaleMismatch {
+            manifest,
+            configured,
+        },
+        CustomerAppBootstrapManifestError::SupportedLocalesMismatch {
+            manifest,
+            configured,
+        } => AppModelError::ConfigSupportedLocalesMismatch {
+            manifest,
+            configured,
+        },
+        CustomerAppBootstrapManifestError::CanonicalHostMismatch {
+            manifest,
+            configured,
+        } => AppModelError::ConfigCanonicalHostMismatch {
+            manifest,
+            configured,
+        },
+        CustomerAppBootstrapManifestError::ModulesMismatch {
+            manifest_only,
+            configured_only,
+        } => AppModelError::ConfigModulesMismatch {
+            manifest_only,
+            configured_only,
+        },
+        CustomerAppBootstrapManifestError::Read { path, reason }
+        | CustomerAppBootstrapManifestError::Parse { path, reason } => {
+            AppModelError::RuntimeBuild {
+                message: format!(
+                    "failed to read shared customer bootstrap manifest model from `{}`: {reason}",
+                    path.display()
+                ),
+            }
+        }
     }
 }
 

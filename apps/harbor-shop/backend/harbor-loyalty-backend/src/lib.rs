@@ -522,6 +522,13 @@ mod tests {
             self.hook_kinds.push(RegisteredHookKind::VerifiedWebhook);
             Ok(())
         }
+
+        fn register_verified_webhook_asset_hooks(
+            &mut self,
+            _hooks: Arc<dyn davenda_customer_sdk::VerifiedWebhookAssetHooks>,
+        ) -> Result<(), BackendError> {
+            unreachable!("Harbor loyalty backend should not register verified webhook asset hooks")
+        }
     }
 
     struct NoopCommerce;

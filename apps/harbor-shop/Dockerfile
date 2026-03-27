@@ -12,16 +12,12 @@ RUN apt-get update \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-ARG DAVENDA_CLI_VERSION=0.1.0
-
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/tmp/cargo-target \
     cargo build --locked -p harbor-shop --release \
-    && cargo install --locked --root /tmp/davenda-cli "davenda-cli@${DAVENDA_CLI_VERSION}" \
-    && cp /tmp/davenda-cli/bin/platform /workspace/platform \
     && cp /tmp/cargo-target/release/harbor-shop /workspace/harbor-shop
 
 FROM debian:bookworm-slim
@@ -36,7 +32,6 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=builder /workspace/platform /usr/local/bin/platform
 COPY --from=builder /workspace/harbor-shop /usr/local/bin/harbor-shop
 COPY --from=builder /workspace /app
 COPY docker/entrypoint.sh /usr/local/bin/harbor-shop-entrypoint

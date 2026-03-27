@@ -91,7 +91,7 @@ Davenda from an upstream registry or pinned git source.
 The Docker story now follows the same split:
 
 - `docker compose up --build` uses `apps/harbor-shop` as the Docker build context and expects
-  Davenda crates plus `davenda-cli` to resolve like normal upstream dependencies
+  Davenda crates plus the Harbor customer binary to resolve like normal upstream dependencies
 - `docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build` is the explicit
   repo-maintainer override when you are building Harbor Shop against this monorepo before those
   upstream packages are published
@@ -337,12 +337,8 @@ access_key_id="minio"
 secret_access_key="minio123"' \
 DAVENDA_COOKIE_SECRET=01234567012345670123456701234567 \
 DAVENDA_CSRF_SECRET=76543210765432107654321076543210 \
-cargo run -p harbor-shop -- serve --config platform.dev.toml
+cargo run -p harbor-shop -- up --config platform.dev.toml
 ```
-
-If you need asset publication or migration commands from the platform-maintainer surface, those
-still run through the top-level `davenda-cli`. That is an honest current limitation of the in-repo
-reference app, not the intended long-term customer command surface.
 
 The linked customer backend currently surfaces in two honest places:
 

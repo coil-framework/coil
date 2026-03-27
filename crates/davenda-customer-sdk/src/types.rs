@@ -1,3 +1,4 @@
+use crate::{BackendError, BackendErrorKind};
 use std::collections::BTreeMap;
 
 pub type MetadataMap = BTreeMap<String, String>;
@@ -376,6 +377,229 @@ pub struct RepositoryWriteReceipt {
     pub repository: String,
     pub record_id: String,
     pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommerceCatalogProductRecord {
+    pub handle: String,
+    pub sku: String,
+    pub title: String,
+    pub summary: String,
+    pub price_minor: i64,
+    pub currency: String,
+    pub collection_handle: String,
+    pub is_visible: bool,
+    pub product_kind: String,
+    pub entitlement_key: Option<String>,
+}
+
+impl CommerceCatalogProductRecord {
+    pub const REPOSITORY: &'static str = "commerce.catalog.products";
+
+    pub fn from_repository_record(record: &RepositoryRecord) -> Result<Self, BackendError> {
+        Ok(Self {
+            handle: required_repository_field(record, "handle")?,
+            sku: required_repository_field(record, "sku")?,
+            title: required_repository_field(record, "title")?,
+            summary: required_repository_field(record, "summary")?,
+            price_minor: required_repository_i64_field(record, "price_minor")?,
+            currency: required_repository_field(record, "currency")?,
+            collection_handle: required_repository_field(record, "collection_handle")?,
+            is_visible: required_repository_bool_field(record, "is_visible")?,
+            product_kind: required_repository_field(record, "product_kind")?,
+            entitlement_key: optional_repository_field(record, "entitlement_key"),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommerceCatalogProductUpdate {
+    pub handle: String,
+    pub title: String,
+    pub summary: String,
+    pub price_minor: i64,
+    pub collection_handle: String,
+    pub is_visible: bool,
+}
+
+impl CommerceCatalogProductUpdate {
+    pub fn new(
+        handle: impl Into<String>,
+        title: impl Into<String>,
+        summary: impl Into<String>,
+        price_minor: i64,
+        collection_handle: impl Into<String>,
+        is_visible: bool,
+    ) -> Self {
+        Self {
+            handle: handle.into(),
+            title: title.into(),
+            summary: summary.into(),
+            price_minor,
+            collection_handle: collection_handle.into(),
+            is_visible,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommerceCatalogCollectionRecord {
+    pub handle: String,
+    pub title: String,
+    pub label: String,
+    pub summary: String,
+    pub is_visible: bool,
+}
+
+impl CommerceCatalogCollectionRecord {
+    pub const REPOSITORY: &'static str = "commerce.catalog.collections";
+
+    pub fn from_repository_record(record: &RepositoryRecord) -> Result<Self, BackendError> {
+        Ok(Self {
+            handle: required_repository_field(record, "handle")?,
+            title: required_repository_field(record, "title")?,
+            label: required_repository_field(record, "label")?,
+            summary: required_repository_field(record, "summary")?,
+            is_visible: required_repository_bool_field(record, "is_visible")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommerceCatalogCollectionUpdate {
+    pub handle: String,
+    pub title: String,
+    pub label: String,
+    pub summary: String,
+    pub is_visible: bool,
+}
+
+impl CommerceCatalogCollectionUpdate {
+    pub fn new(
+        handle: impl Into<String>,
+        title: impl Into<String>,
+        label: impl Into<String>,
+        summary: impl Into<String>,
+        is_visible: bool,
+    ) -> Self {
+        Self {
+            handle: handle.into(),
+            title: title.into(),
+            label: label.into(),
+            summary: summary.into(),
+            is_visible,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommerceOrderRecord {
+    pub order_id: String,
+    pub status: String,
+    pub payment_status: String,
+    pub payment_reference: Option<String>,
+    pub payment_method: Option<String>,
+    pub checkout_email: Option<String>,
+    pub principal_id: Option<String>,
+    pub currency: String,
+    pub total_minor: i64,
+    pub line_count: usize,
+}
+
+impl CommerceOrderRecord {
+    pub const REPOSITORY: &'static str = "commerce.orders";
+
+    pub fn from_repository_record(record: &RepositoryRecord) -> Result<Self, BackendError> {
+        Ok(Self {
+            order_id: record.id.clone(),
+            status: required_repository_field(record, "status")?,
+            payment_status: required_repository_field(record, "payment_status")?,
+            payment_reference: optional_repository_field(record, "payment_reference"),
+            payment_method: optional_repository_field(record, "payment_method"),
+            checkout_email: optional_repository_field(record, "checkout_email"),
+            principal_id: optional_repository_field(record, "principal_id"),
+            currency: required_repository_field(record, "currency")?,
+            total_minor: required_repository_i64_field(record, "total_minor")?,
+            line_count: required_repository_usize_field(record, "line_count")?,
+        })
+    }
+}
+
+fn required_repository_field(
+    record: &RepositoryRecord,
+    field: &str,
+) -> Result<String, BackendError> {
+    record.fields.get(field).cloned().ok_or_else(|| {
+        BackendError::new(
+            BackendErrorKind::Conflict,
+            "repository.record.missing_field",
+            format!(
+                "Repository record `{}` did not expose required field `{field}`.",
+                record.id
+            ),
+        )
+    })
+}
+
+fn optional_repository_field(record: &RepositoryRecord, field: &str) -> Option<String> {
+    record
+        .fields
+        .get(field)
+        .cloned()
+        .and_then(|value| (!value.trim().is_empty()).then_some(value))
+}
+
+fn required_repository_i64_field(
+    record: &RepositoryRecord,
+    field: &str,
+) -> Result<i64, BackendError> {
+    let raw = required_repository_field(record, field)?;
+    raw.parse::<i64>().map_err(|_| {
+        BackendError::new(
+            BackendErrorKind::Conflict,
+            "repository.record.invalid_i64",
+            format!(
+                "Repository record `{}` field `{field}` was not a valid integer.",
+                record.id
+            ),
+        )
+    })
+}
+
+fn required_repository_usize_field(
+    record: &RepositoryRecord,
+    field: &str,
+) -> Result<usize, BackendError> {
+    let raw = required_repository_field(record, field)?;
+    raw.parse::<usize>().map_err(|_| {
+        BackendError::new(
+            BackendErrorKind::Conflict,
+            "repository.record.invalid_usize",
+            format!(
+                "Repository record `{}` field `{field}` was not a valid positive count.",
+                record.id
+            ),
+        )
+    })
+}
+
+fn required_repository_bool_field(
+    record: &RepositoryRecord,
+    field: &str,
+) -> Result<bool, BackendError> {
+    let raw = required_repository_field(record, field)?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(BackendError::new(
+            BackendErrorKind::Conflict,
+            "repository.record.invalid_bool",
+            format!(
+                "Repository record `{}` field `{field}` was not a valid boolean.",
+                record.id
+            ),
+        )),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

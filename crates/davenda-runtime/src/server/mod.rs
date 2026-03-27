@@ -34,6 +34,8 @@ use observability::public_router as observability_router;
 pub(crate) use request::HostedCheckoutClient;
 #[cfg(test)]
 pub(crate) type HostedCheckoutSession = request::HostedCheckoutSession;
+#[cfg(test)]
+pub(crate) type HostedCheckoutSessionStatus = request::HostedCheckoutSessionStatus;
 pub use request::LiveHttpRequest;
 use request::{
     LiveStripeHostedCheckoutClient, error_response, execute_live_request, serve_runtime_request,

@@ -164,8 +164,11 @@ impl RuntimeWasmHostServices {
         record_json: &str,
         updated_at_unix_seconds: i64,
     ) -> Result<(), String> {
-        self.metadata
-            .upsert_customer_managed_asset(logical_path, record_json, updated_at_unix_seconds)
+        self.metadata.upsert_customer_managed_asset(
+            logical_path,
+            record_json,
+            updated_at_unix_seconds,
+        )
     }
 
     pub(crate) fn customer_managed_asset(
@@ -195,6 +198,48 @@ impl RuntimeWasmHostServices {
         detail: Option<String>,
     ) -> Result<(), String> {
         self.webhooks.record(source, event, status, context, detail)
+    }
+
+    pub(crate) fn record_webhook_request_observation(
+        &self,
+        app_id: &str,
+        source: &str,
+        event: &str,
+        status: WebhookObservationStatus,
+        request_id: &str,
+        principal_kind: &str,
+        principal_id: Option<&str>,
+        detail: Option<String>,
+    ) -> Result<(), String> {
+        self.webhooks.record_request(
+            app_id,
+            source,
+            event,
+            status,
+            request_id,
+            principal_kind,
+            principal_id,
+            detail,
+        )
+    }
+
+    pub(crate) fn claim_verified_webhook_delivery(
+        &self,
+        app_id: &str,
+        route_name: &str,
+        source: &str,
+        delivery_id: &str,
+        request_id: &str,
+        recorded_at_unix_seconds: i64,
+    ) -> Result<bool, String> {
+        self.webhooks.claim_delivery(
+            app_id,
+            route_name,
+            source,
+            delivery_id,
+            request_id,
+            recorded_at_unix_seconds,
+        )
     }
 
     pub(crate) fn webhook_observation_snapshot(

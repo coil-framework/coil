@@ -47,6 +47,10 @@ pub enum StorefrontStateError {
     UnexpectedPaymentWebhookProvider { expected: String, received: String },
     #[error("payment webhook verification failed")]
     InvalidPaymentWebhookSignature,
+    #[error("payment webhook payload did not include a delivery id")]
+    MissingPaymentWebhookDeliveryId,
+    #[error("payment webhook delivery `{delivery_id}` has already been processed")]
+    ReplayedPaymentWebhookDelivery { delivery_id: String },
     #[error("payment webhook secret is not configured")]
     MissingPaymentWebhookSecret,
     #[error("refund reason is required")]

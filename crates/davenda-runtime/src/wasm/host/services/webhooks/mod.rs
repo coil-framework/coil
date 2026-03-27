@@ -103,6 +103,30 @@ impl WebhookObservationEvent {
             detail,
         }
     }
+
+    fn from_request(
+        app_id: &str,
+        source: &str,
+        event: &str,
+        status: WebhookObservationStatus,
+        request_id: &str,
+        principal_kind: &str,
+        principal_id: Option<&str>,
+        detail: Option<String>,
+    ) -> Self {
+        Self {
+            id: 0,
+            recorded_at_unix_seconds: unix_seconds_now(),
+            app_id: app_id.to_string(),
+            source: source.to_string(),
+            event: event.to_string(),
+            status,
+            trace_id: request_id.to_string(),
+            principal_kind: principal_kind.to_string(),
+            principal_id: principal_id.map(str::to_string),
+            detail,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +182,48 @@ impl RuntimeWebhookObservationBackend {
         self.backend.insert(&WebhookObservationEvent::from_context(
             source, event, status, context, detail,
         ))
+    }
+
+    pub(super) fn record_request(
+        &self,
+        app_id: &str,
+        source: &str,
+        event: &str,
+        status: WebhookObservationStatus,
+        request_id: &str,
+        principal_kind: &str,
+        principal_id: Option<&str>,
+        detail: Option<String>,
+    ) -> Result<(), String> {
+        self.backend.insert(&WebhookObservationEvent::from_request(
+            app_id,
+            source,
+            event,
+            status,
+            request_id,
+            principal_kind,
+            principal_id,
+            detail,
+        ))
+    }
+
+    pub(super) fn claim_delivery(
+        &self,
+        app_id: &str,
+        route_name: &str,
+        source: &str,
+        delivery_id: &str,
+        request_id: &str,
+        recorded_at_unix_seconds: i64,
+    ) -> Result<bool, String> {
+        self.backend.claim_delivery(
+            app_id,
+            route_name,
+            source,
+            delivery_id,
+            request_id,
+            recorded_at_unix_seconds,
+        )
     }
 
     pub(super) fn snapshot(&self, limit: usize) -> Result<WebhookObservationSnapshot, String> {
@@ -233,6 +299,35 @@ impl WebhookObservationBackend {
         match self {
             Self::Local(store) => store.recent(limit),
             Self::Shared(store) => store.recent(limit),
+        }
+    }
+
+    fn claim_delivery(
+        &self,
+        app_id: &str,
+        route_name: &str,
+        source: &str,
+        delivery_id: &str,
+        request_id: &str,
+        recorded_at_unix_seconds: i64,
+    ) -> Result<bool, String> {
+        match self {
+            Self::Local(store) => store.claim_delivery(
+                app_id,
+                route_name,
+                source,
+                delivery_id,
+                request_id,
+                recorded_at_unix_seconds,
+            ),
+            Self::Shared(store) => store.claim_delivery(
+                app_id,
+                route_name,
+                source,
+                delivery_id,
+                request_id,
+                recorded_at_unix_seconds,
+            ),
         }
     }
 }

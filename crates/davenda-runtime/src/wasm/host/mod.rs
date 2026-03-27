@@ -180,6 +180,48 @@ impl WasmHost {
         self.host_services.webhook_observation_snapshot(limit)
     }
 
+    pub(crate) fn record_webhook_request_observation(
+        &self,
+        app_id: &str,
+        source: &str,
+        event: &str,
+        status: WebhookObservationStatus,
+        request_id: &str,
+        principal_kind: &str,
+        principal_id: Option<&str>,
+        detail: Option<String>,
+    ) -> Result<(), String> {
+        self.host_services.record_webhook_request_observation(
+            app_id,
+            source,
+            event,
+            status,
+            request_id,
+            principal_kind,
+            principal_id,
+            detail,
+        )
+    }
+
+    pub(crate) fn claim_verified_webhook_delivery(
+        &self,
+        app_id: &str,
+        route_name: &str,
+        source: &str,
+        delivery_id: &str,
+        request_id: &str,
+        recorded_at_unix_seconds: i64,
+    ) -> Result<bool, String> {
+        self.host_services.claim_verified_webhook_delivery(
+            app_id,
+            route_name,
+            source,
+            delivery_id,
+            request_id,
+            recorded_at_unix_seconds,
+        )
+    }
+
     pub fn compile_module(&self, bytes: &[u8]) -> Result<CompiledWasmModule, WasmModelError> {
         self.engine.compile_module(bytes)
     }

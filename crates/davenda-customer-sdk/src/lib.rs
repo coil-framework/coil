@@ -15,11 +15,16 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     #[derive(Default)]
     struct RecordingRegistry {
         hook_kinds: Vec<RegisteredHookKind>,
+    }
+
+    struct RecordingRepository {
+        read_results: Vec<RepositoryRecordSet>,
     }
 
     impl CustomerHookRegistry for RecordingRegistry {
@@ -51,6 +56,26 @@ mod tests {
             self.hook_kinds
                 .push(RegisteredHookKind::VerifiedWebhookAssets);
             Ok(())
+        }
+    }
+
+    impl RepositoryFacade for RecordingRepository {
+        fn read(&self, query: &RepositoryQuery) -> Result<RepositoryRecordSet, BackendError> {
+            self.read_results
+                .iter()
+                .find(|result| result.repository == query.repository)
+                .cloned()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.test.unconfigured",
+                        "test repository did not provide a matching read result",
+                    )
+                })
+        }
+
+        fn write(&self, _change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
+            unreachable!("recording repository write is not used in these tests")
         }
     }
 
@@ -168,5 +193,90 @@ mod tests {
             registry.hook_kinds,
             vec![RegisteredHookKind::VerifiedWebhookAssets]
         );
+    }
+
+    #[test]
+    fn repository_facade_ext_parses_typed_catalog_and_order_records() {
+        let repository = RecordingRepository {
+            read_results: vec![
+                RepositoryRecordSet {
+                    repository: CommerceCatalogProductRecord::REPOSITORY.to_string(),
+                    records: vec![RepositoryRecord {
+                        id: "gold-membership".to_string(),
+                        fields: BTreeMap::from([
+                            ("handle".to_string(), "gold-membership".to_string()),
+                            ("sku".to_string(), "membership-gold".to_string()),
+                            ("title".to_string(), "Gold Membership".to_string()),
+                            ("summary".to_string(), "Recurring access".to_string()),
+                            ("price_minor".to_string(), "12900".to_string()),
+                            ("currency".to_string(), "GBP".to_string()),
+                            ("collection_handle".to_string(), "memberships".to_string()),
+                            ("is_visible".to_string(), "true".to_string()),
+                            ("product_kind".to_string(), "membership".to_string()),
+                            ("entitlement_key".to_string(), "membership.gold".to_string()),
+                        ]),
+                    }],
+                },
+                RepositoryRecordSet {
+                    repository: CommerceCatalogCollectionRecord::REPOSITORY.to_string(),
+                    records: vec![RepositoryRecord {
+                        id: "memberships".to_string(),
+                        fields: BTreeMap::from([
+                            ("handle".to_string(), "memberships".to_string()),
+                            ("title".to_string(), "Memberships".to_string()),
+                            ("label".to_string(), "Recurring value".to_string()),
+                            (
+                                "summary".to_string(),
+                                "Benefits and premium access".to_string(),
+                            ),
+                            ("is_visible".to_string(), "true".to_string()),
+                        ]),
+                    }],
+                },
+                RepositoryRecordSet {
+                    repository: CommerceOrderRecord::REPOSITORY.to_string(),
+                    records: vec![RepositoryRecord {
+                        id: "ORD-10042".to_string(),
+                        fields: BTreeMap::from([
+                            ("status".to_string(), "paid".to_string()),
+                            ("payment_status".to_string(), "captured".to_string()),
+                            ("payment_reference".to_string(), "PAY-50001".to_string()),
+                            ("payment_method".to_string(), "card".to_string()),
+                            (
+                                "checkout_email".to_string(),
+                                "buyer@example.com".to_string(),
+                            ),
+                            ("principal_id".to_string(), "member-live-1".to_string()),
+                            ("currency".to_string(), "GBP".to_string()),
+                            ("total_minor".to_string(), "12900".to_string()),
+                            ("line_count".to_string(), "1".to_string()),
+                        ]),
+                    }],
+                },
+            ],
+        };
+
+        let product = repository
+            .commerce_catalog_product("gold-membership")
+            .unwrap()
+            .unwrap();
+        assert_eq!(product.handle, "gold-membership");
+        assert_eq!(product.sku, "membership-gold");
+        assert_eq!(product.price_minor, 12_900);
+
+        let collection = repository
+            .commerce_catalog_collection("memberships")
+            .unwrap()
+            .unwrap();
+        assert_eq!(collection.handle, "memberships");
+        assert!(collection.is_visible);
+
+        let order = repository
+            .commerce_order_by_payment_reference("PAY-50001")
+            .unwrap()
+            .unwrap();
+        assert_eq!(order.order_id, "ORD-10042");
+        assert_eq!(order.payment_status, "captured");
+        assert_eq!(order.total_minor, 12_900);
     }
 }

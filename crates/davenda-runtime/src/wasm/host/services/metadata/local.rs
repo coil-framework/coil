@@ -357,7 +357,10 @@ mod tests {
             backend
                 .customer_managed_asset("uploads/customer-hooks/demo/payment.captured.json")
                 .unwrap(),
-            Some(r#"{"logical_path":"uploads/customer-hooks/demo/payment.captured.json"}"#.to_string())
+            Some(
+                r#"{"logical_path":"uploads/customer-hooks/demo/payment.captured.json"}"#
+                    .to_string()
+            )
         );
         assert_eq!(
             backend

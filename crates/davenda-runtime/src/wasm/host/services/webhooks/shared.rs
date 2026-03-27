@@ -169,6 +169,42 @@ impl SharedWebhookObservationStore {
         })
     }
 
+    pub(super) fn claim_delivery(
+        &self,
+        app_id: &str,
+        route_name: &str,
+        source: &str,
+        delivery_id: &str,
+        request_id: &str,
+        recorded_at_unix_seconds: i64,
+    ) -> Result<bool, String> {
+        self.ensure_initialized()?;
+        let client = self.client()?.clone();
+        let table = self.qualified_delivery_table();
+        let app_id = app_id.to_string();
+        let route_name = route_name.to_string();
+        let source = source.to_string();
+        let delivery_id = delivery_id.to_string();
+        let request_id = request_id.to_string();
+        run_blocking(async move {
+            let rows = sqlx::query(&format!(
+                "INSERT INTO {} (app_id, route_name, source, delivery_id, first_seen_request_id, first_seen_at_unix_seconds) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (app_id, source, delivery_id) DO NOTHING",
+                table
+            ))
+            .bind(&app_id)
+            .bind(&route_name)
+            .bind(&source)
+            .bind(&delivery_id)
+            .bind(&request_id)
+            .bind(recorded_at_unix_seconds)
+            .execute(&client.pool)
+            .await
+            .map_err(|error| format!("failed to persist shared verified webhook delivery: {error}"))?
+            .rows_affected();
+            Ok(rows > 0)
+        })
+    }
+
     fn client(&self) -> Result<&PostgresDataClient, String> {
         self.client
             .get_or_init(|| {
@@ -231,6 +267,22 @@ impl SharedWebhookObservationStore {
                     .map_err(|error| format!(
                         "failed to initialize shared webhook observation lookup index: {error}"
                     ))?;
+                    sqlx::query(&format!(
+                        "CREATE TABLE IF NOT EXISTS {schema_ident}.verified_webhook_deliveries (
+                            app_id TEXT NOT NULL,
+                            route_name TEXT NOT NULL,
+                            source TEXT NOT NULL,
+                            delivery_id TEXT NOT NULL,
+                            first_seen_request_id TEXT NOT NULL,
+                            first_seen_at_unix_seconds BIGINT NOT NULL,
+                            PRIMARY KEY (app_id, source, delivery_id)
+                        )"
+                    ))
+                    .execute(&client.pool)
+                    .await
+                    .map_err(|error| format!(
+                        "failed to initialize shared verified webhook delivery table: {error}"
+                    ))?;
                     Ok(())
                 })
             })
@@ -242,6 +294,14 @@ impl SharedWebhookObservationStore {
             "{}.{}",
             quote_identifier(&self.schema),
             quote_identifier("webhook_observation_entries")
+        )
+    }
+
+    fn qualified_delivery_table(&self) -> String {
+        format!(
+            "{}.{}",
+            quote_identifier(&self.schema),
+            quote_identifier("verified_webhook_deliveries")
         )
     }
 }

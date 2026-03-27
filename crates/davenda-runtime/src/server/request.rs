@@ -140,6 +140,7 @@ type HmacSha256 = Hmac<Sha256>;
 struct VerifiedIngressWebhook {
     webhook: VerifiedWebhook,
     payment_reference: Option<String>,
+    delivery_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,10 +167,27 @@ struct StripeCheckoutSessionResponse {
     url: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct StripeCheckoutSessionLookupResponse {
+    id: String,
+    status: Option<String>,
+    payment_status: Option<String>,
+    client_reference_id: Option<String>,
+    metadata: Option<BTreeMap<String, String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HostedCheckoutSession {
     pub(crate) id: String,
     pub(crate) url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostedCheckoutSessionStatus {
+    pub(crate) id: String,
+    pub(crate) status: Option<String>,
+    pub(crate) payment_status: Option<String>,
+    pub(crate) payment_reference: Option<String>,
 }
 
 pub(crate) trait HostedCheckoutClient: Send + Sync {
@@ -179,6 +197,12 @@ pub(crate) trait HostedCheckoutClient: Send + Sync {
         request_body: &str,
         idempotency_key: &str,
     ) -> Result<HostedCheckoutSession, String>;
+
+    fn fetch_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        session_id: &str,
+    ) -> Result<HostedCheckoutSessionStatus, String>;
 }
 
 #[derive(Debug, Default)]
@@ -222,6 +246,54 @@ impl HostedCheckoutClient for LiveStripeHostedCheckoutClient {
             }
             Err(ureq::Error::Transport(error)) => {
                 Err(format!("Stripe Checkout handoff request failed: {error}"))
+            }
+        }
+    }
+
+    fn fetch_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        session_id: &str,
+    ) -> Result<HostedCheckoutSessionStatus, String> {
+        let encoded_session_id =
+            url::form_urlencoded::byte_serialize(session_id.as_bytes()).collect::<String>();
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout_read(std::time::Duration::from_secs(10))
+            .build();
+        let request = agent
+            .get(&format!(
+                "https://api.stripe.com/v1/checkout/sessions/{encoded_session_id}"
+            ))
+            .set("authorization", &format!("Bearer {api_key}"));
+        match request.call() {
+            Ok(response) => {
+                let body = response.into_string().map_err(|error| {
+                    format!("failed to read Stripe Checkout lookup response: {error}")
+                })?;
+                let session = serde_json::from_str::<StripeCheckoutSessionLookupResponse>(&body)
+                    .map_err(|error| {
+                        format!("failed to decode Stripe Checkout lookup response: {error}")
+                    })?;
+                Ok(HostedCheckoutSessionStatus {
+                    id: session.id,
+                    status: session.status,
+                    payment_status: session.payment_status,
+                    payment_reference: session.client_reference_id.or_else(|| {
+                        session
+                            .metadata
+                            .and_then(|metadata| metadata.get("payment_reference").cloned())
+                    }),
+                })
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                Err(format!(
+                    "Stripe Checkout session lookup failed with HTTP {code}: {body}"
+                ))
+            }
+            Err(ureq::Error::Transport(error)) => {
+                Err(format!("Stripe Checkout lookup request failed: {error}"))
             }
         }
     }
@@ -470,6 +542,8 @@ pub(super) async fn execute_live_request(
     let provider_result = execution_query_field(&execution, "provider_result").map(str::to_string);
     let payment_reference =
         execution_query_field(&execution, "payment_reference").map(str::to_string);
+    let checkout_session_id =
+        execution_query_field(&execution, "checkout_session_id").map(str::to_string);
     if let Some(location) = redirect_failed_checkout_confirmation(
         state,
         route_name.as_str(),
@@ -478,6 +552,7 @@ pub(super) async fn execute_live_request(
         principal_id.as_deref(),
         provider_result.as_deref(),
         payment_reference.as_deref(),
+        checkout_session_id.as_deref(),
         now,
         &mut execution.response_cookies,
     )? {
@@ -515,8 +590,12 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
             | StorefrontStateError::UnknownPaymentReference { .. }
             | StorefrontStateError::UnknownPaymentWebhookEvent { .. }
             | StorefrontStateError::UnexpectedPaymentWebhookProvider { .. }
+            | StorefrontStateError::MissingPaymentWebhookDeliveryId
             | StorefrontStateError::InvalidPaymentWebhookSignature,
         ) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        RuntimeServerError::Storefront(StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            ..
+        }) => (StatusCode::CONFLICT, error.to_string()).into_response(),
         RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret) => {
             (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response()
         }
@@ -1379,6 +1458,81 @@ impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
                     ]),
                 })
                 .collect(),
+            "commerce.catalog.products" => self
+                .storefront
+                .catalog()
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.read.failed",
+                        "Runtime could not load the effective storefront catalog products.",
+                    )
+                    .with_detail(error.to_string())
+                })?
+                .products
+                .iter()
+                .filter(|product| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| product.handle == key || product.sku == key)
+                        && query
+                            .filters
+                            .get("collection_handle")
+                            .map_or(true, |handle| product.collection_handle == *handle)
+                })
+                .map(|product| RepositoryRecord {
+                    id: product.handle.clone(),
+                    fields: BTreeMap::from([
+                        ("handle".to_string(), product.handle.clone()),
+                        ("sku".to_string(), product.sku.clone()),
+                        ("title".to_string(), product.title.clone()),
+                        ("summary".to_string(), product.summary.clone()),
+                        ("price_minor".to_string(), product.price_minor.to_string()),
+                        ("currency".to_string(), product.currency.clone()),
+                        (
+                            "collection_handle".to_string(),
+                            product.collection_handle.clone(),
+                        ),
+                        ("is_visible".to_string(), product.is_visible.to_string()),
+                        ("product_kind".to_string(), product.product_kind.clone()),
+                        (
+                            "entitlement_key".to_string(),
+                            product.entitlement_key.clone().unwrap_or_default(),
+                        ),
+                    ]),
+                })
+                .collect(),
+            "commerce.catalog.collections" => self
+                .storefront
+                .catalog()
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.read.failed",
+                        "Runtime could not load the effective storefront catalog collections.",
+                    )
+                    .with_detail(error.to_string())
+                })?
+                .collections
+                .iter()
+                .filter(|collection| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| collection.handle == key)
+                })
+                .map(|collection| RepositoryRecord {
+                    id: collection.handle.clone(),
+                    fields: BTreeMap::from([
+                        ("handle".to_string(), collection.handle.clone()),
+                        ("title".to_string(), collection.title.clone()),
+                        ("label".to_string(), collection.label.clone()),
+                        ("summary".to_string(), collection.summary.clone()),
+                        ("is_visible".to_string(), collection.is_visible.to_string()),
+                    ]),
+                })
+                .collect(),
             "commerce.orders" => {
                 let order = if let Some(key) = query.key.as_deref() {
                     self.storefront.admin_order(key).map_err(|error| {
@@ -1438,7 +1592,7 @@ impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
                     BackendErrorKind::Unsupported,
                     "repository.read.unsupported",
                     format!(
-                        "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, `cms.redirects`, and `commerce.orders` reads; `{}` is not available.",
+                        "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, `cms.redirects`, `commerce.catalog.products`, `commerce.catalog.collections`, and `commerce.orders` reads; `{}` is not available.",
                         query.repository
                     ),
                 ));
@@ -1452,26 +1606,26 @@ impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
     }
 
     fn write(&self, change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
-        let mut workspace = self
-            .workspace
-            .as_ref()
-            .ok_or_else(|| {
-                BackendError::new(
-                    BackendErrorKind::Unsupported,
-                    "repository.write.unsupported",
-                    "Runtime customer hooks did not expose a CMS workspace for this request.",
-                )
-            })?
-            .lock()
-            .map_err(|_| {
-                BackendError::new(
-                    BackendErrorKind::Internal,
-                    "repository.workspace.lock_failed",
-                    "Runtime could not acquire the CMS workspace lock.",
-                )
-            })?;
         match change.repository.as_str() {
             "cms.pages" => {
+                let mut workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::Unsupported,
+                            "repository.write.unsupported",
+                            "Runtime customer hooks did not expose a CMS workspace for this request.",
+                        )
+                    })?
+                    .lock()
+                    .map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::Internal,
+                            "repository.workspace.lock_failed",
+                            "Runtime could not acquire the CMS workspace lock.",
+                        )
+                    })?;
                 let existing = workspace
                     .selected_page(Some(change.record_id.as_str()))
                     .cloned()
@@ -1526,6 +1680,24 @@ impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
                 })
             }
             "cms.navigation" => {
+                let mut workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::Unsupported,
+                            "repository.write.unsupported",
+                            "Runtime customer hooks did not expose a CMS workspace for this request.",
+                        )
+                    })?
+                    .lock()
+                    .map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::Internal,
+                            "repository.workspace.lock_failed",
+                            "Runtime could not acquire the CMS workspace lock.",
+                        )
+                    })?;
                 let mut items = workspace.navigation.clone();
                 let record_id = if change.record_id == "append" || change.record_id == "new" {
                     let item = CmsAdminNavigationItem {
@@ -1590,6 +1762,24 @@ impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
                 })
             }
             "cms.redirects" => {
+                let mut workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::Unsupported,
+                            "repository.write.unsupported",
+                            "Runtime customer hooks did not expose a CMS workspace for this request.",
+                        )
+                    })?
+                    .lock()
+                    .map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::Internal,
+                            "repository.workspace.lock_failed",
+                            "Runtime could not acquire the CMS workspace lock.",
+                        )
+                    })?;
                 let mut redirects = workspace.redirects.clone();
                 let record_id = if change.record_id == "append" || change.record_id == "new" {
                     let redirect = CmsAdminRedirect {
@@ -1669,15 +1859,176 @@ impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
                     version: Some(self.recorded_at_unix_seconds.to_string()),
                 })
             }
+            "commerce.catalog.products" => {
+                let catalog = self.storefront.catalog().map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.write.failed",
+                        "Runtime could not load the effective storefront catalog product.",
+                    )
+                    .with_detail(error.to_string())
+                })?;
+                let existing = catalog
+                    .product_by_sku_or_handle(change.record_id.as_str())
+                    .cloned()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer hook tried to write unknown catalog product `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                let update = crate::storefront::StorefrontCatalogProductUpdate {
+                    handle: existing.handle.clone(),
+                    title: change
+                        .fields
+                        .get("title")
+                        .cloned()
+                        .unwrap_or(existing.title.clone()),
+                    summary: change
+                        .fields
+                        .get("summary")
+                        .cloned()
+                        .unwrap_or(existing.summary.clone()),
+                    price_minor: repository_i64_field(
+                        &change,
+                        "price_minor",
+                        existing.price_minor,
+                    )?,
+                    collection_handle: change
+                        .fields
+                        .get("collection_handle")
+                        .cloned()
+                        .unwrap_or(existing.collection_handle.clone()),
+                    is_visible: repository_bool_field(&change, "is_visible", existing.is_visible)?,
+                };
+                self.storefront
+                    .update_catalog_product(&update, self.recorded_at_unix_seconds)
+                    .map_err(|error| {
+                        BackendError::new(
+                            BackendErrorKind::Unavailable,
+                            "repository.write.failed",
+                            "Runtime could not persist the storefront catalog product override.",
+                        )
+                        .with_detail(error.to_string())
+                    })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id: update.handle,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            "commerce.catalog.collections" => {
+                let catalog = self.storefront.catalog().map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.write.failed",
+                        "Runtime could not load the effective storefront catalog collection.",
+                    )
+                    .with_detail(error.to_string())
+                })?;
+                let existing = catalog
+                    .collection(change.record_id.as_str())
+                    .cloned()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer hook tried to write unknown catalog collection `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                let update = crate::storefront::StorefrontCatalogCollectionUpdate {
+                    handle: existing.handle.clone(),
+                    title: change
+                        .fields
+                        .get("title")
+                        .cloned()
+                        .unwrap_or(existing.title.clone()),
+                    label: change
+                        .fields
+                        .get("label")
+                        .cloned()
+                        .unwrap_or(existing.label.clone()),
+                    summary: change
+                        .fields
+                        .get("summary")
+                        .cloned()
+                        .unwrap_or(existing.summary.clone()),
+                    is_visible: repository_bool_field(&change, "is_visible", existing.is_visible)?,
+                };
+                self.storefront
+                    .update_catalog_collection(&update, self.recorded_at_unix_seconds)
+                    .map_err(|error| {
+                        BackendError::new(
+                            BackendErrorKind::Unavailable,
+                            "repository.write.failed",
+                            "Runtime could not persist the storefront catalog collection override.",
+                        )
+                        .with_detail(error.to_string())
+                    })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id: update.handle,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
             _ => Err(BackendError::new(
                 BackendErrorKind::Unsupported,
                 "repository.write.unsupported",
                 format!(
-                    "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, and `cms.redirects` writes; `{}` is not available.",
+                    "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, `cms.redirects`, `commerce.catalog.products`, and `commerce.catalog.collections` writes; `{}` is not available.",
                     change.repository
                 ),
             )),
         }
+    }
+}
+
+fn repository_i64_field(
+    change: &RepositoryWrite,
+    field: &str,
+    default: i64,
+) -> Result<i64, BackendError> {
+    match change.fields.get(field) {
+        Some(value) => value.parse::<i64>().map_err(|_| {
+            BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "repository.write.invalid_integer",
+                format!(
+                    "Customer hook field `{field}` for repository `{}` must be a valid integer.",
+                    change.repository
+                ),
+            )
+        }),
+        None => Ok(default),
+    }
+}
+
+fn repository_bool_field(
+    change: &RepositoryWrite,
+    field: &str,
+    default: bool,
+) -> Result<bool, BackendError> {
+    match change.fields.get(field) {
+        Some(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "repository.write.invalid_bool",
+                format!(
+                    "Customer hook field `{field}` for repository `{}` must be a valid boolean.",
+                    change.repository
+                ),
+            )),
+        },
+        None => Ok(default),
     }
 }
 
@@ -2184,8 +2535,7 @@ fn execute_verified_webhook_customer_hooks(
     };
 
     for hook in &state.plan.customer_hooks.verified_webhooks {
-        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &repositories, &audit)
-        {
+        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &repositories, &audit) {
             Ok(WebhookHandlingResult::Accepted { detail }) => {
                 audit
                     .record(
@@ -2739,6 +3089,17 @@ fn verified_webhook_headers(execution: &RequestExecution, source: &str, event: &
         "x-davenda-verified-webhook-event".to_string(),
         event.to_string(),
     );
+    if let Some(delivery_id) = execution
+        .headers
+        .get("stripe-signature")
+        .filter(|_| source == "stripe")
+        .and_then(|_| stripe_event_delivery_id_from_request_body(execution).ok())
+    {
+        headers.insert(
+            "x-davenda-verified-webhook-delivery-id".to_string(),
+            delivery_id,
+        );
+    }
     if let Some(content_type) = execution.content_type.clone() {
         headers.insert("content-type".to_string(), content_type);
     }
@@ -2845,6 +3206,7 @@ fn validated_generic_verified_payment_webhook_from_execution(
             payload,
         },
         payment_reference: Some(payment_reference),
+        delivery_id: None,
     })
 }
 
@@ -2883,16 +3245,23 @@ fn validated_stripe_payment_webhook_from_execution(
             })
         })?
         .to_string();
+    let delivery_id = stripe_event_delivery_id_from_event(&event)?;
     let payment_reference = stripe_payment_reference_from_event(&event)?;
+    let mut headers = verified_webhook_headers(execution, "stripe", &event_name);
+    headers.insert(
+        "x-davenda-verified-webhook-delivery-id".to_string(),
+        delivery_id.clone(),
+    );
     Ok(VerifiedIngressWebhook {
         webhook: VerifiedWebhook {
             source: "stripe".to_string(),
             event: event_name.clone(),
-            headers: verified_webhook_headers(execution, "stripe", &event_name),
+            headers,
             content_type: execution.content_type.clone(),
             payload,
         },
         payment_reference: Some(payment_reference),
+        delivery_id: Some(delivery_id),
     })
 }
 
@@ -2968,8 +3337,16 @@ fn stripe_payment_reference_from_event(
             .iter()
             .find_map(|key| metadata.get(*key).and_then(serde_json::Value::as_str))
         })
-        .or_else(|| object.get("client_reference_id").and_then(serde_json::Value::as_str))
-        .or_else(|| object.get("payment_intent").and_then(serde_json::Value::as_str))
+        .or_else(|| {
+            object
+                .get("client_reference_id")
+                .and_then(serde_json::Value::as_str)
+        })
+        .or_else(|| {
+            object
+                .get("payment_intent")
+                .and_then(serde_json::Value::as_str)
+        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -2981,16 +3358,210 @@ fn stripe_payment_reference_from_event(
     Ok(payment_reference)
 }
 
+fn stripe_event_delivery_id_from_request_body(
+    execution: &RequestExecution,
+) -> Result<String, RuntimeServerError> {
+    let payload = verified_webhook_payload(execution)?;
+    let event = serde_json::from_slice::<serde_json::Value>(&payload).map_err(|error| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to decode Stripe webhook payload: {error}"),
+        }
+    })?;
+    stripe_event_delivery_id_from_event(&event)
+}
+
+fn stripe_event_delivery_id_from_event(
+    event: &serde_json::Value,
+) -> Result<String, RuntimeServerError> {
+    event
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::MissingPaymentWebhookDeliveryId,
+        ))
+}
+
 fn verified_webhook_from_execution(
     state: &RuntimeServerState,
     execution: &RequestExecution,
 ) -> Result<Option<VerifiedIngressWebhook>, RuntimeServerError> {
     match execution.route.route_name.as_str() {
-        "commerce.payment-provider-webhook" => {
-            validated_verified_payment_webhook_from_execution(state, execution).map(Some)
-        }
+        "commerce.payment-provider-webhook" => validated_verified_payment_webhook_from_execution(
+            state, execution,
+        )
+        .and_then(|verified| {
+            guard_verified_webhook_replay(state, execution, &verified)?;
+            Ok(Some(verified))
+        }),
         _ => Ok(None),
     }
+}
+
+fn guard_verified_webhook_replay(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    verified: &VerifiedIngressWebhook,
+) -> Result<(), RuntimeServerError> {
+    let Some(delivery_id) = verified.delivery_id.as_deref() else {
+        return Ok(());
+    };
+    let recorded_at_unix_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let claimed = if should_fallback_to_local_verified_webhook_replay_store(state) {
+        claim_local_verified_webhook_delivery(
+            state,
+            execution,
+            verified.webhook.source.as_str(),
+            delivery_id,
+            recorded_at_unix_seconds,
+        )?
+    } else {
+        state
+            .wasm_host
+            .claim_verified_webhook_delivery(
+                execution.customer_app.as_str(),
+                execution.route.route_name.as_str(),
+                verified.webhook.source.as_str(),
+                delivery_id,
+                execution.trace.request_id.as_str(),
+                recorded_at_unix_seconds,
+            )
+            .map_err(|reason| RuntimeServerError::Configuration {
+                reason: format!("failed to persist verified webhook replay receipt: {reason}"),
+            })?
+    };
+    if claimed {
+        return Ok(());
+    }
+    record_verified_webhook_request_observation(
+        state,
+        execution,
+        &verified.webhook,
+        crate::wasm::WebhookObservationStatus::ReplayRejected,
+        Some(format!(
+            "verified webhook delivery `{delivery_id}` has already been processed"
+        )),
+    );
+    Err(RuntimeServerError::Storefront(
+        StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            delivery_id: delivery_id.to_string(),
+        },
+    ))
+}
+
+fn should_fallback_to_local_verified_webhook_replay_store(state: &RuntimeServerState) -> bool {
+    matches!(
+        state.plan.metadata_audit_backend_selection(),
+        crate::plan::MetadataAuditBackendSelection::SharedPostgres { .. }
+    ) && std::env::var_os("DATABASE_URL").is_none()
+}
+
+fn claim_local_verified_webhook_delivery(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    source: &str,
+    delivery_id: &str,
+    recorded_at_unix_seconds: i64,
+) -> Result<bool, RuntimeServerError> {
+    let path = state
+        .plan
+        .shared_state_root()
+        .join("server")
+        .join("verified-webhook-deliveries.sqlite3");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to create verified webhook replay directory `{}`: {error}",
+                parent.display()
+            ),
+        })?;
+    }
+    let connection =
+        rusqlite::Connection::open(&path).map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to open local verified webhook replay store `{}`: {error}",
+                path.display()
+            ),
+        })?;
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = FULL;
+            CREATE TABLE IF NOT EXISTS verified_webhook_deliveries (
+                app_id TEXT NOT NULL,
+                route_name TEXT NOT NULL,
+                source TEXT NOT NULL,
+                delivery_id TEXT NOT NULL,
+                first_seen_request_id TEXT NOT NULL,
+                first_seen_at_unix_seconds INTEGER NOT NULL,
+                PRIMARY KEY (app_id, source, delivery_id)
+            );
+            "#,
+        )
+        .map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to initialize local verified webhook replay store `{}`: {error}",
+                path.display()
+            ),
+        })?;
+    let inserted = connection
+        .execute(
+            r#"
+            INSERT OR IGNORE INTO verified_webhook_deliveries (
+                app_id,
+                route_name,
+                source,
+                delivery_id,
+                first_seen_request_id,
+                first_seen_at_unix_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            rusqlite::params![
+                execution.customer_app.as_str(),
+                execution.route.route_name.as_str(),
+                source,
+                delivery_id,
+                execution.trace.request_id.as_str(),
+                recorded_at_unix_seconds,
+            ],
+        )
+        .map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to persist local verified webhook replay receipt `{}`: {error}",
+                path.display()
+            ),
+        })?;
+    Ok(inserted > 0)
+}
+
+fn record_verified_webhook_request_observation(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    webhook: &VerifiedWebhook,
+    status: crate::wasm::WebhookObservationStatus,
+    detail: Option<String>,
+) {
+    let principal_kind = if execution.principal.principal_id.is_some() {
+        "user"
+    } else {
+        "anonymous"
+    };
+    let _ = state.wasm_host.record_webhook_request_observation(
+        execution.customer_app.as_str(),
+        webhook.source.as_str(),
+        webhook.event.as_str(),
+        status,
+        execution.trace.request_id.as_str(),
+        principal_kind,
+        execution.principal.principal_id.as_deref(),
+        detail,
+    );
 }
 
 fn storefront_payment_input_from_execution(
@@ -3290,7 +3861,18 @@ async fn apply_native_storefront_mutations(
     response_cookies: &mut Vec<String>,
 ) -> Result<Option<String>, RuntimeServerError> {
     if let Some(verified) = verified_webhook_from_execution(state, execution)? {
-        execute_verified_webhook_customer_hooks(state, execution, &verified.webhook, now)?;
+        if let Err(error) =
+            execute_verified_webhook_customer_hooks(state, execution, &verified.webhook, now)
+        {
+            record_verified_webhook_request_observation(
+                state,
+                execution,
+                &verified.webhook,
+                crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                Some(error.to_string()),
+            );
+            return Err(error);
+        }
         if execution.route.route_name.as_str() != "commerce.payment-provider-webhook" {
             return Ok(None);
         }
@@ -3302,7 +3884,7 @@ async fn apply_native_storefront_mutations(
                 ),
             }
         })?;
-        let receipt = state.storefront.apply_payment_webhook(
+        let receipt = match state.storefront.apply_payment_webhook(
             payment_reference,
             normalized_payment_webhook_event(
                 verified.webhook.source.as_str(),
@@ -3310,13 +3892,51 @@ async fn apply_native_storefront_mutations(
             )
             .as_ref(),
             now.as_unix_seconds(),
-        )?;
+        ) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                record_verified_webhook_request_observation(
+                    state,
+                    execution,
+                    &verified.webhook,
+                    crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                    Some(error.to_string()),
+                );
+                return Err(RuntimeServerError::Storefront(error));
+            }
+        };
         if receipt.needs_paid_event_dispatch {
-            dispatch_paid_order_event(state, &receipt.order, now)?;
-            state
+            if let Err(error) = dispatch_paid_order_event(state, &receipt.order, now) {
+                record_verified_webhook_request_observation(
+                    state,
+                    execution,
+                    &verified.webhook,
+                    crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                    Some(error.to_string()),
+                );
+                return Err(error);
+            }
+            if let Err(error) = state
                 .storefront
-                .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())?;
+                .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())
+            {
+                record_verified_webhook_request_observation(
+                    state,
+                    execution,
+                    &verified.webhook,
+                    crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                    Some(error.to_string()),
+                );
+                return Err(RuntimeServerError::Storefront(error));
+            }
         }
+        record_verified_webhook_request_observation(
+            state,
+            execution,
+            &verified.webhook,
+            crate::wasm::WebhookObservationStatus::Accepted,
+            None,
+        );
         return Ok(None);
     }
 
@@ -3880,13 +4500,10 @@ fn stripe_checkout_session_request_body(
         .ok_or_else(|| format!("order {} is missing a payment reference", order.order_id))?;
     let mut serializer = form_urlencoded::Serializer::new(String::new());
     serializer.append_pair("mode", "payment");
-    serializer.append_pair(
-        "success_url",
-        &provider_checkout_return_url(execution, payment_reference, "return"),
-    );
+    serializer.append_pair("success_url", &stripe_checkout_success_url(execution));
     serializer.append_pair(
         "cancel_url",
-        &provider_checkout_return_url(execution, payment_reference, "cancel"),
+        &provider_checkout_cancel_url(execution, payment_reference),
     );
     serializer.append_pair("client_reference_id", payment_reference);
     if let Some(email) = order.payment.checkout_email.as_deref() {
@@ -3944,6 +4561,23 @@ fn stripe_line_item_name(line: &StorefrontOrderLine) -> String {
     format!("{} ({variant})", line.title)
 }
 
+fn checkout_confirmation_base_url(execution: &RequestExecution) -> String {
+    format!(
+        "{}://{}/checkout/confirmation",
+        execution.trace.transport_scheme, execution.host
+    )
+}
+
+fn stripe_checkout_success_url(execution: &RequestExecution) -> String {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("checkout_session_id", "{CHECKOUT_SESSION_ID}");
+    format!(
+        "{}?{}",
+        checkout_confirmation_base_url(execution),
+        serializer.finish()
+    )
+}
+
 fn provider_checkout_return_url(
     execution: &RequestExecution,
     payment_reference: &str,
@@ -3953,11 +4587,62 @@ fn provider_checkout_return_url(
     serializer.append_pair("provider_result", provider_result);
     serializer.append_pair("payment_reference", payment_reference);
     format!(
-        "{}://{}/checkout/confirmation?{}",
-        execution.trace.transport_scheme,
-        execution.host,
+        "{}?{}",
+        checkout_confirmation_base_url(execution),
         serializer.finish()
     )
+}
+
+fn provider_checkout_cancel_url(execution: &RequestExecution, payment_reference: &str) -> String {
+    provider_checkout_return_url(execution, payment_reference, "cancel")
+}
+
+fn reconcile_hosted_checkout_confirmation(
+    state: &RuntimeServerState,
+    checkout_session_id: &str,
+    now: BrowserInstant,
+) -> Result<(), RuntimeServerError> {
+    if state.uses_development_hosted_checkout_stub() {
+        return Ok(());
+    }
+    let Some(provider) = configured_commerce_payment_provider(&state.plan.config) else {
+        return Ok(());
+    };
+    if provider.code != "stripe" || !provider.uses_hosted_checkout() {
+        return Ok(());
+    }
+    let Some(api_key) = state.payment_provider_api_key.as_deref() else {
+        return Ok(());
+    };
+    let session = match state
+        .hosted_checkout_client
+        .fetch_stripe_checkout_session(api_key, checkout_session_id)
+    {
+        Ok(session) => session,
+        Err(_) => return Ok(()),
+    };
+    let Some(payment_reference) = session.payment_reference.as_deref() else {
+        return Ok(());
+    };
+    let event = match (session.status.as_deref(), session.payment_status.as_deref()) {
+        (Some("complete"), Some("paid" | "no_payment_required")) => Some("payment.captured"),
+        (Some("expired"), _) => Some("payment.failed"),
+        _ => None,
+    };
+    let Some(event) = event else {
+        return Ok(());
+    };
+    let receipt =
+        state
+            .storefront
+            .apply_payment_webhook(payment_reference, event, now.as_unix_seconds())?;
+    if receipt.needs_paid_event_dispatch {
+        dispatch_paid_order_event(state, &receipt.order, now)?;
+        state
+            .storefront
+            .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())?;
+    }
+    Ok(())
 }
 
 fn restore_checkout_after_provider_handoff_failure(
@@ -3986,11 +4671,15 @@ fn redirect_failed_checkout_confirmation(
     principal_id: Option<&str>,
     provider_result: Option<&str>,
     payment_reference: Option<&str>,
+    checkout_session_id: Option<&str>,
     now: BrowserInstant,
     response_cookies: &mut Vec<String>,
 ) -> Result<Option<String>, RuntimeServerError> {
     if route_name != "commerce.checkout-confirmation" || method != HttpMethod::Get {
         return Ok(None);
+    }
+    if let Some(checkout_session_id) = checkout_session_id {
+        reconcile_hosted_checkout_confirmation(state, checkout_session_id, now)?;
     }
     if provider_result == Some("return")
         && state.uses_development_hosted_checkout_stub()
@@ -4287,7 +4976,11 @@ fn persisted_customer_managed_asset_record(
         revision_id: asset.current_revision().id().as_str().to_string(),
         content_type: asset.current_revision().content_type().to_string(),
         byte_length: asset.current_revision().byte_length(),
-        fingerprint_algorithm: asset.current_revision().fingerprint().algorithm().to_string(),
+        fingerprint_algorithm: asset
+            .current_revision()
+            .fingerprint()
+            .algorithm()
+            .to_string(),
         fingerprint_digest: asset.current_revision().fingerprint().digest().to_string(),
         published_current: asset.publication().is_published(),
     })

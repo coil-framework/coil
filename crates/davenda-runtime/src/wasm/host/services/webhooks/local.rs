@@ -50,6 +50,15 @@ impl LocalWebhookObservationStore {
                     ON webhook_observation_entries (recorded_at_unix_seconds DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS webhook_observation_entries_lookup
                     ON webhook_observation_entries (source, event, status);
+                CREATE TABLE IF NOT EXISTS verified_webhook_deliveries (
+                    app_id TEXT NOT NULL,
+                    route_name TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    delivery_id TEXT NOT NULL,
+                    first_seen_request_id TEXT NOT NULL,
+                    first_seen_at_unix_seconds INTEGER NOT NULL,
+                    PRIMARY KEY (app_id, source, delivery_id)
+                );
                 "#,
             )
             .unwrap_or_else(|error| {
@@ -221,6 +230,50 @@ impl LocalWebhookObservationStore {
             })?;
         records.reverse();
         Ok(records)
+    }
+
+    pub(super) fn claim_delivery(
+        &self,
+        app_id: &str,
+        route_name: &str,
+        source: &str,
+        delivery_id: &str,
+        request_id: &str,
+        recorded_at_unix_seconds: i64,
+    ) -> Result<bool, String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| "webhook observation store is poisoned".to_string())?;
+        let tx = connection.transaction().map_err(|error| {
+            format!("failed to start local verified webhook replay transaction: {error}")
+        })?;
+        let inserted = tx
+            .execute(
+                r#"
+                INSERT OR IGNORE INTO verified_webhook_deliveries (
+                    app_id,
+                    route_name,
+                    source,
+                    delivery_id,
+                    first_seen_request_id,
+                    first_seen_at_unix_seconds
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+                params![
+                    app_id,
+                    route_name,
+                    source,
+                    delivery_id,
+                    request_id,
+                    recorded_at_unix_seconds,
+                ],
+            )
+            .map_err(|error| format!("failed to persist verified webhook delivery: {error}"))?;
+        tx.commit().map_err(|error| {
+            format!("failed to commit verified webhook delivery receipt: {error}")
+        })?;
+        Ok(inserted > 0)
     }
 }
 

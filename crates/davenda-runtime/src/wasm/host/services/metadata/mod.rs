@@ -114,7 +114,10 @@ impl RuntimeMetadataBackend {
         )
     }
 
-    pub(super) fn customer_managed_asset(&self, logical_path: &str) -> Result<Option<String>, String> {
+    pub(super) fn customer_managed_asset(
+        &self,
+        logical_path: &str,
+    ) -> Result<Option<String>, String> {
         self.backend.customer_managed_asset(logical_path)
     }
 
@@ -252,12 +255,16 @@ impl MetadataAuditBackend {
         updated_at_unix_seconds: i64,
     ) -> Result<(), String> {
         match self {
-            Self::Local(store) => {
-                store.upsert_customer_managed_asset(logical_path, record_json, updated_at_unix_seconds)
-            }
-            Self::Shared(store) => {
-                store.upsert_customer_managed_asset(logical_path, record_json, updated_at_unix_seconds)
-            }
+            Self::Local(store) => store.upsert_customer_managed_asset(
+                logical_path,
+                record_json,
+                updated_at_unix_seconds,
+            ),
+            Self::Shared(store) => store.upsert_customer_managed_asset(
+                logical_path,
+                record_json,
+                updated_at_unix_seconds,
+            ),
         }
     }
 

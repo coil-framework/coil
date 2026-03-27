@@ -155,7 +155,10 @@ impl SharedMetadataAuditStore {
         })
     }
 
-    pub(super) fn customer_managed_asset(&self, logical_path: &str) -> Result<Option<String>, String> {
+    pub(super) fn customer_managed_asset(
+        &self,
+        logical_path: &str,
+    ) -> Result<Option<String>, String> {
         self.ensure_initialized()?;
         let client = self.client()?.clone();
         let table = self.qualified_customer_managed_assets_table();

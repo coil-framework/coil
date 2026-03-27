@@ -4,7 +4,14 @@ use harbor_shop_app::HarborShopWorkspace;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    LazyLock, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static TEMP_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct EnvVarGuard {
     key: &'static str,
@@ -45,7 +52,8 @@ fn unique_temp_app_root(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    std::env::temp_dir().join(format!("harbor-shop-{label}-{unique}"))
+    let counter = TEMP_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("harbor-shop-{label}-{unique}-{counter}"))
 }
 
 fn copy_dir_recursive(from: &Path, to: &Path) {
@@ -200,6 +208,7 @@ fn workspace_summary_reports_real_linked_plugin_details() {
 
 #[test]
 fn workspace_bootstrap_registers_the_linked_backend_into_the_runtime_plan() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
     let _object_store = set_env_var(
         "OBJECT_STORE_URL",
         r#"
@@ -251,6 +260,7 @@ fn workspace_validate_reports_customer_owned_lifecycle_summary() {
 
 #[test]
 fn workspace_publish_assets_reports_noop_without_theme_roots() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
     let _object_store = set_env_var(
         "OBJECT_STORE_URL",
         r#"
@@ -275,6 +285,7 @@ signed_url_ttl_secs = 900
 
 #[test]
 fn workspace_migrate_dry_run_reports_pending_executable_steps() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
     let _object_store = set_env_var(
         "OBJECT_STORE_URL",
         r#"

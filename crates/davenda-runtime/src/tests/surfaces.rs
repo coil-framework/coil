@@ -576,6 +576,60 @@ fn runtime_builder_run_from_env_requires_cookie_secret() {
 }
 
 #[test]
+fn customer_root_runtime_builder_requires_customer_root_before_build() {
+    let config = PlatformConfig::from_toml_str(
+        &VALID_CONFIG.replace(
+            "enabled = [\"cms-pages\", \"admin-shell\"]",
+            "enabled = [\"cms\"]",
+        ),
+    )
+    .unwrap();
+
+    let error = customer_root_runtime(config, DefaultAuthModelPackage::default())
+        .register_module(davenda_cms::CmsModule::new())
+        .build()
+        .unwrap_err();
+
+    assert!(matches!(error, RuntimeBuildError::CustomerRootNotConfigured));
+}
+
+#[test]
+fn customer_root_runtime_builder_run_from_env_honors_manifest_module_filtering() {
+    let customer_root = unique_temp_template_root("customer-root-runtime-run-from-env");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>customer-root-runtime</main></body>
+</html>"#,
+    );
+    write_customer_root_manifest(&customer_root, "platform-default-auth", &["admin"]);
+    let config = PlatformConfig::from_toml_str(
+        &VALID_CONFIG.replace(
+            "enabled = [\"cms-pages\", \"admin-shell\"]",
+            "enabled = [\"admin\"]",
+        ),
+    )
+    .unwrap();
+
+    let error = customer_root_runtime(config, DefaultAuthModelPackage::default())
+        .with_customer_root(&customer_root)
+        .register_module(davenda_cms::CmsModule::new())
+        .run_from_env()
+        .unwrap_err();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert!(matches!(
+        error,
+        RuntimeBootstrapError::Build(RuntimeBuildError::CustomerManifestMissingLinkedModules {
+            modules
+        }) if modules == vec!["admin".to_string()]
+    ));
+}
+
+#[test]
 fn customer_root_runtime_builder_preserves_runtime_builder_escape_hatch() {
     let config = single_node_valid_config();
     let customer_root = unique_temp_template_root("customer-root-builder-escape-hatch");

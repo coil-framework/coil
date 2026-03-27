@@ -232,7 +232,7 @@ where
     }
 
     pub fn run_from_env(self) -> Result<(), RuntimeBootstrapError> {
-        self.inner.run_from_env()
+        self.build()?.serve_from_env(env::var("DAVENDA_BIND").ok())
     }
 }
 
@@ -269,7 +269,7 @@ where
 {
     fn resolve_enabled_modules_from_customer_root(&self) -> Result<Vec<String>, RuntimeBuildError> {
         let Some(app_root) = &self.app_root else {
-            return Ok(Vec::new());
+            return Err(RuntimeBuildError::CustomerRootNotConfigured);
         };
         let manifest_path = app_root.join("app.toml");
         let manifest = load_customer_root_manifest(&manifest_path)

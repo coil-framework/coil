@@ -184,7 +184,7 @@ impl HarborShopWorkspace {
         let customer_plugins: Vec<Box<dyn CustomerBackendPlugin>> =
             vec![Box::new(harbor_shop_backend::plugin())];
         let runtime_plan = manifest
-            .build_runtime_plan_with_extensions_and_customer_plugins_at(
+            .build_customer_root_runtime_plan_with_extensions_and_customer_plugins_at(
                 config,
                 auth_package,
                 modules,

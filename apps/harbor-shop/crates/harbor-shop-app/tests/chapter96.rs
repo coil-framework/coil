@@ -111,6 +111,8 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
     let app_readme = include_str!("../../../README.md");
     let cargo_toml = include_str!("../../../Cargo.toml");
     let entrypoint = include_str!("../../../docker/entrypoint.sh");
+    let dockerfile = include_str!("../../../Dockerfile");
+    let dockerfile_repo = include_str!("../../../Dockerfile.repo");
 
     assert!(dashboard.contains("Linked customer backend"), "{dashboard}");
     assert!(dashboard.contains("linkedCustomerPlugins"), "{dashboard}");
@@ -181,6 +183,24 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         entrypoint.contains("exec harbor-shop up --config"),
         "{entrypoint}"
     );
+    assert!(
+        dockerfile.contains("cargo build --locked -p harbor-shop --release"),
+        "{dockerfile}"
+    );
+    assert!(
+        dockerfile.contains("COPY --from=builder /workspace/harbor-shop /usr/local/bin/harbor-shop"),
+        "{dockerfile}"
+    );
+    assert!(!dockerfile.contains("davenda-cli"), "{dockerfile}");
+    assert!(
+        dockerfile_repo.contains("WORKDIR /workspace/apps/harbor-shop"),
+        "{dockerfile_repo}"
+    );
+    assert!(
+        dockerfile_repo.contains("cargo build --locked -p harbor-shop --release"),
+        "{dockerfile_repo}"
+    );
+    assert!(!dockerfile_repo.contains("davenda-cli"), "{dockerfile_repo}");
 }
 
 #[test]

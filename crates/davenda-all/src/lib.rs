@@ -181,10 +181,11 @@ impl DavendaAllBuilder {
             }
         })?;
         let runtime_plan = manifest
-            .build_runtime_plan_with_customer_plugins(
+            .build_customer_root_runtime_plan_with_extensions_and_customer_plugins_at(
                 bootstrap.config,
                 bootstrap.auth_package,
                 modules,
+                Vec::new(),
                 self.customer_plugins,
                 app_root,
             )

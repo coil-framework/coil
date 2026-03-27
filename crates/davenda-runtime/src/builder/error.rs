@@ -121,6 +121,10 @@ pub enum RuntimeBuildError {
     CustomerManifestMissingLinkedModules { modules: Vec<String> },
     #[error("customer app manifest `{path}` could not be loaded: {reason}")]
     CustomerManifestLoad { path: PathBuf, reason: String },
+    #[error(
+        "customer-root runtime builder requires `with_customer_root(...)` before build or run"
+    )]
+    CustomerRootNotConfigured,
 }
 
 #[derive(Debug, Error)]

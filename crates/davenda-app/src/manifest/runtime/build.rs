@@ -201,6 +201,85 @@ impl CustomerAppManifest {
         })
     }
 
+    pub fn build_customer_root_runtime_plan_with_extensions_and_customer_plugins_at<P, A>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+        extension_packages: Vec<ExtensionPackage>,
+        customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
+        app_root: A,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage + 'static,
+        A: AsRef<Path>,
+    {
+        let app_root = app_root.as_ref();
+        validate_customer_app_root(app_root)?;
+        self.validate_runtime_config_alignment(&config)?;
+
+        let manifests = modules
+            .iter()
+            .map(|module| module.manifest())
+            .collect::<Vec<_>>();
+        let unexpected_modules = sorted_strings(
+            manifests
+                .iter()
+                .filter(|manifest| {
+                    !self
+                        .modules
+                        .iter()
+                        .any(|installed| installed.id.as_str() == manifest.name)
+                })
+                .map(|manifest| manifest.name.clone())
+                .collect::<Vec<_>>(),
+        );
+        if !unexpected_modules.is_empty() {
+            return Err(AppModelError::UnexpectedRuntimeModules {
+                app_id: self.id.to_string(),
+                modules: unexpected_modules,
+            });
+        }
+
+        let composition = self.compose(&auth_package, &manifests)?;
+        let migration_summary =
+            build_migration_summary(self, auth_package.manifest().name.clone(), &modules);
+        let release_doctor = self.release_doctor_with_extensions(
+            &auth_package,
+            &manifests,
+            &extension_packages,
+            Some(&config),
+        )?;
+        let installed_extensions = self.resolve_extension_packages(&extension_packages)?;
+
+        let mut builder = RuntimeBuilder::for_customer_root(config.clone(), auth_package)
+            .with_customer_root(app_root);
+        for module in modules {
+            builder = builder.with_boxed_module(module);
+        }
+        for plugin in customer_plugins {
+            builder = builder.with_boxed_linked_customer_plugin(plugin);
+        }
+        for extension in installed_extensions {
+            builder = builder.with_installed_extension(extension);
+        }
+
+        let runtime = builder.build()?;
+        let theme_publication = self.publish_theme_assets(&config, &runtime, app_root)?;
+        let mut runtime = runtime;
+        runtime.theme_asset_manifest = theme_publication
+            .as_ref()
+            .map(|publication| publication.manifest().clone());
+
+        Ok(CustomerAppRuntimePlan {
+            composition,
+            runtime,
+            theme_publication,
+            migration_summary,
+            release_doctor,
+        })
+    }
+
     pub fn migration_summary<P>(
         &self,
         auth_package: P,

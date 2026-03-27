@@ -25,6 +25,7 @@ use davenda_template::{
     RenderModel, RenderValue, TemplateModelError, TemplateNamespace, TrustedHtml,
 };
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
@@ -59,29 +60,94 @@ impl CommerceFacade for RuntimeCustomerCommerceFacade<'_> {
     }
 }
 
-struct RuntimeCustomerAuthFacade;
+struct RuntimeCustomerAuthFacade<'a> {
+    plan: &'a RuntimePlan,
+    principal_id: Option<&'a str>,
+}
 
-impl AuthFacade for RuntimeCustomerAuthFacade {
+impl AuthFacade for RuntimeCustomerAuthFacade<'_> {
     fn check_capability(
         &self,
-        _request: &AuthCheckRequest,
+        request: &AuthCheckRequest,
     ) -> Result<AuthCheckResult, BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "auth.render_check.unsupported",
-            "Render-time customer review cannot perform live auth checks.",
-        ))
+        let capability = parse_customer_capability(request.capability.as_str())?;
+        let object = parse_customer_auth_entity(request.object.as_str())?;
+        let subject = customer_hook_auth_subject(self.principal_id);
+        let data = self.plan.data.clone();
+        let tenant_id = self.plan.tenant_id();
+        let auth_package = self.plan.auth_package.clone();
+        let allowed = run_customer_hook_future(async move {
+            let client = data
+                .connect_lazy_postgres()
+                .map_err(|error| error.to_string())?;
+            let engine = zanzibar::postgres::PostgresRebacEngine::new(client.pool.clone());
+            let auth = davenda_auth::DavendaAuth::new(engine, tenant_id);
+            auth.check_capability(auth_package.package(), &subject, capability, &object)
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .map_err(customer_hook_auth_backend_error)?;
+
+        Ok(AuthCheckResult {
+            allowed,
+            explanation: (!allowed).then(|| {
+                format!(
+                    "live auth denied `{}` for `{}`",
+                    request.capability, request.object
+                )
+            }),
+        })
     }
 
     fn explain_denial(
         &self,
-        _request: &AuthExplainRequest,
+        request: &AuthExplainRequest,
     ) -> Result<AuthExplanation, BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "auth.render_explain.unsupported",
-            "Render-time customer review cannot produce live auth explanations.",
-        ))
+        if !self.plan.config.auth.explain_api {
+            return Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "auth.explain.unavailable",
+                "Runtime auth explanations are disabled for this installation.",
+            ));
+        }
+        let capability = parse_customer_capability(request.capability.as_str())?;
+        let object = parse_customer_auth_entity(request.object.as_str())?;
+        let subject = customer_hook_auth_subject(self.principal_id);
+        let config = self.plan.config.clone();
+        let data = self.plan.data.clone();
+        let auth_package = self.plan.auth_package.clone();
+        let explanation = run_customer_hook_future(async move {
+            let explainer = davenda_auth::LiveAuthExplainHost::from_runtime(
+                &config,
+                data,
+                auth_package,
+            )
+            .map_err(|error| error.to_string())?;
+            explainer
+                .explain_capability(&davenda_auth::LiveAuthExplainRequest {
+                    subject,
+                    capability,
+                    object,
+                    options: davenda_auth::ExplainOptions::default(),
+                })
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .map_err(customer_hook_auth_backend_error)?;
+
+        Ok(AuthExplanation {
+            summary: format!(
+                "{} `{}` on `{}`",
+                if explanation.decision.is_allowed() {
+                    "allow"
+                } else {
+                    "deny"
+                },
+                explanation.capability.as_str(),
+                explanation.object
+            ),
+            traces: vec![format!("{:?}", explanation.trace)],
+        })
     }
 }
 
@@ -1270,13 +1336,16 @@ fn customer_order_review(
             plan.config.app.name.clone(),
             format!("{:?}", plan.config.app.environment).to_ascii_lowercase(),
         ),
-        customer_plugin_principal(principal, &order.principal_id),
+        customer_plugin_principal(principal),
         CustomerPluginTraceContext::new(format!("order-detail:{}", order.order_id)),
     );
     let commerce = RuntimeCustomerCommerceFacade {
         catalog: &plan.storefront_catalog,
     };
-    let auth = RuntimeCustomerAuthFacade;
+    let auth = RuntimeCustomerAuthFacade {
+        plan,
+        principal_id: principal.and_then(|ctx| ctx.principal_id.as_deref()),
+    };
     let audit = RuntimeCustomerAuditFacade {
         plan,
         principal_id: principal.and_then(|ctx| ctx.principal_id.as_deref()),
@@ -1327,27 +1396,38 @@ fn customer_order_draft(order: &StorefrontOrderSnapshot, catalog: &StorefrontCat
             metadata: BTreeMap::new(),
         })
         .collect();
+    let mut metadata = BTreeMap::new();
+    metadata.insert("session_id".to_string(), order.session_id.clone());
+    metadata.insert(
+        "payment_method".to_string(),
+        order
+            .payment
+            .method
+            .clone()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase(),
+    );
+    if let Some(checkout_email) = order.payment.checkout_email.as_ref() {
+        metadata.insert("checkout_email".to_string(), checkout_email.trim().to_string());
+    }
     OrderDraft {
         order_id: order.order_id.clone(),
         currency_code: order.currency.clone(),
         subtotal,
         total,
         lines,
-        metadata: BTreeMap::new(),
+        metadata,
     }
 }
 
 fn customer_plugin_principal(
     principal: Option<&PrincipalContext>,
-    order_principal_id: &Option<String>,
 ) -> CustomerPluginPrincipalContext {
     if let Some(principal) = principal {
         if let Some(principal_id) = principal.principal_id.as_ref() {
             return CustomerPluginPrincipalContext::user(principal_id.clone());
         }
-    }
-    if let Some(principal_id) = order_principal_id.as_ref() {
-        return CustomerPluginPrincipalContext::user(principal_id.clone());
     }
     CustomerPluginPrincipalContext {
         kind: CustomerPluginPrincipalKind::Anonymous,
@@ -1359,6 +1439,109 @@ fn customer_plugin_template_error(error: BackendError) -> TemplateModelError {
     TemplateModelError::TemplateRead {
         path: "linked customer hook".to_string(),
         message: error.to_string(),
+    }
+}
+
+fn run_customer_hook_future<T>(
+    future: impl Future<Output = Result<T, String>> + Send + 'static,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if matches!(handle.runtime_flavor(), tokio::runtime::RuntimeFlavor::MultiThread) => {
+            tokio::task::block_in_place(|| handle.block_on(future))
+        }
+        Ok(_) => std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?
+                .block_on(future)
+        })
+        .join()
+        .map_err(|_| "customer hook runtime bridge thread panicked".to_string())?,
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?
+            .block_on(future),
+    }
+}
+
+fn customer_hook_auth_backend_error(reason: String) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Unavailable,
+        "auth.live_check.failed",
+        "Runtime could not complete the linked customer auth check.",
+    )
+    .with_detail(reason)
+}
+
+fn parse_customer_capability(value: &str) -> Result<davenda_auth::Capability, BackendError> {
+    davenda_auth::Capability::from_str(value).ok_or_else(|| {
+        BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.capability.invalid",
+            format!("Unknown capability `{value}`."),
+        )
+    })
+}
+
+fn parse_customer_auth_entity(value: &str) -> Result<davenda_auth::Entity, BackendError> {
+    let Some((namespace, id)) = value.split_once(':') else {
+        return Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Invalid auth object `{value}`."),
+        ));
+    };
+    if id.trim().is_empty() {
+        return Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Invalid auth object `{value}`."),
+        ));
+    }
+    match namespace {
+        "tenant" => Ok(davenda_auth::Entity::tenant(id)),
+        "site" => Ok(davenda_auth::Entity::site(id)),
+        "brand" => Ok(davenda_auth::Entity::brand(id)),
+        "storefront" => Ok(davenda_auth::Entity::storefront(id)),
+        "user" => Ok(davenda_auth::Entity::user(id)),
+        "group" => Ok(davenda_auth::Entity::group(id)),
+        "team" => Ok(davenda_auth::Entity::team(id)),
+        "service_account" => Ok(davenda_auth::Entity::service_account(id)),
+        "page" => Ok(davenda_auth::Entity::page(id)),
+        "navigation" => Ok(davenda_auth::Entity::navigation(id)),
+        "product" => Ok(davenda_auth::Entity::product(id)),
+        "collection" => Ok(davenda_auth::Entity::collection(id)),
+        "order" => Ok(davenda_auth::Entity::order(id)),
+        "subscription" => Ok(davenda_auth::Entity::subscription(id)),
+        "membership_tier" => Ok(davenda_auth::Entity::membership_tier(id)),
+        "event" => Ok(davenda_auth::Entity::event(id)),
+        "event_slot" => Ok(davenda_auth::Entity::event_slot(id)),
+        "booking" => Ok(davenda_auth::Entity::booking(id)),
+        "media" => Ok(davenda_auth::Entity::media(id)),
+        "media_library" => Ok(davenda_auth::Entity::media_library(id)),
+        "asset" => Ok(davenda_auth::Entity::asset(id)),
+        "asset_folder" => Ok(davenda_auth::Entity::asset_folder(id)),
+        "theme_asset_bundle" => Ok(davenda_auth::Entity::theme_asset_bundle(id)),
+        "admin_module" => Ok(davenda_auth::Entity::admin_module(id)),
+        _ => Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Unknown auth object namespace `{namespace}`."),
+        )),
+    }
+}
+
+fn customer_hook_auth_subject(principal_id: Option<&str>) -> davenda_auth::DefaultSubject {
+    match principal_id {
+        Some(principal_id) => {
+            davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(principal_id.to_string()))
+        }
+        None => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::any_user()),
     }
 }
 

@@ -4,7 +4,7 @@ use davenda_customer_sdk::{
     AuditFacade, AuthFacade, BackendError, CheckoutHooks, CmsHooks, CmsPageDraft,
     CmsPublishDecision, CommerceFacade, CustomerPluginDescriptor, JobsFacade, OrderDraft,
     OrderReviewDecision, OutboundHttpFacade, RepositoryFacade, RepositoryQuery, RequestContext,
-    VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
+    RepositoryWrite, VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -120,6 +120,12 @@ struct RejectCmsPublishPlugin;
 #[derive(Debug)]
 struct RejectCmsPublishHooks;
 
+#[derive(Debug)]
+struct RewriteCmsPublishPlugin;
+
+#[derive(Debug)]
+struct RewriteCmsPublishHooks;
+
 impl CmsHooks for RejectCmsPublishHooks {
     fn validate_page_publish(
         &self,
@@ -150,6 +156,32 @@ impl CmsHooks for RejectCmsPublishHooks {
     }
 }
 
+impl CmsHooks for RewriteCmsPublishHooks {
+    fn validate_page_publish(
+        &self,
+        _ctx: &RequestContext,
+        draft: &CmsPageDraft,
+        repositories: &dyn RepositoryFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<CmsPublishDecision, BackendError> {
+        repositories.write(RepositoryWrite {
+            repository: "cms.pages".to_string(),
+            record_id: draft.page_id.clone(),
+            fields: BTreeMap::from([
+                (
+                    "title".to_string(),
+                    format!("{} (Linked review)", draft.title),
+                ),
+                (
+                    "summary".to_string(),
+                    "Linked customer review updated this page before publish.".to_string(),
+                ),
+            ]),
+        })?;
+        Ok(CmsPublishDecision::Allow)
+    }
+}
+
 impl CustomerBackendPlugin for RejectCmsPublishPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new("harbor-shop-cms-policy", "Harbor Shop CMS Policy", "0.1.0")
@@ -157,6 +189,20 @@ impl CustomerBackendPlugin for RejectCmsPublishPlugin {
 
     fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
         registry.register_cms_hooks(Arc::new(RejectCmsPublishHooks))
+    }
+}
+
+impl CustomerBackendPlugin for RewriteCmsPublishPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-cms-publish-rewriter",
+            "Harbor Shop CMS Publish Rewriter",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_cms_hooks(Arc::new(RewriteCmsPublishHooks))
     }
 }
 
@@ -8115,6 +8161,119 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
         "{audit_body}"
     );
     assert!(audit_body.contains("cms.page.publish"), "{audit_body}");
+}
+
+#[tokio::test]
+async fn server_host_allows_linked_cms_hooks_to_rewrite_the_draft_before_publish() {
+    let app_name = unique_app_name("harbor-shop-runtime-cms-rewrite-publish");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RewriteCmsPublishPlugin)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-cms-rewriter")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let publish_token = response_header(&admin_response, "x-davenda-cms-csrf-cms-pages-publish");
+
+    let publish_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &publish_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("page_title", "Harbor Membership Access")
+        .append_pair("page_slug", "harbor-membership-access")
+        .append_pair(
+            "page_summary",
+            "Explains what customers unlock after checkout and how activation appears in account.",
+        )
+        .append_pair(
+            "page_body_html",
+            "<p>Customers can review pending activation immediately after checkout.</p>",
+        )
+        .finish();
+    let publish_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/publish")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(publish_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_response.status(), StatusCode::SEE_OTHER);
+
+    let live_page = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/harbor-membership-access")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let live_body = String::from_utf8(
+        to_bytes(live_page.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(live_body.contains("Harbor Membership Access (Linked review)"), "{live_body}");
+    assert!(
+        live_body.contains("Linked customer review updated this page before publish."),
+        "{live_body}"
+    );
 }
 
 #[tokio::test]

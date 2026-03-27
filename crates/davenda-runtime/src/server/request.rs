@@ -24,7 +24,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
@@ -846,7 +846,10 @@ fn storefront_checkout_form_state_from_execution(
 
 #[derive(Debug)]
 struct RuntimeCheckoutCommerceFacade<'a> {
+    plan: &'a RuntimePlan,
     catalog: &'a StorefrontCatalog,
+    principal_id: Option<&'a str>,
+    recorded_at_unix_seconds: u64,
 }
 
 impl CommerceFacade for RuntimeCheckoutCommerceFacade<'_> {
@@ -864,12 +867,14 @@ impl CommerceFacade for RuntimeCheckoutCommerceFacade<'_> {
             }))
     }
 
-    fn add_order_note(&self, _order_id: &str, _note: &str) -> Result<(), BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "commerce.order_note.unsupported",
-            "Runtime order-note persistence is not implemented for customer checkout hooks yet.",
-        ))
+    fn add_order_note(&self, order_id: &str, note: &str) -> Result<(), BackendError> {
+        record_customer_order_note(
+            self.plan,
+            self.principal_id.unwrap_or("anonymous"),
+            self.recorded_at_unix_seconds,
+            order_id,
+            note,
+        )
     }
 }
 
@@ -1162,9 +1167,41 @@ impl AuditFacade for RuntimeRequestAuditFacade<'_> {
     }
 }
 
+fn record_customer_order_note(
+    plan: &RuntimePlan,
+    principal_id: &str,
+    recorded_at_unix_seconds: u64,
+    order_id: &str,
+    note: &str,
+) -> Result<(), BackendError> {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer
+        .append_pair("action", "customer-plugin.order-note")
+        .append_pair("resource_kind", "order")
+        .append_pair("resource_id", order_id)
+        .append_pair("outcome", "recorded")
+        .append_pair("detail", note);
+    record_admin_audit_entry(
+        plan,
+        recorded_at_unix_seconds.min(i64::MAX as u64) as i64,
+        principal_id,
+        serializer.finish(),
+    )
+    .map_err(|reason| {
+        BackendError::new(
+            BackendErrorKind::Internal,
+            "commerce.order_note.failed",
+            "Failed to persist the linked customer order note.",
+        )
+        .with_detail(reason)
+    })
+}
+
 #[derive(Debug)]
 struct RuntimeCmsRepositoryFacade<'a> {
-    workspace: &'a CmsAdminWorkspace,
+    workspace: Arc<Mutex<CmsAdminWorkspace>>,
+    recorded_at_unix_seconds: u64,
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
 impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
@@ -1180,8 +1217,14 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
             ));
         }
 
-        let records = self
-            .workspace
+        let workspace = self.workspace.lock().map_err(|_| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "repository.workspace.lock_failed",
+                "Runtime could not acquire the CMS workspace lock.",
+            )
+        })?;
+        let records = workspace
             .pages
             .iter()
             .filter(|page| {
@@ -1215,14 +1258,76 @@ impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
     }
 
     fn write(&self, change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "repository.write.unsupported",
-            format!(
-                "Runtime customer CMS hooks are validation-only; repository writes to `{}` are not supported during publish.",
-                change.repository
-            ),
-        ))
+        if change.repository != "cms.pages" {
+            return Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "repository.write.unsupported",
+                format!(
+                    "Runtime customer CMS hooks only expose `cms.pages` writes; `{}` is not available.",
+                    change.repository
+                ),
+            ));
+        }
+
+        let mut workspace = self.workspace.lock().map_err(|_| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "repository.workspace.lock_failed",
+                "Runtime could not acquire the CMS workspace lock.",
+            )
+        })?;
+        let existing = workspace
+            .selected_page(Some(change.record_id.as_str()))
+            .cloned()
+            .ok_or_else(|| {
+                BackendError::new(
+                    BackendErrorKind::InvalidInput,
+                    "repository.write.unknown_record",
+                    format!(
+                        "Customer CMS hook tried to write unknown page `{}`.",
+                        change.record_id
+                    ),
+                )
+            })?;
+        let input = CmsAdminPageInput {
+            page_id: Some(change.record_id.clone()),
+            title: change
+                .fields
+                .get("title")
+                .cloned()
+                .unwrap_or(existing.draft.title),
+            slug: change
+                .fields
+                .get("slug")
+                .cloned()
+                .unwrap_or(existing.draft.slug),
+            summary: change
+                .fields
+                .get("summary")
+                .cloned()
+                .unwrap_or(existing.draft.summary),
+            body_html: change
+                .fields
+                .get("body_html")
+                .cloned()
+                .unwrap_or(existing.draft.body_html),
+        };
+        let page_id = workspace
+            .save_page_draft(input, self.recorded_at_unix_seconds)
+            .map_err(|reason| {
+                BackendError::new(
+                    BackendErrorKind::InvalidInput,
+                    "repository.write.invalid_page",
+                    "Customer CMS hook submitted an invalid page draft update.",
+                )
+                .with_detail(reason)
+            })?;
+
+        Ok(RepositoryWriteReceipt {
+            repository: change.repository,
+            record_id: page_id,
+            version: Some(self.recorded_at_unix_seconds.to_string()),
+        })
     }
 }
 
@@ -1460,7 +1565,7 @@ fn cms_page_draft_from_workspace(page: &CmsAdminPage, locale: &str) -> CmsPageDr
 fn validate_cms_publish_with_customer_hooks(
     state: &RuntimeServerState,
     execution: &RequestExecution,
-    workspace: &CmsAdminWorkspace,
+    workspace: &mut CmsAdminWorkspace,
     page_id: &str,
     now: BrowserInstant,
     response_cookies: &mut Vec<String>,
@@ -1476,7 +1581,12 @@ fn validate_cms_publish_with_customer_hooks(
     })?;
     let context = runtime_customer_request_context(state, execution);
     let draft = cms_page_draft_from_workspace(page, execution.locale.as_str());
-    let repositories = RuntimeCmsRepositoryFacade { workspace };
+    let workspace_shadow = Arc::new(Mutex::new(workspace.clone()));
+    let repositories = RuntimeCmsRepositoryFacade {
+        workspace: Arc::clone(&workspace_shadow),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+        _marker: std::marker::PhantomData,
+    };
     let audit = RuntimeRequestAuditFacade {
         plan: &state.plan,
         principal_id: execution.principal.principal_id.as_deref(),
@@ -1501,6 +1611,11 @@ fn validate_cms_publish_with_customer_hooks(
             }
         }
     }
+
+    *workspace = workspace_shadow.lock().map_err(|_| RuntimeServerError::Configuration {
+        reason: "failed to recover the mutated CMS workspace after customer hooks".to_string(),
+    })?
+    .clone();
 
     Ok(None)
 }
@@ -1614,7 +1729,10 @@ fn review_checkout_with_customer_hooks(
         payment,
     )?;
     let commerce = RuntimeCheckoutCommerceFacade {
+        plan: &state.plan,
         catalog: &state.plan.storefront_catalog,
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
     };
     let auth = RuntimeCheckoutAuthFacade { state, execution };
     let audit = RuntimeRequestAuditFacade {
@@ -2205,7 +2323,7 @@ fn apply_native_cms_admin_mutations(
             if let Some(location) = validate_cms_publish_with_customer_hooks(
                 state,
                 execution,
-                &workspace,
+                &mut workspace,
                 &page_id,
                 now,
                 response_cookies,

@@ -26,11 +26,14 @@ use davenda_template::{
 };
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
 struct RuntimeCustomerCommerceFacade<'a> {
     catalog: &'a StorefrontCatalog,
+    order_id: &'a str,
+    review_notes: Arc<Mutex<Vec<String>>>,
 }
 
 impl CommerceFacade for RuntimeCustomerCommerceFacade<'_> {
@@ -38,25 +41,48 @@ impl CommerceFacade for RuntimeCustomerCommerceFacade<'_> {
         &self,
         sku: &str,
     ) -> Result<Option<davenda_customer_sdk::CommerceProduct>, BackendError> {
-        Ok(self
-            .catalog
-            .product_by_sku_or_handle(sku)
-            .map(|product| davenda_customer_sdk::CommerceProduct {
+        Ok(self.catalog.product_by_sku_or_handle(sku).map(|product| {
+            davenda_customer_sdk::CommerceProduct {
                 sku: product.sku.clone(),
                 handle: product.handle.clone(),
                 title: product.title.clone(),
                 current_price: MoneyAmount::new(product.currency.clone(), product.price_minor),
                 collection_handle: Some(product.collection_handle.clone()),
                 metadata: BTreeMap::new(),
-            }))
+            }
+        }))
     }
 
-    fn add_order_note(&self, _order_id: &str, _note: &str) -> Result<(), BackendError> {
-        Err(BackendError::new(
-            BackendErrorKind::Unsupported,
-            "commerce.order_note.unsupported",
-            "Render-time customer review does not support persisting order notes.",
-        ))
+    fn add_order_note(&self, order_id: &str, note: &str) -> Result<(), BackendError> {
+        if order_id != self.order_id {
+            return Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "commerce.order_note.order_mismatch",
+                format!(
+                    "Render-time customer review can only annotate the active order `{}`; received `{order_id}`.",
+                    self.order_id
+                ),
+            ));
+        }
+        let note = note.trim();
+        if note.is_empty() {
+            return Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "commerce.order_note.empty",
+                "Render-time customer review requires a non-empty order note.",
+            ));
+        }
+        let mut notes = self.review_notes.lock().map_err(|_| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "commerce.order_note.state_poisoned",
+                "Render-time customer review could not record the order note.",
+            )
+        })?;
+        if !notes.iter().any(|existing| existing == note) {
+            notes.push(note.to_string());
+        }
+        Ok(())
     }
 }
 
@@ -117,12 +143,9 @@ impl AuthFacade for RuntimeCustomerAuthFacade<'_> {
         let data = self.plan.data.clone();
         let auth_package = self.plan.auth_package.clone();
         let explanation = run_customer_hook_future(async move {
-            let explainer = davenda_auth::LiveAuthExplainHost::from_runtime(
-                &config,
-                data,
-                auth_package,
-            )
-            .map_err(|error| error.to_string())?;
+            let explainer =
+                davenda_auth::LiveAuthExplainHost::from_runtime(&config, data, auth_package)
+                    .map_err(|error| error.to_string())?;
             explainer
                 .explain_capability(&davenda_auth::LiveAuthExplainRequest {
                     subject,
@@ -1322,12 +1345,18 @@ fn order_detail_from_storefront(
     Ok(Some(model))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CustomerOrderReviewOutcome {
+    decision: OrderReviewDecision,
+    notes: Vec<String>,
+}
+
 fn customer_order_review(
     plan: &RuntimePlan,
     order: &StorefrontOrderSnapshot,
     _session: Option<&SessionContext>,
     principal: Option<&PrincipalContext>,
-) -> Result<Option<OrderReviewDecision>, TemplateModelError> {
+) -> Result<Option<CustomerOrderReviewOutcome>, TemplateModelError> {
     if plan.customer_hooks.checkout.is_empty() {
         return Ok(None);
     }
@@ -1339,8 +1368,11 @@ fn customer_order_review(
         customer_plugin_principal(principal),
         CustomerPluginTraceContext::new(format!("order-detail:{}", order.order_id)),
     );
+    let review_notes = Arc::new(Mutex::new(Vec::new()));
     let commerce = RuntimeCustomerCommerceFacade {
         catalog: &plan.storefront_catalog,
+        order_id: &order.order_id,
+        review_notes: Arc::clone(&review_notes),
     };
     let auth = RuntimeCustomerAuthFacade {
         plan,
@@ -1363,21 +1395,32 @@ fn customer_order_review(
                 adjustment_messages.push(adjustment.reason);
             }
             OrderReviewDecision::Rejected(rejection) => {
-                return Ok(Some(OrderReviewDecision::Rejected(rejection)));
+                return Ok(Some(CustomerOrderReviewOutcome {
+                    decision: OrderReviewDecision::Rejected(rejection),
+                    notes: customer_review_notes(&review_notes)?,
+                }));
             }
         }
     }
 
-    if adjustment_messages.is_empty() {
-        Ok(Some(OrderReviewDecision::Approved))
+    let decision = if adjustment_messages.is_empty() {
+        OrderReviewDecision::Approved
     } else {
-        Ok(Some(OrderReviewDecision::Adjusted(
-            davenda_customer_sdk::OrderAdjustment::new(adjustment_messages.join("; ")),
-        )))
-    }
+        OrderReviewDecision::Adjusted(davenda_customer_sdk::OrderAdjustment::new(
+            adjustment_messages.join("; "),
+        ))
+    };
+
+    Ok(Some(CustomerOrderReviewOutcome {
+        decision,
+        notes: customer_review_notes(&review_notes)?,
+    }))
 }
 
-fn customer_order_draft(order: &StorefrontOrderSnapshot, catalog: &StorefrontCatalog) -> OrderDraft {
+fn customer_order_draft(
+    order: &StorefrontOrderSnapshot,
+    catalog: &StorefrontCatalog,
+) -> OrderDraft {
     let subtotal = MoneyAmount::new(order.currency.clone(), order.subtotal_minor);
     let total = MoneyAmount::new(order.currency.clone(), order.total_minor);
     let lines = order
@@ -1409,7 +1452,10 @@ fn customer_order_draft(order: &StorefrontOrderSnapshot, catalog: &StorefrontCat
             .to_ascii_lowercase(),
     );
     if let Some(checkout_email) = order.payment.checkout_email.as_ref() {
-        metadata.insert("checkout_email".to_string(), checkout_email.trim().to_string());
+        metadata.insert(
+            "checkout_email".to_string(),
+            checkout_email.trim().to_string(),
+        );
     }
     OrderDraft {
         order_id: order.order_id.clone(),
@@ -1449,7 +1495,12 @@ where
     T: Send + 'static,
 {
     match tokio::runtime::Handle::try_current() {
-        Ok(handle) if matches!(handle.runtime_flavor(), tokio::runtime::RuntimeFlavor::MultiThread) => {
+        Ok(handle)
+            if matches!(
+                handle.runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            ) =>
+        {
             tokio::task::block_in_place(|| handle.block_on(future))
         }
         Ok(_) => std::thread::spawn(move || {
@@ -1538,17 +1589,34 @@ fn parse_customer_auth_entity(value: &str) -> Result<davenda_auth::Entity, Backe
 
 fn customer_hook_auth_subject(principal_id: Option<&str>) -> davenda_auth::DefaultSubject {
     match principal_id {
-        Some(principal_id) => {
-            davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(principal_id.to_string()))
-        }
+        Some(principal_id) => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
+            principal_id.to_string(),
+        )),
         None => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::any_user()),
     }
 }
 
+fn customer_review_notes(
+    review_notes: &Arc<Mutex<Vec<String>>>,
+) -> Result<Vec<String>, TemplateModelError> {
+    review_notes
+        .lock()
+        .map(|notes| notes.clone())
+        .map_err(|_| TemplateModelError::TemplateRead {
+            path: "linked customer hook".to_string(),
+            message: "customer review note state was poisoned".to_string(),
+        })
+}
+
 fn customer_order_review_model(
-    decision: OrderReviewDecision,
+    review: CustomerOrderReviewOutcome,
 ) -> Result<RenderModel, TemplateModelError> {
-    match decision {
+    let notes = review
+        .notes
+        .iter()
+        .map(|note| RenderModel::new().with_value("text", RenderValue::text(note.clone())))
+        .collect::<Result<Vec<_>, _>>()?;
+    let base = match review.decision {
         OrderReviewDecision::Approved => RenderModel::new()
             .with_value("status", RenderValue::text("Approved"))?
             .with_value(
@@ -1560,22 +1628,25 @@ fn customer_order_review_model(
             .with_value("code", RenderValue::text("approved"))?
             .with_bool("isApproved", true)?
             .with_bool("isRejected", false)?
-            .with_bool("isAdjusted", false),
+            .with_bool("isAdjusted", false)?,
         OrderReviewDecision::Rejected(rejection) => RenderModel::new()
             .with_value("status", RenderValue::text("Rejected"))?
             .with_value("summary", RenderValue::text(rejection.message.clone()))?
             .with_value("code", RenderValue::text(rejection.code))?
             .with_bool("isApproved", false)?
             .with_bool("isRejected", true)?
-            .with_bool("isAdjusted", false),
+            .with_bool("isAdjusted", false)?,
         OrderReviewDecision::Adjusted(adjustment) => RenderModel::new()
             .with_value("status", RenderValue::text("Adjusted"))?
             .with_value("summary", RenderValue::text(adjustment.reason.clone()))?
             .with_value("code", RenderValue::text("adjusted"))?
             .with_bool("isApproved", false)?
             .with_bool("isRejected", false)?
-            .with_bool("isAdjusted", true),
-    }
+            .with_bool("isAdjusted", true)?,
+    };
+    base.with_bool("hasNotes", !notes.is_empty())?
+        .with_value("noteCount", RenderValue::text(notes.len().to_string()))?
+        .with_list("notes", notes)
 }
 
 fn admin_order_row_from_storefront(
@@ -4001,11 +4072,245 @@ fn empty_membership_summary() -> Result<RenderModel, TemplateModelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builder::RuntimeBuilder;
+    use davenda_auth::DefaultAuthModelPackage;
+    use davenda_config::PlatformConfig;
+    use davenda_customer_sdk::{
+        AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade,
+        CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor, OrderDraft,
+        OrderReviewDecision, RequestContext,
+    };
     use davenda_template::{
         DocumentRenderRequest, TemplateName, TemplateNamespace, TemplateRegistry, TemplateRuntime,
         TemplateSelector, TemplateSourceParser,
     };
     use std::collections::HashSet;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    const RENDER_TEST_CONFIG: &str = r#"
+[app]
+name = "showcase-events"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+single_node_escape_hatch = "explicit_single_node"
+object_store = "s3"
+object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
+local_root = "/tmp/davenda-runtime-tests"
+deployment = "single_node"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+fallback_locale = "en-GB"
+localized_routes = true
+
+[seo]
+canonical_host = "www.example.com"
+emit_json_ld = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 101
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#;
+
+    #[derive(Debug)]
+    struct NoteRecordingCheckoutPlugin;
+
+    #[derive(Debug)]
+    struct NoteRecordingCheckoutHooks;
+
+    impl CheckoutHooks for NoteRecordingCheckoutHooks {
+        fn review_order(
+            &self,
+            _ctx: &RequestContext,
+            order: &OrderDraft,
+            commerce: &dyn CommerceFacade,
+            _auth: &dyn AuthFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<OrderReviewDecision, BackendError> {
+            commerce.add_order_note(&order.order_id, "Flag for finance follow-up")?;
+            commerce.add_order_note(&order.order_id, "Flag for finance follow-up")?;
+            Ok(OrderReviewDecision::approved())
+        }
+    }
+
+    impl CustomerBackendPlugin for NoteRecordingCheckoutPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "render-order-note-recorder",
+                "Render Order Note Recorder",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_checkout_hooks(Arc::new(NoteRecordingCheckoutHooks))
+        }
+    }
+
+    #[derive(Debug)]
+    struct WrongOrderNoteCheckoutPlugin;
+
+    #[derive(Debug)]
+    struct WrongOrderNoteCheckoutHooks;
+
+    impl CheckoutHooks for WrongOrderNoteCheckoutHooks {
+        fn review_order(
+            &self,
+            _ctx: &RequestContext,
+            _order: &OrderDraft,
+            commerce: &dyn CommerceFacade,
+            _auth: &dyn AuthFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<OrderReviewDecision, BackendError> {
+            commerce.add_order_note("ORD-OTHER", "This should fail closed")?;
+            Ok(OrderReviewDecision::approved())
+        }
+    }
+
+    impl CustomerBackendPlugin for WrongOrderNoteCheckoutPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "render-order-note-mismatch",
+                "Render Order Note Mismatch",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_checkout_hooks(Arc::new(WrongOrderNoteCheckoutHooks))
+        }
+    }
+
+    fn render_test_plan_with_customer_plugin<C>(plugin: C) -> RuntimePlan
+    where
+        C: CustomerBackendPlugin,
+    {
+        let app_name = format!(
+            "render-customer-hooks-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let storage_root = std::env::temp_dir().join(&app_name).display().to_string();
+        let config = PlatformConfig::from_toml_str(
+            &RENDER_TEST_CONFIG
+                .replace(
+                    "name = \"showcase-events\"",
+                    &format!("name = \"{app_name}\""),
+                )
+                .replace(
+                    "local_root = \"var/storage\"",
+                    &format!("local_root = \"{storage_root}\""),
+                ),
+        )
+        .unwrap();
+        RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_customer_plugin(plugin)
+            .build()
+            .unwrap()
+    }
+
+    fn sample_storefront_order_snapshot() -> StorefrontOrderSnapshot {
+        StorefrontOrderSnapshot {
+            order_id: "ORD-10042".to_string(),
+            session_id: "session-order-detail".to_string(),
+            principal_id: Some("member@example.com".to_string()),
+            status: "paid".to_string(),
+            payment: StorefrontPaymentSnapshot {
+                status: "captured".to_string(),
+                method: Some("card".to_string()),
+                reference: Some("PAY-50001".to_string()),
+                last4: Some("4242".to_string()),
+                checkout_email: Some("member@example.com".to_string()),
+            },
+            currency: "GBP".to_string(),
+            line_count: 1,
+            subtotal_minor: 8_900,
+            total_minor: 8_900,
+            refunded_total_minor: 0,
+            refundable_total_minor: 8_900,
+            subtotal: "£89.00".to_string(),
+            total: "£89.00".to_string(),
+            refunded_total: "£0.00".to_string(),
+            refundable_total: "£89.00".to_string(),
+            created_at_unix_seconds: 0,
+            lines: vec![StorefrontOrderLine {
+                sku: "gold-membership".to_string(),
+                title: "Gold Membership".to_string(),
+                variant_title: "Annual".to_string(),
+                product_kind: "membership".to_string(),
+                entitlement_key: Some("membership.gold".to_string()),
+                quantity: 1,
+                unit_price_minor: 8_900,
+                total_minor: 8_900,
+                currency: "GBP".to_string(),
+                total: "£89.00".to_string(),
+            }],
+            refunds: Vec::new(),
+        }
+    }
 
     fn fixture_model(route_name: &str) -> RenderModel {
         apply_route_specific_bindings(
@@ -4316,6 +4621,61 @@ mod tests {
         );
         assert!(html.contains("no completed orders yet"), "{html}");
         assert!(html.contains("qualifying membership purchase"), "{html}");
+    }
+
+    #[test]
+    fn customer_order_review_surfaces_render_recorded_notes() {
+        let plan = render_test_plan_with_customer_plugin(NoteRecordingCheckoutPlugin);
+        let review = customer_order_review(&plan, &sample_storefront_order_snapshot(), None, None)
+            .unwrap()
+            .expect("checkout hook review should exist");
+
+        assert_eq!(review.notes, vec!["Flag for finance follow-up".to_string()]);
+
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <p class="status" dv:text="${review.status}">Approved</p>
+    <ul dv:if="${review.hasNotes}">
+      <li dv:each="note : ${review.notes}" dv:text="${note.text}">note</li>
+    </ul>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    RenderModel::new()
+                        .with_object("review", customer_order_review_model(review).unwrap())
+                        .unwrap(),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains("Approved"), "{html}");
+        assert!(html.contains("Flag for finance follow-up"), "{html}");
+    }
+
+    #[test]
+    fn customer_order_review_fails_closed_on_mismatched_render_order_note_target() {
+        let plan = render_test_plan_with_customer_plugin(WrongOrderNoteCheckoutPlugin);
+        let error = customer_order_review(&plan, &sample_storefront_order_snapshot(), None, None)
+            .expect_err("mismatched note target should fail the render hook");
+        let message = error.to_string();
+
+        assert!(message.contains("order_mismatch"), "{message}");
+        assert!(message.contains("ORD-10042"), "{message}");
     }
 }
 #[derive(Clone)]

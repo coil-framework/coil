@@ -136,20 +136,20 @@ impl DavendaAllBuilder {
     ) -> Result<(), DavendaAllError> {
         let app_root = app_root.as_ref();
         let manifest_path = app_root.join("app.toml");
-        let manifest = davenda_app::CustomerAppManifest::from_file(&manifest_path).map_err(|error| {
-            DavendaAllError::ManifestLoad {
-                path: manifest_path.clone(),
-                reason: error.to_string(),
-            }
-        })?;
+        let manifest =
+            davenda_app::CustomerAppManifest::from_file(&manifest_path).map_err(|error| {
+                DavendaAllError::ManifestLoad {
+                    path: manifest_path.clone(),
+                    reason: error.to_string(),
+                }
+            })?;
 
         let config_path = resolve_path(app_root, config_path.as_ref());
-        let config_input = fs::read_to_string(&config_path).map_err(|error| {
-            DavendaAllError::ConfigLoad {
+        let config_input =
+            fs::read_to_string(&config_path).map_err(|error| DavendaAllError::ConfigLoad {
                 path: config_path.clone(),
                 reason: error.to_string(),
-            }
-        })?;
+            })?;
         let config = PlatformConfig::from_toml_str(&config_input).map_err(|error| {
             DavendaAllError::ConfigLoad {
                 path: config_path.clone(),
@@ -157,11 +157,9 @@ impl DavendaAllBuilder {
             }
         })?;
 
-        let auth_package =
-            load_auth_model_package_at(&manifest.auth.package_name, app_root).map_err(|error| {
-                DavendaAllError::RuntimeBuild {
-                    reason: error.to_string(),
-                }
+        let auth_package = load_auth_model_package_at(&manifest.auth.package_name, app_root)
+            .map_err(|error| DavendaAllError::RuntimeBuild {
+                reason: error.to_string(),
             })?;
         let modules = official_modules_from_config(&config).map_err(|error| {
             DavendaAllError::RuntimeBuild {
@@ -207,9 +205,12 @@ impl DavendaAllBuilder {
                     bind: bind.clone(),
                     reason: error.to_string(),
                 })?;
-            server.serve(listener).await.map_err(|error| DavendaAllError::Serve {
-                reason: error.to_string(),
-            })
+            server
+                .serve(listener)
+                .await
+                .map_err(|error| DavendaAllError::Serve {
+                    reason: error.to_string(),
+                })
         })
     }
 }

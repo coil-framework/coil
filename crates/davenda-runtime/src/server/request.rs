@@ -894,7 +894,9 @@ impl AuthFacade for RuntimeCheckoutAuthFacade<'_> {
         let subject = customer_hook_auth_subject(self.execution.principal.principal_id.as_deref());
         let authorizer = Arc::clone(&self.state.route_authorizer);
         let allowed = run_customer_hook_future(async move {
-            authorizer.check_capability(&subject, capability, &object).await
+            authorizer
+                .check_capability(&subject, capability, &object)
+                .await
         })
         .map_err(customer_hook_auth_backend_error)?;
 
@@ -1375,33 +1377,32 @@ impl JobsFacade for RuntimeCustomerJobsFacade<'_> {
                 "jobs.queue.mismatch",
                 format!(
                     "Customer webhook requested queue `{}` for `{}`, but the registered runtime job uses `{}`.",
-                    request.queue,
-                    request.job_name,
-                    definition.queue
+                    request.queue, request.job_name, definition.queue
                 ),
             ));
         }
 
         let mut dispatch =
-            JobDispatchRequest::new(request.job_name.clone(), request.payload_description).map_err(
-                |error| {
+            JobDispatchRequest::new(request.job_name.clone(), request.payload_description)
+                .map_err(|error| {
                     BackendError::new(
                         BackendErrorKind::InvalidInput,
                         "jobs.dispatch.invalid",
                         "Customer webhook requested an invalid runtime job dispatch.",
                     )
                     .with_detail(error.to_string())
-                },
-            )?;
+                })?;
         if let Some(idempotency_key) = request.idempotency_key {
-            dispatch = dispatch.with_idempotency_key(idempotency_key).map_err(|error| {
-                BackendError::new(
-                    BackendErrorKind::InvalidInput,
-                    "jobs.idempotency.invalid",
-                    "Customer webhook requested an invalid idempotency key.",
-                )
-                .with_detail(error.to_string())
-            })?;
+            dispatch = dispatch
+                .with_idempotency_key(idempotency_key)
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "jobs.idempotency.invalid",
+                        "Customer webhook requested an invalid idempotency key.",
+                    )
+                    .with_detail(error.to_string())
+                })?;
         }
         let enqueued = host
             .enqueue_job(
@@ -1431,17 +1432,19 @@ struct RuntimeCustomerOutboundHttpFacade<'a> {
 
 impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade<'_> {
     fn send(&self, request: OutboundHttpRequest) -> Result<OutboundHttpResponse, BackendError> {
-        self.wasm_host.send_outbound_http(&request).map_err(|reason| {
-            BackendError::new(
-                BackendErrorKind::Unavailable,
-                "http.send.failed",
-                format!(
-                    "Runtime could not execute approved outbound HTTP integration `{}`.",
-                    request.integration
-                ),
-            )
-            .with_detail(reason)
-        })
+        self.wasm_host
+            .send_outbound_http(&request)
+            .map_err(|reason| {
+                BackendError::new(
+                    BackendErrorKind::Unavailable,
+                    "http.send.failed",
+                    format!(
+                        "Runtime could not execute approved outbound HTTP integration `{}`.",
+                        request.integration
+                    ),
+                )
+                .with_detail(reason)
+            })
     }
 }
 
@@ -1612,10 +1615,12 @@ fn validate_cms_publish_with_customer_hooks(
         }
     }
 
-    *workspace = workspace_shadow.lock().map_err(|_| RuntimeServerError::Configuration {
-        reason: "failed to recover the mutated CMS workspace after customer hooks".to_string(),
-    })?
-    .clone();
+    *workspace = workspace_shadow
+        .lock()
+        .map_err(|_| RuntimeServerError::Configuration {
+            reason: "failed to recover the mutated CMS workspace after customer hooks".to_string(),
+        })?
+        .clone();
 
     Ok(None)
 }
@@ -1648,36 +1653,38 @@ fn execute_verified_webhook_customer_hooks(
     for hook in &state.plan.customer_hooks.verified_webhooks {
         match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &audit) {
             Ok(WebhookHandlingResult::Accepted { detail }) => {
-                audit.record(
-                    AuditEntry::new(
-                        "customer-plugin.verified-webhook",
-                        "webhook",
-                        format!("{}:{}", webhook.source, webhook.event),
-                        "accepted",
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "accepted",
+                        )
+                        .with_detail(detail.unwrap_or_else(|| {
+                            "customer hook accepted verified webhook".to_string()
+                        })),
                     )
-                    .with_detail(detail.unwrap_or_else(|| {
-                        "customer hook accepted verified webhook".to_string()
-                    })),
-                )
-                .map_err(|error| RuntimeServerError::CustomerHookFailed {
-                    surface: "verified-webhook",
-                    reason: error.to_string(),
-                })?;
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
             }
             Ok(WebhookHandlingResult::Rejected { code, message }) => {
-                audit.record(
-                    AuditEntry::new(
-                        "customer-plugin.verified-webhook",
-                        "webhook",
-                        format!("{}:{}", webhook.source, webhook.event),
-                        "rejected",
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "rejected",
+                        )
+                        .with_detail(format!("{code}: {message}")),
                     )
-                    .with_detail(format!("{code}: {message}")),
-                )
-                .map_err(|error| RuntimeServerError::CustomerHookFailed {
-                    surface: "verified-webhook",
-                    reason: error.to_string(),
-                })?;
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
                 return Err(RuntimeServerError::CustomerHookRejected {
                     surface: "verified-webhook",
                     code,
@@ -1685,19 +1692,20 @@ fn execute_verified_webhook_customer_hooks(
                 });
             }
             Err(error) => {
-                audit.record(
-                    AuditEntry::new(
-                        "customer-plugin.verified-webhook",
-                        "webhook",
-                        format!("{}:{}", webhook.source, webhook.event),
-                        "failed",
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "failed",
+                        )
+                        .with_detail(error.to_string()),
                     )
-                    .with_detail(error.to_string()),
-                )
-                .map_err(|audit_error| RuntimeServerError::CustomerHookFailed {
-                    surface: "verified-webhook",
-                    reason: audit_error.to_string(),
-                })?;
+                    .map_err(|audit_error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: audit_error.to_string(),
+                    })?;
                 return Err(RuntimeServerError::CustomerHookFailed {
                     surface: "verified-webhook",
                     reason: error.to_string(),
@@ -3290,7 +3298,12 @@ where
     T: Send + 'static,
 {
     match tokio::runtime::Handle::try_current() {
-        Ok(handle) if matches!(handle.runtime_flavor(), tokio::runtime::RuntimeFlavor::MultiThread) => {
+        Ok(handle)
+            if matches!(
+                handle.runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            ) =>
+        {
             tokio::task::block_in_place(|| handle.block_on(future))
         }
         Ok(_) => std::thread::spawn(move || {
@@ -3388,9 +3401,9 @@ fn parse_customer_auth_entity(value: &str) -> Result<davenda_auth::Entity, Backe
 
 fn customer_hook_auth_subject(principal_id: Option<&str>) -> davenda_auth::DefaultSubject {
     match principal_id {
-        Some(principal_id) => {
-            davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(principal_id.to_string()))
-        }
+        Some(principal_id) => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
+            principal_id.to_string(),
+        )),
         None => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::any_user()),
     }
 }

@@ -4,7 +4,8 @@ use davenda_customer_sdk::{
     OrderDraft, OrderReviewDecision, RequestContext,
 };
 use davenda_storage::StoragePolicyOverride;
-use std::sync::Arc;
+use davenda_template::{DocumentRenderRequest, RenderModel, TemplateName, TemplateSelector};
+use std::{fs, sync::Arc};
 
 #[derive(Debug)]
 struct ExampleCheckoutPlugin;
@@ -163,6 +164,96 @@ fn runtime_builder_rejects_duplicate_linked_customer_plugins() {
         RuntimeBuildError::DuplicateCustomerPlugin { plugin_id }
             if plugin_id == "harbor-shop-backend"
     ));
+}
+
+#[test]
+fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let customer_root = unique_temp_template_root("customer-root-runtime-builder");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <head>
+    <title>Customer Root</title>
+  </head>
+  <body>
+    <main>customer-root-runtime</main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::for_customer_root(config, DefaultAuthModelPackage::default())
+        .with_customer_root(&customer_root)
+        .with_linked_customer_plugin(ExampleCheckoutPlugin)
+        .build()
+        .unwrap();
+
+    let html = plan
+        .template
+        .runtime
+        .render_document(
+            &plan.template.namespace_chain(None),
+            DocumentRenderRequest::new(
+                TemplateSelector::new(TemplateName::new("pages/home").unwrap()),
+                RenderModel::new(),
+            ),
+        )
+        .unwrap()
+        .html;
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert_eq!(plan.linked_customer_plugins.len(), 1);
+    assert_eq!(
+        plan.linked_customer_plugins[0].plugin_id,
+        "harbor-shop-backend"
+    );
+    assert!(html.contains("customer-root-runtime"), "{html}");
+}
+
+#[test]
+fn customer_root_runtime_builder_preserves_runtime_builder_escape_hatch() {
+    let config = single_node_valid_config();
+    let customer_root = unique_temp_template_root("customer-root-builder-escape-hatch");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>customer-root-runtime</main></body>
+</html>"#,
+    );
+
+    let plan = customer_root_runtime(config, DefaultAuthModelPackage::default())
+        .with_customer_root(&customer_root)
+        .into_runtime_builder()
+        .with_storage_policy_rule(
+            PathPolicyRule::new(
+                "secure/customer",
+                Some(StorageClass::LocalOnlySensitive),
+                StoragePolicy::single_node_sensitive(),
+            )
+            .unwrap()
+            .with_local_subdir("customer")
+            .unwrap(),
+        )
+        .build()
+        .unwrap();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    let storage_plan = plan
+        .storage_host()
+        .plan_single_node_escape_hatch_write(StoragePlanRequest::new("secure/customer/runtime.txt"))
+        .unwrap();
+
+    assert_eq!(storage_plan.storage_class, StorageClass::LocalOnlySensitive);
+    assert_eq!(
+        storage_plan.matched_rule_prefix.as_deref(),
+        Some("secure/customer")
+    );
 }
 
 #[test]

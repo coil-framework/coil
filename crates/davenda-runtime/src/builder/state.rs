@@ -39,6 +39,10 @@ impl<P> RuntimeBuilder<P>
 where
     P: AuthModelPackage + 'static,
 {
+    /// Lower-level runtime builder for direct platform/runtime composition.
+    ///
+    /// Customer-root binaries should prefer `RuntimeBuilder::for_customer_root(...)` so the
+    /// linked-customer composition path stays explicit in code.
     pub fn new(config: PlatformConfig, auth_package: P) -> Self {
         Self {
             config,
@@ -54,6 +58,14 @@ where
             feature_flags: Vec::new(),
             maintenance_mode: None,
         }
+    }
+
+    /// Explicit ADR 96 entrypoint for linked customer-root binaries/workspaces.
+    pub fn for_customer_root(
+        config: PlatformConfig,
+        auth_package: P,
+    ) -> CustomerRootRuntimeBuilder<P> {
+        CustomerRootRuntimeBuilder::new(config, auth_package)
     }
 
     pub fn with_module<M>(mut self, module: M) -> Self

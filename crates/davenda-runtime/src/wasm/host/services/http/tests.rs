@@ -163,10 +163,7 @@ fn runtime_outbound_http_backend_serves_linked_customer_hook_requests_through_th
             integration: "crm".to_string(),
             method: "POST".to_string(),
             url: mapped_endpoint,
-            headers: BTreeMap::from([(
-                "content-type".to_string(),
-                "application/json".to_string(),
-            )]),
+            headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
             body: br#"{"ping":true}"#.to_vec(),
         })
         .expect("mapped linked-hook request should succeed");
@@ -210,7 +207,10 @@ fn runtime_outbound_http_backend_rejects_url_drift_for_linked_customer_hooks() {
         })
         .unwrap_err();
 
-    assert!(error.contains("approved endpoint"), "unexpected error: {error}");
+    assert!(
+        error.contains("approved endpoint"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

@@ -85,7 +85,10 @@ impl RuntimeOutboundHttpBackend {
         })
     }
 
-    pub(crate) fn send(&self, request: &OutboundHttpRequest) -> Result<OutboundHttpResponse, String> {
+    pub(crate) fn send(
+        &self,
+        request: &OutboundHttpRequest,
+    ) -> Result<OutboundHttpResponse, String> {
         if !self.allow_network {
             return Err("outbound network is disabled for this runtime".to_string());
         }
@@ -94,8 +97,7 @@ impl RuntimeOutboundHttpBackend {
         if request.url != endpoint.as_str() {
             return Err(format!(
                 "integration `{}` must target the approved endpoint `{}`",
-                request.integration,
-                endpoint
+                request.integration, endpoint
             ));
         }
 

@@ -3,8 +3,8 @@ use axum::response::Response;
 use davenda_customer_sdk::{
     AuditFacade, AuthFacade, BackendError, CheckoutHooks, CmsHooks, CmsPageDraft,
     CmsPublishDecision, CommerceFacade, CustomerPluginDescriptor, JobsFacade, OrderDraft,
-    OrderReviewDecision, OutboundHttpFacade, RepositoryFacade, RepositoryQuery, RequestContext,
-    RepositoryWrite, VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
+    OrderReviewDecision, OutboundHttpFacade, RepositoryFacade, RepositoryQuery, RepositoryWrite,
+    RequestContext, VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -266,7 +266,10 @@ impl VerifiedWebhookHooks for RejectVerifiedWebhookPlugin {
     ) -> Result<WebhookHandlingResult, BackendError> {
         Ok(WebhookHandlingResult::rejected(
             "customer.policy.rejected",
-            format!("linked customer policy rejected {}:{}", webhook.source, webhook.event),
+            format!(
+                "linked customer policy rejected {}:{}",
+                webhook.source, webhook.event
+            ),
         ))
     }
 }
@@ -8269,7 +8272,10 @@ async fn server_host_allows_linked_cms_hooks_to_rewrite_the_draft_before_publish
             .to_vec(),
     )
     .unwrap();
-    assert!(live_body.contains("Harbor Membership Access (Linked review)"), "{live_body}");
+    assert!(
+        live_body.contains("Harbor Membership Access (Linked review)"),
+        "{live_body}"
+    );
     assert!(
         live_body.contains("Linked customer review updated this page before publish."),
         "{live_body}"

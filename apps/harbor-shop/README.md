@@ -340,7 +340,7 @@ DAVENDA_CSRF_SECRET=76543210765432107654321076543210 \
 cargo run -p harbor-shop -- up --config platform.dev.toml
 ```
 
-The linked customer backend currently surfaces in two honest places:
+The linked customer backend currently surfaces in three honest places:
 
 - `cargo run -p harbor-shop -- describe`
 - `cargo run -p harbor-shop -- linked-backend demo`

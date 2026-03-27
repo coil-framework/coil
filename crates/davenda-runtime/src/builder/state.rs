@@ -2,9 +2,66 @@ use super::*;
 use crate::builder::assembly;
 use davenda_template::TemplateDefinition;
 use std::env;
+use std::path::Path;
 use std::path::PathBuf;
 
-pub type Builder<P> = RuntimeBuilder<P>;
+#[derive(Default)]
+pub struct Builder {
+    modules: Vec<Box<dyn PlatformModule>>,
+    customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
+}
+
+impl Builder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register_module<M>(mut self, module: M) -> Self
+    where
+        M: PlatformModule + 'static,
+    {
+        self.modules.push(Box::new(module));
+        self
+    }
+
+    pub fn register_customer_plugin<C>(mut self, plugin: C) -> Self
+    where
+        C: CustomerBackendPlugin,
+    {
+        self.customer_plugins.push(Box::new(plugin));
+        self
+    }
+
+    pub fn build_from_paths(
+        self,
+        app_root: impl AsRef<Path>,
+        config_path: impl AsRef<Path>,
+    ) -> Result<RuntimePlan, RuntimeBootstrapError> {
+        let bootstrap = CustomerRootBootstrapInputs::from_paths(app_root, config_path)?;
+        self.build_from_bootstrap_inputs(bootstrap)
+    }
+
+    pub fn run_from_env(self) -> Result<(), RuntimeBootstrapError> {
+        let bind_override = env::var("DAVENDA_BIND").ok();
+        self.build_from_bootstrap_inputs(CustomerRootBootstrapInputs::from_env()?)?
+            .serve_from_env(bind_override)
+    }
+
+    fn build_from_bootstrap_inputs(
+        self,
+        bootstrap: CustomerRootBootstrapInputs,
+    ) -> Result<RuntimePlan, RuntimeBootstrapError> {
+        let mut builder = RuntimeBuilder::new(bootstrap.config, bootstrap.auth_package)
+            .with_template_root(bootstrap.app_root);
+        for module in self.modules {
+            builder = builder.with_boxed_module(module);
+        }
+        for plugin in self.customer_plugins {
+            builder = builder.with_boxed_customer_plugin(plugin);
+        }
+        builder.build().map_err(RuntimeBootstrapError::Build)
+    }
+}
 
 pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
@@ -192,23 +249,20 @@ where
 }
 
 impl RuntimeBuilder<davenda_auth::LoadedAuthModelPackage> {
-    pub fn for_customer_root_from_env(
-        auth_package_name: impl AsRef<str>,
-    ) -> Result<
+    pub fn for_customer_root_from_env() -> Result<
         CustomerRootRuntimeBuilder<davenda_auth::LoadedAuthModelPackage>,
         RuntimeBootstrapError,
     > {
-        CustomerRootRuntimeBuilder::from_env(auth_package_name)
+        CustomerRootRuntimeBuilder::from_env()
     }
 
     pub fn for_customer_root_from_paths(
         app_root: impl AsRef<std::path::Path>,
         config_path: impl AsRef<std::path::Path>,
-        auth_package_name: impl AsRef<str>,
     ) -> Result<
         CustomerRootRuntimeBuilder<davenda_auth::LoadedAuthModelPackage>,
         RuntimeBootstrapError,
     > {
-        CustomerRootRuntimeBuilder::from_paths(app_root, config_path, auth_package_name)
+        CustomerRootRuntimeBuilder::from_paths(app_root, config_path)
     }
 }

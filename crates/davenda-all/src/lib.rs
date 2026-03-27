@@ -115,15 +115,7 @@ impl DavendaAllBuilder {
 
     pub fn run_from_env(self) -> Result<(), DavendaAllError> {
         let app_root = env::current_dir().map_err(DavendaAllError::CurrentDirectory)?;
-        let manifest_path = app_root.join("app.toml");
-        let manifest =
-            davenda_app::CustomerAppManifest::from_file(&manifest_path).map_err(|error| {
-                DavendaAllError::ManifestLoad {
-                    path: manifest_path.clone(),
-                    reason: error.to_string(),
-                }
-            })?;
-        let bootstrap = customer_root_bootstrap_inputs_from_env(&manifest.auth.package_name)
+        let bootstrap = customer_root_bootstrap_inputs_from_env()
             .map_err(|error| match error {
                 davenda_runtime::RuntimeBootstrapError::ConfigLoad { path, reason } => {
                     DavendaAllError::ConfigLoad { path, reason }
@@ -166,7 +158,6 @@ impl DavendaAllBuilder {
         let bootstrap = customer_root_bootstrap_inputs_from_paths(
             app_root,
             config_path,
-            &manifest.auth.package_name,
         )
         .map_err(|error| match error {
             davenda_runtime::RuntimeBootstrapError::ConfigLoad { path, reason } => {

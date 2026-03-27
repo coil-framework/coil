@@ -277,7 +277,7 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
     copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
 
-    let plan = customer_root_runtime_from_paths(&customer_root, "platform.toml", "harbor-auth")
+    let plan = customer_root_runtime_from_paths(&customer_root, "platform.toml")
         .unwrap()
         .build()
         .unwrap();
@@ -312,14 +312,20 @@ fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
   <body><main>bootstrap-inputs</main></body>
 </html>"#,
     );
-    fs::write(customer_root.join("platform.toml"), VALID_CONFIG).unwrap();
+    fs::write(
+        customer_root.join("platform.toml"),
+        VALID_CONFIG.replace(
+            "package = \"platform-default-auth\"",
+            "package = \"harbor-auth\"",
+        ),
+    )
+    .unwrap();
     let harbor_auth =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
     copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
 
     let inputs =
-        customer_root_bootstrap_inputs_from_paths(&customer_root, "platform.toml", "harbor-auth")
-            .unwrap();
+        customer_root_bootstrap_inputs_from_paths(&customer_root, "platform.toml").unwrap();
 
     fs::remove_dir_all(&customer_root).unwrap();
 
@@ -339,13 +345,16 @@ fn customer_root_runtime_builder_reports_missing_auth_packages_from_paths() {
   <body><main>missing-auth</main></body>
 </html>"#,
     );
-    fs::write(customer_root.join("platform.toml"), VALID_CONFIG).unwrap();
+    fs::write(
+        customer_root.join("platform.toml"),
+        VALID_CONFIG.replace(
+            "package = \"platform-default-auth\"",
+            "package = \"missing-auth-package\"",
+        ),
+    )
+    .unwrap();
 
-    let error = match customer_root_runtime_from_paths(
-        &customer_root,
-        "platform.toml",
-        "missing-auth-package",
-    ) {
+    let error = match customer_root_runtime_from_paths(&customer_root, "platform.toml") {
         Ok(_) => panic!("expected missing auth package to fail"),
         Err(error) => error,
     };
@@ -357,6 +366,42 @@ fn customer_root_runtime_builder_reports_missing_auth_packages_from_paths() {
         RuntimeBootstrapError::AuthPackageLoad { package, .. }
             if package == "missing-auth-package"
     ));
+}
+
+#[test]
+fn direct_builder_bootstraps_customer_root_from_paths() {
+    let customer_root = unique_temp_template_root("direct-runtime-builder-bootstrap");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>direct-builder</main></body>
+</html>"#,
+    );
+    fs::write(
+        customer_root.join("platform.toml"),
+        VALID_CONFIG.replace(
+            "package = \"platform-default-auth\"",
+            "package = \"harbor-auth\"",
+        ),
+    )
+    .unwrap();
+    let harbor_auth =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
+    copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
+
+    let plan = Builder::new()
+        .register_module(davenda_cms::CmsModule::new())
+        .register_customer_plugin(ExampleCheckoutPlugin)
+        .build_from_paths(&customer_root, "platform.toml")
+        .unwrap();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert!(plan.modules.iter().any(|module| module.name == "cms"));
+    assert_eq!(plan.auth_package_name, "harbor-auth");
+    assert_eq!(plan.linked_customer_plugins.len(), 1);
 }
 
 #[test]

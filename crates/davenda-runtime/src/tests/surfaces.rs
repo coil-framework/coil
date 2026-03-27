@@ -65,6 +65,44 @@ fn copy_directory(from: &Path, to: &Path) {
     }
 }
 
+fn write_customer_root_manifest(root: &Path, auth_package: &str, enabled_modules: &[&str]) {
+    let enabled = enabled_modules
+        .iter()
+        .map(|module| format!("\"{module}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    fs::write(
+        root.join("app.toml"),
+        format!(
+            r#"[app]
+name = "showcase-events"
+display_name = "Showcase Events"
+
+[domains]
+canonical = "www.example.com"
+additional = []
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[theme]
+active = "showcase"
+template_namespaces = ["customer-app"]
+asset_roots = []
+
+[auth]
+mode = "extend"
+package = "{auth_package}"
+
+[modules]
+enabled = [{enabled}]
+"#
+        ),
+    )
+    .unwrap();
+}
+
 #[test]
 fn storage_host_applies_path_rules_for_sensitive_files() {
     let config = single_node_valid_config();
@@ -183,7 +221,12 @@ fn runtime_builder_rejects_duplicate_linked_customer_plugins() {
 
 #[test]
 fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config =
+        PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+            "enabled = [\"cms-pages\", \"admin-shell\"]",
+            "enabled = [\"cms\"]",
+        ))
+        .unwrap();
     let customer_root = unique_temp_template_root("customer-root-runtime-builder");
     write_template_file(
         &customer_root,
@@ -198,9 +241,11 @@ fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
   </body>
 </html>"#,
     );
+    write_customer_root_manifest(&customer_root, "platform-default-auth", &["cms"]);
 
     let plan = RuntimeBuilder::for_customer_root(config, DefaultAuthModelPackage::default())
         .with_customer_root(&customer_root)
+        .register_module(davenda_cms::CmsModule::new())
         .with_linked_customer_plugin(ExampleCheckoutPlugin)
         .build()
         .unwrap();
@@ -230,7 +275,13 @@ fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
 
 #[test]
 fn customer_root_runtime_builder_supports_register_aliases() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(
+        &VALID_CONFIG.replace(
+            "enabled = [\"cms-pages\", \"admin-shell\"]",
+            "enabled = [\"cms\"]",
+        ),
+    )
+    .unwrap();
     let customer_root = unique_temp_template_root("customer-root-runtime-register-aliases");
     write_template_file(
         &customer_root,
@@ -240,6 +291,7 @@ fn customer_root_runtime_builder_supports_register_aliases() {
   <body><main>customer-root-runtime</main></body>
 </html>"#,
     );
+    write_customer_root_manifest(&customer_root, "platform-default-auth", &["cms"]);
 
     let plan = customer_root_runtime(config, DefaultAuthModelPackage::default())
         .with_customer_root(&customer_root)
@@ -267,18 +319,22 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG.replace(
-            "package = \"platform-default-auth\"",
-            "package = \"harbor-auth\"",
-        ),
+        VALID_CONFIG
+            .replace(
+                "package = \"platform-default-auth\"",
+                "package = \"harbor-auth\"",
+            )
+            .replace("enabled = [\"cms-pages\", \"admin-shell\"]", "enabled = [\"cms\"]"),
     )
     .unwrap();
+    write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
     let harbor_auth =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
     copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
 
     let plan = customer_root_runtime_from_paths(&customer_root, "platform.toml")
         .unwrap()
+        .register_module(davenda_cms::CmsModule::new())
         .build()
         .unwrap();
 
@@ -314,12 +370,15 @@ fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG.replace(
-            "package = \"platform-default-auth\"",
-            "package = \"harbor-auth\"",
-        ),
+        VALID_CONFIG
+            .replace(
+                "package = \"platform-default-auth\"",
+                "package = \"harbor-auth\"",
+            )
+            .replace("enabled = [\"cms-pages\", \"admin-shell\"]", "enabled = [\"cms\"]"),
     )
     .unwrap();
+    write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
     let harbor_auth =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
     copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
@@ -347,12 +406,15 @@ fn customer_root_runtime_builder_reports_missing_auth_packages_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG.replace(
-            "package = \"platform-default-auth\"",
-            "package = \"missing-auth-package\"",
-        ),
+        VALID_CONFIG
+            .replace(
+                "package = \"platform-default-auth\"",
+                "package = \"missing-auth-package\"",
+            )
+            .replace("enabled = [\"cms-pages\", \"admin-shell\"]", "enabled = [\"cms\"]"),
     )
     .unwrap();
+    write_customer_root_manifest(&customer_root, "missing-auth-package", &["cms"]);
 
     let error = match customer_root_runtime_from_paths(&customer_root, "platform.toml") {
         Ok(_) => panic!("expected missing auth package to fail"),
@@ -381,12 +443,18 @@ fn direct_builder_bootstraps_customer_root_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG.replace(
-            "package = \"platform-default-auth\"",
-            "package = \"harbor-auth\"",
-        ),
+        VALID_CONFIG
+            .replace(
+                "package = \"platform-default-auth\"",
+                "package = \"harbor-auth\"",
+            )
+            .replace(
+                "enabled = [\"cms-pages\", \"admin-shell\"]",
+                "enabled = [\"cms\"]",
+            ),
     )
     .unwrap();
+    write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
     let harbor_auth =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
     copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
@@ -402,6 +470,80 @@ fn direct_builder_bootstraps_customer_root_from_paths() {
     assert!(plan.modules.iter().any(|module| module.name == "cms"));
     assert_eq!(plan.auth_package_name, "harbor-auth");
     assert_eq!(plan.linked_customer_plugins.len(), 1);
+}
+
+#[test]
+fn direct_builder_uses_the_customer_manifest_to_enable_only_selected_modules() {
+    let customer_root = unique_temp_template_root("direct-runtime-builder-manifest-enable");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>direct-builder-manifest</main></body>
+</html>"#,
+    );
+    fs::write(
+        customer_root.join("platform.toml"),
+        VALID_CONFIG.replace(
+            "enabled = [\"cms-pages\", \"admin-shell\"]",
+            "enabled = [\"cms\"]",
+        ),
+    )
+    .unwrap();
+    write_customer_root_manifest(&customer_root, "platform-default-auth", &["cms"]);
+
+    let plan = Builder::new()
+        .register_module(davenda_cms::CmsModule::new())
+        .register_module(davenda_admin::AdminModule::new())
+        .build_from_paths(&customer_root, "platform.toml")
+        .unwrap();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert_eq!(
+        plan.modules
+            .iter()
+            .map(|module| module.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["cms"]
+    );
+}
+
+#[test]
+fn direct_builder_rejects_manifest_modules_not_linked_into_the_customer_binary() {
+    let customer_root = unique_temp_template_root("direct-runtime-builder-missing-linked-module");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>missing-linked-module</main></body>
+</html>"#,
+    );
+    fs::write(
+        customer_root.join("platform.toml"),
+        VALID_CONFIG.replace(
+            "enabled = [\"cms-pages\", \"admin-shell\"]",
+            "enabled = [\"admin\"]",
+        ),
+    )
+    .unwrap();
+    write_customer_root_manifest(&customer_root, "platform-default-auth", &["admin"]);
+
+    let error = Builder::new()
+        .register_module(davenda_cms::CmsModule::new())
+        .build_from_paths(&customer_root, "platform.toml")
+        .unwrap_err();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    assert!(matches!(
+        error,
+        RuntimeBootstrapError::Build(RuntimeBuildError::CustomerManifestMissingLinkedModules {
+            modules
+        }) if modules == vec!["admin".to_string()]
+    ));
 }
 
 #[test]

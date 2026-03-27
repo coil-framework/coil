@@ -1,5 +1,7 @@
 use super::*;
 use davenda_auth::{LoadedAuthModelPackage, load_auth_model_package_at};
+use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::env;
 use std::path::Path;
 use std::path::PathBuf;
@@ -10,14 +12,54 @@ use std::path::PathBuf;
 /// customer binary to start from the lower-level `RuntimeBuilder::new(...)` surface.
 pub struct CustomerRootRuntimeBuilder<P> {
     inner: RuntimeBuilder<P>,
+    config: PlatformConfig,
+    app_root: Option<PathBuf>,
+    enabled_modules: Vec<String>,
 }
 
 pub struct CustomerRootBootstrapInputs {
     pub app_root: PathBuf,
+    pub manifest_path: PathBuf,
+    pub enabled_modules: Vec<String>,
     pub config_path: PathBuf,
     pub config: PlatformConfig,
     pub auth_package_name: String,
     pub auth_package: LoadedAuthModelPackage,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CustomerRootManifestDocument {
+    app: CustomerRootManifestApp,
+    domains: CustomerRootManifestDomains,
+    i18n: CustomerRootManifestI18n,
+    auth: CustomerRootManifestAuth,
+    modules: CustomerRootManifestModules,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CustomerRootManifestApp {
+    name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CustomerRootManifestDomains {
+    canonical: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CustomerRootManifestI18n {
+    default_locale: String,
+    supported_locales: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CustomerRootManifestAuth {
+    package: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CustomerRootManifestModules {
+    enabled: Vec<String>,
 }
 
 pub fn customer_root_runtime<P>(
@@ -60,7 +102,10 @@ where
 {
     pub fn new(config: PlatformConfig, auth_package: P) -> Self {
         Self {
-            inner: RuntimeBuilder::new(config, auth_package),
+            inner: RuntimeBuilder::new(config.clone(), auth_package),
+            config,
+            app_root: None,
+            enabled_modules: Vec::new(),
         }
     }
 
@@ -71,6 +116,8 @@ where
     where
         A: Into<PathBuf>,
     {
+        let root = root.into();
+        self.app_root = Some(root.clone());
         self.inner = self.inner.with_template_root(root);
         self
     }
@@ -174,7 +221,14 @@ where
     }
 
     pub fn build(self) -> Result<RuntimePlan, RuntimeBuildError> {
-        self.inner.build()
+        let enabled_modules = if self.enabled_modules.is_empty() {
+            self.resolve_enabled_modules_from_customer_root()?
+        } else {
+            self.enabled_modules
+        };
+        self.inner
+            .resolve_enabled_customer_modules(&enabled_modules)?
+            .build()
     }
 
     pub fn run_from_env(self) -> Result<(), RuntimeBootstrapError> {
@@ -202,7 +256,39 @@ impl CustomerRootRuntimeBuilder<LoadedAuthModelPackage> {
     }
 
     pub fn from_bootstrap_inputs(inputs: CustomerRootBootstrapInputs) -> Self {
-        Self::new(inputs.config, inputs.auth_package).with_customer_root(inputs.app_root)
+        let mut builder =
+            Self::new(inputs.config, inputs.auth_package).with_customer_root(inputs.app_root);
+        builder.enabled_modules = inputs.enabled_modules;
+        builder
+    }
+}
+
+impl<P> CustomerRootRuntimeBuilder<P>
+where
+    P: AuthModelPackage + 'static,
+{
+    fn resolve_enabled_modules_from_customer_root(&self) -> Result<Vec<String>, RuntimeBuildError> {
+        let Some(app_root) = &self.app_root else {
+            return Ok(Vec::new());
+        };
+        let manifest_path = app_root.join("app.toml");
+        let manifest = load_customer_root_manifest(&manifest_path)
+            .map_err(|error| match error {
+                RuntimeBootstrapError::ManifestLoad { path, reason } => {
+                    RuntimeBuildError::CustomerManifestLoad { path, reason }
+                }
+                other => RuntimeBuildError::CustomerManifestLoad {
+                    path: manifest_path.clone(),
+                    reason: other.to_string(),
+                },
+            })?;
+        validate_customer_root_manifest_alignment(&manifest, &self.config).map_err(|reason| {
+            RuntimeBuildError::CustomerManifestLoad {
+                path: manifest_path,
+                reason,
+            }
+        })?;
+        Ok(manifest.modules.enabled)
     }
 }
 
@@ -223,10 +309,18 @@ impl CustomerRootBootstrapInputs {
     ) -> Result<Self, RuntimeBootstrapError> {
         let app_root = app_root.as_ref().to_path_buf();
         let config_path = resolve_path(&app_root, config_path.as_ref());
+        let manifest_path = app_root.join("app.toml");
         let config = PlatformConfig::from_file(&config_path).map_err(|error| {
             RuntimeBootstrapError::ConfigLoad {
                 path: config_path.clone(),
                 reason: error.to_string(),
+            }
+        })?;
+        let manifest = load_customer_root_manifest(&manifest_path)?;
+        validate_customer_root_manifest_alignment(&manifest, &config).map_err(|reason| {
+            RuntimeBootstrapError::ManifestLoad {
+                path: manifest_path.clone(),
+                reason,
             }
         })?;
         let auth_package_name = config.auth.package.clone();
@@ -241,6 +335,8 @@ impl CustomerRootBootstrapInputs {
 
         Ok(Self {
             app_root,
+            manifest_path,
+            enabled_modules: manifest.modules.enabled,
             config_path,
             config,
             auth_package_name,
@@ -275,4 +371,98 @@ fn discover_default_config_path(app_root: &Path) -> Option<PathBuf> {
             .map(|path| app_root.join(path))
             .find(|path| path.is_file())
         })
+}
+
+fn load_customer_root_manifest(
+    manifest_path: &Path,
+) -> Result<CustomerRootManifestDocument, RuntimeBootstrapError> {
+    let source = std::fs::read_to_string(manifest_path).map_err(|error| {
+        RuntimeBootstrapError::ManifestLoad {
+            path: manifest_path.to_path_buf(),
+            reason: error.to_string(),
+        }
+    })?;
+    toml::from_str(&source).map_err(|error| RuntimeBootstrapError::ManifestLoad {
+        path: manifest_path.to_path_buf(),
+        reason: error.to_string(),
+    })
+}
+
+fn validate_customer_root_manifest_alignment(
+    manifest: &CustomerRootManifestDocument,
+    config: &PlatformConfig,
+) -> Result<(), String> {
+    if manifest.app.name != config.app.name {
+        return Err(format!(
+            "customer app manifest app `{}` does not match runtime config app `{}`",
+            manifest.app.name, config.app.name
+        ));
+    }
+    if manifest.auth.package != config.auth.package {
+        return Err(format!(
+            "customer app manifest auth package `{}` does not match runtime config auth package `{}`",
+            manifest.auth.package, config.auth.package
+        ));
+    }
+    if manifest.i18n.default_locale != config.i18n.default_locale {
+        return Err(format!(
+            "customer app manifest default locale `{}` does not match runtime config default locale `{}`",
+            manifest.i18n.default_locale, config.i18n.default_locale
+        ));
+    }
+    if sorted_strings(manifest.i18n.supported_locales.clone())
+        != sorted_strings(config.i18n.supported_locales.clone())
+    {
+        return Err(format!(
+            "customer app manifest supported locales {:?} do not match runtime config supported locales {:?}",
+            sorted_strings(manifest.i18n.supported_locales.clone()),
+            sorted_strings(config.i18n.supported_locales.clone())
+        ));
+    }
+    if manifest.domains.canonical != config.seo.canonical_host {
+        return Err(format!(
+            "customer app manifest canonical host `{}` does not match runtime config canonical host `{}`",
+            manifest.domains.canonical, config.seo.canonical_host
+        ));
+    }
+    if sorted_strings(manifest.modules.enabled.clone())
+        != sorted_strings(config.modules.enabled.clone())
+    {
+        return Err(format!(
+            "customer app manifest modules {:?} do not match runtime config modules {:?}",
+            sorted_strings(manifest.modules.enabled.clone()),
+            sorted_strings(config.modules.enabled.clone())
+        ));
+    }
+    Ok(())
+}
+
+fn sorted_strings(values: Vec<String>) -> Vec<String> {
+    let mut values = values;
+    values.sort();
+    values
+}
+
+pub(crate) fn resolve_enabled_customer_modules(
+    enabled_modules: &[String],
+    modules: Vec<Box<dyn PlatformModule>>,
+) -> Result<Vec<Box<dyn PlatformModule>>, RuntimeBuildError> {
+    let enabled = enabled_modules.iter().cloned().collect::<BTreeSet<_>>();
+    let mut linked = BTreeSet::new();
+    let mut selected = Vec::new();
+    for module in modules {
+        let name = module.manifest().name;
+        linked.insert(name.clone());
+        if enabled.contains(&name) {
+            selected.push(module);
+        }
+    }
+    let missing = enabled
+        .into_iter()
+        .filter(|module| !linked.contains(module))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(RuntimeBuildError::CustomerManifestMissingLinkedModules { modules: missing });
+    }
+    Ok(selected)
 }

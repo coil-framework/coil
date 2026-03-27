@@ -115,6 +115,12 @@ pub enum RuntimeBuildError {
         job: String,
         trigger: JobTriggerKind,
     },
+    #[error(
+        "customer app manifest enables modules not linked into the customer binary: {modules:?}"
+    )]
+    CustomerManifestMissingLinkedModules { modules: Vec<String> },
+    #[error("customer app manifest `{path}` could not be loaded: {reason}")]
+    CustomerManifestLoad { path: PathBuf, reason: String },
 }
 
 #[derive(Debug, Error)]
@@ -131,6 +137,8 @@ pub enum RuntimeBootstrapError {
     ConfigNotFound { app_root: PathBuf },
     #[error("platform config `{path}` could not be loaded: {reason}")]
     ConfigLoad { path: PathBuf, reason: String },
+    #[error("customer app manifest `{path}` could not be loaded: {reason}")]
+    ManifestLoad { path: PathBuf, reason: String },
     #[error("auth package `{package}` could not be loaded from `{app_root}`: {reason}")]
     AuthPackageLoad {
         package: String,

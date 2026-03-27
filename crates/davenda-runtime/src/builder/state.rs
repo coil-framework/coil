@@ -59,6 +59,9 @@ impl Builder {
         for plugin in self.customer_plugins {
             builder = builder.with_boxed_customer_plugin(plugin);
         }
+        builder = builder
+            .resolve_enabled_customer_modules(&bootstrap.enabled_modules)
+            .map_err(RuntimeBootstrapError::Build)?;
         builder.build().map_err(RuntimeBootstrapError::Build)
     }
 }
@@ -220,6 +223,17 @@ where
     pub fn with_maintenance_mode(mut self, maintenance_mode: MaintenanceMode) -> Self {
         self.maintenance_mode = Some(maintenance_mode);
         self
+    }
+
+    pub(crate) fn resolve_enabled_customer_modules(
+        mut self,
+        enabled_modules: &[String],
+    ) -> Result<Self, RuntimeBuildError> {
+        self.modules = crate::builder::customer_root::resolve_enabled_customer_modules(
+            enabled_modules,
+            self.modules,
+        )?;
+        Ok(self)
     }
 
     pub fn build(self) -> Result<RuntimePlan, RuntimeBuildError> {

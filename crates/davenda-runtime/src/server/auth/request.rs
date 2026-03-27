@@ -52,8 +52,14 @@ pub(crate) async fn authorize_live_request(
     else {
         return Ok(());
     };
-    let subject =
-        davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(principal_id.to_string()));
+    let subject = match request.principal_kind {
+        RequestPrincipalKind::ServiceAccount => davenda_auth::DefaultSubject::entity(
+            davenda_auth::Entity::service_account(principal_id.to_string()),
+        ),
+        _ => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
+            principal_id.to_string(),
+        )),
+    };
     let allowed = state
         .route_authorizer
         .check_capability(&subject, capability, &object)

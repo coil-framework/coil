@@ -16,10 +16,9 @@ use davenda_customer_sdk::{
     CustomerAppContext as SdkCustomerAppContext, Headers, JobReceipt, JobsFacade, ManagedAsset,
     MoneyAmount, OrderDraft, OrderLineDraft, OrderReviewDecision, OutboundHttpFacade,
     OutboundHttpRequest, OutboundHttpResponse, PrincipalContext as SdkPrincipalContext,
-    PrincipalKind as SdkPrincipalKind, RepositoryFacade, RepositoryQuery, RepositoryRecord,
-    RepositoryRecordSet, RepositoryWrite, RepositoryWriteReceipt,
-    RequestContext as SdkRequestContext, TraceContext as SdkTraceContext, VerifiedWebhook,
-    WebhookHandlingResult,
+    RepositoryFacade, RepositoryQuery, RepositoryRecord, RepositoryRecordSet, RepositoryWrite,
+    RepositoryWriteReceipt, RequestContext as SdkRequestContext, TraceContext as SdkTraceContext,
+    VerifiedWebhook, WebhookHandlingResult,
 };
 use davenda_jobs::JobInstant;
 use davenda_storage::StoragePlanRequest;
@@ -133,6 +132,7 @@ const CMS_ADMIN_CSRF_ACTIONS: &[(&str, &str)] = &[
         "x-davenda-cms-csrf-cms-redirects-save",
     ),
 ];
+const STRIPE_WEBHOOK_MAX_AGE_SECS: u64 = 300;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -1025,7 +1025,14 @@ impl AuthFacade for RuntimeCheckoutAuthFacade<'_> {
     ) -> Result<AuthCheckResult, BackendError> {
         let capability = parse_customer_capability(&request.capability)?;
         let object = parse_customer_auth_entity(&request.object)?;
-        let subject = customer_hook_auth_subject(self.execution.principal.principal_id.as_deref());
+        let Some(subject) = customer_hook_auth_subject(&self.execution.principal) else {
+            return Ok(AuthCheckResult {
+                allowed: false,
+                explanation: Some(
+                    "anonymous requests do not have an authenticated auth subject".to_string(),
+                ),
+            });
+        };
         let authorizer = Arc::clone(&self.state.route_authorizer);
         let allowed = run_customer_hook_future(async move {
             authorizer
@@ -1059,8 +1066,16 @@ impl AuthFacade for RuntimeCheckoutAuthFacade<'_> {
                 "Runtime auth explanations are disabled for this installation.",
             ));
         };
+        let Some(subject) = customer_hook_auth_subject(&self.execution.principal) else {
+            return Ok(AuthExplanation {
+                summary: format!("deny `{}` on `{}`", capability.as_str(), request.object),
+                traces: vec![
+                    "anonymous requests do not have an authenticated auth subject".to_string(),
+                ],
+            });
+        };
         let explain_request = davenda_auth::LiveAuthExplainRequest {
-            subject: customer_hook_auth_subject(self.execution.principal.principal_id.as_deref()),
+            subject,
             capability,
             object,
             options: davenda_auth::ExplainOptions::default(),
@@ -1250,15 +1265,16 @@ fn runtime_customer_request_context(
                 .with_locale(locale.to_string())
         }
     };
-    let principal = execution
-        .principal
-        .principal_id
-        .as_deref()
-        .map(|principal_id| SdkPrincipalContext {
-            kind: SdkPrincipalKind::User,
-            id: Some(principal_id.to_string()),
-        })
-        .unwrap_or_else(SdkPrincipalContext::anonymous);
+    let principal = match (
+        execution.principal.principal_id.as_deref(),
+        execution.principal.principal_kind,
+    ) {
+        (Some(principal_id), RequestPrincipalKind::ServiceAccount) => {
+            SdkPrincipalContext::service_account(principal_id.to_string())
+        }
+        (Some(principal_id), _) => SdkPrincipalContext::user(principal_id.to_string()),
+        (None, _) => SdkPrincipalContext::anonymous(),
+    };
     let trace = SdkTraceContext::new(execution.trace.request_id.clone())
         .with_request_id(execution.trace.request_id.clone());
     SdkRequestContext::new(customer_app, principal, trace)
@@ -3197,16 +3213,23 @@ fn validated_generic_verified_payment_webhook_from_execution(
         ));
     }
     let payload = verified_webhook_payload(execution)?;
+    let delivery_id =
+        generic_verified_webhook_delivery_id(&provider, &event, &payment_reference, &payload);
+    let mut headers = verified_webhook_headers(execution, &provider, &event);
+    headers.insert(
+        "x-davenda-verified-webhook-delivery-id".to_string(),
+        delivery_id.clone(),
+    );
     Ok(VerifiedIngressWebhook {
         webhook: VerifiedWebhook {
             source: provider.clone(),
             event: event.clone(),
-            headers: verified_webhook_headers(execution, &provider, &event),
+            headers,
             content_type: execution.content_type.clone(),
             payload,
         },
         payment_reference: Some(payment_reference),
-        delivery_id: None,
+        delivery_id: Some(delivery_id),
     })
 }
 
@@ -3285,7 +3308,19 @@ fn verify_stripe_webhook_signature(
     let timestamp = timestamp.ok_or(RuntimeServerError::Storefront(
         StorefrontStateError::InvalidPaymentWebhookSignature,
     ))?;
+    let timestamp = timestamp.parse::<u64>().map_err(|_| {
+        RuntimeServerError::Storefront(StorefrontStateError::InvalidPaymentWebhookSignature)
+    })?;
     if signatures.is_empty() {
+        return Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ));
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now.abs_diff(timestamp) > STRIPE_WEBHOOK_MAX_AGE_SECS {
         return Err(RuntimeServerError::Storefront(
             StorefrontStateError::InvalidPaymentWebhookSignature,
         ));
@@ -3294,7 +3329,7 @@ fn verify_stripe_webhook_signature(
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| {
         RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret)
     })?;
-    mac.update(timestamp.as_bytes());
+    mac.update(timestamp.to_string().as_bytes());
     mac.update(b".");
     mac.update(payload);
     let expected = mac.finalize().into_bytes();
@@ -3310,6 +3345,23 @@ fn verify_stripe_webhook_signature(
             StorefrontStateError::InvalidPaymentWebhookSignature,
         ))
     }
+}
+
+fn generic_verified_webhook_delivery_id(
+    provider: &str,
+    event: &str,
+    payment_reference: &str,
+    payload: &[u8],
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(provider.as_bytes());
+    hasher.update(b":");
+    hasher.update(event.as_bytes());
+    hasher.update(b":");
+    hasher.update(payment_reference.as_bytes());
+    hasher.update(b":");
+    hasher.update(payload);
+    format!("{:x}", hasher.finalize())
 }
 
 fn stripe_payment_reference_from_event(
@@ -3547,10 +3599,10 @@ fn record_verified_webhook_request_observation(
     status: crate::wasm::WebhookObservationStatus,
     detail: Option<String>,
 ) {
-    let principal_kind = if execution.principal.principal_id.is_some() {
-        "user"
-    } else {
-        "anonymous"
+    let principal_kind = match execution.principal.principal_kind {
+        RequestPrincipalKind::Anonymous => "anonymous",
+        RequestPrincipalKind::User => "user",
+        RequestPrincipalKind::ServiceAccount => "service_account",
     };
     let _ = state.wasm_host.record_webhook_request_observation(
         execution.customer_app.as_str(),
@@ -5113,12 +5165,19 @@ fn parse_customer_auth_entity(value: &str) -> Result<davenda_auth::Entity, Backe
     }
 }
 
-fn customer_hook_auth_subject(principal_id: Option<&str>) -> davenda_auth::DefaultSubject {
-    match principal_id {
-        Some(principal_id) => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::user(
-            principal_id.to_string(),
+fn customer_hook_auth_subject(
+    principal: &PrincipalContext,
+) -> Option<davenda_auth::DefaultSubject> {
+    match (principal.principal_id.as_deref(), principal.principal_kind) {
+        (Some(principal_id), RequestPrincipalKind::ServiceAccount) => {
+            Some(davenda_auth::DefaultSubject::entity(
+                davenda_auth::Entity::service_account(principal_id.to_string()),
+            ))
+        }
+        (Some(principal_id), _) => Some(davenda_auth::DefaultSubject::entity(
+            davenda_auth::Entity::user(principal_id.to_string()),
         )),
-        None => davenda_auth::DefaultSubject::entity(davenda_auth::Entity::any_user()),
+        (None, _) => None,
     }
 }
 
@@ -5448,4 +5507,37 @@ async fn enforce_request_body_limit(
         .await
         .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit })?;
     Ok(Request::from_parts(parts, Body::from(bytes)))
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn customer_hook_auth_subject_is_absent_for_anonymous_requests() {
+        let principal = PrincipalContext {
+            principal_id: None,
+            principal_kind: RequestPrincipalKind::Anonymous,
+            granted_capabilities: HashSet::new(),
+        };
+
+        assert!(customer_hook_auth_subject(&principal).is_none());
+    }
+
+    #[test]
+    fn customer_hook_auth_subject_preserves_service_accounts() {
+        let principal = PrincipalContext {
+            principal_id: Some("runtime.webhooks".to_string()),
+            principal_kind: RequestPrincipalKind::ServiceAccount,
+            granted_capabilities: HashSet::new(),
+        };
+
+        assert_eq!(
+            customer_hook_auth_subject(&principal),
+            Some(davenda_auth::DefaultSubject::entity(
+                davenda_auth::Entity::service_account("runtime.webhooks"),
+            ))
+        );
+    }
 }

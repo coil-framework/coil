@@ -261,6 +261,43 @@ fn wasm_host_prepares_render_hook_invocations_from_request_execution() {
 }
 
 #[test]
+fn wasm_host_preserves_service_account_principal_kind_from_request_execution() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .with_installed_extension(installed_render_hook_extension())
+        .build()
+        .unwrap();
+
+    let cookie_secret = b"01234567012345670123456701234567";
+    let csrf_secret = b"76543210765432107654321076543210";
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "www.example.com", "/en-GB/pages/home")
+                .unwrap()
+                .with_service_account_principal("runtime.service-hooks"),
+            cookie_secret,
+            csrf_secret,
+        )
+        .unwrap();
+
+    let sessions = plan
+        .wasm_host()
+        .begin_render_hook_invocations("cms.page.render", &execution)
+        .unwrap();
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].plan().context.principal.kind,
+        PrincipalKind::ServiceAccount
+    );
+    assert_eq!(
+        sessions[0].plan().context.principal.id.as_deref(),
+        Some("runtime.service-hooks")
+    );
+}
+
+#[test]
 fn wasm_host_prepares_job_and_webhook_invocations() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())

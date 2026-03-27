@@ -45,6 +45,7 @@ impl RuntimePlan {
         };
         let principal = PrincipalContext {
             principal_id: request.principal_id.clone(),
+            principal_kind: request.principal_kind,
             granted_capabilities: request.granted_capabilities.clone(),
         };
         let csrf_token = request.csrf_token.clone().or_else(|| {
@@ -131,12 +132,18 @@ impl RuntimePlan {
 
         if request.principal_id.is_none() {
             request.principal_id = resolved.principal_id.clone();
+            if request.principal_id.is_some() {
+                request.principal_kind = RequestPrincipalKind::User;
+            }
         }
 
         let mut execution = self.execute_request(request, cookie_secret, csrf_secret)?;
         execution.session = resolved.session;
         if execution.principal.principal_id.is_none() {
             execution.principal.principal_id = resolved.principal_id;
+            if execution.principal.principal_id.is_some() {
+                execution.principal.principal_kind = RequestPrincipalKind::User;
+            }
         }
         execution.flash_messages = resolved.flash_messages;
         execution.response_cookies = resolved.response_cookies;

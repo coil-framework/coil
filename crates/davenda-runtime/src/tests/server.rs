@@ -1147,6 +1147,14 @@ fn stripe_webhook_signature(timestamp: i64, payload: &str) -> String {
     format!("t={timestamp},v1={:x}", mac.finalize().into_bytes())
 }
 
+fn fresh_stripe_webhook_signature(payload: &str) -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    stripe_webhook_signature(timestamp, payload)
+}
+
 fn response_header(response: &Response<Body>, name: &str) -> String {
     response
         .headers()
@@ -4069,6 +4077,77 @@ async fn server_host_rejects_native_stripe_webhooks_with_invalid_stripe_signatur
 }
 
 #[tokio::test]
+async fn server_host_rejects_native_stripe_webhooks_with_stale_timestamps() {
+    let app_name = unique_app_name("harbor-shop-runtime-stale-native-stripe-webhook");
+    let config = with_stripe_payment_provider(config_with_app_name(&app_name));
+    let template_root = checked_in_harbor_shop_root();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let payload = serde_json::json!({
+        "id": "evt_test_stale",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_stale",
+                "client_reference_id": "PAY-50001",
+                "metadata": {
+                    "payment_reference": "PAY-50001"
+                }
+            }
+        }
+    })
+    .to_string();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/json")
+                .header(
+                    "stripe-signature",
+                    stripe_webhook_signature(now - 600, &payload),
+                )
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.contains("payment webhook verification failed"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn server_host_rejects_payment_webhooks_for_an_unconfigured_provider() {
     let app_name = unique_app_name("harbor-shop-runtime-payment-provider-mismatch");
     let config = with_stripe_payment_provider(config_with_app_name(&app_name));
@@ -6904,7 +6983,7 @@ async fn server_host_accepts_native_stripe_webhooks_and_exposes_raw_json_to_cust
         }
     })
     .to_string();
-    let signature = stripe_webhook_signature(1_712_345_678, &payload);
+    let signature = fresh_stripe_webhook_signature(&payload);
     let response = server
         .respond(
             Request::builder()
@@ -7045,7 +7124,7 @@ async fn server_host_rejects_replayed_native_stripe_webhook_deliveries_across_se
         }
     })
     .to_string();
-    let signature = stripe_webhook_signature(1_712_345_678, &payload);
+    let signature = fresh_stripe_webhook_signature(&payload);
     let first = server
         .respond(
             Request::builder()
@@ -7116,6 +7195,138 @@ async fn server_host_rejects_replayed_native_stripe_webhook_deliveries_across_se
 
     let recorded = calls.lock().unwrap().clone();
     assert_eq!(recorded.len(), 1, "{recorded:?}");
+}
+
+#[tokio::test]
+async fn server_host_rejects_replayed_generic_verified_webhooks_across_server_reopen() {
+    let app_name = unique_app_name("harbor-shop-runtime-generic-webhook-replay");
+    let config = with_payment_webhook_secret(config_with_app_name(&app_name));
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-generic-replay";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("buyer@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let webhook_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("provider", "generic")
+        .append_pair("event", "payment.captured")
+        .append_pair("payment_reference", "PAY-50001")
+        .append_pair(
+            "signature",
+            &payment_webhook_signature("generic", "payment.captured", "PAY-50001"),
+        )
+        .finish();
+    let first = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(webhook_body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let first_status = first.status();
+    let first_body = String::from_utf8(
+        to_bytes(first.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(first_status, StatusCode::OK, "{first_body}");
+
+    let reopened = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let second = reopened
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(webhook_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = second.status();
+    let body = String::from_utf8(
+        to_bytes(second.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let snapshot = store
+        .snapshot(&issued.record.session_id, Some(principal_id))
+        .unwrap();
+    assert_eq!(snapshot.payment.status, "captured");
+    assert_eq!(
+        snapshot
+            .latest_order
+            .as_ref()
+            .map(|order| order.status.as_str()),
+        Some("paid")
+    );
+    assert!(
+        body.contains("has already been processed") || body.contains("verified webhook delivery"),
+        "{body}"
+    );
 }
 
 #[tokio::test]

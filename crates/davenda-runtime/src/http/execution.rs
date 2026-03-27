@@ -26,6 +26,7 @@ pub struct RequestInput {
     pub csrf_action: Option<String>,
     pub maintenance_bypass_token: Option<String>,
     pub principal_id: Option<String>,
+    pub principal_kind: RequestPrincipalKind,
     pub granted_capabilities: HashSet<davenda_auth::Capability>,
 }
 
@@ -54,6 +55,7 @@ impl RequestInput {
             csrf_action: None,
             maintenance_bypass_token: None,
             principal_id: None,
+            principal_kind: RequestPrincipalKind::Anonymous,
             granted_capabilities: HashSet::new(),
         })
     }
@@ -105,6 +107,13 @@ impl RequestInput {
 
     pub fn with_principal(mut self, principal_id: impl Into<String>) -> Self {
         self.principal_id = Some(principal_id.into());
+        self.principal_kind = RequestPrincipalKind::User;
+        self
+    }
+
+    pub fn with_service_account_principal(mut self, principal_id: impl Into<String>) -> Self {
+        self.principal_id = Some(principal_id.into());
+        self.principal_kind = RequestPrincipalKind::ServiceAccount;
         self
     }
 
@@ -187,6 +196,13 @@ fn request_field_value_is_valid(value: &str) -> bool {
         .any(|ch| ch == '\0' || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t')))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestPrincipalKind {
+    Anonymous,
+    User,
+    ServiceAccount,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestTraceContext {
     pub request_id: String,
@@ -202,6 +218,7 @@ pub struct SessionContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrincipalContext {
     pub principal_id: Option<String>,
+    pub principal_kind: RequestPrincipalKind,
     pub granted_capabilities: HashSet<davenda_auth::Capability>,
 }
 

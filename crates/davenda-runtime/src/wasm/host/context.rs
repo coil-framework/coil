@@ -7,9 +7,15 @@ impl WasmHost {
         input: InvocationInput,
     ) -> Result<InvocationContext, WasmModelError> {
         let customer_app = self.customer_app_context(Some(&execution.locale))?;
-        let principal = match execution.principal.principal_id.as_deref() {
-            Some(principal_id) => PrincipalRef::user(principal_id.to_string())?,
-            None => PrincipalRef::anonymous(),
+        let principal = match (
+            execution.principal.principal_id.as_deref(),
+            execution.principal.principal_kind,
+        ) {
+            (Some(principal_id), RequestPrincipalKind::ServiceAccount) => {
+                PrincipalRef::service_account(principal_id.to_string())?
+            }
+            (Some(principal_id), _) => PrincipalRef::user(principal_id.to_string())?,
+            (None, _) => PrincipalRef::anonymous(),
         };
         let trace = TraceContext::new(execution.trace.request_id.clone())?
             .with_request_id(execution.trace.request_id.clone())?;

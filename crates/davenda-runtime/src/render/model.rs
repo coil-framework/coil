@@ -4613,6 +4613,7 @@ cdn_base_url = "https://cdn.example.com"
         };
         let principal = PrincipalContext {
             principal_id: Some(principal_id.to_string()),
+            principal_kind: RequestPrincipalKind::User,
             granted_capabilities: HashSet::new(),
         };
         apply_route_specific_bindings(
@@ -4972,6 +4973,7 @@ cdn_base_url = "https://cdn.example.com"
         let plan = render_test_plan_with_customer_plugin(StoredPrincipalReplayCheckoutPlugin);
         let operator = PrincipalContext {
             principal_id: Some("operator@example.com".to_string()),
+            principal_kind: RequestPrincipalKind::User,
             granted_capabilities: HashSet::new(),
         };
         let review = customer_order_review(
@@ -4992,6 +4994,7 @@ cdn_base_url = "https://cdn.example.com"
             render_test_plan_with_customer_plugin(ViewerFallbackPrincipalReplayCheckoutPlugin);
         let operator = PrincipalContext {
             principal_id: Some("operator@example.com".to_string()),
+            principal_kind: RequestPrincipalKind::User,
             granted_capabilities: HashSet::new(),
         };
         let mut order = sample_storefront_order_snapshot();
@@ -5062,6 +5065,7 @@ cdn_base_url = "https://cdn.example.com"
         let plan = render_test_plan_with_customer_plugin(ReplayPrincipalCheckoutPlugin);
         let operator = PrincipalContext {
             principal_id: Some("ops.admin@example.com".to_string()),
+            principal_kind: RequestPrincipalKind::User,
             granted_capabilities: HashSet::new(),
         };
 

@@ -123,6 +123,20 @@
               </button>
             </form>
           </article>
+          <article class="admin-card" dv:if="${selectedOrder.hasCustomerReview}">
+            <h2>Linked customer backend</h2>
+            <p>
+              Review status
+              <strong dv:text="${selectedOrder.customerReview.status}">Approved</strong>
+            </p>
+            <p dv:text="${selectedOrder.customerReview.summary}">
+              The linked Harbor backend approved this order without extra handling.
+            </p>
+            <p>
+              Decision code
+              <code dv:text="${selectedOrder.customerReview.code}">approved</code>
+            </p>
+          </article>
         </div>
       </section>
 

@@ -1,35 +1,36 @@
 # Harbor Loyalty Backend
 
-`harbor-loyalty-backend` is the checked-in example of customer-owned native backend logic for Harbor
-Shop.
+`harbor-loyalty-backend` is the checked-in Harbor Shop example for chapter 96: a linked
+customer-owned Rust backend crate that holds first-party customer logic.
 
 Use it when you need custom Rust code for one customer store and that work does not belong in:
 
 - templates or config
-- a bounded WASM extension under `apps/harbor-shop/extensions/`
+- a bounded WASM extension under `apps/harbor-shop/extensions/` for third-party/runtime-installed work
 - a reusable first-party/native module under `crates/`
 
 This example stays intentionally small, but it demonstrates the full path a third-party developer
 needs:
 
 - where Harbor Shop-specific Rust code lives
-- how that code is exposed over HTTP
-- how local Docker wiring starts it
-- how signed inbound integration traffic is handled
-- how to add tests for the custom logic and the HTTP surface
+- how a linked customer crate exposes hook-style logic through `plugin()`
+- how the same crate can optionally be wrapped in an HTTP sidecar
+- how signed inbound integration traffic is handled when that sidecar is warranted
+- how to add tests for the pure logic and the optional HTTP surface
 
 ## What Lives Where
 
 `src/lib.rs`
-- pure Harbor Shop business logic and request/response types
+- the primary linked-crate example
+- Harbor Shop business logic, request/response types, and `plugin()` live here
 - this is where customer-specific rules should start
 
 `src/http.rs`
-- the HTTP adapter for this service
-- route registration, request validation, and signed webhook checks live here
+- the optional HTTP adapter
+- route registration, request validation, and signed webhook checks live here when a sidecar is justified
 
 `src/main.rs`
-- process bootstrap
+- optional process bootstrap
 - reads `HARBOR_BACKEND_*` environment variables and starts the Axum server
 
 `requests/*.json`
@@ -40,18 +41,41 @@ needs:
 
 ## How It Connects To Harbor Shop
 
-The connection path is:
+The primary connection path is the linked crate:
+
+1. customer-owned logic lives in `src/lib.rs`
+2. `plugin()` is the intended registration point for a customer workspace/binary
+3. the customer binary links this crate and registers the hooks at startup
+4. Harbor Shop-specific behavior stays in customer-owned Rust rather than starting in WASM or a sidecar
+
+The optional sidecar path is secondary:
 
 1. `apps/harbor-shop/docker-compose.yml` defines the optional `harbor-backend-example` service
 2. that service builds this crate and exposes it on `http://localhost:8081`
-3. `src/main.rs` loads `HARBOR_BACKEND_BIND`, `HARBOR_BACKEND_BRAND`, and `HARBOR_BACKEND_WEBHOOK_SECRET`
-4. `src/http.rs` builds the router and maps routes onto the Harbor Shop business rules in `src/lib.rs`
+3. `src/main.rs` loads `HARBOR_BACKEND_*` settings
+4. `src/http.rs` maps HTTP routes onto the same rules from `src/lib.rs`
 
-That is the intended pattern for customer-owned native backend work in Harbor Shop: keep the rules
-in app-owned code, keep the process boundary explicit, and avoid scattering the behavior through
-Davenda core.
+That is the intended Harbor Shop pattern now: linked crate first, sidecar only when a process
+boundary is genuinely useful.
 
-## Run It
+## Linked Crate First
+
+Read `src/lib.rs` first. It is the primary example.
+
+High-level intended registration shape:
+
+```rust
+davenda_runtime::Builder::new()
+    .register_customer_plugin(harbor_loyalty_backend::plugin())
+    .run_from_env()
+```
+
+The exact stable SDK/bootstrap layer is still platform work, but this example crate is already
+structured around that ownership model. In the current Harbor Shop workspace, the linked plugin is
+visible through the Harbor customer binary’s `describe` command and through the admin dashboard’s
+runtime-backed plugin metadata panel once the app is running.
+
+## Optional Sidecar Adapter
 
 From the repo root:
 
@@ -59,7 +83,7 @@ From the repo root:
 cargo run --manifest-path apps/harbor-shop/backend/harbor-loyalty-backend/Cargo.toml
 ```
 
-By default it binds to `0.0.0.0:8081`.
+By default the optional sidecar binds to `0.0.0.0:8081`.
 
 To run it with the full Harbor Shop stack:
 
@@ -118,7 +142,8 @@ The shortest safe path is:
 
 That keeps the service maintainable. Pure rules stay easy to test, and the HTTP adapter stays thin.
 
-The checked-in `POST /api/orders/review` route is the example to copy:
+The checked-in `review_order(...)` logic in `src/lib.rs` is the example to copy first. The
+`POST /api/orders/review` route is only the optional transport wrapper around it.
 
 - `src/lib.rs`
   - `OrderReviewRequest`
@@ -133,7 +158,9 @@ The checked-in `POST /api/orders/review` route is the example to copy:
 That example shows the intended Harbor Shop customization pattern:
 
 - keep the business rule pure and deterministic in Rust
-- keep request validation and HTTP concerns in the adapter
+- expose it through the linked crate first
+- keep the linked crate ready to implement `davenda-customer-sdk` traits directly
+- keep request validation and HTTP concerns in the adapter only when needed
 - keep a checked-in sample payload next to the code so another developer can exercise the rule immediately
 
 ## When Not To Copy This Pattern
@@ -141,6 +168,7 @@ That example shows the intended Harbor Shop customization pattern:
 Do not reach for a separate backend process if a smaller boundary is enough.
 
 - If you only need a render hook, small webhook, widget, or bounded integration point, prefer a WASM extension in `apps/harbor-shop/extensions/`.
+- If you need customer-owned first-party Rust logic, start with this linked crate.
 - If the logic needs deep transactional access, shared platform data ownership, or reuse across many apps, it probably belongs in a native module under `crates/`.
 
 Relevant design docs:
@@ -148,3 +176,4 @@ Relevant design docs:
 - `docs/design/03-product-shape-core-official-modules-customer-apps.md`
 - `docs/design/13-workspace-and-crate-layout.md`
 - `docs/design/80-customer-extensions-and-integration-patterns.md`
+- `docs/design/96-customer-root-workspaces-and-linked-rust-backends.md`

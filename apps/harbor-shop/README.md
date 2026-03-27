@@ -50,8 +50,15 @@ journey without requiring a pre-seeded database user or live Stripe credentials:
 - the deployment target for customer-specific WASM extension artifacts
 
 `backend/`
-- customer-app-owned native Rust backend examples
-- use this when Harbor Shop needs deeper custom logic than templates or a bounded WASM extension
+- customer-app-owned Rust backend example code
+- the primary example is a linked customer crate consistent with chapter 96
+- the optional HTTP sidecar adapter remains here only for cases that truly need a process boundary
+
+`Cargo.toml`, `Cargo.lock`, `crates/`
+- the Harbor Shop nested Cargo workspace
+- `crates/harbor-shop-bin` is the customer binary composition root
+- `crates/harbor-shop-app` owns manifest/config/auth loading plus Harbor Shop runtime composition
+- `crates/harbor-shop-backend` is the linked customer Rust backend registered into the customer binary
 
 `docker/`, `Dockerfile`, `docker-compose.yml`
 - the local developer stack
@@ -65,6 +72,35 @@ Harbor Shop is meant to show the boundary described in `docs/design`:
 - Harbor Shop provides composition, branding, templates, app policy, and customer-specific behavior
 
 That is why this folder matters. It is the customer-app layer, not a random demo directory.
+
+## Harbor Shop As A Customer-Root Workspace
+
+Harbor Shop now has its own nested Cargo workspace in this folder.
+
+That is the chapter 96 shape in repo form:
+
+- Davenda stays upstream and is consumed through local path dependencies for now
+- Harbor Shop owns a binary crate that links the official modules it needs
+- Harbor Shop owns a linked backend crate that registers customer-specific behavior through public Davenda APIs
+- the optional sidecar adapter still exists, but it is no longer the primary Rust integration story
+
+From `apps/harbor-shop`:
+
+```bash
+cargo run -p harbor-shop -- describe
+```
+
+That prints the active app root, config, linked modules, and the linked customer plugin ids added
+by the Harbor Shop workspace.
+
+The checked-in linked plugin in this workspace is:
+
+- `Harbor Shop Linked Backend` (`harbor-shop-backend`)
+
+Once Harbor Shop is running, the same linked-backend shape is visible inside the app itself:
+
+- `/admin` now renders the linked customer plugin metadata from the runtime plan itself
+- `cargo run -p harbor-shop -- describe` prints the linked plugin ids in the customer workspace
 
 ## Prerequisites
 
@@ -86,7 +122,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-If you also want the checked-in native Rust backend example running locally:
+If you also want the optional sidecar adapter for the checked-in Rust backend example running locally:
 
 ```bash
 docker compose --profile backend-example up --build
@@ -119,7 +155,7 @@ The `app` container then does four things:
 1. validates `platform.dev.toml`
 2. applies migrations
 3. publishes theme assets
-4. starts `platform dev server`
+4. starts the Harbor Shop customer binary
 
 If startup stalls or restarts, check:
 
@@ -215,6 +251,29 @@ After code or template changes, rebuild and restart:
 docker compose up --build
 ```
 
+If you want to use the nested Harbor Shop workspace directly instead of Docker Compose:
+
+```bash
+cd apps/harbor-shop
+cargo run -p harbor-shop -- describe
+cargo run --manifest-path ../../Cargo.toml -p davenda-cli -- assets publish --config apps/harbor-shop/platform.dev.toml --yes
+DATABASE_URL=postgres://davenda:devpass@127.0.0.1:5438/davenda_harbor_shop \
+REDIS_URL=redis://127.0.0.1:6379 \
+OBJECT_STORE_URL='endpoint_url="http://127.0.0.1:9000"
+bucket="harbor-shop"
+region="us-east-1"
+access_key_id="minio"
+secret_access_key="minio123"' \
+DAVENDA_COOKIE_SECRET=01234567012345670123456701234567 \
+DAVENDA_CSRF_SECRET=76543210765432107654321076543210 \
+cargo run -p harbor-shop -- serve --config platform.dev.toml
+```
+
+The linked customer backend currently surfaces in two honest places:
+
+- `cargo run -p harbor-shop -- describe`
+- the `/admin` dashboard section that renders linked plugin metadata from the runtime plan
+
 ## How Published Assets Work
 
 Harbor Shop does not serve theme files by raw filename in the intended path.
@@ -229,12 +288,17 @@ For third-party developers, the important rule is simple:
 
 ## Adding A Customer Extension
 
-The default customer-specific customization path is a WASM extension, as described in:
+WASM is not the default path for Harbor Shop-owned first-party logic anymore. Chapter 96 makes the
+linked customer Rust crate the primary path when the code ships with the customer's own source
+tree and build.
+
+WASM remains the right path for bounded runtime-installed or third-party work, as described in:
 
 - `docs/design/62-extension-packaging-versioning-and-distribution.md`
 - `docs/design/80-customer-extensions-and-integration-patterns.md`
 
-Use an extension when the behavior is specific to one app and does not deserve promotion into a shared native module.
+Use a WASM extension when the behavior is bounded, replaceable, and should stay capability-scoped
+at runtime rather than being linked into the customer build.
 
 Examples:
 
@@ -244,7 +308,8 @@ Examples:
 - a reporting export
 - a background reconciliation job
 
-The Harbor Shop app does not currently ship a ready-made extension package generator inside this folder. The workflow today is:
+The Harbor Shop app does not currently ship a ready-made extension package generator inside this
+folder. The workflow today is:
 
 1. build a WASM extension package against Davenda’s extension contracts
 2. place the compiled artifact under `apps/harbor-shop/extensions/`
@@ -254,21 +319,27 @@ If the customization starts owning shared data, deep transaction logic, or broad
 
 ## Adding Custom Business Rules In Rust
 
-Not every customization belongs in a WASM extension.
+This is the primary Harbor Shop customization path for customer-owned first-party logic, per
+chapter 96.
 
-Use native Rust code when the behavior needs deeper runtime integration, broader reuse, or stronger operational guarantees. The design intent for that is in:
+Use a linked Rust crate when the behavior ships with the customer app, needs direct hook
+registration, or wants to participate in the customer build as first-party code. The design intent
+for that is in:
 
 - `docs/design/03-product-shape-core-official-modules-customer-apps.md`
 - `docs/design/13-workspace-and-crate-layout.md`
+- `docs/design/96-customer-root-workspaces-and-linked-rust-backends.md`
 
 The practical rule is:
 
-- use Harbor Shop templates, config, auth bindings, and WASM extensions for app-specific presentation and bounded behavior
-- use native Rust modules or adapters when you need deeper access to transactions, render pipeline internals, shared data ownership, or widely reused domain logic
-- use `apps/harbor-shop/backend/` when the work is customer-owned native Rust with its own HTTP/process boundary
+- use Harbor Shop templates, config, auth bindings, and linked customer Rust crates for first-party customer product logic
+- use WASM extensions for bounded third-party or runtime-installed customization
+- use native Rust modules when you need deeper access to transactions, shared data ownership, or widely reused domain logic
+- use the optional sidecar adapter under `apps/harbor-shop/backend/` only when the linked crate genuinely needs a separate HTTP/process boundary
 - use `crates/` only when the behavior is becoming a reusable native module or needs platform-level ownership
 
-For customer-specific native Rust work, the right place is a customer-app-owned package or adapter crate in the workspace, not random edits scattered through core.
+For customer-specific native Rust work, the right place is a customer-app-owned crate in the
+customer workspace, not random edits scattered through core.
 
 Examples of native-Rust changes that are reasonable:
 
@@ -280,26 +351,24 @@ Harbor Shop now includes a concrete checked-in example under:
 
 - `backend/harbor-loyalty-backend/`
 
+Read this as a linked customer-backend example first and an optional sidecar second.
+
 This example is intentionally small but real:
 
-- it is a standalone Rust HTTP service
-- it exposes Harbor Shop-specific loyalty logic at `POST /api/loyalty/preview`
-- it exposes a Harbor Shop-specific fulfilment review rule at `POST /api/orders/review`
-- it exposes a fail-closed signed webhook consumer at `POST /webhooks/crm/contact-updated`
-- it demonstrates the customer-app-owned native backend path without modifying Davenda core
-- it shows the internal split a third-party developer should copy:
-  - `src/lib.rs` for pure business rules
-  - `src/http.rs` for route wiring and validation
-  - `src/main.rs` for bootstrap and environment loading
+- `src/lib.rs` is the primary chapter 96 example
+- it exposes `harbor_loyalty_backend::plugin()` plus Harbor Shop-specific hook logic
+- it shows how customer-owned rules stay in a linked Rust crate instead of starting in WASM or a sidecar
+- `src/http.rs` and `src/main.rs` are the optional sidecar adapter around the same linked crate
+- the sidecar path remains useful for external webhook/process integration, but it is not the primary model
 
-Read these files first if you want to add custom backend logic:
+Read these files first if you want to add customer-owned Rust logic:
 
 - `backend/README.md`
 - `backend/harbor-loyalty-backend/README.md`
 - `backend/harbor-loyalty-backend/src/lib.rs`
 - `backend/harbor-loyalty-backend/src/http.rs`
 
-To run it with the local stack:
+To run the optional sidecar adapter with the local stack:
 
 ```bash
 docker compose --profile backend-example up --build
@@ -330,21 +399,25 @@ curl -sS \
 ```
 
 The example is meant to be copied and reshaped by third-party developers who need customer-owned
-Rust/backend logic that sits next to Harbor Shop rather than leaking into platform core.
+Rust logic linked into Harbor Shop without leaking into platform core. The optional sidecar is only
+the transport wrapper for cases that need it.
 
-If you want the shortest “how do I add my own Rust rule?” path, start with the checked-in
-`review_order(...)` example:
+If you want the shortest “how do I add my own Rust rule?” path, start with the linked crate API in
+`src/lib.rs`, then optionally add an HTTP adapter if the integration truly needs one.
+
+The checked-in `review_order(...)` example is still the fastest rule to copy:
 
 - define request/response types and a pure rule in `src/lib.rs`
 - add the thin HTTP adapter in `src/http.rs`
 - add a sample payload under `requests/`
 - add tests for both the pure rule and the route
 
-To work on the example without Docker Compose:
+To work on the example crate without Docker Compose:
 
 ```bash
-cargo run --manifest-path apps/harbor-shop/backend/harbor-loyalty-backend/Cargo.toml
-cargo test --manifest-path apps/harbor-shop/backend/harbor-loyalty-backend/Cargo.toml
+cd apps/harbor-shop
+cargo run -p harbor-loyalty-backend
+cargo test -p harbor-loyalty-backend
 ```
 
 ## Troubleshooting

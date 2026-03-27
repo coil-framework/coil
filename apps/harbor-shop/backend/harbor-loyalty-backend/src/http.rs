@@ -1,3 +1,9 @@
+//! Optional Axum sidecar adapter for the Harbor Shop linked customer backend example.
+//!
+//! The primary path for this crate is linking `plugin()` into a customer-owned binary. This file
+//! exists only for cases where the same Rust rules genuinely need a separate HTTP/process
+//! boundary.
+
 use std::sync::Arc;
 
 use axum::{
@@ -9,8 +15,8 @@ use axum::{
 };
 
 use crate::{
-    CrmContactUpdate, LoyaltyPreviewRequest, OrderReviewRequest, compute_loyalty_preview,
-    health_response, review_order, route_crm_contact, service_overview, webhook_secret_matches,
+    CrmContactUpdate, HarborCustomerBackend, LoyaltyPreviewRequest, OrderReviewRequest,
+    health_response, plugin, service_overview, webhook_secret_matches,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +29,7 @@ pub struct BackendConfig {
 struct AppState {
     brand: String,
     webhook_secret: String,
+    backend: HarborCustomerBackend,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -35,6 +42,7 @@ pub fn build_router(config: BackendConfig) -> Router {
     let state = Arc::new(AppState {
         brand: config.brand,
         webhook_secret: config.webhook_secret,
+        backend: plugin(),
     });
 
     Router::new()
@@ -55,6 +63,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn loyalty_preview(
+    State(state): State<Arc<AppState>>,
     ExtractJson(request): ExtractJson<LoyaltyPreviewRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     if request.customer_email.trim().is_empty() {
@@ -77,10 +86,14 @@ async fn loyalty_preview(
         ));
     }
 
-    Ok((StatusCode::OK, Json(compute_loyalty_preview(&request))))
+    Ok((
+        StatusCode::OK,
+        Json(state.backend.preview_loyalty(&request)),
+    ))
 }
 
 async fn order_review(
+    State(state): State<Arc<AppState>>,
     ExtractJson(request): ExtractJson<OrderReviewRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     if request.customer_email.trim().is_empty() {
@@ -113,7 +126,10 @@ async fn order_review(
         ));
     }
 
-    Ok((StatusCode::OK, Json(review_order(&request))))
+    Ok((
+        StatusCode::OK,
+        Json(state.backend.review_checkout_order(&request)),
+    ))
 }
 
 async fn contact_updated(
@@ -136,7 +152,10 @@ async fn contact_updated(
         ));
     }
 
-    Ok((StatusCode::ACCEPTED, Json(route_crm_contact(&update))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(state.backend.route_crm_contact_update(&update)),
+    ))
 }
 
 #[cfg(test)]

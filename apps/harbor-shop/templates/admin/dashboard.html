@@ -119,6 +119,41 @@
         </div>
       </section>
 
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Linked customer backend</p>
+        <h2>Workspace-owned Rust hook path</h2>
+        <p>
+          Harbor Shop ships a linked Rust backend crate through the customer workspace itself. The
+          running store exposes that linked plugin metadata directly in the runtime render model,
+          so this admin view can show exactly which first-party customer hooks are compiled into
+          the app.
+        </p>
+        <p>
+          This is the primary first-party Rust customization path for Harbor Shop. The optional
+          sidecar and WASM paths still exist, but they are secondary and bounded.
+        </p>
+        <div class="admin-card-grid" dv:if="${hasLinkedCustomerPlugins}">
+          <article class="admin-card" dv:each="plugin : ${linkedCustomerPlugins}">
+            <h3 dv:text="${plugin.displayName}">Harbor Shop Linked Backend</h3>
+            <p>
+              Plugin id:
+              <code dv:text="${plugin.id}">harbor-shop-backend</code>
+            </p>
+            <p>
+              Version:
+              <strong dv:text="${plugin.version}">0.1.0</strong>
+            </p>
+            <p>
+              Registered hooks:
+              <span dv:text="${plugin.hooksSummary}">checkout, verified-webhook</span>
+            </p>
+          </article>
+        </div>
+        <p dv:unless="${hasLinkedCustomerPlugins}">
+          No linked customer plugins are registered in the current runtime plan.
+        </p>
+      </section>
+
       <section class="admin-panels">
         <article class="admin-panel" dv:each="panel : ${adminPanels}">
           <p class="admin-panel__eyebrow" dv:text="${panel.label}">Inspect products and collections</p>

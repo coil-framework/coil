@@ -1,0 +1,34 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/harbor-shop-app",
+    "crates/harbor-shop-backend",
+    "crates/harbor-shop-bin",
+    "backend/harbor-loyalty-backend",
+]
+default-members = ["crates/harbor-shop-bin"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+davenda-admin = { path = "../../crates/davenda-admin" }
+davenda-all = { path = "../../crates/davenda-all" }
+davenda-app = { path = "../../crates/davenda-app" }
+davenda-assets = { path = "../../crates/davenda-assets" }
+davenda-auth = { path = "../../crates/davenda-auth" }
+davenda-cms = { path = "../../crates/davenda-cms" }
+davenda-commerce = { path = "../../crates/davenda-commerce" }
+davenda-config = { path = "../../crates/davenda-config" }
+davenda-core = { path = "../../crates/davenda-core" }
+davenda-customer-sdk = { path = "../../crates/davenda-customer-sdk" }
+davenda-events = { path = "../../crates/davenda-events" }
+davenda-media = { path = "../../crates/davenda-media" }
+davenda-memberships = { path = "../../crates/davenda-memberships" }
+davenda-ops = { path = "../../crates/davenda-ops" }
+davenda-runtime = { path = "../../crates/davenda-runtime" }

@@ -27,7 +27,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/tmp/cargo-target \
     cargo build --locked -p davenda-cli --release \
-    && cp /tmp/cargo-target/release/platform /workspace/platform
+    && cargo build --manifest-path apps/harbor-shop/Cargo.toml -p harbor-shop --release \
+    && cp /tmp/cargo-target/release/platform /workspace/platform \
+    && cp /tmp/cargo-target/release/harbor-shop /workspace/harbor-shop
 
 FROM debian:bookworm-slim
 
@@ -42,6 +44,7 @@ RUN apt-get update \
 WORKDIR /app/apps/harbor-shop
 
 COPY --from=builder /workspace/platform /usr/local/bin/platform
+COPY --from=builder /workspace/harbor-shop /usr/local/bin/harbor-shop
 COPY --from=builder /workspace/apps /app/apps
 COPY apps/harbor-shop/docker/entrypoint.sh /usr/local/bin/harbor-shop-entrypoint
 

@@ -1,10 +1,12 @@
 use crate::{
     AssetWriteReceipt, AssetWriteRequest, AuditEntry, AuthCheckRequest, AuthCheckResult,
-    AuthExplainRequest, AuthExplanation, BackendError, CommerceCatalogCollectionRecord,
-    CommerceCatalogCollectionUpdate, CommerceCatalogProductRecord, CommerceCatalogProductUpdate,
-    CommerceOrderRecord, CommerceProduct, JobReceipt, JobRequest, ManagedAsset,
-    OutboundHttpRequest, OutboundHttpResponse, RepositoryQuery, RepositoryRecordSet,
-    RepositoryWrite, RepositoryWriteReceipt,
+    AuthExplainRequest, AuthExplanation, BackendError, CmsNavigationAppend, CmsNavigationRecord,
+    CmsNavigationUpdate, CmsPageRecord, CmsPageUpdate, CmsRedirectAppend, CmsRedirectRecord,
+    CmsRedirectUpdate, CommerceCatalogCollectionRecord, CommerceCatalogCollectionUpdate,
+    CommerceCatalogProductRecord, CommerceCatalogProductUpdate, CommerceOrderRecord,
+    CommerceProduct, JobReceipt, JobRequest, ManagedAsset, OutboundHttpRequest,
+    OutboundHttpResponse, RepositoryQuery, RepositoryRecordSet, RepositoryWrite,
+    RepositoryWriteReceipt,
 };
 use std::collections::BTreeMap;
 
@@ -25,6 +27,108 @@ pub trait RepositoryFacade: Send + Sync {
 }
 
 pub trait RepositoryFacadeExt: RepositoryFacade {
+    fn cms_page(&self, page_id_or_slug: &str) -> Result<Option<CmsPageRecord>, BackendError> {
+        let records =
+            self.read(&RepositoryQuery::new(CmsPageRecord::REPOSITORY).with_key(page_id_or_slug))?;
+        records
+            .records
+            .first()
+            .map(CmsPageRecord::from_repository_record)
+            .transpose()
+    }
+
+    fn update_cms_page(
+        &self,
+        update: &CmsPageUpdate,
+    ) -> Result<RepositoryWriteReceipt, BackendError> {
+        self.write(RepositoryWrite {
+            repository: CmsPageRecord::REPOSITORY.to_string(),
+            record_id: update.page_id.clone(),
+            fields: BTreeMap::from([
+                ("title".to_string(), update.title.clone()),
+                ("slug".to_string(), update.slug.clone()),
+                ("summary".to_string(), update.summary.clone()),
+                ("body_html".to_string(), update.body_html.clone()),
+            ]),
+        })
+    }
+
+    fn cms_navigation_items(&self) -> Result<Vec<CmsNavigationRecord>, BackendError> {
+        let records = self.read(&RepositoryQuery::new(CmsNavigationRecord::REPOSITORY))?;
+        records
+            .records
+            .iter()
+            .map(CmsNavigationRecord::from_repository_record)
+            .collect()
+    }
+
+    fn append_cms_navigation_item(
+        &self,
+        item: &CmsNavigationAppend,
+    ) -> Result<RepositoryWriteReceipt, BackendError> {
+        self.write(RepositoryWrite {
+            repository: CmsNavigationRecord::REPOSITORY.to_string(),
+            record_id: "append".to_string(),
+            fields: BTreeMap::from([
+                ("label".to_string(), item.label.clone()),
+                ("href".to_string(), item.href.clone()),
+            ]),
+        })
+    }
+
+    fn update_cms_navigation_item(
+        &self,
+        item: &CmsNavigationUpdate,
+    ) -> Result<RepositoryWriteReceipt, BackendError> {
+        self.write(RepositoryWrite {
+            repository: CmsNavigationRecord::REPOSITORY.to_string(),
+            record_id: item.record_id.to_string(),
+            fields: BTreeMap::from([
+                ("label".to_string(), item.label.clone()),
+                ("href".to_string(), item.href.clone()),
+            ]),
+        })
+    }
+
+    fn cms_redirects(&self) -> Result<Vec<CmsRedirectRecord>, BackendError> {
+        let records = self.read(&RepositoryQuery::new(CmsRedirectRecord::REPOSITORY))?;
+        records
+            .records
+            .iter()
+            .map(CmsRedirectRecord::from_repository_record)
+            .collect()
+    }
+
+    fn append_cms_redirect(
+        &self,
+        redirect: &CmsRedirectAppend,
+    ) -> Result<RepositoryWriteReceipt, BackendError> {
+        self.write(RepositoryWrite {
+            repository: CmsRedirectRecord::REPOSITORY.to_string(),
+            record_id: "append".to_string(),
+            fields: BTreeMap::from([
+                ("from".to_string(), redirect.from.clone()),
+                ("to".to_string(), redirect.to.clone()),
+                ("permanent".to_string(), redirect.permanent.to_string()),
+            ]),
+        })
+    }
+
+    fn update_cms_redirect(
+        &self,
+        redirect: &CmsRedirectUpdate,
+    ) -> Result<RepositoryWriteReceipt, BackendError> {
+        self.write(RepositoryWrite {
+            repository: CmsRedirectRecord::REPOSITORY.to_string(),
+            record_id: redirect.record_id.to_string(),
+            fields: BTreeMap::from([
+                ("from".to_string(), redirect.from.clone()),
+                ("to".to_string(), redirect.to.clone()),
+                ("permanent".to_string(), redirect.permanent.to_string()),
+            ]),
+        })
+    }
+
     fn commerce_catalog_product(
         &self,
         handle_or_sku: &str,

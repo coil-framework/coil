@@ -3,11 +3,11 @@ use axum::response::Response;
 use davenda_config::Environment;
 use davenda_customer_sdk::{
     AssetWriteRequest, AssetsFacade, AuditFacade, AuthFacade, BackendError, CheckoutHooks,
-    CmsHooks, CmsPageDraft, CmsPublishDecision, CommerceCatalogCollectionUpdate,
-    CommerceCatalogProductUpdate, CommerceFacade, CustomerPluginDescriptor, Headers, JobsFacade,
-    OrderDraft, OrderReviewDecision, OutboundHttpFacade, RepositoryFacade, RepositoryFacadeExt,
-    RepositoryQuery, RepositoryWrite, RequestContext, VerifiedWebhook, VerifiedWebhookAssetHooks,
-    VerifiedWebhookHooks, WebhookHandlingResult,
+    CmsHooks, CmsNavigationAppend, CmsPageDraft, CmsPageUpdate, CmsPublishDecision,
+    CmsRedirectAppend, CommerceCatalogCollectionUpdate, CommerceCatalogProductUpdate,
+    CommerceFacade, CustomerPluginDescriptor, Headers, JobsFacade, OrderDraft, OrderReviewDecision,
+    OutboundHttpFacade, RepositoryFacade, RepositoryFacadeExt, RequestContext, VerifiedWebhook,
+    VerifiedWebhookAssetHooks, VerifiedWebhookHooks, WebhookHandlingResult,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -350,13 +350,9 @@ impl CmsHooks for RejectCmsPublishHooks {
         repositories: &dyn RepositoryFacade,
         _audit: &dyn AuditFacade,
     ) -> Result<CmsPublishDecision, BackendError> {
-        let records =
-            repositories.read(&RepositoryQuery::new("cms.pages").with_key(&draft.page_id))?;
-        let seen_slug = records
-            .records
-            .first()
-            .and_then(|record| record.fields.get("slug"))
-            .cloned()
+        let seen_slug = repositories
+            .cms_page(&draft.page_id)?
+            .map(|record| record.slug)
             .unwrap_or_default();
         if seen_slug != draft.slug {
             return Err(BackendError::new(
@@ -380,20 +376,13 @@ impl CmsHooks for RewriteCmsPublishHooks {
         repositories: &dyn RepositoryFacade,
         _audit: &dyn AuditFacade,
     ) -> Result<CmsPublishDecision, BackendError> {
-        repositories.write(RepositoryWrite {
-            repository: "cms.pages".to_string(),
-            record_id: draft.page_id.clone(),
-            fields: BTreeMap::from([
-                (
-                    "title".to_string(),
-                    format!("{} (Linked review)", draft.title),
-                ),
-                (
-                    "summary".to_string(),
-                    "Linked customer review updated this page before publish.".to_string(),
-                ),
-            ]),
-        })?;
+        repositories.update_cms_page(&CmsPageUpdate::new(
+            draft.page_id.clone(),
+            format!("{} (Linked review)", draft.title),
+            draft.slug.clone(),
+            "Linked customer review updated this page before publish.",
+            draft.body_html.clone(),
+        ))?;
         Ok(CmsPublishDecision::Allow)
     }
 }
@@ -406,19 +395,18 @@ impl CmsHooks for RewriteCmsWorkspacePublishHooks {
         repositories: &dyn RepositoryFacade,
         _audit: &dyn AuditFacade,
     ) -> Result<CmsPublishDecision, BackendError> {
-        let navigation = repositories.read(&RepositoryQuery::new("cms.navigation"))?;
-        if navigation.records.is_empty() {
+        let navigation = repositories.cms_navigation_items()?;
+        if navigation.is_empty() {
             return Err(BackendError::new(
                 davenda_customer_sdk::BackendErrorKind::Conflict,
                 "cms.navigation.missing",
                 "linked CMS hook expected the live primary navigation to exist",
             ));
         }
-        let redirects = repositories.read(&RepositoryQuery::new("cms.redirects"))?;
+        let redirects = repositories.cms_redirects()?;
         if redirects
-            .records
             .iter()
-            .any(|record| record.fields.get("from") == Some(&"/legacy/shipping".to_string()))
+            .any(|record| record.from == "/legacy/shipping")
         {
             return Err(BackendError::new(
                 davenda_customer_sdk::BackendErrorKind::Conflict,
@@ -426,23 +414,15 @@ impl CmsHooks for RewriteCmsWorkspacePublishHooks {
                 "linked CMS hook found an unexpected legacy shipping redirect before publish",
             ));
         }
-        repositories.write(RepositoryWrite {
-            repository: "cms.navigation".to_string(),
-            record_id: "append".to_string(),
-            fields: BTreeMap::from([
-                ("label".to_string(), "Shipping".to_string()),
-                ("href".to_string(), format!("/pages/{}", draft.slug)),
-            ]),
-        })?;
-        repositories.write(RepositoryWrite {
-            repository: "cms.redirects".to_string(),
-            record_id: "append".to_string(),
-            fields: BTreeMap::from([
-                ("from".to_string(), "/legacy/shipping".to_string()),
-                ("to".to_string(), format!("/pages/{}", draft.slug)),
-                ("permanent".to_string(), "true".to_string()),
-            ]),
-        })?;
+        repositories.append_cms_navigation_item(&CmsNavigationAppend::new(
+            "Shipping",
+            format!("/pages/{}", draft.slug),
+        ))?;
+        repositories.append_cms_redirect(&CmsRedirectAppend::new(
+            "/legacy/shipping",
+            format!("/pages/{}", draft.slug),
+            true,
+        ))?;
         Ok(CmsPublishDecision::Allow)
     }
 }
@@ -777,31 +757,22 @@ impl VerifiedWebhookHooks for RecordingWebhookOrderRepositoryPlugin {
         repositories: &dyn RepositoryFacade,
         _audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
-        let orders = repositories.read(
-            &RepositoryQuery::new("commerce.orders").with_filter("payment_reference", "PAY-50001"),
-        )?;
-        let order = orders.records.first().ok_or_else(|| {
-            BackendError::new(
-                davenda_customer_sdk::BackendErrorKind::Conflict,
-                "repository.order.missing",
-                "linked verified webhook hook did not see the persisted order",
-            )
-        })?;
+        let order = repositories
+            .commerce_order_by_payment_reference("PAY-50001")?
+            .ok_or_else(|| {
+                BackendError::new(
+                    davenda_customer_sdk::BackendErrorKind::Conflict,
+                    "repository.order.missing",
+                    "linked verified webhook hook did not see the persisted order",
+                )
+            })?;
         self.reads.lock().unwrap().push(RecordedWebhookOrderRead {
-            order_id: order.id.clone(),
-            status: order.fields.get("status").cloned().unwrap_or_default(),
-            payment_reference: order
-                .fields
-                .get("payment_reference")
-                .cloned()
-                .unwrap_or_default(),
-            checkout_email: order
-                .fields
-                .get("checkout_email")
-                .cloned()
-                .unwrap_or_default(),
+            order_id: order.order_id.clone(),
+            status: order.status.clone(),
+            payment_reference: order.payment_reference.clone().unwrap_or_default(),
+            checkout_email: order.checkout_email.clone().unwrap_or_default(),
         });
-        Ok(WebhookHandlingResult::accepted(Some(order.id.clone())))
+        Ok(WebhookHandlingResult::accepted(Some(order.order_id)))
     }
 }
 

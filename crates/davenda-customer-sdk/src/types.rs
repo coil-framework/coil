@@ -380,6 +380,191 @@ pub struct RepositoryWriteReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsPageRecord {
+    pub page_id: String,
+    pub title: String,
+    pub slug: String,
+    pub summary: String,
+    pub body_html: String,
+    pub status: String,
+    pub live_path: Option<String>,
+}
+
+impl CmsPageRecord {
+    pub const REPOSITORY: &'static str = "cms.pages";
+
+    pub fn from_repository_record(record: &RepositoryRecord) -> Result<Self, BackendError> {
+        Ok(Self {
+            page_id: record.id.clone(),
+            title: required_repository_field(record, "title")?,
+            slug: required_repository_field(record, "slug")?,
+            summary: required_repository_field(record, "summary")?,
+            body_html: required_repository_field(record, "body_html")?,
+            status: required_repository_field(record, "status")?,
+            live_path: optional_repository_field(record, "live_path"),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsPageUpdate {
+    pub page_id: String,
+    pub title: String,
+    pub slug: String,
+    pub summary: String,
+    pub body_html: String,
+}
+
+impl CmsPageUpdate {
+    pub fn new(
+        page_id: impl Into<String>,
+        title: impl Into<String>,
+        slug: impl Into<String>,
+        summary: impl Into<String>,
+        body_html: impl Into<String>,
+    ) -> Self {
+        Self {
+            page_id: page_id.into(),
+            title: title.into(),
+            slug: slug.into(),
+            summary: summary.into(),
+            body_html: body_html.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsNavigationRecord {
+    pub record_id: usize,
+    pub label: String,
+    pub href: String,
+}
+
+impl CmsNavigationRecord {
+    pub const REPOSITORY: &'static str = "cms.navigation";
+
+    pub fn from_repository_record(record: &RepositoryRecord) -> Result<Self, BackendError> {
+        Ok(Self {
+            record_id: record.id.parse::<usize>().map_err(|_| {
+                BackendError::new(
+                    BackendErrorKind::Conflict,
+                    "repository.record.invalid_navigation_id",
+                    format!(
+                        "Repository record `{}` was not a valid CMS navigation record id.",
+                        record.id
+                    ),
+                )
+            })?,
+            label: required_repository_field(record, "label")?,
+            href: required_repository_field(record, "href")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsNavigationUpdate {
+    pub record_id: usize,
+    pub label: String,
+    pub href: String,
+}
+
+impl CmsNavigationUpdate {
+    pub fn new(record_id: usize, label: impl Into<String>, href: impl Into<String>) -> Self {
+        Self {
+            record_id,
+            label: label.into(),
+            href: href.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsNavigationAppend {
+    pub label: String,
+    pub href: String,
+}
+
+impl CmsNavigationAppend {
+    pub fn new(label: impl Into<String>, href: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            href: href.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsRedirectRecord {
+    pub record_id: usize,
+    pub from: String,
+    pub to: String,
+    pub permanent: bool,
+}
+
+impl CmsRedirectRecord {
+    pub const REPOSITORY: &'static str = "cms.redirects";
+
+    pub fn from_repository_record(record: &RepositoryRecord) -> Result<Self, BackendError> {
+        Ok(Self {
+            record_id: record.id.parse::<usize>().map_err(|_| {
+                BackendError::new(
+                    BackendErrorKind::Conflict,
+                    "repository.record.invalid_redirect_id",
+                    format!(
+                        "Repository record `{}` was not a valid CMS redirect record id.",
+                        record.id
+                    ),
+                )
+            })?,
+            from: required_repository_field(record, "from")?,
+            to: required_repository_field(record, "to")?,
+            permanent: required_repository_bool_field(record, "permanent")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsRedirectUpdate {
+    pub record_id: usize,
+    pub from: String,
+    pub to: String,
+    pub permanent: bool,
+}
+
+impl CmsRedirectUpdate {
+    pub fn new(
+        record_id: usize,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        permanent: bool,
+    ) -> Self {
+        Self {
+            record_id,
+            from: from.into(),
+            to: to.into(),
+            permanent,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmsRedirectAppend {
+    pub from: String,
+    pub to: String,
+    pub permanent: bool,
+}
+
+impl CmsRedirectAppend {
+    pub fn new(from: impl Into<String>, to: impl Into<String>, permanent: bool) -> Self {
+        Self {
+            from: from.into(),
+            to: to.into(),
+            permanent,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommerceCatalogProductRecord {
     pub handle: String,
     pub sku: String,

@@ -16,7 +16,7 @@ pub use types::*;
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Default)]
     struct RecordingRegistry {
@@ -25,6 +25,7 @@ mod tests {
 
     struct RecordingRepository {
         read_results: Vec<RepositoryRecordSet>,
+        writes: Arc<Mutex<Vec<RepositoryWrite>>>,
     }
 
     impl CustomerHookRegistry for RecordingRegistry {
@@ -75,7 +76,13 @@ mod tests {
         }
 
         fn write(&self, _change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
-            unreachable!("recording repository write is not used in these tests")
+            let change = _change;
+            self.writes.lock().unwrap().push(change.clone());
+            Ok(RepositoryWriteReceipt {
+                repository: change.repository,
+                record_id: change.record_id,
+                version: Some("test-version".to_string()),
+            })
         }
     }
 
@@ -200,6 +207,44 @@ mod tests {
         let repository = RecordingRepository {
             read_results: vec![
                 RepositoryRecordSet {
+                    repository: CmsPageRecord::REPOSITORY.to_string(),
+                    records: vec![RepositoryRecord {
+                        id: "page-membership-guide".to_string(),
+                        fields: BTreeMap::from([
+                            ("title".to_string(), "Membership guide".to_string()),
+                            ("slug".to_string(), "membership-guide".to_string()),
+                            ("summary".to_string(), "How activation works".to_string()),
+                            ("body_html".to_string(), "<p>Body</p>".to_string()),
+                            ("status".to_string(), "draft".to_string()),
+                            (
+                                "live_path".to_string(),
+                                "/pages/membership-guide".to_string(),
+                            ),
+                        ]),
+                    }],
+                },
+                RepositoryRecordSet {
+                    repository: CmsNavigationRecord::REPOSITORY.to_string(),
+                    records: vec![RepositoryRecord {
+                        id: "0".to_string(),
+                        fields: BTreeMap::from([
+                            ("label".to_string(), "Home".to_string()),
+                            ("href".to_string(), "/".to_string()),
+                        ]),
+                    }],
+                },
+                RepositoryRecordSet {
+                    repository: CmsRedirectRecord::REPOSITORY.to_string(),
+                    records: vec![RepositoryRecord {
+                        id: "1".to_string(),
+                        fields: BTreeMap::from([
+                            ("from".to_string(), "/legacy".to_string()),
+                            ("to".to_string(), "/pages/membership-guide".to_string()),
+                            ("permanent".to_string(), "true".to_string()),
+                        ]),
+                    }],
+                },
+                RepositoryRecordSet {
                     repository: CommerceCatalogProductRecord::REPOSITORY.to_string(),
                     records: vec![RepositoryRecord {
                         id: "gold-membership".to_string(),
@@ -254,7 +299,26 @@ mod tests {
                     }],
                 },
             ],
+            writes: Arc::new(Mutex::new(Vec::new())),
         };
+
+        let page = repository
+            .cms_page("page-membership-guide")
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.page_id, "page-membership-guide");
+        assert_eq!(page.slug, "membership-guide");
+        assert_eq!(page.live_path.as_deref(), Some("/pages/membership-guide"));
+
+        let navigation = repository.cms_navigation_items().unwrap();
+        assert_eq!(navigation.len(), 1);
+        assert_eq!(navigation[0].record_id, 0);
+        assert_eq!(navigation[0].href, "/");
+
+        let redirects = repository.cms_redirects().unwrap();
+        assert_eq!(redirects.len(), 1);
+        assert_eq!(redirects[0].record_id, 1);
+        assert!(redirects[0].permanent);
 
         let product = repository
             .commerce_catalog_product("gold-membership")
@@ -278,5 +342,49 @@ mod tests {
         assert_eq!(order.order_id, "ORD-10042");
         assert_eq!(order.payment_status, "captured");
         assert_eq!(order.total_minor, 12_900);
+
+        repository
+            .update_cms_page(&CmsPageUpdate::new(
+                "page-membership-guide",
+                "Updated title",
+                "membership-guide",
+                "Updated summary",
+                "<p>Updated body</p>",
+            ))
+            .unwrap();
+        repository
+            .append_cms_navigation_item(&CmsNavigationAppend::new(
+                "Shipping",
+                "/pages/shipping-returns",
+            ))
+            .unwrap();
+        repository
+            .append_cms_redirect(&CmsRedirectAppend::new(
+                "/legacy/shipping",
+                "/pages/shipping-returns",
+                true,
+            ))
+            .unwrap();
+
+        let writes = repository.writes.lock().unwrap().clone();
+        assert_eq!(writes.len(), 3);
+        assert_eq!(writes[0].repository, "cms.pages");
+        assert_eq!(writes[0].record_id, "page-membership-guide");
+        assert_eq!(
+            writes[0].fields.get("title").map(String::as_str),
+            Some("Updated title")
+        );
+        assert_eq!(writes[1].repository, "cms.navigation");
+        assert_eq!(writes[1].record_id, "append");
+        assert_eq!(
+            writes[1].fields.get("href").map(String::as_str),
+            Some("/pages/shipping-returns")
+        );
+        assert_eq!(writes[2].repository, "cms.redirects");
+        assert_eq!(writes[2].record_id, "append");
+        assert_eq!(
+            writes[2].fields.get("permanent").map(String::as_str),
+            Some("true")
+        );
     }
 }

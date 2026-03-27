@@ -8,4 +8,8 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 davenda-all.workspace = true
+davenda-app.workspace = true
+davenda-config.workspace = true
+davenda-customer-sdk.workspace = true
+davenda-runtime.workspace = true
 harbor-shop-backend = { path = "../harbor-shop-backend" }

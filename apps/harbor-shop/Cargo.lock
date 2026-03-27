@@ -739,6 +739,7 @@ dependencies = [
  "davenda-ops",
  "davenda-runtime",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -1546,7 +1547,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "davenda-all",
  "harbor-shop-app",
+ "harbor-shop-backend",
  "tokio",
 ]
 
@@ -1556,6 +1559,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "davenda-all",
+ "davenda-app",
+ "davenda-config",
+ "davenda-customer-sdk",
+ "davenda-runtime",
  "harbor-shop-backend",
 ]
 

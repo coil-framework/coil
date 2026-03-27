@@ -66,5 +66,9 @@ pub use search::{
 mod module;
 pub use module::OpsModule;
 
+pub fn module() -> OpsModule {
+    OpsModule::new()
+}
+
 #[cfg(test)]
 mod tests;

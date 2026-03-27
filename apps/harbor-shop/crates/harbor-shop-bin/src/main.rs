@@ -1,11 +1,8 @@
-use std::env;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use harbor_shop_app::{
-    HarborShopWorkspace, default_cookie_secret, default_csrf_secret, environment_secret_resolver,
-};
+use harbor_shop_app::HarborShopWorkspace;
 
 #[derive(Debug, Parser)]
 #[command(name = "harbor-shop")]
@@ -37,69 +34,37 @@ async fn main() -> Result<()> {
         Some(path) => HarborShopWorkspace::at(path)?,
         None => HarborShopWorkspace::default()?,
     };
-    let bootstrap = workspace.build_bootstrap(&cli.config)?;
-
     match cli.command {
-        Command::Describe => describe(&bootstrap),
-        Command::Serve { bind } => {
-            let cookie_secret = required_secret_bytes(
-                "DAVENDA_COOKIE_SECRET",
-                default_cookie_secret(bootstrap.runtime_plan.runtime.config.app.environment),
-            )?;
-            let csrf_secret = required_secret_bytes(
-                "DAVENDA_CSRF_SECRET",
-                default_csrf_secret(bootstrap.runtime_plan.runtime.config.app.environment),
-            )?;
-            let bind =
-                bind.unwrap_or_else(|| bootstrap.runtime_plan.runtime.config.server.bind.clone());
-            let server = bootstrap.server_host(
-                &environment_secret_resolver(),
-                &cookie_secret,
-                &csrf_secret,
-            )?;
-            let listener = tokio::net::TcpListener::bind(&bind)
-                .await
-                .with_context(|| format!("failed to bind Harbor Shop server to {bind}"))?;
-            println!("Harbor Shop linked workspace server listening on {bind}");
-            server
-                .serve(listener)
-                .await
-                .context("Harbor Shop server exited with an error")
-        }
+        Command::Describe => describe(&workspace, &cli.config),
+        Command::Serve { bind } => serve(&workspace, &cli.config, bind),
     }
 }
 
-fn describe(bootstrap: &harbor_shop_app::HarborShopBootstrap) -> Result<()> {
+fn describe(workspace: &HarborShopWorkspace, config_path: &PathBuf) -> Result<()> {
+    let summary = workspace.describe(config_path)?;
     println!("Harbor Shop customer workspace");
-    println!("app root: {}", bootstrap.app_root.display());
-    println!("config: {}", bootstrap.config_path.display());
-    println!("app id: {}", bootstrap.manifest.id);
-    println!("auth package: {}", bootstrap.manifest.auth.package_name);
+    println!("app root: {}", summary.app_root.display());
+    println!("config: {}", summary.config_path.display());
+    println!("app id: {}", summary.manifest.id);
+    println!("auth package: {}", summary.manifest.auth.package_name);
     println!(
         "modules: {}",
-        bootstrap
-            .module_ids()
-            .into_iter()
+        summary
+            .manifest
+            .modules
+            .iter()
+            .map(|module| module.id.to_string())
             .collect::<Vec<_>>()
             .join(", ")
     );
-    println!(
-        "linked plugins: {}",
-        bootstrap.linked_plugin_ids().join(", ")
-    );
-    println!(
-        "server bind: {}",
-        bootstrap.runtime_plan.runtime.config.server.bind
-    );
+    println!("linked plugins: {}", summary.linked_plugin_ids.join(", "));
+    println!("server bind: {}", summary.config.server.bind);
     Ok(())
 }
 
-fn required_secret_bytes(name: &str, fallback: Option<&str>) -> Result<Vec<u8>> {
-    match env::var(name) {
-        Ok(value) if !value.is_empty() => Ok(value.into_bytes()),
-        Ok(_) => bail!("environment variable `{name}` is present but empty"),
-        Err(_) => fallback
-            .map(|value| value.as_bytes().to_vec())
-            .ok_or_else(|| anyhow::anyhow!("environment variable `{name}` is required")),
-    }
+fn serve(workspace: &HarborShopWorkspace, config_path: &PathBuf, bind: Option<String>) -> Result<()> {
+    davenda_all::builder()
+        .with_customer_plugin(harbor_shop_backend::plugin())
+        .run_from_paths(workspace.app_root(), workspace.resolve_path(config_path), bind)
+        .context("Harbor Shop server exited with an error")
 }

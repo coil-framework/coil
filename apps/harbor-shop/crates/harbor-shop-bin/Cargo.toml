@@ -8,7 +8,9 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+davenda-all.workspace = true
 harbor-shop-app = { path = "../harbor-shop-app" }
+harbor-shop-backend = { path = "../harbor-shop-backend" }
 tokio.workspace = true
 
 [[bin]]

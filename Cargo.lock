@@ -643,6 +643,7 @@ dependencies = [
  "davenda-ops",
  "davenda-runtime",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

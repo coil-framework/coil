@@ -79,7 +79,8 @@ Harbor Shop now has its own nested Cargo workspace in this folder.
 
 That is the chapter 96 shape in repo form:
 
-- Davenda stays upstream and is consumed through local path dependencies for now
+- Davenda is modeled here as normal upstream `0.1.0` dependencies
+- this in-repo reference workspace patches those upstream coordinates back to `../../crates/*` through `patch.crates-io`
 - Harbor Shop owns a binary crate that links the official modules it needs
 - Harbor Shop owns a linked backend crate that registers customer-specific behavior through public Davenda APIs
 - the optional sidecar adapter still exists, but it is no longer the primary Rust integration story
@@ -256,7 +257,6 @@ If you want to use the nested Harbor Shop workspace directly instead of Docker C
 ```bash
 cd apps/harbor-shop
 cargo run -p harbor-shop -- describe
-cargo run --manifest-path ../../Cargo.toml -p davenda-cli -- assets publish --config apps/harbor-shop/platform.dev.toml --yes
 DATABASE_URL=postgres://davenda:devpass@127.0.0.1:5438/davenda_harbor_shop \
 REDIS_URL=redis://127.0.0.1:6379 \
 OBJECT_STORE_URL='endpoint_url="http://127.0.0.1:9000"
@@ -268,6 +268,10 @@ DAVENDA_COOKIE_SECRET=01234567012345670123456701234567 \
 DAVENDA_CSRF_SECRET=76543210765432107654321076543210 \
 cargo run -p harbor-shop -- serve --config platform.dev.toml
 ```
+
+If you need asset publication or migration commands from the platform-maintainer surface, those
+still run through the top-level `davenda-cli`. That is an honest current limitation of the in-repo
+reference app, not the intended long-term customer command surface.
 
 The linked customer backend currently surfaces in two honest places:
 

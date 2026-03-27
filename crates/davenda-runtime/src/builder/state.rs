@@ -3,6 +3,8 @@ use crate::builder::assembly;
 use davenda_template::TemplateDefinition;
 use std::path::PathBuf;
 
+pub type Builder<P> = RuntimeBuilder<P>;
+
 pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
     auth_package: P,
@@ -60,6 +62,13 @@ where
     {
         self.modules.push(Box::new(module));
         self
+    }
+
+    pub fn register_module<M>(self, module: M) -> Self
+    where
+        M: PlatformModule + 'static,
+    {
+        self.with_module(module)
     }
 
     pub fn with_boxed_module(mut self, module: Box<dyn PlatformModule>) -> Self {

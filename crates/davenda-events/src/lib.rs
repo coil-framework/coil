@@ -38,3 +38,7 @@ pub use booking::*;
 pub use catalog::*;
 pub use model::*;
 pub use module::EventsModule;
+
+pub fn module() -> EventsModule {
+    EventsModule::new()
+}

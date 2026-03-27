@@ -4,11 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use davenda_all::{
-    CustomerAppComposition, CustomerAppManifest, CustomerAppRuntimePlan, CustomerBackendPlugin,
-    Environment, EnvironmentSecretResolver, HttpServerHost, PlatformConfig, SecretResolver,
-    load_auth_model_package_at, official_modules_from_config,
-};
+use davenda_all::{load_auth_model_package_at, official_modules_from_config};
+use davenda_app::{CustomerAppComposition, CustomerAppManifest, CustomerAppRuntimePlan};
+use davenda_config::{Environment, PlatformConfig};
+use davenda_customer_sdk::CustomerBackendPlugin;
+use davenda_runtime::{EnvironmentSecretResolver, HttpServerHost, SecretResolver};
 
 #[derive(Debug, Clone)]
 pub struct HarborShopWorkspace {
@@ -22,6 +22,15 @@ pub struct HarborShopBootstrap {
     pub manifest: CustomerAppManifest,
     pub composition: CustomerAppComposition,
     pub runtime_plan: CustomerAppRuntimePlan,
+}
+
+#[derive(Debug, Clone)]
+pub struct HarborShopSummary {
+    pub app_root: PathBuf,
+    pub config_path: PathBuf,
+    pub manifest: CustomerAppManifest,
+    pub config: PlatformConfig,
+    pub linked_plugin_ids: Vec<String>,
 }
 
 impl HarborShopWorkspace {
@@ -124,6 +133,22 @@ impl HarborShopWorkspace {
             manifest,
             composition,
             runtime_plan,
+        })
+    }
+
+    pub fn describe(&self, config_path: impl AsRef<Path>) -> Result<HarborShopSummary> {
+        let manifest = self.load_manifest()?;
+        let (config_path, config) = self.load_platform_config(config_path)?;
+        manifest
+            .validate_runtime_config_alignment(&config)
+            .context("Harbor Shop manifest/config alignment failed")?;
+
+        Ok(HarborShopSummary {
+            app_root: self.app_root.clone(),
+            config_path,
+            manifest,
+            config,
+            linked_plugin_ids: vec![harbor_shop_backend::plugin().descriptor().id],
         })
     }
 }

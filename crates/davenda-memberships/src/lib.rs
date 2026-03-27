@@ -16,3 +16,7 @@ pub use model::{
 };
 pub use module::MembershipsModule;
 pub use subscription::{EntitlementGrant, EntitlementStatus, Subscription, default_retry_policy};
+
+pub fn module() -> MembershipsModule {
+    MembershipsModule::new()
+}

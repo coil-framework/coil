@@ -28,5 +28,13 @@ pub use module::{
 pub use orders::{Order, OrderOutcome, Refund};
 pub use pricing::{DiscountRule, PriceAdjustment, PriceQuote, PricingPolicy};
 
+pub fn module() -> CommerceModule {
+    CommerceModule::new()
+}
+
+pub fn payments_stripe_module() -> CommercePaymentsStripeModule {
+    CommercePaymentsStripeModule::new()
+}
+
 #[cfg(test)]
 mod tests;

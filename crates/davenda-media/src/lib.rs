@@ -40,5 +40,9 @@ pub use model::{
 };
 pub use module::MediaModule;
 
+pub fn module() -> MediaModule {
+    MediaModule::new()
+}
+
 #[cfg(test)]
 mod tests;

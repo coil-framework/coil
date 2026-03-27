@@ -1436,26 +1436,31 @@ fn customer_order_draft(
                 .product_by_sku_or_handle(&line.sku)
                 .map(|product| product.collection_handle.clone()),
             entitlement_key: line.entitlement_key.clone(),
-            metadata: BTreeMap::new(),
+            metadata: line.metadata.clone(),
         })
         .collect();
-    let mut metadata = BTreeMap::new();
-    metadata.insert("session_id".to_string(), order.session_id.clone());
-    metadata.insert(
-        "payment_method".to_string(),
+    let mut metadata = order.metadata.clone();
+    metadata
+        .entry("session_id".to_string())
+        .or_insert_with(|| order.session_id.clone());
+    metadata.entry("payment_method".to_string()).or_insert_with(|| {
         order
             .payment
             .method
             .clone()
             .unwrap_or_default()
             .trim()
-            .to_ascii_lowercase(),
-    );
+            .to_ascii_lowercase()
+    });
     if let Some(checkout_email) = order.payment.checkout_email.as_ref() {
-        metadata.insert(
-            "checkout_email".to_string(),
-            checkout_email.trim().to_string(),
-        );
+        metadata
+            .entry("checkout_email".to_string())
+            .or_insert_with(|| checkout_email.trim().to_string());
+    }
+    if let Some(principal_id) = order.principal_id.as_ref() {
+        metadata
+            .entry("order_principal_id".to_string())
+            .or_insert_with(|| principal_id.clone());
     }
     OrderDraft {
         order_id: order.order_id.clone(),
@@ -4214,6 +4219,12 @@ cdn_base_url = "https://cdn.example.com"
     #[derive(Debug)]
     struct WrongOrderNoteCheckoutHooks;
 
+    #[derive(Debug)]
+    struct MetadataReplayCheckoutPlugin;
+
+    #[derive(Debug)]
+    struct MetadataReplayCheckoutHooks;
+
     impl CheckoutHooks for WrongOrderNoteCheckoutHooks {
         fn review_order(
             &self,
@@ -4239,6 +4250,46 @@ cdn_base_url = "https://cdn.example.com"
 
         fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
             registry.register_checkout_hooks(Arc::new(WrongOrderNoteCheckoutHooks))
+        }
+    }
+
+    impl CheckoutHooks for MetadataReplayCheckoutHooks {
+        fn review_order(
+            &self,
+            _ctx: &RequestContext,
+            order: &OrderDraft,
+            _commerce: &dyn CommerceFacade,
+            _auth: &dyn AuthFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<OrderReviewDecision, BackendError> {
+            let membership_tier = order.metadata.get("membership_tier").map(String::as_str);
+            let shipping_country = order.metadata.get("shipping_country").map(String::as_str);
+            let order_principal_id = order.metadata.get("order_principal_id").map(String::as_str);
+            if membership_tier != Some("gold")
+                || shipping_country != Some("GB")
+                || order_principal_id != Some("member@example.com")
+            {
+                return Err(BackendError::new(
+                    BackendErrorKind::InvalidInput,
+                    "checkout.metadata.missing",
+                    "Render replay lost linked checkout metadata.",
+                ));
+            }
+            Ok(OrderReviewDecision::approved())
+        }
+    }
+
+    impl CustomerBackendPlugin for MetadataReplayCheckoutPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "render-order-metadata-replay",
+                "Render Order Metadata Replay",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_checkout_hooks(Arc::new(MetadataReplayCheckoutHooks))
         }
     }
 
@@ -4277,6 +4328,11 @@ cdn_base_url = "https://cdn.example.com"
             order_id: "ORD-10042".to_string(),
             session_id: "session-order-detail".to_string(),
             principal_id: Some("member@example.com".to_string()),
+            metadata: BTreeMap::from([
+                ("membership_tier".to_string(), "gold".to_string()),
+                ("shipping_country".to_string(), "GB".to_string()),
+                ("expedited_requested".to_string(), "false".to_string()),
+            ]),
             status: "paid".to_string(),
             payment: StorefrontPaymentSnapshot {
                 status: "captured".to_string(),
@@ -4302,6 +4358,7 @@ cdn_base_url = "https://cdn.example.com"
                 variant_title: "Annual".to_string(),
                 product_kind: "membership".to_string(),
                 entitlement_key: Some("membership.gold".to_string()),
+                metadata: BTreeMap::from([("variant_title".to_string(), "Annual".to_string())]),
                 quantity: 1,
                 unit_price_minor: 8_900,
                 total_minor: 8_900,
@@ -4676,6 +4733,16 @@ cdn_base_url = "https://cdn.example.com"
 
         assert!(message.contains("order_mismatch"), "{message}");
         assert!(message.contains("ORD-10042"), "{message}");
+    }
+
+    #[test]
+    fn customer_order_review_replays_persisted_order_metadata_into_linked_hooks() {
+        let plan = render_test_plan_with_customer_plugin(MetadataReplayCheckoutPlugin);
+        let review = customer_order_review(&plan, &sample_storefront_order_snapshot(), None, None)
+            .unwrap()
+            .expect("metadata-aware review should exist");
+
+        assert!(matches!(review.decision, OrderReviewDecision::Approved));
     }
 }
 #[derive(Clone)]

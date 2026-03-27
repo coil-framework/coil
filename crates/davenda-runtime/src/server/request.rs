@@ -1450,6 +1450,7 @@ impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade<'_> {
 
 fn checkout_order_draft(
     state: &RuntimeServerState,
+    execution: &RequestExecution,
     session_id: &str,
     principal_id: Option<&str>,
     payment: &StorefrontPaymentInput,
@@ -1477,6 +1478,32 @@ fn checkout_order_draft(
             }
         })
         .collect::<Vec<_>>();
+    let metadata = storefront_checkout_order_metadata(
+        state,
+        execution,
+        &snapshot,
+        session_id,
+        principal_id,
+        payment,
+    );
+    Ok(OrderDraft {
+        order_id: format!("draft:{}", payment.intent_reference),
+        currency_code: snapshot.cart.currency.clone(),
+        subtotal: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
+        total: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
+        lines,
+        metadata,
+    })
+}
+
+fn storefront_checkout_order_metadata(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    snapshot: &StorefrontStateSnapshot,
+    session_id: &str,
+    principal_id: Option<&str>,
+    payment: &StorefrontPaymentInput,
+) -> BTreeMap<String, String> {
     let mut metadata = BTreeMap::new();
     metadata.insert("session_id".to_string(), session_id.to_string());
     metadata.insert(
@@ -1487,14 +1514,59 @@ fn checkout_order_draft(
         "checkout_email".to_string(),
         payment.checkout_email.trim().to_string(),
     );
-    Ok(OrderDraft {
-        order_id: format!("draft:{}", payment.intent_reference),
-        currency_code: snapshot.cart.currency.clone(),
-        subtotal: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
-        total: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
-        lines,
-        metadata,
+    if let Some(principal_id) = principal_id {
+        metadata.insert("order_principal_id".to_string(), principal_id.to_string());
+    }
+    if let Some(shipping_country) = execution_form_field(execution, "shipping_country")
+        .or_else(|| execution_form_field(execution, "country"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.insert("shipping_country".to_string(), shipping_country.to_ascii_uppercase());
+    }
+    if let Some(expedited_requested) = execution_form_field(execution, "expedited_requested")
+        .or_else(|| execution_form_field(execution, "expedited"))
+        .or_else(|| execution_form_field(execution, "priority_shipping"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.insert(
+            "expedited_requested".to_string(),
+            normalize_checkout_flag(expedited_requested).to_string(),
+        );
+    }
+    metadata.insert(
+        "membership_tier".to_string(),
+        storefront_membership_tier(state, snapshot)
+            .unwrap_or("guest")
+            .to_string(),
+    );
+    metadata
+}
+
+fn storefront_membership_tier<'a>(
+    state: &'a RuntimeServerState,
+    snapshot: &'a StorefrontStateSnapshot,
+) -> Option<&'static str> {
+    snapshot.cart.lines.iter().find_map(|line| {
+        let product = state.plan.storefront_catalog.product_by_sku_or_handle(&line.sku)?;
+        match product.entitlement_key.as_deref() {
+            Some("membership.gold") => Some("gold"),
+            Some(entitlement) if entitlement.starts_with("membership.") => Some("standard"),
+            _ => None,
+        }
     })
+}
+
+fn normalize_checkout_flag(value: &str) -> &'static str {
+    if matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "y" | "on"
+    ) {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn customer_checkout_error_summary(error: &BackendError) -> Cow<'static, str> {
@@ -1732,6 +1804,7 @@ fn review_checkout_with_customer_hooks(
     let context = runtime_customer_request_context(state, execution);
     let order = checkout_order_draft(
         state,
+        execution,
         session_id,
         execution.principal.principal_id.as_deref(),
         payment,
@@ -2622,10 +2695,22 @@ async fn apply_native_storefront_mutations(
             )? {
                 return Ok(Some(location));
             }
-            let snapshot = match state.storefront.checkout_complete(
+            let checkout_metadata = storefront_checkout_order_metadata(
+                state,
+                execution,
+                &state.storefront.snapshot(
+                    session_id,
+                    execution.principal.principal_id.as_deref(),
+                )?,
                 session_id,
                 execution.principal.principal_id.as_deref(),
                 &payment,
+            );
+            let snapshot = match state.storefront.checkout_complete_with_metadata(
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                &payment,
+                &checkout_metadata,
                 now.as_unix_seconds(),
             ) {
                 Ok(snapshot) => snapshot,

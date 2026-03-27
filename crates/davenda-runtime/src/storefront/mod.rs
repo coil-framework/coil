@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params, types::Type};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -194,6 +194,7 @@ pub struct StorefrontOrderLine {
     pub variant_title: String,
     pub product_kind: String,
     pub entitlement_key: Option<String>,
+    pub metadata: BTreeMap<String, String>,
     pub quantity: u32,
     pub unit_price_minor: i64,
     pub total_minor: i64,
@@ -217,6 +218,7 @@ pub struct StorefrontOrderSnapshot {
     pub order_id: String,
     pub session_id: String,
     pub principal_id: Option<String>,
+    pub metadata: BTreeMap<String, String>,
     pub status: String,
     pub payment: StorefrontPaymentSnapshot,
     pub currency: String,
@@ -697,6 +699,7 @@ impl StorefrontStateStore {
                     order_id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
                     principal_id TEXT,
+                    metadata_json TEXT,
                     status TEXT NOT NULL,
                     payment_status TEXT NOT NULL DEFAULT 'captured',
                     payment_method TEXT,
@@ -717,6 +720,7 @@ impl StorefrontStateStore {
                     variant_title TEXT NOT NULL,
                     product_kind TEXT NOT NULL,
                     entitlement_key TEXT,
+                    metadata_json TEXT,
                     quantity INTEGER NOT NULL,
                     unit_price_minor INTEGER NOT NULL,
                     currency TEXT NOT NULL,
@@ -1326,6 +1330,23 @@ impl StorefrontStateStore {
         payment: &StorefrontPaymentInput,
         now_unix_seconds: u64,
     ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
+        self.checkout_complete_with_metadata(
+            session_id,
+            principal_id,
+            payment,
+            &BTreeMap::new(),
+            now_unix_seconds,
+        )
+    }
+
+    pub fn checkout_complete_with_metadata(
+        &self,
+        session_id: &str,
+        principal_id: Option<&str>,
+        payment: &StorefrontPaymentInput,
+        order_metadata: &BTreeMap<String, String>,
+        now_unix_seconds: u64,
+    ) -> Result<StorefrontStateSnapshot, StorefrontStateError> {
         let mut connection = self.lock_connection()?;
         let tx = connection.transaction().map_err(|error| {
             query_error(format!(
@@ -1359,18 +1380,20 @@ impl StorefrontStateStore {
                 received: payment.intent_reference.clone(),
             });
         }
+        let order_metadata_json = storefront_metadata_json(order_metadata)?;
         tx.execute(
             r#"
             INSERT INTO orders (
-                order_id, session_id, principal_id, status, payment_status, payment_method,
+                order_id, session_id, principal_id, metadata_json, status, payment_status, payment_method,
                 payment_reference, payment_last4, checkout_email, currency,
                 line_count, subtotal_minor, total_minor, created_at_unix_seconds
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             "#,
             params![
                 order_id,
                 session_id,
                 principal_id,
+                order_metadata_json,
                 "pending_payment",
                 "provider_pending",
                 payment.method.as_str(),
@@ -1386,12 +1409,13 @@ impl StorefrontStateStore {
         )
         .map_err(|error| query_error(format!("failed to create storefront order: {error}")))?;
         for line in &lines {
+            let line_metadata = storefront_order_line_metadata(&self.catalog, line);
             tx.execute(
                 r#"
                 INSERT INTO order_lines (
                     order_id, sku, title, variant_title, product_kind,
-                    entitlement_key, quantity, unit_price_minor, currency
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    entitlement_key, metadata_json, quantity, unit_price_minor, currency
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                 "#,
                 params![
                     order_id,
@@ -1400,6 +1424,7 @@ impl StorefrontStateStore {
                     line.variant_title,
                     line.product_kind,
                     line.entitlement_key,
+                    storefront_metadata_json(&line_metadata)?,
                     i64::from(line.quantity),
                     line.unit_price_minor,
                     line.currency,
@@ -2235,7 +2260,7 @@ impl StorefrontStateStore {
             tx.prepare(
                 r#"
                 SELECT
-                    order_id, session_id, principal_id, status, payment_status,
+                    order_id, session_id, principal_id, metadata_json, status, payment_status,
                     payment_method, payment_reference, payment_last4, checkout_email,
                     currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
                 FROM orders
@@ -2248,7 +2273,7 @@ impl StorefrontStateStore {
             tx.prepare(
                 r#"
                 SELECT
-                    order_id, session_id, principal_id, status, payment_status,
+                    order_id, session_id, principal_id, metadata_json, status, payment_status,
                     payment_method, payment_reference, payment_last4, checkout_email,
                     currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
                 FROM orders
@@ -2271,17 +2296,18 @@ impl StorefrontStateStore {
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, Option<String>>(2)?,
-                            row.get::<_, String>(3)?,
+                            row.get::<_, Option<String>>(3)?,
                             row.get::<_, String>(4)?,
-                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, String>(5)?,
                             row.get::<_, Option<String>>(6)?,
                             row.get::<_, Option<String>>(7)?,
                             row.get::<_, Option<String>>(8)?,
-                            row.get::<_, String>(9)?,
-                            row.get::<_, i64>(10)?,
+                            row.get::<_, Option<String>>(9)?,
+                            row.get::<_, String>(10)?,
                             row.get::<_, i64>(11)?,
                             row.get::<_, i64>(12)?,
                             row.get::<_, i64>(13)?,
+                            row.get::<_, i64>(14)?,
                         ))
                     },
                 )
@@ -2298,17 +2324,18 @@ impl StorefrontStateStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(3)?,
                         row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, String>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, Option<String>>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, i64>(10)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, String>(10)?,
                         row.get::<_, i64>(11)?,
                         row.get::<_, i64>(12)?,
                         row.get::<_, i64>(13)?,
+                        row.get::<_, i64>(14)?,
                     ))
                 })
                 .map_err(|error| {
@@ -2334,7 +2361,7 @@ impl StorefrontStateStore {
             .prepare(
                 r#"
                 SELECT
-                    order_id, session_id, principal_id, status, payment_status,
+                    order_id, session_id, principal_id, metadata_json, status, payment_status,
                     payment_method, payment_reference, payment_last4, checkout_email,
                     currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
                 FROM orders
@@ -2353,17 +2380,18 @@ impl StorefrontStateStore {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, i64>(10)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, String>(10)?,
                     row.get::<_, i64>(11)?,
                     row.get::<_, i64>(12)?,
                     row.get::<_, i64>(13)?,
+                    row.get::<_, i64>(14)?,
                 ))
             })
             .map_err(|error| {
@@ -2384,6 +2412,7 @@ impl StorefrontStateStore {
             String,
             String,
             Option<String>,
+            Option<String>,
             String,
             String,
             Option<String>,
@@ -2402,6 +2431,7 @@ impl StorefrontStateStore {
             order_id,
             order_session_id,
             order_principal_id,
+            metadata_json,
             status,
             payment_status,
             payment_method,
@@ -2434,6 +2464,8 @@ impl StorefrontStateStore {
                 order_id,
                 session_id: order_session_id,
                 principal_id: order_principal_id,
+                metadata: parse_storefront_metadata_json(metadata_json)
+                    .map_err(|reason| query_error(format!("failed to decode storefront order metadata: {reason}")))?,
                 status,
                 payment: StorefrontPaymentSnapshot {
                     status: payment_status,
@@ -2555,7 +2587,7 @@ impl StorefrontStateStore {
             r#"
             SELECT
                 sku, title, variant_title, product_kind, entitlement_key,
-                quantity, unit_price_minor, currency
+                metadata_json, quantity, unit_price_minor, currency
             FROM order_lines
             WHERE order_id = ?1
             ORDER BY sku ASC
@@ -2563,10 +2595,18 @@ impl StorefrontStateStore {
         )?;
         statement
             .query_map(params![order_id], |row| {
-                let quantity_i64: i64 = row.get(5)?;
+                let metadata = parse_storefront_metadata_json(row.get::<_, Option<String>>(5)?)
+                    .map_err(|reason| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            5,
+                            Type::Text,
+                            Box::new(std::io::Error::other(reason)),
+                        )
+                    })?;
+                let quantity_i64: i64 = row.get(6)?;
                 let quantity = u32::try_from(quantity_i64)
-                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, quantity_i64))?;
-                let unit_price_minor: i64 = row.get(6)?;
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, quantity_i64))?;
+                let unit_price_minor: i64 = row.get(7)?;
                 let total_minor = unit_price_minor.saturating_mul(i64::from(quantity));
                 Ok(StorefrontOrderLine {
                     sku: row.get(0)?,
@@ -2574,10 +2614,11 @@ impl StorefrontStateStore {
                     variant_title: row.get(2)?,
                     product_kind: row.get(3)?,
                     entitlement_key: row.get(4)?,
+                    metadata,
                     quantity,
                     unit_price_minor,
                     total_minor,
-                    currency: row.get(7)?,
+                    currency: row.get(8)?,
                     total: format_minor_currency(total_minor),
                 })
             })?
@@ -2666,7 +2707,7 @@ impl StorefrontStateStore {
             .query_row(
                 r#"
                 SELECT
-                    order_id, session_id, principal_id, status, payment_status,
+                    order_id, session_id, principal_id, metadata_json, status, payment_status,
                     payment_method, payment_reference, payment_last4, checkout_email,
                     currency, line_count, subtotal_minor, total_minor, created_at_unix_seconds
                 FROM orders
@@ -2678,17 +2719,18 @@ impl StorefrontStateStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(3)?,
                         row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, String>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, Option<String>>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, i64>(10)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, String>(10)?,
                         row.get::<_, i64>(11)?,
                         row.get::<_, i64>(12)?,
                         row.get::<_, i64>(13)?,
+                        row.get::<_, i64>(14)?,
                     ))
                 },
             )
@@ -2698,6 +2740,7 @@ impl StorefrontStateStore {
             order_id,
             session_id,
             principal_id,
+            metadata_json,
             status,
             payment_status,
             payment_method,
@@ -2725,6 +2768,8 @@ impl StorefrontStateStore {
             order_id,
             session_id,
             principal_id,
+            metadata: parse_storefront_metadata_json(metadata_json)
+                .map_err(|reason| rusqlite::Error::FromSqlConversionFailure(3, Type::Text, Box::new(std::io::Error::other(reason))))?,
             status,
             payment: StorefrontPaymentSnapshot {
                 status: payment_status,
@@ -2874,10 +2919,47 @@ fn ensure_storefront_columns(connection: &Connection) -> Result<(), StorefrontSt
             "payment_reference TEXT",
             "payment_last4 TEXT",
             "checkout_email TEXT",
+            "metadata_json TEXT",
             "order_paid_event_dispatched_at_unix_seconds INTEGER",
         ],
     )?;
+    ensure_table_columns(connection, "order_lines", &["metadata_json TEXT"])?;
     Ok(())
+}
+
+fn storefront_metadata_json(
+    metadata: &BTreeMap<String, String>,
+) -> Result<String, StorefrontStateError> {
+    serde_json::to_string(metadata).map_err(|error| StorefrontStateError::Serialization {
+        reason: error.to_string(),
+    })
+}
+
+fn parse_storefront_metadata_json(
+    encoded: Option<String>,
+) -> Result<BTreeMap<String, String>, String> {
+    match encoded.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => serde_json::from_str(value).map_err(|error| error.to_string()),
+        None => Ok(BTreeMap::new()),
+    }
+}
+
+fn storefront_order_line_metadata(
+    catalog: &StorefrontCatalog,
+    line: &StorefrontCartLine,
+) -> BTreeMap<String, String> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("variant_title".to_string(), line.variant_title.clone());
+    if let Some(product) = catalog.product_by_sku_or_handle(&line.sku) {
+        metadata.insert(
+            "collection_handle".to_string(),
+            product.collection_handle.clone(),
+        );
+    }
+    if let Some(entitlement_key) = line.entitlement_key.as_ref() {
+        metadata.insert("entitlement_key".to_string(), entitlement_key.clone());
+    }
+    metadata
 }
 
 fn ensure_table_columns(

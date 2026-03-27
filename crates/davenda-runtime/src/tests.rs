@@ -1467,6 +1467,44 @@ fn storefront_state_store_persists_carts_and_orders_across_reopen() {
 }
 
 #[test]
+fn storefront_state_store_updates_existing_cart_line_quantities() {
+    let root = unique_temp_template_root("storefront-state-update-cart");
+    let _ = fs::remove_dir_all(&root);
+    let store = StorefrontStateStore::open_with_root(root.clone(), "storefront-suite").unwrap();
+
+    let snapshot = store
+        .add_to_cart(
+            "session-live-update",
+            Some("member-live-update"),
+            "harbor-cap",
+            1,
+            100,
+        )
+        .unwrap();
+    assert_eq!(snapshot.cart.item_count, 1);
+    assert_eq!(snapshot.cart.lines.len(), 1);
+    assert_eq!(snapshot.cart.lines[0].sku, "harbor-cap");
+    assert_eq!(snapshot.cart.lines[0].quantity, 1);
+
+    let snapshot = store
+        .update_cart(
+            "session-live-update",
+            Some("member-live-update"),
+            "harbor-cap",
+            3,
+            101,
+        )
+        .unwrap();
+    assert_eq!(snapshot.cart.item_count, 3);
+    assert_eq!(snapshot.cart.lines.len(), 1);
+    assert_eq!(snapshot.cart.lines[0].sku, "harbor-cap");
+    assert_eq!(snapshot.cart.lines[0].quantity, 3);
+    assert_eq!(snapshot.cart.lines[0].total, "£87.00");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn storefront_state_store_persists_catalog_overrides_across_reopen() {
     let root = unique_temp_template_root("storefront-catalog-admin");
     let _ = fs::remove_dir_all(&root);

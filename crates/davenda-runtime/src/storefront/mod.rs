@@ -994,12 +994,12 @@ impl StorefrontStateStore {
             return Err(StorefrontStateError::InvalidQuantity);
         }
 
-        let item = self.catalog_item(sku)?;
         let mut connection = self.lock_connection()?;
         let tx = connection.transaction().map_err(|error| {
             query_error(format!("failed to start add-to-cart transaction: {error}"))
         })?;
         self.ensure_cart(&tx, session_id, principal_id, "active", now_unix_seconds)?;
+        let item = self.catalog_item_in_tx(&tx, sku)?;
         tx.execute(
             r#"
             INSERT INTO cart_lines (
@@ -1061,7 +1061,7 @@ impl StorefrontStateStore {
                 query_error(format!("failed to remove storefront cart line: {error}"))
             })?;
         } else {
-            let item = self.catalog_item(sku)?;
+            let item = self.catalog_item_in_tx(&tx, sku)?;
             tx.execute(
                 r#"
                 INSERT INTO cart_lines (
@@ -1106,6 +1106,18 @@ impl StorefrontStateStore {
 
     fn catalog_item(&self, sku: &str) -> Result<CatalogItem, StorefrontStateError> {
         self.catalog()?
+            .catalog_item(sku)
+            .ok_or_else(|| StorefrontStateError::UnknownSku {
+                sku: sku.to_string(),
+            })
+    }
+
+    fn catalog_item_in_tx(
+        &self,
+        tx: &Transaction<'_>,
+        sku: &str,
+    ) -> Result<CatalogItem, StorefrontStateError> {
+        self.load_effective_catalog(tx)?
             .catalog_item(sku)
             .ok_or_else(|| StorefrontStateError::UnknownSku {
                 sku: sku.to_string(),

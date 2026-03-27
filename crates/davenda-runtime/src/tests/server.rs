@@ -1,12 +1,14 @@
 use super::*;
 use axum::response::Response;
 use davenda_customer_sdk::{
-    AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade, CustomerPluginDescriptor,
-    OrderDraft, OrderReviewDecision, RequestContext,
+    AuditFacade, AuthFacade, BackendError, CheckoutHooks, CmsHooks, CmsPageDraft,
+    CmsPublishDecision, CommerceFacade, CustomerPluginDescriptor, JobsFacade, OrderDraft,
+    OrderReviewDecision, OutboundHttpFacade, RepositoryFacade, RepositoryQuery, RequestContext,
+    VerifiedWebhook, VerifiedWebhookHooks, WebhookHandlingResult,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 const LIVE_DATABASE_URL: &str = "postgres://platform:secret@db.internal/platform";
 const LIVE_OBJECT_STORE_SECRET: &str = r#"
@@ -109,6 +111,114 @@ impl CustomerBackendPlugin for RejectMembershipCheckoutPlugin {
 
     fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
         registry.register_checkout_hooks(Arc::new(RejectMembershipCheckoutHooks))
+    }
+}
+
+#[derive(Debug)]
+struct RejectCmsPublishPlugin;
+
+#[derive(Debug)]
+struct RejectCmsPublishHooks;
+
+impl CmsHooks for RejectCmsPublishHooks {
+    fn validate_page_publish(
+        &self,
+        _ctx: &RequestContext,
+        draft: &CmsPageDraft,
+        repositories: &dyn RepositoryFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<CmsPublishDecision, BackendError> {
+        let records =
+            repositories.read(&RepositoryQuery::new("cms.pages").with_key(&draft.page_id))?;
+        let seen_slug = records
+            .records
+            .first()
+            .and_then(|record| record.fields.get("slug"))
+            .cloned()
+            .unwrap_or_default();
+        if seen_slug != draft.slug {
+            return Err(BackendError::new(
+                davenda_customer_sdk::BackendErrorKind::Conflict,
+                "cms.page.repository_mismatch",
+                "linked CMS hook did not see the draft page that is about to publish",
+            ));
+        }
+        Ok(CmsPublishDecision::reject(
+            "cms.page.requires-review",
+            "Linked customer policy blocked this page from publishing until editorial review is complete.",
+        ))
+    }
+}
+
+impl CustomerBackendPlugin for RejectCmsPublishPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new("harbor-shop-cms-policy", "Harbor Shop CMS Policy", "0.1.0")
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_cms_hooks(Arc::new(RejectCmsPublishHooks))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedVerifiedWebhook {
+    source: String,
+    event: String,
+    content_type: Option<String>,
+    payload: String,
+}
+
+#[derive(Debug)]
+struct RecordingVerifiedWebhookPlugin {
+    calls: Arc<Mutex<Vec<RecordedVerifiedWebhook>>>,
+}
+
+impl VerifiedWebhookHooks for RecordingVerifiedWebhookPlugin {
+    fn handle_verified_webhook(
+        &self,
+        _ctx: &RequestContext,
+        webhook: &VerifiedWebhook,
+        _http: &dyn OutboundHttpFacade,
+        jobs: &dyn JobsFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<WebhookHandlingResult, BackendError> {
+        let receipt = jobs.enqueue(
+            davenda_customer_sdk::JobRequest::new(
+                "jobs.work",
+                "customer.webhook.follow-up",
+                "record verified payment webhook",
+            )
+            .with_idempotency_key(format!(
+                "verified-webhook:{}:{}",
+                webhook.source, webhook.event
+            )),
+        )?;
+        self.calls.lock().unwrap().push(RecordedVerifiedWebhook {
+            source: webhook.source.clone(),
+            event: webhook.event.clone(),
+            content_type: webhook.content_type.clone(),
+            payload: String::from_utf8_lossy(&webhook.payload).into_owned(),
+        });
+        Ok(WebhookHandlingResult::accepted(Some(format!(
+            "{}:{}",
+            receipt.queue, receipt.job_id
+        ))))
+    }
+}
+
+impl CustomerBackendPlugin for RecordingVerifiedWebhookPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-verified-webhooks",
+            "Harbor Shop Verified Webhooks",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_verified_webhook_hooks(Arc::new(Self {
+            calls: self.calls.clone(),
+        }))
     }
 }
 
@@ -5450,6 +5560,220 @@ async fn server_host_runs_sdk_checkout_hooks_before_stripe_handoff() {
 }
 
 #[tokio::test]
+async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flow() {
+    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-hooks");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RecordingVerifiedWebhookPlugin {
+            calls: calls.clone(),
+        })
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_verified_hooks",
+    ));
+    let server = plan
+        .server_host_with_checkout_client(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+            checkout_client.clone(),
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-verified-hooks";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "harbor-cap")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&checkout_start, "location"), "/checkout");
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&complete_response, "location"),
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_verified_hooks"
+    );
+    assert_eq!(checkout_client.take_calls().len(), 1);
+
+    let webhook_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("provider", "stripe")
+        .append_pair("event", "payment.captured")
+        .append_pair("payment_reference", "PAY-50001")
+        .append_pair(
+            "signature",
+            &payment_webhook_signature("stripe", "payment.captured", "PAY-50001"),
+        )
+        .finish();
+    let webhook_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/webhooks/commerce/payment-provider")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(webhook_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(webhook_response.status(), StatusCode::OK);
+
+    let recorded = calls.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].source, "stripe");
+    assert_eq!(recorded[0].event, "payment.captured");
+    assert_eq!(
+        recorded[0].content_type.as_deref(),
+        Some("application/x-www-form-urlencoded")
+    );
+    assert!(
+        recorded[0]
+            .payload
+            .contains("\"payment_reference\":[\"PAY-50001\"]"),
+        "{}",
+        recorded[0].payload
+    );
+    assert!(
+        recorded[0].payload.contains("\"provider\":[\"stripe\"]"),
+        "{}",
+        recorded[0].payload
+    );
+}
+
+#[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and_webhook() {
     let app_name = unique_app_name("harbor-shop-runtime-stripe-handoff");
     let mut config = checked_in_harbor_shop_config(&app_name);
@@ -7659,6 +7983,195 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
         "{audit_body}"
     );
     assert!(audit_body.contains("cms.page.publish"), "{audit_body}");
+}
+
+#[tokio::test]
+async fn server_host_runs_sdk_cms_publish_hooks_before_live_publish() {
+    let app_name = unique_app_name("harbor-shop-runtime-cms-hooks");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RejectCmsPublishPlugin)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-cms-hooks")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let new_page_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?new=1")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let draft_token = response_header(
+        &new_page_response,
+        "x-davenda-cms-csrf-cms-pages-save-draft",
+    );
+    let draft_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &draft_token)
+        .append_pair("page_title", "SDK Hook Review Page")
+        .append_pair("page_slug", "sdk-hook-review-page")
+        .append_pair(
+            "page_summary",
+            "A unique draft used to prove linked customer CMS publish hooks can block live publication.",
+        )
+        .append_pair(
+            "page_body_html",
+            "<p>This page should remain draft-only because the linked customer publish hook rejects it.</p>",
+        )
+        .finish();
+    let draft_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/draft")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(draft_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(draft_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&draft_response, "location"),
+        "/admin/pages?page=page-sdk-hook-review-page"
+    );
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-sdk-hook-review-page")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let publish_token = response_header(&admin_response, "x-davenda-cms-csrf-cms-pages-publish");
+
+    let publish_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &publish_token)
+        .append_pair("page_id", "page-sdk-hook-review-page")
+        .finish();
+    let publish_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/publish")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(publish_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&publish_response, "location"),
+        "/admin/pages?page=page-sdk-hook-review-page"
+    );
+    let flash_cookie = cookie_pair_from_response(&publish_response, "davenda_flash")
+        .expect("publish rejection flash");
+
+    let retry_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-sdk-hook-review-page")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("{session_cookie}; {flash_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let retry_body = String::from_utf8(
+        to_bytes(retry_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        retry_body.contains(
+            "Linked customer policy blocked this page from publishing until editorial review is complete."
+        ),
+        "{retry_body}"
+    );
+
+    let live_page = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/sdk-hook-review-page")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live_page.status(), StatusCode::OK);
+    let live_page_body = String::from_utf8(
+        to_bytes(live_page.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        live_page_body.contains("Page unavailable"),
+        "{live_page_body}"
+    );
+    assert!(
+        live_page_body.contains("not published yet"),
+        "{live_page_body}"
+    );
 }
 
 #[tokio::test]

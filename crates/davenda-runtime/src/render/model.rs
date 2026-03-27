@@ -1946,8 +1946,9 @@ fn merge_cms_page_form_feedback(
     form_state: Option<&StorefrontFormState>,
 ) -> Result<RenderModel, TemplateModelError> {
     let errors = form_errors_model(form_state)?;
+    let has_errors = form_state.is_some() || !errors.is_empty();
     model
-        .with_bool("hasErrors", !errors.is_empty())?
+        .with_bool("hasErrors", has_errors)?
         .with_value(
             "errorSummary",
             RenderValue::text(
@@ -1964,8 +1965,9 @@ fn merge_cms_navigation_form_feedback(
     form_state: Option<&StorefrontFormState>,
 ) -> Result<RenderModel, TemplateModelError> {
     let errors = form_errors_model(form_state)?;
+    let has_errors = form_state.is_some() || !errors.is_empty();
     model
-        .with_bool("hasErrors", !errors.is_empty())?
+        .with_bool("hasErrors", has_errors)?
         .with_value(
             "errorSummary",
             RenderValue::text(
@@ -1982,8 +1984,9 @@ fn merge_cms_redirect_form_feedback(
     form_state: Option<&StorefrontFormState>,
 ) -> Result<RenderModel, TemplateModelError> {
     let errors = form_errors_model(form_state)?;
+    let has_errors = form_state.is_some() || !errors.is_empty();
     model
-        .with_bool("hasErrors", !errors.is_empty())?
+        .with_bool("hasErrors", has_errors)?
         .with_value(
             "errorSummary",
             RenderValue::text(

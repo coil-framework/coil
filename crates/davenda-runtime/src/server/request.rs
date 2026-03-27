@@ -7,12 +7,16 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, 
 use axum::response::IntoResponse;
 use davenda_customer_sdk::{
     AuditEntry, AuditFacade, AuthCheckRequest, AuthCheckResult, AuthExplainRequest,
-    AuthExplanation, AuthFacade, BackendError, BackendErrorKind, CommerceFacade, CommerceProduct,
-    CustomerAppContext as SdkCustomerAppContext, MoneyAmount, OrderDraft, OrderLineDraft,
-    OrderReviewDecision, PrincipalContext as SdkPrincipalContext,
-    PrincipalKind as SdkPrincipalKind, RequestContext as SdkRequestContext,
-    TraceContext as SdkTraceContext,
+    AuthExplanation, AuthFacade, BackendError, BackendErrorKind, CmsPageDraft, CmsPublishDecision,
+    CommerceFacade, CommerceProduct, CustomerAppContext as SdkCustomerAppContext, Headers,
+    JobReceipt, JobsFacade, MoneyAmount, OrderDraft, OrderLineDraft, OrderReviewDecision,
+    OutboundHttpFacade, OutboundHttpRequest, OutboundHttpResponse,
+    PrincipalContext as SdkPrincipalContext, PrincipalKind as SdkPrincipalKind, RepositoryFacade,
+    RepositoryQuery, RepositoryRecord, RepositoryRecordSet, RepositoryWrite,
+    RepositoryWriteReceipt, RequestContext as SdkRequestContext, TraceContext as SdkTraceContext,
+    VerifiedWebhook, WebhookHandlingResult,
 };
+use davenda_jobs::{IdempotencyKey, JobId, JobInstant, JobName, JobQueueName, JobSpec};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
@@ -20,6 +24,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
@@ -73,6 +78,8 @@ const CMS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
         "x-davenda-cms-csrf-cms-redirects-save",
     ),
 ];
+static CUSTOMER_HOOK_JOB_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
 const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.cart",
     "commerce.add-to-cart",
@@ -889,45 +896,6 @@ impl AuthFacade for RuntimeCheckoutAuthFacade {
     }
 }
 
-#[derive(Debug)]
-struct RuntimeCheckoutAuditFacade<'a> {
-    plan: &'a RuntimePlan,
-    principal_id: Option<&'a str>,
-    recorded_at_unix_seconds: u64,
-}
-
-impl AuditFacade for RuntimeCheckoutAuditFacade<'_> {
-    fn record(&self, entry: AuditEntry) -> Result<(), BackendError> {
-        let mut serializer = form_urlencoded::Serializer::new(String::new());
-        serializer
-            .append_pair("action", entry.action.as_str())
-            .append_pair("resource_kind", entry.resource_kind.as_str())
-            .append_pair("resource_id", entry.resource_id.as_str())
-            .append_pair("outcome", entry.outcome.as_str());
-        if let Some(detail) = entry.detail.as_deref() {
-            serializer.append_pair("detail", detail);
-        }
-        for (key, value) in &entry.metadata {
-            serializer.append_pair(&format!("meta.{key}"), value);
-        }
-
-        record_admin_audit_entry(
-            self.plan,
-            self.recorded_at_unix_seconds.min(i64::MAX as u64) as i64,
-            self.principal_id.unwrap_or("anonymous"),
-            serializer.finish(),
-        )
-        .map_err(|reason| {
-            BackendError::new(
-                BackendErrorKind::Internal,
-                "audit.record.failed",
-                "Failed to persist the checkout audit entry.",
-            )
-            .with_detail(reason)
-        })
-    }
-}
-
 fn cms_page_form_state_from_execution(
     execution: &RequestExecution,
     summary: impl Into<String>,
@@ -1076,7 +1044,7 @@ fn storefront_cart_form_state_from_execution(
     state
 }
 
-fn checkout_request_context(
+fn runtime_customer_request_context(
     state: &RuntimeServerState,
     execution: &RequestExecution,
 ) -> SdkRequestContext {
@@ -1104,6 +1072,221 @@ fn checkout_request_context(
     let trace = SdkTraceContext::new(execution.trace.request_id.clone())
         .with_request_id(execution.trace.request_id.clone());
     SdkRequestContext::new(customer_app, principal, trace)
+}
+
+#[derive(Debug)]
+struct RuntimeRequestAuditFacade<'a> {
+    plan: &'a RuntimePlan,
+    principal_id: Option<&'a str>,
+    recorded_at_unix_seconds: u64,
+}
+
+impl AuditFacade for RuntimeRequestAuditFacade<'_> {
+    fn record(&self, entry: AuditEntry) -> Result<(), BackendError> {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer
+            .append_pair("action", entry.action.as_str())
+            .append_pair("resource_kind", entry.resource_kind.as_str())
+            .append_pair("resource_id", entry.resource_id.as_str())
+            .append_pair("outcome", entry.outcome.as_str());
+        if let Some(detail) = entry.detail.as_deref() {
+            serializer.append_pair("detail", detail);
+        }
+        for (key, value) in &entry.metadata {
+            serializer.append_pair(&format!("meta.{key}"), value);
+        }
+
+        record_admin_audit_entry(
+            self.plan,
+            self.recorded_at_unix_seconds.min(i64::MAX as u64) as i64,
+            self.principal_id.unwrap_or("anonymous"),
+            serializer.finish(),
+        )
+        .map_err(|reason| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "audit.record.failed",
+                "Failed to persist the customer hook audit entry.",
+            )
+            .with_detail(reason)
+        })
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeCmsRepositoryFacade<'a> {
+    workspace: &'a CmsAdminWorkspace,
+}
+
+impl RepositoryFacade for RuntimeCmsRepositoryFacade<'_> {
+    fn read(&self, query: &RepositoryQuery) -> Result<RepositoryRecordSet, BackendError> {
+        if query.repository != "cms.pages" {
+            return Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "repository.read.unsupported",
+                format!(
+                    "Runtime customer CMS hooks only expose `cms.pages` reads; `{}` is not available.",
+                    query.repository
+                ),
+            ));
+        }
+
+        let records = self
+            .workspace
+            .pages
+            .iter()
+            .filter(|page| {
+                query.key.as_deref().map_or(true, |key| {
+                    page.id == key
+                        || page.draft.slug == key
+                        || page.live.as_ref().is_some_and(|live| live.slug == key)
+                })
+            })
+            .map(|page| {
+                let mut fields = BTreeMap::new();
+                fields.insert("title".to_string(), page.draft.title.clone());
+                fields.insert("slug".to_string(), page.draft.slug.clone());
+                fields.insert("summary".to_string(), page.draft.summary.clone());
+                fields.insert("body_html".to_string(), page.draft.body_html.clone());
+                fields.insert("status".to_string(), page.status_label().to_string());
+                if let Some(live_path) = page.live_path() {
+                    fields.insert("live_path".to_string(), live_path);
+                }
+                RepositoryRecord {
+                    id: page.id.clone(),
+                    fields,
+                }
+            })
+            .collect();
+
+        Ok(RepositoryRecordSet {
+            repository: query.repository.clone(),
+            records,
+        })
+    }
+
+    fn write(&self, change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "repository.write.unsupported",
+            format!(
+                "Runtime customer CMS hooks are validation-only; repository writes to `{}` are not supported during publish.",
+                change.repository
+            ),
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeCustomerJobsFacade<'a> {
+    plan: &'a RuntimePlan,
+    trace_id: &'a str,
+    now: BrowserInstant,
+}
+
+impl JobsFacade for RuntimeCustomerJobsFacade<'_> {
+    fn enqueue(
+        &self,
+        request: davenda_customer_sdk::JobRequest,
+    ) -> Result<JobReceipt, BackendError> {
+        let queue = JobQueueName::new(request.queue.clone()).map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "jobs.queue.invalid",
+                "Customer webhook requested an invalid jobs queue.",
+            )
+            .with_detail(error.to_string())
+        })?;
+        let job_name = JobName::new(request.job_name.clone()).map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "jobs.name.invalid",
+                "Customer webhook requested an invalid job name.",
+            )
+            .with_detail(error.to_string())
+        })?;
+        let sequence = CUSTOMER_HOOK_JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let job_id = JobId::new(format!("customer-hook-{sequence}")).map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "jobs.id.invalid",
+                "Runtime could not allocate a valid job id for the customer webhook.",
+            )
+            .with_detail(error.to_string())
+        })?;
+        let mut spec = JobSpec::new(
+            job_id.clone(),
+            job_name,
+            queue.clone(),
+            request.payload_description,
+        )
+        .map_err(|error| {
+            BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "jobs.spec.invalid",
+                "Customer webhook requested an invalid job spec.",
+            )
+            .with_detail(error.to_string())
+        })?;
+        if let Some(idempotency_key) = request.idempotency_key {
+            spec = spec.with_idempotency_key(IdempotencyKey::new(idempotency_key).map_err(
+                |error| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "jobs.idempotency.invalid",
+                        "Customer webhook requested an invalid idempotency key.",
+                    )
+                    .with_detail(error.to_string())
+                },
+            )?);
+        }
+
+        let mut host = self
+            .plan
+            .jobs_host(format!("customer-hooks-{}", self.trace_id))
+            .map_err(|error| {
+                BackendError::new(
+                    BackendErrorKind::Unavailable,
+                    "jobs.host.unavailable",
+                    "Runtime jobs coordination is unavailable for the customer webhook hook.",
+                )
+                .with_detail(error.to_string())
+            })?;
+        let enqueued = host
+            .enqueue_spec(
+                spec,
+                JobInstant::from_unix_seconds(self.now.as_unix_seconds()),
+            )
+            .map_err(|error| {
+                BackendError::new(
+                    BackendErrorKind::Unavailable,
+                    "jobs.enqueue.failed",
+                    "Runtime could not enqueue the customer webhook follow-up job.",
+                )
+                .with_detail(error.to_string())
+            })?;
+
+        Ok(JobReceipt {
+            queue: queue.to_string(),
+            job_id: enqueued.to_string(),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeCustomerOutboundHttpFacade;
+
+impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade {
+    fn send(&self, request: OutboundHttpRequest) -> Result<OutboundHttpResponse, BackendError> {
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "http.send.unsupported",
+            format!(
+                "Runtime outbound HTTP is not implemented for linked customer hooks yet (integration `{}`).",
+                request.integration
+            ),
+        ))
+    }
 }
 
 fn checkout_order_draft(
@@ -1170,6 +1353,160 @@ fn customer_checkout_error_summary(error: &BackendError) -> Cow<'static, str> {
     }
 }
 
+fn customer_cms_publish_error_summary(error: &BackendError) -> Cow<'static, str> {
+    match error.kind() {
+        BackendErrorKind::InvalidInput
+        | BackendErrorKind::Forbidden
+        | BackendErrorKind::Conflict
+        | BackendErrorKind::Unauthorized => Cow::Owned(error.message().to_string()),
+        BackendErrorKind::Unsupported => Cow::Borrowed(
+            "Publishing could not continue because a required customer backend feature is not available in this runtime yet.",
+        ),
+        BackendErrorKind::Unavailable | BackendErrorKind::Timeout | BackendErrorKind::Internal => {
+            Cow::Borrowed("Publishing is temporarily unavailable. Review the page and try again.")
+        }
+    }
+}
+
+fn customer_hook_request_headers(execution: &RequestExecution) -> Headers {
+    BTreeMap::from([
+        (
+            "x-davenda-customer-app".to_string(),
+            execution.customer_app.clone(),
+        ),
+        (
+            "x-davenda-request-id".to_string(),
+            execution.trace.request_id.clone(),
+        ),
+        (
+            "x-davenda-route".to_string(),
+            execution.route.route_name.clone(),
+        ),
+    ])
+}
+
+fn cms_page_draft_from_workspace(page: &CmsAdminPage, locale: &str) -> CmsPageDraft {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("status".to_string(), page.status_label().to_string());
+    metadata.insert(
+        "published_once".to_string(),
+        if page.published_once { "true" } else { "false" }.to_string(),
+    );
+    if let Some(live_path) = page.live_path() {
+        metadata.insert("live_path".to_string(), live_path);
+    }
+    CmsPageDraft {
+        page_id: page.id.clone(),
+        slug: page.draft.slug.clone(),
+        title: page.draft.title.clone(),
+        summary: page.draft.summary.clone(),
+        body_html: page.draft.body_html.clone(),
+        locale: (!locale.trim().is_empty()).then(|| locale.to_string()),
+        metadata,
+    }
+}
+
+fn validate_cms_publish_with_customer_hooks(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    workspace: &CmsAdminWorkspace,
+    page_id: &str,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if state.plan.customer_hooks.cms.is_empty() {
+        return Ok(None);
+    }
+
+    let page = workspace.selected_page(Some(page_id)).ok_or_else(|| {
+        RuntimeServerError::Configuration {
+            reason: format!("CMS page `{page_id}` was not found during publish validation"),
+        }
+    })?;
+    let context = runtime_customer_request_context(state, execution);
+    let draft = cms_page_draft_from_workspace(page, execution.locale.as_str());
+    let repositories = RuntimeCmsRepositoryFacade { workspace };
+    let audit = RuntimeRequestAuditFacade {
+        plan: &state.plan,
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+    };
+
+    for hook in &state.plan.customer_hooks.cms {
+        match hook.validate_page_publish(&context, &draft, &repositories, &audit) {
+            Ok(CmsPublishDecision::Allow) => {}
+            Ok(CmsPublishDecision::Reject { message, .. }) => {
+                let form_state = cms_page_form_state_from_execution(execution, message);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+            Err(error) => {
+                let form_state = cms_page_form_state_from_execution(
+                    execution,
+                    customer_cms_publish_error_summary(&error),
+                );
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn execute_verified_webhook_customer_hooks(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    webhook: &VerifiedWebhook,
+    now: BrowserInstant,
+) {
+    if state.plan.customer_hooks.verified_webhooks.is_empty() {
+        return;
+    }
+
+    let context = runtime_customer_request_context(state, execution);
+    let http = RuntimeCustomerOutboundHttpFacade;
+    let jobs = RuntimeCustomerJobsFacade {
+        plan: &state.plan,
+        trace_id: execution.trace.request_id.as_str(),
+        now,
+    };
+    let audit = RuntimeRequestAuditFacade {
+        plan: &state.plan,
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+    };
+
+    for hook in &state.plan.customer_hooks.verified_webhooks {
+        let outcome = match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &audit) {
+            Ok(WebhookHandlingResult::Accepted { detail }) => AuditEntry::new(
+                "customer-plugin.verified-webhook",
+                "webhook",
+                format!("{}:{}", webhook.source, webhook.event),
+                "accepted",
+            )
+            .with_detail(
+                detail.unwrap_or_else(|| "customer hook accepted verified webhook".to_string()),
+            ),
+            Ok(WebhookHandlingResult::Rejected { code, message }) => AuditEntry::new(
+                "customer-plugin.verified-webhook",
+                "webhook",
+                format!("{}:{}", webhook.source, webhook.event),
+                "rejected",
+            )
+            .with_detail(format!("{code}: {message}")),
+            Err(error) => AuditEntry::new(
+                "customer-plugin.verified-webhook",
+                "webhook",
+                format!("{}:{}", webhook.source, webhook.event),
+                "failed",
+            )
+            .with_detail(error.to_string()),
+        };
+        let _ = audit.record(outcome);
+    }
+}
+
 fn review_checkout_with_customer_hooks(
     state: &RuntimeServerState,
     execution: &RequestExecution,
@@ -1182,7 +1519,7 @@ fn review_checkout_with_customer_hooks(
         return Ok(None);
     }
 
-    let context = checkout_request_context(state, execution);
+    let context = runtime_customer_request_context(state, execution);
     let order = checkout_order_draft(
         state,
         session_id,
@@ -1193,7 +1530,7 @@ fn review_checkout_with_customer_hooks(
         catalog: &state.plan.storefront_catalog,
     };
     let auth = RuntimeCheckoutAuthFacade;
-    let audit = RuntimeCheckoutAuditFacade {
+    let audit = RuntimeRequestAuditFacade {
         plan: &state.plan,
         principal_id: execution.principal.principal_id.as_deref(),
         recorded_at_unix_seconds: now.as_unix_seconds(),
@@ -1778,6 +2115,16 @@ fn apply_native_cms_admin_mutations(
                         reason: "missing page_id for publish".to_string(),
                     })?
             };
+            if let Some(location) = validate_cms_publish_with_customer_hooks(
+                state,
+                execution,
+                &workspace,
+                &page_id,
+                now,
+                response_cookies,
+            )? {
+                return Ok(Some(location));
+            }
             workspace
                 .publish_page(&page_id, now.as_unix_seconds())
                 .map_err(|reason| RuntimeServerError::Configuration { reason })?;
@@ -1933,10 +2280,14 @@ async fn apply_native_storefront_mutations(
     response_cookies: &mut Vec<String>,
 ) -> Result<Option<String>, RuntimeServerError> {
     if execution.route.route_name.as_str() == "commerce.payment-provider-webhook" {
-        let webhook = validated_payment_webhook_from_execution(state, execution)?;
+        let verified = validated_payment_webhook_from_execution(state, execution)?;
+        let provider = execution_form_field(execution, "provider")
+            .unwrap_or("generic")
+            .trim()
+            .to_ascii_lowercase();
         let receipt = state.storefront.apply_payment_webhook(
-            webhook.payment_reference.as_str(),
-            webhook.event.as_str(),
+            verified.payment_reference.as_str(),
+            verified.event.as_str(),
             now.as_unix_seconds(),
         )?;
         if receipt.needs_paid_event_dispatch {
@@ -1945,6 +2296,21 @@ async fn apply_native_storefront_mutations(
                 .storefront
                 .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())?;
         }
+        let payload = serde_json::to_vec(&execution.form_fields).map_err(|error| {
+            RuntimeServerError::Configuration {
+                reason: format!(
+                    "failed to encode verified webhook payload for customer hooks: {error}"
+                ),
+            }
+        })?;
+        let webhook = VerifiedWebhook {
+            source: provider,
+            event: verified.event.clone(),
+            headers: customer_hook_request_headers(execution),
+            content_type: Some("application/x-www-form-urlencoded".to_string()),
+            payload,
+        };
+        execute_verified_webhook_customer_hooks(state, execution, &webhook, now);
         return Ok(None);
     }
 

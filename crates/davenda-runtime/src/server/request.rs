@@ -5,6 +5,14 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use axum::response::IntoResponse;
+use davenda_customer_sdk::{
+    AuditEntry, AuditFacade, AuthCheckRequest, AuthCheckResult, AuthExplainRequest,
+    AuthExplanation, AuthFacade, BackendError, BackendErrorKind, CommerceFacade, CommerceProduct,
+    CustomerAppContext as SdkCustomerAppContext, MoneyAmount, OrderDraft, OrderLineDraft,
+    OrderReviewDecision, PrincipalContext as SdkPrincipalContext,
+    PrincipalKind as SdkPrincipalKind, RequestContext as SdkRequestContext,
+    TraceContext as SdkTraceContext,
+};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
@@ -825,6 +833,101 @@ fn storefront_checkout_form_state_from_execution(
     state
 }
 
+#[derive(Debug)]
+struct RuntimeCheckoutCommerceFacade<'a> {
+    catalog: &'a StorefrontCatalog,
+}
+
+impl CommerceFacade for RuntimeCheckoutCommerceFacade<'_> {
+    fn product(&self, sku: &str) -> Result<Option<CommerceProduct>, BackendError> {
+        Ok(self
+            .catalog
+            .product_by_sku_or_handle(sku)
+            .map(|product| CommerceProduct {
+                sku: product.sku.clone(),
+                handle: product.handle.clone(),
+                title: product.title.clone(),
+                current_price: MoneyAmount::new(product.currency.clone(), product.price_minor),
+                collection_handle: Some(product.collection_handle.clone()),
+                metadata: BTreeMap::new(),
+            }))
+    }
+
+    fn add_order_note(&self, _order_id: &str, _note: &str) -> Result<(), BackendError> {
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "commerce.order_note.unsupported",
+            "Runtime order-note persistence is not implemented for customer checkout hooks yet.",
+        ))
+    }
+}
+
+#[derive(Debug, Default)]
+struct RuntimeCheckoutAuthFacade;
+
+impl AuthFacade for RuntimeCheckoutAuthFacade {
+    fn check_capability(
+        &self,
+        _request: &AuthCheckRequest,
+    ) -> Result<AuthCheckResult, BackendError> {
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "auth.live_check.unsupported",
+            "Runtime auth capability checks are not implemented for customer checkout hooks yet.",
+        ))
+    }
+
+    fn explain_denial(
+        &self,
+        _request: &AuthExplainRequest,
+    ) -> Result<AuthExplanation, BackendError> {
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "auth.explain.unsupported",
+            "Runtime auth denial explanations are not implemented for customer checkout hooks yet.",
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeCheckoutAuditFacade<'a> {
+    plan: &'a RuntimePlan,
+    principal_id: Option<&'a str>,
+    recorded_at_unix_seconds: u64,
+}
+
+impl AuditFacade for RuntimeCheckoutAuditFacade<'_> {
+    fn record(&self, entry: AuditEntry) -> Result<(), BackendError> {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer
+            .append_pair("action", entry.action.as_str())
+            .append_pair("resource_kind", entry.resource_kind.as_str())
+            .append_pair("resource_id", entry.resource_id.as_str())
+            .append_pair("outcome", entry.outcome.as_str());
+        if let Some(detail) = entry.detail.as_deref() {
+            serializer.append_pair("detail", detail);
+        }
+        for (key, value) in &entry.metadata {
+            serializer.append_pair(&format!("meta.{key}"), value);
+        }
+
+        record_admin_audit_entry(
+            self.plan,
+            self.recorded_at_unix_seconds.min(i64::MAX as u64) as i64,
+            self.principal_id.unwrap_or("anonymous"),
+            serializer.finish(),
+        )
+        .map_err(|reason| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "audit.record.failed",
+                "Failed to persist the checkout audit entry.",
+            )
+            .with_detail(reason)
+        })
+    }
+}
+
 fn cms_page_form_state_from_execution(
     execution: &RequestExecution,
     summary: impl Into<String>,
@@ -971,6 +1074,160 @@ fn storefront_cart_form_state_from_execution(
         }
     }
     state
+}
+
+fn checkout_request_context(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> SdkRequestContext {
+    let environment = match state.plan.config.app.environment {
+        davenda_config::Environment::Development => "development",
+        davenda_config::Environment::Staging => "staging",
+        davenda_config::Environment::Production => "production",
+    };
+    let customer_app = match execution.locale.trim() {
+        "" => SdkCustomerAppContext::new(execution.customer_app.clone(), environment.to_owned()),
+        locale => {
+            SdkCustomerAppContext::new(execution.customer_app.clone(), environment.to_owned())
+                .with_locale(locale.to_string())
+        }
+    };
+    let principal = execution
+        .principal
+        .principal_id
+        .as_deref()
+        .map(|principal_id| SdkPrincipalContext {
+            kind: SdkPrincipalKind::User,
+            id: Some(principal_id.to_string()),
+        })
+        .unwrap_or_else(SdkPrincipalContext::anonymous);
+    let trace = SdkTraceContext::new(execution.trace.request_id.clone())
+        .with_request_id(execution.trace.request_id.clone());
+    SdkRequestContext::new(customer_app, principal, trace)
+}
+
+fn checkout_order_draft(
+    state: &RuntimeServerState,
+    session_id: &str,
+    principal_id: Option<&str>,
+    payment: &StorefrontPaymentInput,
+) -> Result<OrderDraft, RuntimeServerError> {
+    let snapshot = state.storefront.snapshot(session_id, principal_id)?;
+    let lines = snapshot
+        .cart
+        .lines
+        .iter()
+        .map(|line| {
+            let collection_handle = state
+                .plan
+                .storefront_catalog
+                .product_by_sku_or_handle(&line.sku)
+                .map(|product| product.collection_handle.clone());
+            OrderLineDraft {
+                sku: line.sku.clone(),
+                title: line.title.clone(),
+                quantity: line.quantity,
+                unit_price: MoneyAmount::new(line.currency.clone(), line.unit_price_minor),
+                product_kind: line.product_kind.clone(),
+                collection_handle,
+                entitlement_key: line.entitlement_key.clone(),
+                metadata: BTreeMap::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut metadata = BTreeMap::new();
+    metadata.insert("session_id".to_string(), session_id.to_string());
+    metadata.insert(
+        "payment_method".to_string(),
+        payment.method.trim().to_ascii_lowercase(),
+    );
+    metadata.insert(
+        "checkout_email".to_string(),
+        payment.checkout_email.trim().to_string(),
+    );
+    Ok(OrderDraft {
+        order_id: format!("draft:{}", payment.intent_reference),
+        currency_code: snapshot.cart.currency.clone(),
+        subtotal: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
+        total: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
+        lines,
+        metadata,
+    })
+}
+
+fn customer_checkout_error_summary(error: &BackendError) -> Cow<'static, str> {
+    match error.kind() {
+        BackendErrorKind::InvalidInput
+        | BackendErrorKind::Forbidden
+        | BackendErrorKind::Conflict
+        | BackendErrorKind::Unauthorized => Cow::Owned(error.message().to_string()),
+        BackendErrorKind::Unsupported => Cow::Borrowed(
+            "Checkout could not continue because a required customer backend feature is not available in this runtime yet.",
+        ),
+        BackendErrorKind::Unavailable | BackendErrorKind::Timeout | BackendErrorKind::Internal => {
+            Cow::Borrowed("Checkout is temporarily unavailable. Review the basket and try again.")
+        }
+    }
+}
+
+fn review_checkout_with_customer_hooks(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    session_id: &str,
+    payment: &StorefrontPaymentInput,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if state.plan.customer_hooks.checkout.is_empty() {
+        return Ok(None);
+    }
+
+    let context = checkout_request_context(state, execution);
+    let order = checkout_order_draft(
+        state,
+        session_id,
+        execution.principal.principal_id.as_deref(),
+        payment,
+    )?;
+    let commerce = RuntimeCheckoutCommerceFacade {
+        catalog: &state.plan.storefront_catalog,
+    };
+    let auth = RuntimeCheckoutAuthFacade;
+    let audit = RuntimeCheckoutAuditFacade {
+        plan: &state.plan,
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+    };
+    let mut adjustment_messages = Vec::new();
+
+    for hook in &state.plan.customer_hooks.checkout {
+        match hook.review_order(&context, &order, &commerce, &auth, &audit) {
+            Ok(OrderReviewDecision::Approved) => {}
+            Ok(OrderReviewDecision::Adjusted(adjustment)) => {
+                adjustment_messages.push(adjustment.reason);
+            }
+            Ok(OrderReviewDecision::Rejected(rejection)) => {
+                let form_state =
+                    storefront_checkout_form_state_from_execution(execution, rejection.message);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/checkout".to_string()));
+            }
+            Err(error) => {
+                let form_state = storefront_checkout_form_state_from_execution(
+                    execution,
+                    customer_checkout_error_summary(&error),
+                );
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/checkout".to_string()));
+            }
+        }
+    }
+
+    for message in adjustment_messages {
+        push_storefront_flash(state, response_cookies, FlashLevel::Info, message)?;
+    }
+
+    Ok(None)
 }
 
 fn catalog_admin_product_form_state_from_execution(
@@ -1776,6 +2033,16 @@ async fn apply_native_storefront_mutations(
                     return Ok(Some("/checkout".to_string()));
                 }
             };
+            if let Some(location) = review_checkout_with_customer_hooks(
+                state,
+                execution,
+                session_id,
+                &payment,
+                now,
+                response_cookies,
+            )? {
+                return Ok(Some(location));
+            }
             let snapshot = match state.storefront.checkout_complete(
                 session_id,
                 execution.principal.principal_id.as_deref(),

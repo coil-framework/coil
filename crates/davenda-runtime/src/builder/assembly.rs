@@ -1,4 +1,6 @@
 use super::*;
+use crate::builder::LinkedCustomerPluginSummary;
+use crate::builder::customer_plugins::{CustomerHookSet, RuntimeCustomerHookRegistry};
 use crate::builder::helpers::*;
 use crate::builder::http::*;
 use crate::builder::state::RuntimeBuilderParts;
@@ -16,6 +18,7 @@ where
         config,
         auth_package,
         modules,
+        customer_plugins,
         extensions,
         templates,
         template_roots,
@@ -36,19 +39,68 @@ where
     }
 
     let bootstrap = bootstrap_core_services(&config)?;
-    let storage_planner =
-        StoragePlanner::new(StorageTopology::from_config(&config), storage_policies);
     let mut registry = bootstrap.registry;
     let mut template = bootstrap.template;
     let mut observability = bootstrap.observability;
     let mut module_manifests = Vec::new();
     let mut install_migrations = MigrationPlan::new();
+    let mut linked_customer_plugins = Vec::new();
+    let mut customer_hooks = CustomerHookSet::default();
 
-    for feature_flag in feature_flags {
+    let runtime_routes = routes;
+    let runtime_handlers = handlers;
+    let runtime_templates = templates;
+    let runtime_template_roots = template_roots;
+    let runtime_storage_policies = storage_policies;
+    let runtime_feature_flags = feature_flags;
+    let runtime_maintenance_mode = maintenance_mode;
+
+    let mut seen_customer_plugins = BTreeSet::new();
+    for plugin in customer_plugins {
+        let descriptor = plugin.descriptor();
+        let plugin_id = descriptor.id.trim().to_string();
+        if plugin_id.is_empty() {
+            return Err(RuntimeBuildError::CustomerPluginRegistration {
+                plugin_id: "<empty>".to_string(),
+                message: "invalid_input:plugin.id: customer plugin id must not be empty"
+                    .to_string(),
+            });
+        }
+        if !seen_customer_plugins.insert(plugin_id.clone()) {
+            return Err(RuntimeBuildError::DuplicateCustomerPlugin { plugin_id });
+        }
+
+        let mut plugin_registry = RuntimeCustomerHookRegistry::default();
+        plugin.register(&mut plugin_registry).map_err(|error| {
+            RuntimeBuildError::CustomerPluginRegistration {
+                plugin_id: plugin_id.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        let (registered_hooks, hook_kinds) = plugin_registry.into_parts();
+        customer_hooks.checkout.extend(registered_hooks.checkout);
+        customer_hooks.cms.extend(registered_hooks.cms);
+        customer_hooks
+            .verified_webhooks
+            .extend(registered_hooks.verified_webhooks);
+        linked_customer_plugins.push(LinkedCustomerPluginSummary {
+            plugin_id,
+            display_name: descriptor.display_name,
+            version: descriptor.version,
+            registered_hooks: hook_kinds,
+        });
+    }
+
+    let storage_planner = StoragePlanner::new(
+        StorageTopology::from_config(&config),
+        runtime_storage_policies,
+    );
+
+    for feature_flag in runtime_feature_flags {
         observability.flags.insert(feature_flag)?;
     }
 
-    if let Some(maintenance_mode) = maintenance_mode {
+    if let Some(maintenance_mode) = runtime_maintenance_mode {
         observability.maintenance = maintenance_mode;
     }
 
@@ -78,7 +130,7 @@ where
     }
 
     let mut customer_templates = templates::load_customer_templates_from_roots(
-        &template_roots,
+        &runtime_template_roots,
         template.customer_app_namespace.clone(),
     )?;
     templates::supplement_customer_templates(
@@ -91,9 +143,9 @@ where
     )?;
 
     let (module_routes, module_handlers) = module_http_contributions(&module_manifests)?;
-    let mut all_routes = routes;
+    let mut all_routes = runtime_routes;
     all_routes.extend(module_routes);
-    let mut all_handlers = handlers;
+    let mut all_handlers = runtime_handlers;
     all_handlers.extend(module_handlers);
     append_customer_home_route(&customer_templates, &mut all_routes, &mut all_handlers)?;
     let http = build_http_runtime_plan(&auth_package, &all_routes)?;
@@ -108,7 +160,7 @@ where
         module.register(&mut registry)?;
     }
 
-    for definition in templates {
+    for definition in runtime_templates {
         template.registry.register(definition)?;
     }
     for definition in customer_templates {
@@ -224,7 +276,7 @@ where
 
     let shared_backend_scope = next_runtime_plan_scope();
     let shared_state_root = shared_state_root(&config);
-    let storefront_catalog = StorefrontCatalog::load_from_roots(&template_roots)?;
+    let storefront_catalog = StorefrontCatalog::load_from_roots(&runtime_template_roots)?;
 
     let app_name = config.app.name.clone();
 
@@ -258,6 +310,8 @@ where
         extension_registry,
         registered_extension_slots,
         installed_extensions,
+        linked_customer_plugins,
+        customer_hooks,
         shared_jobs_runtime: SharedJobsRuntimeHandle::new(format!(
             "customer-app:{}:{}",
             app_name, shared_backend_scope

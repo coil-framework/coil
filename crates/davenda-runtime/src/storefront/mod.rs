@@ -532,7 +532,8 @@ impl StorefrontCatalog {
     }
 
     pub fn visible_collection(&self, handle: &str) -> Option<&StorefrontCollectionDefinition> {
-        self.collection(handle).filter(|collection| collection.is_visible)
+        self.collection(handle)
+            .filter(|collection| collection.is_visible)
     }
 
     pub fn product(&self, handle: &str) -> Option<&StorefrontProductDefinition> {

@@ -154,6 +154,10 @@ pub fn bootstrap_core_services(
         "Per-surface WASM resource limits for pages, APIs, jobs, webhooks, and widgets",
     )?;
     registry.register_core_service(
+        "core.customer_plugins",
+        "Linked customer-plugin registration and stable first-party hook runtime",
+    )?;
+    registry.register_core_service(
         "core.jobs",
         format!(
             "Background jobs, scheduler, and domain-event queues over {:?}",

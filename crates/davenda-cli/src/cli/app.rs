@@ -3989,11 +3989,11 @@ fn run_tls_status(config_path: &Path) -> Result<CommandReport, CliRunError> {
         .runtime
         .tls_validation_host_with_secret_resolver(&EnvironmentSecretResolver)
         .map_err(|error| {
-        CliRunError::execution(format!(
-            "failed to build TLS host for `{}`: {error}",
-            built.manifest.id
-        ))
-    })?;
+            CliRunError::execution(format!(
+                "failed to build TLS host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
     let snapshot = host.status();
 
     let mut report = CommandReport::new(
@@ -4138,11 +4138,11 @@ fn run_tls_validate_challenge_impl(
         .runtime
         .tls_validation_host_with_secret_resolver(&EnvironmentSecretResolver)
         .map_err(|error| {
-        CliRunError::execution(format!(
-            "failed to build TLS host for `{}`: {error}",
-            built.manifest.id
-        ))
-    })?;
+            CliRunError::execution(format!(
+                "failed to build TLS host for `{}`: {error}",
+                built.manifest.id
+            ))
+        })?;
     let bindings = customer_app_tls_bindings(&built)?;
     let validation = host
         .validate_challenge_for_bindings(bindings.clone())

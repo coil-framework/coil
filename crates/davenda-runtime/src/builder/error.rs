@@ -47,6 +47,10 @@ pub enum RuntimeBuildError {
     EmptyTemplateTree { path: String },
     #[error("configured auth package `{configured}` does not match loaded package `{actual}`")]
     AuthPackageMismatch { configured: String, actual: String },
+    #[error("linked customer plugin `{plugin_id}` is registered more than once")]
+    DuplicateCustomerPlugin { plugin_id: String },
+    #[error("failed to register linked customer plugin `{plugin_id}`: {message}")]
+    CustomerPluginRegistration { plugin_id: String, message: String },
     #[error(
         "installed extension `{extension_id}` targets customer app `{actual}` but runtime config is `{configured}`"
     )]

@@ -1,5 +1,53 @@
 use super::*;
+use davenda_customer_sdk::{
+    AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade, CustomerPluginDescriptor,
+    OrderDraft, OrderReviewDecision, RequestContext,
+};
 use davenda_storage::StoragePolicyOverride;
+use std::sync::Arc;
+
+#[derive(Debug)]
+struct ExampleCheckoutPlugin;
+
+#[derive(Debug)]
+struct ExampleCheckoutHooks;
+
+impl CheckoutHooks for ExampleCheckoutHooks {
+    fn review_order(
+        &self,
+        _ctx: &RequestContext,
+        _order: &OrderDraft,
+        _commerce: &dyn CommerceFacade,
+        _auth: &dyn AuthFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<OrderReviewDecision, BackendError> {
+        Ok(OrderReviewDecision::approved())
+    }
+}
+
+impl CustomerBackendPlugin for ExampleCheckoutPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new("harbor-shop-backend", "Harbor Shop Backend", "0.1.0")
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_checkout_hooks(Arc::new(ExampleCheckoutHooks))?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct DuplicateCustomerPlugin;
+
+impl CustomerBackendPlugin for DuplicateCustomerPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new("harbor-shop-backend", "Harbor Shop Backend", "0.1.1")
+    }
+
+    fn register(&self, _registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        Ok(())
+    }
+}
 
 #[test]
 fn storage_host_applies_path_rules_for_sensitive_files() {
@@ -71,6 +119,49 @@ fn storage_host_publishes_deployment_releases_to_the_cdn_manifest() {
         AssetDeliveryTarget::Cdn { public_url, object_key }
             if public_url == &format!("https://cdn.example.com/theme/site.{digest}.css")
                 && object_key == &format!("theme/site.{digest}.css")
+    ));
+}
+
+#[test]
+fn runtime_builder_registers_linked_customer_plugins_through_sdk_hooks() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .register_customer_plugin(ExampleCheckoutPlugin)
+        .build()
+        .unwrap();
+
+    assert_eq!(plan.customer_hooks.checkout.len(), 1);
+    assert_eq!(plan.customer_hooks.cms.len(), 0);
+    assert_eq!(plan.customer_hooks.verified_webhooks.len(), 0);
+    assert_eq!(plan.linked_customer_plugins.len(), 1);
+    assert_eq!(
+        plan.linked_customer_plugins[0].plugin_id,
+        "harbor-shop-backend"
+    );
+    assert_eq!(
+        plan.linked_customer_plugins[0].display_name,
+        "Harbor Shop Backend"
+    );
+    assert_eq!(plan.linked_customer_plugins[0].version, "0.1.0");
+    assert_eq!(
+        plan.linked_customer_plugins[0].registered_hooks,
+        vec![RegisteredHookKind::Checkout]
+    );
+}
+
+#[test]
+fn runtime_builder_rejects_duplicate_linked_customer_plugins() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .register_customer_plugin(ExampleCheckoutPlugin)
+        .register_customer_plugin(DuplicateCustomerPlugin)
+        .build()
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeBuildError::DuplicateCustomerPlugin { plugin_id }
+            if plugin_id == "harbor-shop-backend"
     ));
 }
 

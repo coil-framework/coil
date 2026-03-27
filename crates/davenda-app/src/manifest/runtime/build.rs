@@ -1,4 +1,5 @@
 use super::*;
+use davenda_customer_sdk::CustomerBackendPlugin;
 use std::path::Path;
 
 impl CustomerAppManifest {
@@ -44,14 +45,57 @@ impl CustomerAppManifest {
     where
         P: AuthModelPackage + 'static,
     {
-        let app_root = std::env::current_dir().map_err(|error| AppModelError::RuntimeBuild {
-            message: format!("failed to resolve customer app root: {error}"),
-        })?;
-        self.build_runtime_plan_with_extensions_at(
+        self.build_runtime_plan_with_extensions_and_customer_plugins(
             config,
             auth_package,
             modules,
             extension_packages,
+            Vec::new(),
+        )
+    }
+
+    pub fn build_runtime_plan_with_customer_plugins<P, A>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+        customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
+        app_root: A,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage + 'static,
+        A: AsRef<Path>,
+    {
+        self.build_runtime_plan_with_extensions_and_customer_plugins_at(
+            config,
+            auth_package,
+            modules,
+            Vec::new(),
+            customer_plugins,
+            app_root,
+        )
+    }
+
+    pub fn build_runtime_plan_with_extensions_and_customer_plugins<P>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+        extension_packages: Vec<ExtensionPackage>,
+        customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage + 'static,
+    {
+        let app_root = std::env::current_dir().map_err(|error| AppModelError::RuntimeBuild {
+            message: format!("failed to resolve customer app root: {error}"),
+        })?;
+        self.build_runtime_plan_with_extensions_and_customer_plugins_at(
+            config,
+            auth_package,
+            modules,
+            extension_packages,
+            customer_plugins,
             app_root,
         )
     }
@@ -62,6 +106,29 @@ impl CustomerAppManifest {
         auth_package: P,
         modules: Vec<Box<dyn PlatformModule>>,
         extension_packages: Vec<ExtensionPackage>,
+        app_root: A,
+    ) -> Result<CustomerAppRuntimePlan, AppModelError>
+    where
+        P: AuthModelPackage + 'static,
+        A: AsRef<Path>,
+    {
+        self.build_runtime_plan_with_extensions_and_customer_plugins_at(
+            config,
+            auth_package,
+            modules,
+            extension_packages,
+            Vec::new(),
+            app_root,
+        )
+    }
+
+    pub fn build_runtime_plan_with_extensions_and_customer_plugins_at<P, A>(
+        &self,
+        config: PlatformConfig,
+        auth_package: P,
+        modules: Vec<Box<dyn PlatformModule>>,
+        extension_packages: Vec<ExtensionPackage>,
+        customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
         app_root: A,
     ) -> Result<CustomerAppRuntimePlan, AppModelError>
     where
@@ -110,6 +177,9 @@ impl CustomerAppManifest {
         builder = builder.with_template_root(app_root);
         for module in modules {
             builder = builder.with_boxed_module(module);
+        }
+        for plugin in customer_plugins {
+            builder = builder.with_boxed_customer_plugin(plugin);
         }
         for extension in installed_extensions {
             builder = builder.with_installed_extension(extension);

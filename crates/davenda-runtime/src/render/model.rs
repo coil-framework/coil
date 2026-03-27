@@ -1,4 +1,5 @@
 use super::*;
+use crate::builder::RegisteredHookKind;
 use crate::storefront::{
     StorefrontCartLine, StorefrontFormState, StorefrontOrderSnapshot, StorefrontPaymentSnapshot,
     StorefrontStateSnapshot, StorefrontStateStore,
@@ -7,6 +8,14 @@ use davenda_assets::AssetDeliveryTarget;
 use davenda_commerce::{
     CheckoutId, CheckoutLine, CheckoutSession, CurrencyCode, EntitlementKey, Money, Order, OrderId,
     PricingPolicy, ProductId, ProductKind, Sku,
+};
+use davenda_customer_sdk::{
+    AuditEntry, AuditFacade, AuthCheckRequest, AuthCheckResult, AuthExplainRequest,
+    AuthExplanation, AuthFacade, BackendError, CommerceFacade,
+    CustomerAppContext as CustomerPluginAppContext, MoneyAmount, OrderDraft, OrderLineDraft,
+    OrderReviewDecision, PrincipalContext as CustomerPluginPrincipalContext,
+    PrincipalKind as CustomerPluginPrincipalKind, RequestContext as CustomerPluginRequestContext,
+    TraceContext as CustomerPluginTraceContext,
 };
 use davenda_memberships::{
     BillingInterval, MemberAccountId, MembershipCatalog, MembershipInstant, MembershipModelError,
@@ -17,6 +26,58 @@ use davenda_template::{
 };
 use std::collections::BTreeMap;
 use url::form_urlencoded;
+
+struct RuntimeCustomerCommerceFacade;
+
+impl CommerceFacade for RuntimeCustomerCommerceFacade {
+    fn product(
+        &self,
+        _sku: &str,
+    ) -> Result<Option<davenda_customer_sdk::CommerceProduct>, BackendError> {
+        Ok(None)
+    }
+
+    fn add_order_note(&self, _order_id: &str, _note: &str) -> Result<(), BackendError> {
+        Ok(())
+    }
+}
+
+struct RuntimeCustomerAuthFacade;
+
+impl AuthFacade for RuntimeCustomerAuthFacade {
+    fn check_capability(
+        &self,
+        _request: &AuthCheckRequest,
+    ) -> Result<AuthCheckResult, BackendError> {
+        Ok(AuthCheckResult {
+            allowed: false,
+            explanation: Some(
+                "runtime customer auth facade is not wired for direct checks".to_string(),
+            ),
+        })
+    }
+
+    fn explain_denial(
+        &self,
+        request: &AuthExplainRequest,
+    ) -> Result<AuthExplanation, BackendError> {
+        Ok(AuthExplanation {
+            summary: format!(
+                "No denial explainer is wired for `{}` on `{}`",
+                request.capability, request.object
+            ),
+            traces: Vec::new(),
+        })
+    }
+}
+
+struct RuntimeCustomerAuditFacade;
+
+impl AuditFacade for RuntimeCustomerAuditFacade {
+    fn record(&self, _entry: AuditEntry) -> Result<(), BackendError> {
+        Ok(())
+    }
+}
 
 impl RuntimePlan {
     pub(super) fn template_namespaces_for_execution(
@@ -122,6 +183,14 @@ impl RuntimePlan {
             .with_object(
                 "page",
                 page_model_for_route(execution, template_name, fragment_id),
+            )?
+            .with_bool(
+                "hasLinkedCustomerPlugins",
+                !self.linked_customer_plugins.is_empty(),
+            )?
+            .with_list(
+                "linkedCustomerPlugins",
+                linked_customer_plugins_model(&self.linked_customer_plugins)?,
             )?;
 
         if let Some(fragment_id) = fragment_id {
@@ -147,6 +216,42 @@ impl RuntimePlan {
             Some(&execution.session),
             Some(&execution.principal),
         )
+    }
+}
+
+fn linked_customer_plugins_model(
+    plugins: &[crate::builder::LinkedCustomerPluginSummary],
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    plugins
+        .iter()
+        .map(|plugin| {
+            RenderModel::new()
+                .with_value("id", RenderValue::text(plugin.plugin_id.clone()))?
+                .with_value(
+                    "displayName",
+                    RenderValue::text(plugin.display_name.clone()),
+                )?
+                .with_value("version", RenderValue::text(plugin.version.clone()))?
+                .with_value(
+                    "hooksSummary",
+                    RenderValue::text(
+                        plugin
+                            .registered_hooks
+                            .iter()
+                            .map(registered_hook_label)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                )
+        })
+        .collect()
+}
+
+fn registered_hook_label(kind: &RegisteredHookKind) -> &'static str {
+    match kind {
+        RegisteredHookKind::Checkout => "checkout",
+        RegisteredHookKind::CmsPagePublish => "cms-page-publish",
+        RegisteredHookKind::VerifiedWebhook => "verified-webhook",
     }
 }
 
@@ -568,7 +673,8 @@ fn apply_route_specific_bindings(
             let selected_order = params
                 .get("order_id")
                 .and_then(|order_id| {
-                    order_detail_from_storefront(plan, order_id, form_state).transpose()
+                    order_detail_from_storefront(plan, order_id, form_state, session, principal)
+                        .transpose()
                 })
                 .transpose()?;
             model = model
@@ -954,6 +1060,8 @@ fn order_detail_from_storefront(
     plan: Option<&RuntimePlan>,
     order_id: &str,
     form_state: Option<&StorefrontFormState>,
+    session: Option<&SessionContext>,
+    principal: Option<&PrincipalContext>,
 ) -> Result<Option<RenderModel>, TemplateModelError> {
     let Some(plan) = plan else {
         return Ok(None);
@@ -1038,7 +1146,12 @@ fn order_detail_from_storefront(
                 .with_value("reason", RenderValue::text(refund.reason.clone()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    RenderModel::new()
+    let customer_review = customer_order_review(plan, &order, session, principal)?;
+    let has_customer_review = customer_review.is_some();
+    let customer_review_model = customer_review
+        .map(customer_order_review_model)
+        .transpose()?;
+    let mut model = RenderModel::new()
         .with_value("orderId", RenderValue::text(order.order_id.clone()))?
         .with_value("reference", RenderValue::text(order.order_id.clone()))?
         .with_value(
@@ -1087,11 +1200,129 @@ fn order_detail_from_storefront(
         .with_list("refunds", refunds)?
         .with_bool("hasLineItems", !order.lines.is_empty())?
         .with_list("lineItems", line_items)?
+        .with_bool("hasCustomerReview", has_customer_review)?
         .with_value(
             "detailHref",
             RenderValue::text(format!("/admin/orders/{}", order.order_id)),
+        )?;
+    if let Some(customer_review_model) = customer_review_model {
+        model = model.with_object("customerReview", customer_review_model)?;
+    }
+    Ok(Some(model))
+}
+
+fn customer_order_review(
+    plan: &RuntimePlan,
+    order: &StorefrontOrderSnapshot,
+    _session: Option<&SessionContext>,
+    principal: Option<&PrincipalContext>,
+) -> Result<Option<OrderReviewDecision>, TemplateModelError> {
+    let Some(hook) = plan.customer_hooks.checkout.first() else {
+        return Ok(None);
+    };
+    let request = CustomerPluginRequestContext::new(
+        CustomerPluginAppContext::new(
+            plan.config.app.name.clone(),
+            format!("{:?}", plan.config.app.environment).to_ascii_lowercase(),
+        ),
+        customer_plugin_principal(principal, &order.principal_id),
+        CustomerPluginTraceContext::new(format!("order-detail:{}", order.order_id)),
+    );
+    let review = hook
+        .review_order(
+            &request,
+            &customer_order_draft(order),
+            &RuntimeCustomerCommerceFacade,
+            &RuntimeCustomerAuthFacade,
+            &RuntimeCustomerAuditFacade,
         )
-        .map(Some)
+        .map_err(customer_plugin_template_error)?;
+    Ok(Some(review))
+}
+
+fn customer_order_draft(order: &StorefrontOrderSnapshot) -> OrderDraft {
+    let subtotal = MoneyAmount::new(order.currency.clone(), order.subtotal_minor);
+    let total = MoneyAmount::new(order.currency.clone(), order.total_minor);
+    let lines = order
+        .lines
+        .iter()
+        .map(|line| OrderLineDraft {
+            sku: line.sku.clone(),
+            title: line.title.clone(),
+            quantity: line.quantity,
+            unit_price: MoneyAmount::new(line.currency.clone(), line.unit_price_minor),
+            product_kind: line.product_kind.clone(),
+            collection_handle: None,
+            entitlement_key: line.entitlement_key.clone(),
+            metadata: BTreeMap::new(),
+        })
+        .collect();
+    OrderDraft {
+        order_id: order.order_id.clone(),
+        currency_code: order.currency.clone(),
+        subtotal,
+        total,
+        lines,
+        metadata: BTreeMap::new(),
+    }
+}
+
+fn customer_plugin_principal(
+    principal: Option<&PrincipalContext>,
+    order_principal_id: &Option<String>,
+) -> CustomerPluginPrincipalContext {
+    if let Some(principal) = principal {
+        if let Some(principal_id) = principal.principal_id.as_ref() {
+            return CustomerPluginPrincipalContext::user(principal_id.clone());
+        }
+    }
+    if let Some(principal_id) = order_principal_id.as_ref() {
+        return CustomerPluginPrincipalContext::user(principal_id.clone());
+    }
+    CustomerPluginPrincipalContext {
+        kind: CustomerPluginPrincipalKind::Anonymous,
+        id: None,
+    }
+}
+
+fn customer_plugin_template_error(error: BackendError) -> TemplateModelError {
+    TemplateModelError::TemplateRead {
+        path: "linked customer hook".to_string(),
+        message: error.to_string(),
+    }
+}
+
+fn customer_order_review_model(
+    decision: OrderReviewDecision,
+) -> Result<RenderModel, TemplateModelError> {
+    match decision {
+        OrderReviewDecision::Approved => RenderModel::new()
+            .with_value("status", RenderValue::text("Approved"))?
+            .with_value(
+                "summary",
+                RenderValue::text(
+                    "The linked Harbor customer backend approved this order without extra handling.",
+                ),
+            )?
+            .with_value("code", RenderValue::text("approved"))?
+            .with_bool("isApproved", true)?
+            .with_bool("isRejected", false)?
+            .with_bool("isAdjusted", false),
+        OrderReviewDecision::Rejected(rejection) => RenderModel::new()
+            .with_value("status", RenderValue::text("Rejected"))?
+            .with_value("summary", RenderValue::text(rejection.message.clone()))?
+            .with_value("code", RenderValue::text(rejection.code))?
+            .with_bool("isApproved", false)?
+            .with_bool("isRejected", true)?
+            .with_bool("isAdjusted", false),
+        OrderReviewDecision::Adjusted(adjustment) => RenderModel::new()
+            .with_value("status", RenderValue::text("Adjusted"))?
+            .with_value("summary", RenderValue::text(adjustment.reason.clone()))?
+            .with_value("code", RenderValue::text("adjusted"))?
+            .with_bool("isApproved", false)?
+            .with_bool("isRejected", false)?
+            .with_bool("isAdjusted", true),
+    }
 }
 
 fn admin_order_row_from_storefront(
@@ -3878,7 +4109,7 @@ fn merge_checkout_form_feedback(
     form_state: Option<&StorefrontFormState>,
 ) -> Result<RenderModel, TemplateModelError> {
     let errors = form_errors_model(form_state)?;
-    let has_errors = !errors.is_empty();
+    let has_errors = form_state.is_some() || !errors.is_empty();
     let checkout_email_error = storefront_field_error(form_state, "checkout_email");
     let payment_method_error = storefront_field_error(form_state, "payment_method");
     let payment_last4_error = storefront_field_error(form_state, "payment_last4");

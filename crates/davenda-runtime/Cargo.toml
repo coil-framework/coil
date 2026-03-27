@@ -11,6 +11,7 @@ davenda-cache = { path = "../davenda-cache" }
 davenda-commerce = { path = "../davenda-commerce" }
 davenda-config = { path = "../davenda-config" }
 davenda-core = { path = "../davenda-core" }
+davenda-customer-sdk = { path = "../davenda-customer-sdk" }
 davenda-data = { path = "../davenda-data" }
 davenda-i18n = { path = "../davenda-i18n" }
 davenda-jobs = { path = "../davenda-jobs" }

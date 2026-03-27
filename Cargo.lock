@@ -626,6 +626,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "davenda-all"
+version = "0.1.0"
+dependencies = [
+ "davenda-admin",
+ "davenda-app",
+ "davenda-auth",
+ "davenda-cms",
+ "davenda-commerce",
+ "davenda-config",
+ "davenda-core",
+ "davenda-customer-sdk",
+ "davenda-events",
+ "davenda-media",
+ "davenda-memberships",
+ "davenda-ops",
+ "davenda-runtime",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "davenda-app"
 version = "0.1.0"
 dependencies = [
@@ -633,6 +653,7 @@ dependencies = [
  "davenda-auth",
  "davenda-config",
  "davenda-core",
+ "davenda-customer-sdk",
  "davenda-data",
  "davenda-i18n",
  "davenda-jobs",
@@ -774,6 +795,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "davenda-customer-sdk"
+version = "0.1.0"
+
+[[package]]
 name = "davenda-data"
 version = "0.1.0"
 dependencies = [
@@ -885,6 +910,7 @@ dependencies = [
  "davenda-commerce",
  "davenda-config",
  "davenda-core",
+ "davenda-customer-sdk",
  "davenda-data",
  "davenda-events",
  "davenda-i18n",

@@ -123,6 +123,7 @@ fn bootstrap_registers_core_services() {
     assert!(ids.contains(&"core.template.fragments"));
     assert!(ids.contains(&"core.wasm"));
     assert!(ids.contains(&"core.wasm.limits"));
+    assert!(ids.contains(&"core.customer_plugins"));
     assert_eq!(
         bootstrap.cache.distributed_backend(),
         Some(DistributedCacheBackend::Redis)

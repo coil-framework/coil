@@ -1,4 +1,5 @@
 use super::*;
+use crate::builder::CustomerHookSet;
 use davenda_assets::ActiveAssetManifest;
 use davenda_storage::execution::ObjectStoreClientConfig;
 use std::fmt;
@@ -86,6 +87,8 @@ pub struct RuntimePlan {
     pub extension_registry: ExtensionRegistry,
     pub registered_extension_slots: Vec<RegisteredExtensionSlot>,
     pub installed_extensions: Vec<InstalledExtensionSummary>,
+    pub linked_customer_plugins: Vec<LinkedCustomerPluginSummary>,
+    pub(crate) customer_hooks: CustomerHookSet,
     pub(crate) shared_jobs_runtime: SharedJobsRuntimeHandle,
     pub module_jobs: Vec<RegisteredModuleJob>,
     pub module_event_subscriptions: Vec<RegisteredEventSubscription>,

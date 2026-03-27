@@ -1,5 +1,9 @@
 use super::*;
 use axum::response::Response;
+use davenda_customer_sdk::{
+    AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade, CustomerPluginDescriptor,
+    OrderDraft, OrderReviewDecision, RequestContext,
+};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::sync::Mutex;
@@ -62,6 +66,49 @@ impl crate::server::HostedCheckoutClient for StaticHostedCheckoutClient {
             id: self.session_id.clone(),
             url: self.session_url.clone(),
         })
+    }
+}
+
+#[derive(Debug)]
+struct RejectMembershipCheckoutPlugin;
+
+#[derive(Debug)]
+struct RejectMembershipCheckoutHooks;
+
+impl CheckoutHooks for RejectMembershipCheckoutHooks {
+    fn review_order(
+        &self,
+        _ctx: &RequestContext,
+        order: &OrderDraft,
+        _commerce: &dyn CommerceFacade,
+        _auth: &dyn AuthFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<OrderReviewDecision, BackendError> {
+        if order
+            .lines
+            .iter()
+            .any(|line| line.entitlement_key.as_deref() == Some("membership.gold"))
+        {
+            return Ok(OrderReviewDecision::rejected(
+                "checkout.manual_review",
+                "Orders containing Gold Membership require manual review before payment can start.",
+            ));
+        }
+        Ok(OrderReviewDecision::approved())
+    }
+}
+
+impl CustomerBackendPlugin for RejectMembershipCheckoutPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "harbor-shop-checkout-policy",
+            "Harbor Shop Checkout Policy",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_checkout_hooks(Arc::new(RejectMembershipCheckoutHooks))
     }
 }
 
@@ -5204,6 +5251,205 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
 }
 
 #[tokio::test]
+async fn server_host_runs_sdk_checkout_hooks_before_stripe_handoff() {
+    let app_name = unique_app_name("harbor-shop-runtime-checkout-hooks");
+    let mut config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    config.auth.package = "harbor-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .register_customer_plugin(RejectMembershipCheckoutPlugin)
+        .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
+        .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
+        .with_module(CommerceModule::new())
+        .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
+        .with_module(davenda_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let checkout_client = Arc::new(StaticHostedCheckoutClient::with_url(
+        "https://checkout.stripe.test/session/cs_test_harbor_shop_blocked",
+    ));
+    let server = plan
+        .server_host_with_checkout_client(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+            checkout_client.clone(),
+        )
+        .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-checkout-hooks";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("davenda_session={}", issued.cookie_value);
+
+    let cart_bootstrap = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let add_token = response_header(
+        &cart_bootstrap,
+        "x-davenda-storefront-csrf-commerce-add-to-cart",
+    );
+    let add_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/cart/items")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", add_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("product_slug", "gold-membership")
+                        .append_pair("quantity", "1")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(add_response.status(), StatusCode::SEE_OTHER);
+
+    let cart_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/cart")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_start_token = response_header(
+        &cart_response,
+        "x-davenda-storefront-csrf-commerce-checkout-start",
+    );
+    let checkout_start = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/start")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_start_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkout_start.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&checkout_start, "location"), "/checkout");
+
+    let checkout_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_complete_token = response_header(
+        &checkout_response,
+        "x-davenda-storefront-csrf-commerce-checkout-complete",
+    );
+
+    let complete_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/checkout/complete")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("x-csrf-token", checkout_complete_token)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("checkout_email", "buyer@example.com")
+                        .append_pair("payment_method", "card")
+                        .append_pair("checkout_intent", "PAY-50001")
+                        .append_pair("terms_accepted", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let flash_cookie =
+        cookie_pair_from_response(&complete_response, "davenda_flash").expect("flash cookie");
+    assert_eq!(complete_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&complete_response, "location"), "/checkout");
+    assert!(checkout_client.take_calls().is_empty());
+
+    let checkout_retry = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/checkout")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("{session_cookie}; {flash_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let checkout_retry_body = String::from_utf8(
+        to_bytes(checkout_retry.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert!(
+        checkout_retry_body.contains(
+            "Orders containing Gold Membership require manual review before payment can start."
+        ),
+        "{checkout_retry_body}"
+    );
+    assert!(
+        checkout_retry_body.contains("buyer@example.com"),
+        "{checkout_retry_body}"
+    );
+}
+
+#[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and_webhook() {
     let app_name = unique_app_name("harbor-shop-runtime-stripe-handoff");
     let mut config = checked_in_harbor_shop_config(&app_name);
@@ -8480,7 +8726,10 @@ async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_sh
             .to_vec(),
     )
     .unwrap();
-    assert!(!catalog_page_body.contains("Harbor Cap"), "{catalog_page_body}");
+    assert!(
+        !catalog_page_body.contains("Harbor Cap"),
+        "{catalog_page_body}"
+    );
 
     let hidden_product_page = server
         .respond(
@@ -8505,7 +8754,10 @@ async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_sh
         hidden_product_body.contains("This product is not currently available."),
         "{hidden_product_body}"
     );
-    assert!(!hidden_product_body.contains("Add to cart"), "{hidden_product_body}");
+    assert!(
+        !hidden_product_body.contains("Add to cart"),
+        "{hidden_product_body}"
+    );
 
     let collection_token =
         storefront_csrf_token_from_body(&updated_admin_body, "commerce.catalog-admin-update");

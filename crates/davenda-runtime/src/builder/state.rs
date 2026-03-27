@@ -7,6 +7,7 @@ pub struct RuntimeBuilder<P> {
     config: PlatformConfig,
     auth_package: P,
     modules: Vec<Box<dyn PlatformModule>>,
+    customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
     extensions: Vec<InstalledExtension>,
     templates: Vec<TemplateDefinition>,
     template_roots: Vec<PathBuf>,
@@ -21,6 +22,7 @@ pub(crate) struct RuntimeBuilderParts<P> {
     pub(crate) config: PlatformConfig,
     pub(crate) auth_package: P,
     pub(crate) modules: Vec<Box<dyn PlatformModule>>,
+    pub(crate) customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
     pub(crate) extensions: Vec<InstalledExtension>,
     pub(crate) templates: Vec<TemplateDefinition>,
     pub(crate) template_roots: Vec<PathBuf>,
@@ -40,6 +42,7 @@ where
             config,
             auth_package,
             modules: Vec::new(),
+            customer_plugins: Vec::new(),
             extensions: Vec::new(),
             templates: Vec::new(),
             template_roots: Vec::new(),
@@ -62,6 +65,26 @@ where
     pub fn with_boxed_module(mut self, module: Box<dyn PlatformModule>) -> Self {
         self.modules.push(module);
         self
+    }
+
+    pub fn register_customer_plugin<C>(mut self, plugin: C) -> Self
+    where
+        C: CustomerBackendPlugin,
+    {
+        self.customer_plugins.push(Box::new(plugin));
+        self
+    }
+
+    pub fn with_boxed_customer_plugin(mut self, plugin: Box<dyn CustomerBackendPlugin>) -> Self {
+        self.customer_plugins.push(plugin);
+        self
+    }
+
+    pub fn with_customer_plugin<C>(self, plugin: C) -> Self
+    where
+        C: CustomerBackendPlugin,
+    {
+        self.register_customer_plugin(plugin)
     }
 
     pub fn with_installed_extension(mut self, extension: InstalledExtension) -> Self {
@@ -129,6 +152,7 @@ where
             config: self.config,
             auth_package: self.auth_package,
             modules: self.modules,
+            customer_plugins: self.customer_plugins,
             extensions: self.extensions,
             templates: self.templates,
             template_roots: self.template_roots,

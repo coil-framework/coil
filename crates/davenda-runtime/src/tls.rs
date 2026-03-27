@@ -124,9 +124,8 @@ impl TlsHost {
             "tls-validation:{}:{}",
             customer_app, shared_backend_namespace
         ))?;
-        let control_plane = TlsControlPlaneRuntime::in_memory_control_plane_for_tests(
-            runtime.clone(),
-        );
+        let control_plane =
+            TlsControlPlaneRuntime::in_memory_control_plane_for_tests(runtime.clone());
         Self::build_executor(
             &customer_app,
             &shared_backend_namespace,

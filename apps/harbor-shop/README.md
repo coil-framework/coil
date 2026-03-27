@@ -112,6 +112,9 @@ From `apps/harbor-shop`:
 ```bash
 ./scripts/prepare-local-dev.sh
 cargo run -p harbor-shop -- describe
+cargo run -p harbor-shop -- validate
+cargo run -p harbor-shop -- migrate apply --dry-run
+cargo run -p harbor-shop -- assets publish
 ```
 
 That prints the active app root, config, linked modules, and the linked customer plugin ids added
@@ -196,12 +199,19 @@ Access permission for `local/harbor-shop` is set to `download`
 
 That is the bootstrap job creating the local object-store bucket and making published theme assets downloadable in the dev stack.
 
-The `app` container then does four things:
+The `app` container now runs Harbor Shop's own lifecycle command:
 
-1. validates `platform.dev.toml`
-2. applies migrations
-3. publishes theme assets
-4. starts the Harbor Shop customer binary
+1. Harbor builds and validates the customer runtime from `platform.dev.toml`
+2. Harbor applies pending executable migrations through the customer binary
+3. Harbor publishes theme assets through the same customer runtime build path
+4. Harbor starts the storefront/admin server
+
+You can run the same end-to-end lifecycle directly from the customer workspace:
+
+```bash
+./scripts/prepare-local-dev.sh
+cargo run -p harbor-shop -- up
+```
 
 The committed Cargo workspace stays upstream-clean. The default checked-in `docker compose up`
 path now uses only the Harbor Shop folder as its Docker build context. The separate

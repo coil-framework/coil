@@ -19,6 +19,7 @@ davenda-commerce = { path = "../../crates/davenda-commerce" }
 davenda-config = { path = "../../crates/davenda-config" }
 davenda-core = { path = "../../crates/davenda-core" }
 davenda-customer-sdk = { path = "../../crates/davenda-customer-sdk" }
+davenda-data = { path = "../../crates/davenda-data" }
 davenda-events = { path = "../../crates/davenda-events" }
 davenda-media = { path = "../../crates/davenda-media" }
 davenda-memberships = { path = "../../crates/davenda-memberships" }

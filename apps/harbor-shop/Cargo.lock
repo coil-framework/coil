@@ -1562,10 +1562,13 @@ dependencies = [
  "anyhow",
  "davenda-all",
  "davenda-app",
+ "davenda-auth",
  "davenda-config",
  "davenda-customer-sdk",
+ "davenda-data",
  "davenda-runtime",
  "harbor-shop-backend",
+ "tokio",
 ]
 
 [[package]]

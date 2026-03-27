@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use harbor_shop_app::HarborShopWorkspace;
 use serde::Serialize;
@@ -22,13 +22,42 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Describe,
+    Validate,
+    Assets {
+        #[command(subcommand)]
+        command: AssetsCommand,
+    },
+    Migrate {
+        #[command(subcommand)]
+        command: MigrateCommand,
+    },
     Serve {
+        #[arg(long)]
+        bind: Option<String>,
+    },
+    Up {
         #[arg(long)]
         bind: Option<String>,
     },
     LinkedBackend {
         #[command(subcommand)]
         command: LinkedBackendCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AssetsCommand {
+    Publish,
+}
+
+#[derive(Debug, Subcommand)]
+enum MigrateCommand {
+    Apply {
+        #[arg(long)]
+        dry_run: bool,
+
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -59,7 +88,11 @@ async fn main() -> Result<()> {
     };
     match cli.command {
         Command::Describe => describe(&workspace, &cli.config),
+        Command::Validate => validate(&workspace, &cli.config),
+        Command::Assets { command } => assets(&workspace, &cli.config, command),
+        Command::Migrate { command } => migrate(&workspace, &cli.config, command),
         Command::Serve { bind } => serve(&workspace, &cli.config, bind),
+        Command::Up { bind } => up(&workspace, &cli.config, bind),
         Command::LinkedBackend { command } => linked_backend(&workspace, command),
     }
 }
@@ -102,19 +135,149 @@ fn describe(workspace: &HarborShopWorkspace, config_path: &PathBuf) -> Result<()
     Ok(())
 }
 
+fn validate(workspace: &HarborShopWorkspace, config_path: &PathBuf) -> Result<()> {
+    let validation = workspace.validate(config_path)?;
+    println!("Harbor Shop validation passed");
+    println!("app root: {}", validation.app_root.display());
+    println!("config: {}", validation.config_path.display());
+    println!("app id: {}", validation.app_id);
+    println!("modules: {}", validation.module_ids.join(", "));
+    println!(
+        "linked plugins: {}",
+        validation.linked_plugin_ids.join(", ")
+    );
+    println!("route surfaces: {}", validation.route_surface_count);
+    println!("jobs: {}", validation.job_count);
+    println!(
+        "migration contracts: {}",
+        validation.migration_contract_count
+    );
+    if validation.manual_customer_migration_entries.is_empty() {
+        println!("manual customer migrations: none");
+    } else {
+        println!(
+            "manual customer migrations: {}",
+            validation.manual_customer_migration_entries.len()
+        );
+    }
+    Ok(())
+}
+
+fn assets(
+    workspace: &HarborShopWorkspace,
+    config_path: &PathBuf,
+    command: AssetsCommand,
+) -> Result<()> {
+    match command {
+        AssetsCommand::Publish => {
+            let publication = workspace.publish_assets(config_path)?;
+            println!("Harbor Shop asset publication");
+            println!("config: {}", publication.config_path.display());
+            println!("app id: {}", publication.app_id);
+            println!("asset roots: {}", publication.asset_roots.join(", "));
+            if publication.published {
+                println!(
+                    "published {} asset entries with {} storage writes",
+                    publication.asset_entries, publication.writes
+                );
+                if let Some(release_id) = publication.release_id {
+                    println!("release: {release_id}");
+                }
+            } else {
+                println!("published 0 asset entries with 0 storage writes");
+                println!("reason: asset publication is disabled or no asset roots are configured");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn migrate(
+    workspace: &HarborShopWorkspace,
+    config_path: &PathBuf,
+    command: MigrateCommand,
+) -> Result<()> {
+    match command {
+        MigrateCommand::Apply { dry_run, yes } => {
+            if !dry_run && !yes {
+                bail!("`harbor-shop migrate apply` requires `--yes` unless `--dry-run` is used");
+            }
+            let report = workspace.migrate_apply(config_path, dry_run)?;
+            println!("Harbor Shop migration apply");
+            println!("config: {}", report.config_path.display());
+            println!("app id: {}", report.app_id);
+            if report.dry_run {
+                println!(
+                    "planned {} pending executable migration steps",
+                    report.pending_steps
+                );
+            } else {
+                println!(
+                    "applied {} pending executable migration steps with {} SQL statements",
+                    report.pending_steps, report.executed_statements
+                );
+            }
+            println!("total executable steps: {}", report.executable_steps);
+            println!("already applied: {}", report.already_applied_steps);
+            if report.manual_customer_migration_entries.is_empty() {
+                println!("manual customer migrations: none");
+            } else {
+                println!(
+                    "manual customer migrations: {}",
+                    report.manual_customer_migration_entries.len()
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
 fn serve(
     workspace: &HarborShopWorkspace,
     config_path: &PathBuf,
     bind: Option<String>,
 ) -> Result<()> {
-    davenda_all::builder()
-        .with_customer_plugin(harbor_shop_backend::plugin())
-        .run_from_paths(
-            workspace.app_root(),
-            workspace.resolve_path(config_path),
-            bind,
-        )
+    workspace
+        .build_bootstrap(config_path)?
+        .serve_from_env(bind)
         .context("Harbor Shop server exited with an error")
+}
+
+fn up(workspace: &HarborShopWorkspace, config_path: &PathBuf, bind: Option<String>) -> Result<()> {
+    let bootstrap = workspace.build_bootstrap(config_path)?;
+    println!("Harbor Shop lifecycle bootstrap");
+    println!("app root: {}", bootstrap.app_root.display());
+    println!("config: {}", bootstrap.config_path.display());
+    println!("app id: {}", bootstrap.manifest.id);
+    println!("modules: {}", bootstrap.module_ids().join(", "));
+    println!(
+        "linked plugins: {}",
+        bootstrap.linked_plugin_ids().join(", ")
+    );
+
+    let assets = bootstrap.asset_publication_report();
+    if assets.published {
+        println!(
+            "published {} asset entries with {} storage writes",
+            assets.asset_entries, assets.writes
+        );
+    } else {
+        println!("asset publication skipped");
+    }
+
+    let migrations = bootstrap.apply_migrations(false)?;
+    if migrations.pending_steps == 0 {
+        println!("migrations: no pending executable steps");
+    } else {
+        println!(
+            "migrations: applied {} pending executable steps with {} SQL statements",
+            migrations.pending_steps, migrations.executed_statements
+        );
+    }
+
+    bootstrap
+        .serve_from_env(bind)
+        .context("Harbor Shop lifecycle bootstrap failed while serving")
 }
 
 fn linked_backend(workspace: &HarborShopWorkspace, command: LinkedBackendCommand) -> Result<()> {
@@ -157,7 +320,9 @@ fn linked_backend_describe_output() -> String {
         summary.id,
         summary.display_name,
         summary.version,
-        summary.documentation_url.unwrap_or_else(|| "none".to_string()),
+        summary
+            .documentation_url
+            .unwrap_or_else(|| "none".to_string()),
         hooks,
     )
 }
@@ -222,7 +387,10 @@ mod tests {
         let output = linked_backend_demo_output(&workspace).unwrap();
 
         assert!(output.contains("Harbor Shop linked backend"), "{output}");
-        assert!(output.contains("registered hooks: checkout, verified_webhook"), "{output}");
+        assert!(
+            output.contains("registered hooks: checkout, verified_webhook"),
+            "{output}"
+        );
         assert!(output.contains("\"segment\": \"harbor-vip\""), "{output}");
         assert!(
             output.contains("\"assigned_queue\": \"ops-manual-review\""),
@@ -254,12 +422,61 @@ mod tests {
     fn linked_backend_describe_output_reports_registered_hook_summary() {
         let output = linked_backend_describe_output();
 
-        assert!(output.contains("plugin id: harbor-shop-backend"), "{output}");
-        assert!(output.contains("display name: Harbor Shop Linked Backend"), "{output}");
-        assert!(output.contains("registered hooks: checkout, verified_webhook"), "{output}");
+        assert!(
+            output.contains("plugin id: harbor-shop-backend"),
+            "{output}"
+        );
+        assert!(
+            output.contains("display name: Harbor Shop Linked Backend"),
+            "{output}"
+        );
+        assert!(
+            output.contains("registered hooks: checkout, verified_webhook"),
+            "{output}"
+        );
         assert!(
             output.contains("documentation: apps/harbor-shop/backend/README.md"),
             "{output}"
         );
+    }
+
+    #[test]
+    fn cli_accepts_customer_owned_lifecycle_commands() {
+        let cli = Cli::try_parse_from([
+            "harbor-shop",
+            "--config",
+            "platform.dev.toml",
+            "migrate",
+            "apply",
+            "--dry-run",
+        ])
+        .expect("lifecycle migrate command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::Migrate {
+                command: MigrateCommand::Apply {
+                    dry_run: true,
+                    yes: false
+                }
+            }
+        ));
+
+        let cli = Cli::try_parse_from(["harbor-shop", "assets", "publish"])
+            .expect("asset publication command should parse");
+        assert!(matches!(
+            cli.command,
+            Command::Assets {
+                command: AssetsCommand::Publish
+            }
+        ));
+
+        let cli = Cli::try_parse_from(["harbor-shop", "validate"])
+            .expect("validate command should parse");
+        assert!(matches!(cli.command, Command::Validate));
+
+        let cli = Cli::try_parse_from(["harbor-shop", "up"])
+            .expect("lifecycle bootstrap command should parse");
+        assert!(matches!(cli.command, Command::Up { .. }));
     }
 }

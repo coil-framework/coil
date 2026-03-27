@@ -63,7 +63,10 @@ fn copy_dir_recursive(from: &Path, to: &Path) {
 }
 
 fn temp_workspace_without_theme_assets() -> TempAppRoot {
-    let source_root = HarborShopWorkspace::default().unwrap().app_root().to_path_buf();
+    let source_root = HarborShopWorkspace::default()
+        .unwrap()
+        .app_root()
+        .to_path_buf();
     let temp_root = unique_temp_app_root("chapter96");
     fs::create_dir_all(&temp_root).unwrap();
     copy_dir_recursive(&source_root.join("auth"), &temp_root.join("auth"));
@@ -77,10 +80,7 @@ fn temp_workspace_without_theme_assets() -> TempAppRoot {
     )
     .unwrap();
     let app_manifest = fs::read_to_string(source_root.join("app.toml")).unwrap();
-    let app_manifest = app_manifest.replace(
-        "asset_roots = [\"theme/assets\"]",
-        "asset_roots = []",
-    );
+    let app_manifest = app_manifest.replace("asset_roots = [\"theme/assets\"]", "asset_roots = []");
     fs::write(temp_root.join("app.toml"), app_manifest).unwrap();
     TempAppRoot { path: temp_root }
 }
@@ -98,6 +98,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
     let dashboard = include_str!("../../../templates/admin/dashboard.html");
     let app_readme = include_str!("../../../README.md");
     let cargo_toml = include_str!("../../../Cargo.toml");
+    let entrypoint = include_str!("../../../docker/entrypoint.sh");
 
     assert!(dashboard.contains("Linked customer backend"), "{dashboard}");
     assert!(dashboard.contains("linkedCustomerPlugins"), "{dashboard}");
@@ -119,11 +120,28 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         "{app_readme}"
     );
     assert!(
+        app_readme.contains("cargo run -p harbor-shop -- validate"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("cargo run -p harbor-shop -- migrate apply --dry-run"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("cargo run -p harbor-shop -- assets publish"),
+        "{app_readme}"
+    );
+    assert!(
+        app_readme.contains("cargo run -p harbor-shop -- up"),
+        "{app_readme}"
+    );
+    assert!(
         app_readme.contains("./scripts/prepare-local-dev.sh"),
         "{app_readme}"
     );
     assert!(
-        app_readme.contains("docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build"),
+        app_readme
+            .contains("docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build"),
         "{app_readme}"
     );
     assert!(
@@ -143,7 +161,14 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         "{app_readme}"
     );
     assert!(!cargo_toml.contains("[patch.crates-io]"), "{cargo_toml}");
-    assert!(cargo_toml.contains("davenda-all = \"0.1.0\""), "{cargo_toml}");
+    assert!(
+        cargo_toml.contains("davenda-all = \"0.1.0\""),
+        "{cargo_toml}"
+    );
+    assert!(
+        entrypoint.contains("exec harbor-shop up --config"),
+        "{entrypoint}"
+    );
 }
 
 #[test]
@@ -187,7 +212,10 @@ signed_url_ttl_secs = 900
     let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
 
     assert_eq!(bootstrap.linked_plugin_ids(), vec!["harbor-shop-backend"]);
-    assert_eq!(bootstrap.runtime_plan.runtime.linked_customer_plugins.len(), 1);
+    assert_eq!(
+        bootstrap.runtime_plan.runtime.linked_customer_plugins.len(),
+        1
+    );
     let plugin = &bootstrap.runtime_plan.runtime.linked_customer_plugins[0];
     assert_eq!(plugin.plugin_id, "harbor-shop-backend");
     assert_eq!(plugin.display_name, "Harbor Shop Linked Backend");
@@ -198,4 +226,69 @@ signed_url_ttl_secs = 900
             RegisteredHookKind::VerifiedWebhook,
         ]
     );
+}
+
+#[test]
+fn workspace_validate_reports_customer_owned_lifecycle_summary() {
+    let workspace = HarborShopWorkspace::default().unwrap();
+    let validation = workspace.validate("platform.dev.toml").unwrap();
+
+    assert_eq!(validation.app_id, "harbor-shop");
+    assert!(
+        validation
+            .module_ids
+            .iter()
+            .any(|module| module == "commerce")
+    );
+    assert_eq!(validation.linked_plugin_ids, vec!["harbor-shop-backend"]);
+    assert!(validation.route_surface_count > 0);
+    assert!(validation.job_count > 0);
+}
+
+#[test]
+fn workspace_publish_assets_reports_noop_without_theme_roots() {
+    let _object_store = set_env_var(
+        "OBJECT_STORE_URL",
+        r#"
+endpoint_url = "https://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#,
+    );
+    let temp_root = temp_workspace_without_theme_assets();
+    let workspace = HarborShopWorkspace::at(&temp_root.path).unwrap();
+    let report = workspace.publish_assets("platform.dev.toml").unwrap();
+
+    assert_eq!(report.app_id, "harbor-shop");
+    assert!(!report.published);
+    assert!(report.asset_roots.is_empty());
+    assert_eq!(report.asset_entries, 0);
+    assert_eq!(report.writes, 0);
+}
+
+#[test]
+fn workspace_migrate_dry_run_reports_pending_executable_steps() {
+    let _object_store = set_env_var(
+        "OBJECT_STORE_URL",
+        r#"
+endpoint_url = "https://s3.internal"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#,
+    );
+    let temp_root = temp_workspace_without_theme_assets();
+    let workspace = HarborShopWorkspace::at(&temp_root.path).unwrap();
+    let report = workspace.migrate_apply("platform.dev.toml", true).unwrap();
+
+    assert!(report.dry_run);
+    assert_eq!(report.app_id, "harbor-shop");
+    assert_eq!(report.pending_steps, report.executable_steps);
+    assert_eq!(report.already_applied_steps, 0);
+    assert_eq!(report.executed_statements, 0);
 }

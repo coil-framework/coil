@@ -57,7 +57,10 @@ fn customer_root_workspace_shape_matches_chapter_96_model() {
         workspace_cargo.contains("\"backend/harbor-loyalty-backend\""),
         "{workspace_cargo}"
     );
-    assert!(!workspace_cargo.contains("[patch.crates-io]"), "{workspace_cargo}");
+    assert!(
+        !workspace_cargo.contains("[patch.crates-io]"),
+        "{workspace_cargo}"
+    );
     assert!(
         app_manifest.contains("name = \"harbor-shop\""),
         "{app_manifest}"
@@ -106,7 +109,9 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{app_readme}"
     );
     assert!(
-        app_readme.contains("The committed workspace is intentionally free of `patch.crates-io` overlays"),
+        app_readme.contains(
+            "The committed workspace is intentionally free of `patch.crates-io` overlays"
+        ),
         "{app_readme}"
     );
     assert!(
@@ -114,7 +119,8 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{app_readme}"
     );
     assert!(
-        app_readme.contains("docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build"),
+        app_readme
+            .contains("docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build"),
         "{app_readme}"
     );
 
@@ -204,16 +210,16 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
     );
     assert!(bin_main.contains("linked plugins:"), "{bin_main}");
     assert!(bin_main.contains("LinkedBackendCommand"), "{bin_main}");
-    assert!(bin_main.contains("linked_backend_demo_output"), "{bin_main}");
+    assert!(
+        bin_main.contains("linked_backend_demo_output"),
+        "{bin_main}"
+    );
 
     assert!(
         compose.contains("profiles: [\"backend-example\"]"),
         "{compose}"
     );
-    assert!(
-        compose.contains("context: ."),
-        "{compose}"
-    );
+    assert!(compose.contains("context: ."), "{compose}");
     assert!(
         compose.contains("dockerfile: backend/harbor-loyalty-backend/Dockerfile"),
         "{compose}"
@@ -226,10 +232,7 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         compose.contains("HARBOR_BACKEND_WEBHOOK_SECRET"),
         "{compose}"
     );
-    assert!(
-        repo_compose.contains("context: ../.."),
-        "{repo_compose}"
-    );
+    assert!(repo_compose.contains("context: ../.."), "{repo_compose}");
     assert!(
         repo_compose.contains("apps/harbor-shop/Dockerfile.repo"),
         "{repo_compose}"

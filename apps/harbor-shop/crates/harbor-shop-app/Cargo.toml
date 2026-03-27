@@ -9,6 +9,7 @@ publish = false
 anyhow.workspace = true
 davenda-all.workspace = true
 davenda-app.workspace = true
+davenda-auth.workspace = true
 davenda-config.workspace = true
 davenda-customer-sdk.workspace = true
 davenda-data.workspace = true

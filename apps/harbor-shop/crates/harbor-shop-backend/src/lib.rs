@@ -81,7 +81,8 @@ impl CustomerHookRegistry for RecordingRegistry {
         &mut self,
         _hooks: Arc<dyn davenda_customer_sdk::VerifiedWebhookAssetHooks>,
     ) -> Result<(), BackendError> {
-        self.hook_kinds.push(RegisteredHookKind::VerifiedWebhookAssets);
+        self.hook_kinds
+            .push(RegisteredHookKind::VerifiedWebhookAssets);
         Ok(())
     }
 }
@@ -140,10 +141,11 @@ impl VerifiedWebhookHooks for HarborShopBackend {
         webhook: &VerifiedWebhook,
         http: &dyn OutboundHttpFacade,
         jobs: &dyn davenda_customer_sdk::JobsFacade,
+        repositories: &dyn davenda_customer_sdk::RepositoryFacade,
         audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
         self.inner
-            .handle_verified_webhook(ctx, webhook, http, jobs, audit)
+            .handle_verified_webhook(ctx, webhook, http, jobs, repositories, audit)
     }
 }
 

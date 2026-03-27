@@ -8,14 +8,8 @@ fn harbor_readme_makes_wasm_extensions_concrete_and_bounded() {
         include_str!("../../../extensions/harbor-waitlist-tools/config-schema.example.toml");
     let app_manifest = include_str!("../../../app.toml");
 
-    assert!(
-        app_readme.contains("harbor-waitlist-tools"),
-        "{app_readme}"
-    );
-    assert!(
-        app_readme.contains("runtime-installed"),
-        "{app_readme}"
-    );
+    assert!(app_readme.contains("harbor-waitlist-tools"), "{app_readme}");
+    assert!(app_readme.contains("runtime-installed"), "{app_readme}");
     assert!(
         app_readme.contains("linked customer Rust crate"),
         "{app_readme}"
@@ -39,7 +33,8 @@ fn harbor_readme_makes_wasm_extensions_concrete_and_bounded() {
     );
 
     assert!(
-        waitlist_readme.contains("runtime-installed rather than linked into the Harbor customer binary"),
+        waitlist_readme
+            .contains("runtime-installed rather than linked into the Harbor customer binary"),
         "{waitlist_readme}"
     );
     assert!(
@@ -56,22 +51,10 @@ fn harbor_readme_makes_wasm_extensions_concrete_and_bounded() {
         package.contains("id = \"harbor-waitlist-tools\""),
         "{package}"
     );
-    assert!(
-        package.contains("point = \"admin-widget\""),
-        "{package}"
-    );
-    assert!(
-        package.contains("point = \"scheduled-job\""),
-        "{package}"
-    );
-    assert!(
-        package.contains("auth-check"),
-        "{package}"
-    );
-    assert!(
-        package.contains("outbound-http:partner_crm"),
-        "{package}"
-    );
+    assert!(package.contains("point = \"admin-widget\""), "{package}");
+    assert!(package.contains("point = \"scheduled-job\""), "{package}");
+    assert!(package.contains("auth-check"), "{package}");
+    assert!(package.contains("outbound-http:partner_crm"), "{package}");
 
     assert!(
         config_schema.contains("partner_crm_integration"),

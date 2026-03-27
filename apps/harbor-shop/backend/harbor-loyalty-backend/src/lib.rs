@@ -128,6 +128,7 @@ impl VerifiedWebhookHooks for HarborCustomerBackend {
         webhook: &VerifiedWebhook,
         _http: &dyn davenda_customer_sdk::OutboundHttpFacade,
         _jobs: &dyn JobsFacade,
+        _repositories: &dyn davenda_customer_sdk::RepositoryFacade,
         audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
         if webhook.source != "crm" || webhook.event != "contact-updated" {
@@ -600,6 +601,31 @@ mod tests {
         }
     }
 
+    struct NoopRepositories;
+
+    impl davenda_customer_sdk::RepositoryFacade for NoopRepositories {
+        fn read(
+            &self,
+            _query: &davenda_customer_sdk::RepositoryQuery,
+        ) -> Result<davenda_customer_sdk::RepositoryRecordSet, BackendError> {
+            Ok(davenda_customer_sdk::RepositoryRecordSet {
+                repository: "noop".to_string(),
+                records: Vec::new(),
+            })
+        }
+
+        fn write(
+            &self,
+            _change: davenda_customer_sdk::RepositoryWrite,
+        ) -> Result<davenda_customer_sdk::RepositoryWriteReceipt, BackendError> {
+            Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "repository.write.unsupported",
+                "Harbor Shop test noop repository does not support writes",
+            ))
+        }
+    }
+
     fn request_context() -> RequestContext {
         RequestContext::new(
             CustomerAppContext::new("harbor-shop", "development").with_locale("en-GB"),
@@ -855,6 +881,7 @@ mod tests {
             },
             &NoopHttp,
             &NoopJobs,
+            &NoopRepositories,
             &audit,
         )
         .unwrap();

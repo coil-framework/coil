@@ -30,6 +30,9 @@ wait_for_tcp postgres 5432 postgres
 wait_for_tcp redis 6379 redis
 wait_for_http http://minio:9000/minio/health/live minio
 
+echo "Publishing Harbor Shop theme assets"
+harbor-shop --config "$CONFIG_PATH" assets publish
+
 echo "Launching Harbor Shop dev server"
 if [ "${STRIPE_SECRET_KEY:-sk_test_replace_me}" = "sk_test_replace_me" ]; then
   echo "info: STRIPE_SECRET_KEY is still the placeholder value; Harbor Shop will use the built-in local checkout stub until you override it with a real Stripe test key"

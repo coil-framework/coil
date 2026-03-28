@@ -33,5 +33,8 @@ wait_for_http http://minio:9000/minio/health/live minio
 echo "Applying OctoHub executable migrations"
 octohub --config "$CONFIG_PATH" migrate apply --yes
 
+echo "Publishing OctoHub theme assets"
+octohub --config "$CONFIG_PATH" assets publish
+
 echo "Launching OctoHub dev server"
 exec octohub --config "$CONFIG_PATH" up

@@ -159,15 +159,14 @@ impl HttpRuntimePlan {
         host: &str,
         path: &str,
     ) -> Option<ResolvedRouteMatch> {
-        let site_id = config
-            .sites
-            .iter()
-            .find(|site| {
-                site.canonical_host == host || site.hosts.iter().any(|candidate| candidate == host)
-            })
-            .map(|site| site.id.clone())
-            .or_else(|| config.default_site().map(|site| site.id.clone()));
-        let supported_locales = config.supported_locales_for_site(site_id.as_deref());
+        let site = config.site_for_host(host);
+        let site_id = site.map(|site| site.id.clone());
+        let supported_locales = site
+            .map(|site| site.supported_locales.as_slice())
+            .unwrap_or(config.i18n.supported_locales.as_slice());
+        let localized_routes = site
+            .and_then(|site| site.localized_routes)
+            .unwrap_or(config.i18n.localized_routes);
         self.routes.iter().find_map(|route| {
             if route.method != method {
                 return None;
@@ -193,7 +192,7 @@ impl HttpRuntimePlan {
                     }),
                     None => None,
                 },
-                LocalePolicy::Localized if config.i18n.localized_routes => {
+                LocalePolicy::Localized if localized_routes => {
                     supported_locales.iter().find_map(|locale| {
                         let localized_path = format!(
                             "/{}/{}",

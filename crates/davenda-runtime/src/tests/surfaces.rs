@@ -85,6 +85,7 @@ additional = []
 [i18n]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR"]
+localized_routes = true
 
 [theme]
 active = "showcase"

@@ -111,9 +111,13 @@ impl RuntimePlan {
             route: matched.resolved.clone(),
             route_area: matched.route.area,
             locale: matched.resolved.locale.clone().unwrap_or_else(|| {
-                self.config
-                    .default_locale_for_site(matched.resolved.site_id.as_deref())
-                    .to_string()
+                matched
+                    .resolved
+                    .site_id
+                    .as_deref()
+                    .and_then(|site_id| self.config.site_for_id(site_id))
+                    .map(|site| site.default_locale.clone())
+                    .unwrap_or_else(|| self.config.i18n.default_locale.clone())
             }),
             trace,
             session: session.clone(),

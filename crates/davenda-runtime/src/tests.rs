@@ -267,6 +267,34 @@ fn request_execution_resolves_site_context_and_site_locales() {
 }
 
 #[test]
+fn request_execution_does_not_assign_unknown_hosts_to_the_first_site() {
+    let config = config_with_sites();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(EventsModule::new())
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(
+                HttpMethod::Get,
+                "preview.example.com",
+                "/fr-FR/events/summer-gala",
+            )
+            .unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    assert_eq!(execution.site_id, None);
+    assert_eq!(execution.site_display_name, None);
+    assert_eq!(execution.brand_name, None);
+    assert_eq!(execution.locale, "fr-FR");
+    assert_eq!(execution.route.route_name, "events.detail");
+}
+
+#[test]
 fn cache_plan_uses_site_identity_for_same_site_alias_hosts() {
     let config = config_with_sites();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())

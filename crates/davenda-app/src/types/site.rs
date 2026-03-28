@@ -8,6 +8,7 @@ pub struct AppSite {
     pub domains: Vec<AppDomain>,
     pub default_locale: LocaleTag,
     pub supported_locales: Vec<LocaleTag>,
+    pub localized_routes: Option<bool>,
 }
 
 impl AppSite {
@@ -24,6 +25,7 @@ impl AppSite {
             domains: Vec::new(),
             default_locale,
             supported_locales,
+            localized_routes: None,
         })
     }
 
@@ -34,6 +36,11 @@ impl AppSite {
 
     pub fn with_domain(mut self, domain: AppDomain) -> Self {
         self.domains.push(domain);
+        self
+    }
+
+    pub fn with_localized_routes(mut self, localized_routes: bool) -> Self {
+        self.localized_routes = Some(localized_routes);
         self
     }
 

@@ -21,7 +21,9 @@ pub struct PlatformConfig {
     pub database: DatabaseConfig,
     pub storage: StorageConfig,
     pub cache: CacheConfig,
+    #[serde(default)]
     pub i18n: I18nConfig,
+    #[serde(default)]
     pub seo: SeoConfig,
     #[serde(default)]
     pub sites: Vec<SiteConfig>,
@@ -92,6 +94,7 @@ impl PlatformConfig {
     pub fn canonical_host_for_site(&self, site_id: Option<&str>) -> &str {
         site_id
             .and_then(|site_id| self.site_for_id(site_id))
+            .or_else(|| self.default_site())
             .map(|site| site.canonical_host.as_str())
             .unwrap_or(self.seo.canonical_host.as_str())
     }
@@ -99,6 +102,7 @@ impl PlatformConfig {
     pub fn default_locale_for_site(&self, site_id: Option<&str>) -> &str {
         site_id
             .and_then(|site_id| self.site_for_id(site_id))
+            .or_else(|| self.default_site())
             .map(|site| site.default_locale.as_str())
             .unwrap_or(self.i18n.default_locale.as_str())
     }
@@ -106,15 +110,27 @@ impl PlatformConfig {
     pub fn supported_locales_for_site(&self, site_id: Option<&str>) -> &[String] {
         site_id
             .and_then(|site_id| self.site_for_id(site_id))
+            .or_else(|| self.default_site())
             .map(|site| site.supported_locales.as_slice())
             .unwrap_or(self.i18n.supported_locales.as_slice())
     }
+
+    pub fn localized_routes_for_site(&self, site_id: Option<&str>) -> bool {
+        site_id
+            .and_then(|site_id| self.site_for_id(site_id))
+            .or_else(|| self.default_site())
+            .and_then(|site| site.localized_routes)
+            .unwrap_or(self.i18n.localized_routes)
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct I18nConfig {
+    #[serde(default)]
     pub default_locale: String,
+    #[serde(default)]
     pub supported_locales: Vec<String>,
+    #[serde(default)]
     pub fallback_locale: String,
     #[serde(default)]
     pub localized_routes: bool,
@@ -128,6 +144,16 @@ pub struct SeoConfig {
     pub sitemap_enabled: bool,
 }
 
+impl Default for SeoConfig {
+    fn default() -> Self {
+        Self {
+            canonical_host: String::new(),
+            emit_json_ld: false,
+            sitemap_enabled: default_sitemap_enabled(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SiteConfig {
     pub id: String,
@@ -139,6 +165,8 @@ pub struct SiteConfig {
     pub hosts: Vec<String>,
     pub default_locale: String,
     pub supported_locales: Vec<String>,
+    #[serde(default)]
+    pub localized_routes: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

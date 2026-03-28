@@ -8,6 +8,7 @@ pub struct CustomerAppManifest {
     pub sites: Vec<AppSite>,
     pub default_locale: LocaleTag,
     pub supported_locales: Vec<LocaleTag>,
+    pub localized_routes: bool,
     pub modules: Vec<InstalledModuleSpec>,
     pub theme: ThemeProfile,
     pub auth: AuthStrategy,
@@ -32,6 +33,7 @@ impl CustomerAppManifest {
             sites: Vec::new(),
             default_locale,
             supported_locales,
+            localized_routes: false,
             modules: Vec::new(),
             theme,
             auth,
@@ -48,6 +50,11 @@ impl CustomerAppManifest {
 
     pub fn with_site(mut self, site: AppSite) -> Self {
         self.sites.push(site);
+        self
+    }
+
+    pub fn with_localized_routes(mut self, localized_routes: bool) -> Self {
+        self.localized_routes = localized_routes;
         self
     }
 
@@ -94,7 +101,7 @@ impl CustomerAppManifest {
                 canonical_domains += 1;
             }
         }
-        if canonical_domains == 0 {
+        if canonical_domains == 0 && self.sites.is_empty() {
             return Err(AppModelError::MissingCanonicalDomain {
                 app_id: self.id.to_string(),
             });
@@ -205,7 +212,8 @@ impl CustomerAppManifest {
             self.display_name.clone(),
             self.default_locale.clone(),
             self.supported_locales.clone(),
-        )?;
+        )?
+        .with_localized_routes(self.localized_routes);
         for domain in &self.domains {
             site = site.with_domain(domain.clone());
         }

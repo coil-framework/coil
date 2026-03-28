@@ -9,6 +9,7 @@ additional = ["us.127.0.0.1.nip.io", "de.127.0.0.1.nip.io", "shop.example.com", 
 [i18n]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "de-DE", "en-US"]
+localized_routes = true
 
 [[sites]]
 id = "harbor-uk"

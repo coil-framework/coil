@@ -297,10 +297,22 @@ impl CustomerAppManifest {
         config: &PlatformConfig,
     ) -> Result<(), AppModelError> {
         let resolved_sites = self.resolved_sites()?;
+        let compatibility_canonical_host = self
+            .domains
+            .iter()
+            .find(|domain| domain.canonical)
+            .map(|domain| domain.hostname.clone())
+            .or_else(|| {
+                resolved_sites
+                    .first()
+                    .and_then(|site| site.canonical_domain().map(ToString::to_string))
+            })
+            .expect("validated manifests always resolve a canonical domain");
         let bootstrap_manifest = CustomerAppBootstrapManifest::new(
             self.id.to_string(),
             self.default_locale.to_string(),
             sorted_locale_strings(&self.supported_locales),
+            self.localized_routes,
             self.auth.package_name.clone(),
             self.modules
                 .iter()
@@ -323,15 +335,11 @@ impl CustomerAppManifest {
                             .collect::<Vec<_>>(),
                         site.default_locale.to_string(),
                         sorted_locale_strings(&site.supported_locales),
+                        site.localized_routes,
                     )
                 })
                 .collect::<Vec<_>>(),
-            self.domains
-                .iter()
-                .find(|domain| domain.canonical)
-                .expect("validated manifests always declare a canonical domain")
-                .hostname
-                .clone(),
+            compatibility_canonical_host,
         );
         bootstrap_manifest
             .validate_runtime_config_alignment(config)

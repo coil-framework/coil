@@ -440,6 +440,7 @@ fn customer_bootstrap_manifest_validates_aligned_runtime_config() {
         "showcase-events",
         "en-GB",
         vec!["en-GB".to_string(), "fr-FR".to_string()],
+        true,
         "platform-default-auth",
         vec![
             "cms-pages".to_string(),
@@ -462,6 +463,7 @@ fn customer_bootstrap_manifest_reports_module_drift() {
         "showcase-events",
         "en-GB",
         vec!["en-GB".to_string(), "fr-FR".to_string()],
+        true,
         "platform-default-auth",
         vec!["cms-pages".to_string(), "memberships".to_string()],
         Vec::new(),
@@ -584,4 +586,114 @@ enabled = ["cms-pages", "admin-shell"]
 
     std::fs::remove_file(&manifest_path).unwrap();
     std::fs::remove_dir(&temp_dir).unwrap();
+}
+
+#[test]
+fn parses_site_only_config_without_top_level_locale_or_canonical_defaults() {
+    let config = PlatformConfig::from_toml_str(
+        r#"
+[app]
+name = "showcase-events"
+environment = "production"
+
+[server]
+bind = "0.0.0.0:8080"
+trusted_proxies = ["10.0.0.0/8"]
+
+[http.session]
+store = "redis"
+idle_timeout_secs = 3600
+absolute_timeout_secs = 86400
+
+[http.session_cookie]
+name = "davenda_session"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.flash_cookie]
+name = "davenda_flash"
+path = "/"
+same_site = "lax"
+secure = true
+http_only = true
+
+[http.csrf]
+enabled = true
+field_name = "_csrf"
+header_name = "x-csrf-token"
+
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+
+[storage]
+default_class = "public_upload"
+deployment = "distributed"
+object_store = "s3"
+local_root = "/var/lib/platform"
+
+[cache]
+l1 = "moka"
+l2 = "redis"
+
+[[sites]]
+id = "storefront"
+display_name = "Showcase Storefront"
+canonical_host = "shop.example.com"
+hosts = ["www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+localized_routes = true
+
+[auth]
+package = "platform-default-auth"
+explain_api = false
+tenant_id = 101
+
+[modules]
+enabled = ["cms-pages", "admin-shell", "memberships", "events", "media-library"]
+
+[wasm]
+directory = "extensions"
+default_time_limit_ms = 50
+allow_network = false
+
+[jobs]
+backend = "redis"
+
+[observability]
+metrics = true
+tracing = true
+
+[assets]
+publish_manifest = true
+cdn_base_url = "https://cdn.example.com"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.canonical_host_for_site(None), "shop.example.com");
+    assert_eq!(config.default_locale_for_site(None), "en-GB");
+    assert_eq!(
+        config.supported_locales_for_site(None),
+        &["en-GB".to_string(), "fr-FR".to_string()]
+    );
+    assert!(config.localized_routes_for_site(None));
+}
+
+#[test]
+fn explicit_sites_override_top_level_localized_route_policy() {
+    let config = PlatformConfig::from_toml_str(
+        &format!(
+            "{}\n[[sites]]\nid = \"storefront\"\ndisplay_name = \"Showcase Storefront\"\ncanonical_host = \"shop.example.com\"\nhosts = [\"www.example.com\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"fr-FR\"]\nlocalized_routes = false\n",
+            VALID_CONFIG
+        ),
+    )
+    .unwrap();
+
+    assert!(!config.localized_routes_for_site(Some("storefront")));
+    assert!(!config.localized_routes_for_site(None));
 }

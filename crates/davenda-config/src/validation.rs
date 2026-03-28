@@ -233,13 +233,17 @@ impl PlatformConfig {
             }
         }
 
+        let has_explicit_sites = !self.sites.is_empty();
         if self.i18n.supported_locales.is_empty() {
-            errors.push(ConfigValidationError::MissingSupportedLocales);
+            if !has_explicit_sites {
+                errors.push(ConfigValidationError::MissingSupportedLocales);
+            }
         } else {
-            if !self
-                .i18n
-                .supported_locales
-                .contains(&self.i18n.default_locale)
+            if self.i18n.default_locale.trim().is_empty()
+                || !self
+                    .i18n
+                    .supported_locales
+                    .contains(&self.i18n.default_locale)
             {
                 errors.push(ConfigValidationError::DefaultLocaleNotSupported {
                     default_locale: self.i18n.default_locale.clone(),
@@ -247,10 +251,11 @@ impl PlatformConfig {
                 });
             }
 
-            if !self
-                .i18n
-                .supported_locales
-                .contains(&self.i18n.fallback_locale)
+            if self.i18n.fallback_locale.trim().is_empty()
+                || !self
+                    .i18n
+                    .supported_locales
+                    .contains(&self.i18n.fallback_locale)
             {
                 errors.push(ConfigValidationError::FallbackLocaleNotSupported {
                     fallback_locale: self.i18n.fallback_locale.clone(),
@@ -259,7 +264,7 @@ impl PlatformConfig {
             }
         }
 
-        if self.seo.canonical_host.trim().is_empty() {
+        if self.seo.canonical_host.trim().is_empty() && !has_explicit_sites {
             errors.push(ConfigValidationError::EmptyCanonicalHost);
         }
 
@@ -303,7 +308,9 @@ impl PlatformConfig {
             }
 
             for locale in &site.supported_locales {
-                if !self.i18n.supported_locales.contains(locale) {
+                if !self.i18n.supported_locales.is_empty()
+                    && !self.i18n.supported_locales.contains(locale)
+                {
                     errors.push(ConfigValidationError::SiteLocaleOutsideAppSupport {
                         site: site.id.clone(),
                         locale: locale.clone(),

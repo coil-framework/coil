@@ -261,6 +261,7 @@ fn app() -> CustomerAppManifest {
         auth(),
     )
     .unwrap()
+    .with_localized_routes(true)
     .with_domain(AppDomain::new("shop.example.com", true).unwrap())
     .with_module(InstalledModuleSpec::new("cms").unwrap())
     .with_module(InstalledModuleSpec::new("commerce").unwrap())
@@ -367,6 +368,64 @@ enabled = ["cms", "commerce"]
     assert_eq!(
         composition.primary_site().unwrap().canonical_domain(),
         Some("shop.example.com")
+    );
+    assert_eq!(composition.primary_site().unwrap().localized_routes, None);
+}
+
+#[test]
+fn manifest_accepts_site_first_defaults_without_top_level_domains_or_i18n() {
+    let manifest = CustomerAppManifest::from_toml_str(
+        r#"
+[app]
+name = "harbor-shop"
+display_name = "Harbor Shop"
+
+[[sites]]
+id = "storefront"
+display_name = "Harbor Shop"
+canonical_domain = "shop.example.com"
+additional_domains = ["www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+localized_routes = true
+
+[[sites]]
+id = "events"
+display_name = "Harbor Events"
+canonical_domain = "events.example.com"
+default_locale = "en-GB"
+supported_locales = ["en-GB"]
+
+[theme]
+active = "harbor"
+template_namespaces = ["customer-app", "harbor"]
+asset_roots = ["theme/assets"]
+
+[auth]
+mode = "extend"
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms", "commerce"]
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(manifest.default_locale.to_string(), "en-GB");
+    assert_eq!(
+        manifest
+            .supported_locales
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        vec!["en-GB".to_string(), "fr-FR".to_string()]
+    );
+    assert_eq!(manifest.localized_routes, false);
+    assert_eq!(manifest.domains.len(), 0);
+    assert_eq!(manifest.resolved_sites().unwrap().len(), 2);
+    assert_eq!(
+        manifest.resolved_sites().unwrap()[0].localized_routes,
+        Some(true)
     );
 }
 

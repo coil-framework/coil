@@ -21,13 +21,18 @@ struct CustomerAppBootstrapApp {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct CustomerAppBootstrapDomains {
+    #[serde(default)]
     canonical: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct CustomerAppBootstrapI18n {
+    #[serde(default)]
     default_locale: String,
+    #[serde(default)]
     supported_locales: Vec<String>,
+    #[serde(default)]
+    localized_routes: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -42,6 +47,8 @@ pub struct CustomerAppBootstrapSite {
     hosts: Vec<String>,
     default_locale: String,
     supported_locales: Vec<String>,
+    #[serde(default)]
+    localized_routes: Option<bool>,
 }
 
 impl CustomerAppBootstrapSite {
@@ -53,6 +60,7 @@ impl CustomerAppBootstrapSite {
         hosts: Vec<String>,
         default_locale: impl Into<String>,
         supported_locales: Vec<String>,
+        localized_routes: Option<bool>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -62,6 +70,7 @@ impl CustomerAppBootstrapSite {
             hosts,
             default_locale: default_locale.into(),
             supported_locales,
+            localized_routes,
         }
     }
 }
@@ -161,6 +170,7 @@ impl CustomerAppBootstrapManifest {
         app_name: impl Into<String>,
         default_locale: impl Into<String>,
         supported_locales: Vec<String>,
+        localized_routes: bool,
         auth_package: impl Into<String>,
         enabled_modules: Vec<String>,
         sites: Vec<CustomerAppBootstrapSite>,
@@ -176,6 +186,7 @@ impl CustomerAppBootstrapManifest {
             i18n: CustomerAppBootstrapI18n {
                 default_locale: default_locale.into(),
                 supported_locales,
+                localized_routes,
             },
             sites,
             auth: CustomerAppBootstrapAuth {
@@ -204,6 +215,7 @@ impl CustomerAppBootstrapManifest {
             Vec::new(),
             self.i18n.default_locale.clone(),
             self.i18n.supported_locales.clone(),
+            Some(self.i18n.localized_routes),
         )]
     }
 
@@ -223,29 +235,31 @@ impl CustomerAppBootstrapManifest {
                 configured: config.auth.package.clone(),
             });
         }
-        if self.i18n.default_locale != config.i18n.default_locale {
-            return Err(CustomerAppBootstrapManifestError::DefaultLocaleMismatch {
-                manifest: self.i18n.default_locale.clone(),
-                configured: config.i18n.default_locale.clone(),
-            });
-        }
+        if self.sites.is_empty() && config.sites.is_empty() {
+            if self.i18n.default_locale != config.i18n.default_locale {
+                return Err(CustomerAppBootstrapManifestError::DefaultLocaleMismatch {
+                    manifest: self.i18n.default_locale.clone(),
+                    configured: config.i18n.default_locale.clone(),
+                });
+            }
 
-        let manifest_locales = sorted_strings(self.i18n.supported_locales.clone());
-        let configured_locales = sorted_strings(config.i18n.supported_locales.clone());
-        if manifest_locales != configured_locales {
-            return Err(
-                CustomerAppBootstrapManifestError::SupportedLocalesMismatch {
-                    manifest: manifest_locales,
-                    configured: configured_locales,
-                },
-            );
-        }
+            let manifest_locales = sorted_strings(self.i18n.supported_locales.clone());
+            let configured_locales = sorted_strings(config.i18n.supported_locales.clone());
+            if manifest_locales != configured_locales {
+                return Err(
+                    CustomerAppBootstrapManifestError::SupportedLocalesMismatch {
+                        manifest: manifest_locales,
+                        configured: configured_locales,
+                    },
+                );
+            }
 
-        if self.domains.canonical != config.seo.canonical_host {
-            return Err(CustomerAppBootstrapManifestError::CanonicalHostMismatch {
-                manifest: self.domains.canonical.clone(),
-                configured: config.seo.canonical_host.clone(),
-            });
+            if self.domains.canonical != config.seo.canonical_host {
+                return Err(CustomerAppBootstrapManifestError::CanonicalHostMismatch {
+                    manifest: self.domains.canonical.clone(),
+                    configured: config.seo.canonical_host.clone(),
+                });
+            }
         }
 
         let manifest_resolved_sites = self.resolved_sites();
@@ -264,6 +278,7 @@ impl CustomerAppBootstrapManifest {
                 hosts: Vec::new(),
                 default_locale: config.i18n.default_locale.clone(),
                 supported_locales: config.i18n.supported_locales.clone(),
+                localized_routes: Some(config.i18n.localized_routes),
             }]
         } else {
             config.sites.clone()
@@ -345,6 +360,19 @@ impl CustomerAppBootstrapManifest {
                     field: "supported_locales",
                     manifest: manifest_locales.join(","),
                     configured: configured_locales.join(","),
+                });
+            }
+            let manifest_localized_routes =
+                site.localized_routes.unwrap_or(self.i18n.localized_routes);
+            let configured_localized_routes = configured
+                .localized_routes
+                .unwrap_or(config.i18n.localized_routes);
+            if manifest_localized_routes != configured_localized_routes {
+                return Err(CustomerAppBootstrapManifestError::SiteFieldMismatch {
+                    site: site.id.clone(),
+                    field: "localized_routes",
+                    manifest: manifest_localized_routes.to_string(),
+                    configured: configured_localized_routes.to_string(),
                 });
             }
         }

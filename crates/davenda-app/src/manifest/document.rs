@@ -6,7 +6,9 @@ use std::path::Path;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct CustomerAppManifestDocument {
     pub app: AppDocument,
+    #[serde(default)]
     pub domains: DomainsDocument,
+    #[serde(default)]
     pub i18n: I18nDocument,
     #[serde(default)]
     pub sites: Vec<SiteDocument>,
@@ -37,23 +39,50 @@ impl CustomerAppManifestDocument {
     }
 
     pub fn into_manifest(self) -> Result<CustomerAppManifest, AppModelError> {
+        let sites = self
+            .sites
+            .into_iter()
+            .map(SiteDocument::into_site)
+            .collect::<Result<Vec<_>, _>>()?;
         let app_id = CustomerAppId::new(self.app.name)?;
         let display_name = self.app.display_name.unwrap_or_else(|| app_id.to_string());
-        let default_locale = LocaleTag::new(self.i18n.default_locale).map_err(|error| {
-            AppModelError::ManifestParse {
-                message: error.to_string(),
-            }
-        })?;
-        let supported_locales = self
-            .i18n
-            .supported_locales
-            .into_iter()
-            .map(|locale| {
-                LocaleTag::new(locale).map_err(|error| AppModelError::ManifestParse {
+        let default_locale = if self.i18n.default_locale.is_empty() {
+            sites.first()
+                .map(|site| site.default_locale.clone())
+                .ok_or_else(|| AppModelError::ManifestParse {
+                    message: "customer app manifest requires [i18n].default_locale when no explicit [[sites]] are declared".to_string(),
+                })?
+        } else {
+            LocaleTag::new(self.i18n.default_locale).map_err(|error| {
+                AppModelError::ManifestParse {
                     message: error.to_string(),
+                }
+            })?
+        };
+        let supported_locales = if self.i18n.supported_locales.is_empty() {
+            let mut locales = sites
+                .iter()
+                .flat_map(|site| site.supported_locales.clone())
+                .collect::<Vec<_>>();
+            locales.sort();
+            locales.dedup();
+            if locales.is_empty() {
+                return Err(AppModelError::ManifestParse {
+                    message: "customer app manifest requires [i18n].supported_locales when no explicit [[sites]] are declared".to_string(),
+                });
+            }
+            locales
+        } else {
+            self.i18n
+                .supported_locales
+                .into_iter()
+                .map(|locale| {
+                    LocaleTag::new(locale).map_err(|error| AppModelError::ManifestParse {
+                        message: error.to_string(),
+                    })
                 })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, _>>()?
+        };
         let theme = build_theme_profile(self.theme)?;
         let auth = build_auth_strategy(self.auth)?;
 
@@ -64,15 +93,22 @@ impl CustomerAppManifestDocument {
             supported_locales,
             theme,
             auth,
-        )?;
+        )?
+        .with_localized_routes(self.i18n.localized_routes);
 
-        manifest = manifest.with_domain(AppDomain::new(self.domains.canonical, true)?);
+        if !self.domains.canonical.is_empty() {
+            manifest = manifest.with_domain(AppDomain::new(self.domains.canonical, true)?);
+        } else if sites.is_empty() {
+            return Err(AppModelError::ManifestParse {
+                message: "customer app manifest requires [domains].canonical when no explicit [[sites]] are declared".to_string(),
+            });
+        }
         for hostname in self.domains.additional {
             manifest = manifest.with_domain(AppDomain::new(hostname, false)?);
         }
 
-        for site in self.sites {
-            manifest = manifest.with_site(site.into_site()?);
+        for site in sites {
+            manifest = manifest.with_site(site);
         }
 
         for module in self.modules.enabled {
@@ -111,15 +147,29 @@ pub struct AppDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DomainsDocument {
+    #[serde(default)]
     pub canonical: String,
     #[serde(default)]
     pub additional: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+impl Default for DomainsDocument {
+    fn default() -> Self {
+        Self {
+            canonical: String::new(),
+            additional: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 pub struct I18nDocument {
+    #[serde(default)]
     pub default_locale: String,
+    #[serde(default)]
     pub supported_locales: Vec<String>,
+    #[serde(default)]
+    pub localized_routes: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -133,6 +183,8 @@ pub struct SiteDocument {
     pub additional_domains: Vec<String>,
     pub default_locale: String,
     pub supported_locales: Vec<String>,
+    #[serde(default)]
+    pub localized_routes: Option<bool>,
 }
 
 impl SiteDocument {
@@ -158,6 +210,9 @@ impl SiteDocument {
         )?;
         if let Some(brand_name) = self.brand_name {
             site = site.with_brand_name(brand_name)?;
+        }
+        if let Some(localized_routes) = self.localized_routes {
+            site = site.with_localized_routes(localized_routes);
         }
         site = site.with_domain(AppDomain::new(self.canonical_domain, true)?);
         for hostname in self.additional_domains {

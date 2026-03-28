@@ -234,7 +234,7 @@ impl RuntimePlan {
             .and_then(|module| TemplateNamespace::new(module.to_string()).ok())
     }
 
-    pub(super) fn render_model_for_execution(
+    pub(crate) fn render_model_for_execution(
         &self,
         execution: &RequestExecution,
         template_name: &str,
@@ -303,8 +303,9 @@ impl RuntimePlan {
                         .unwrap_or_else(|| execution.route.route_name.clone()),
                 ),
             )?
+            .with_object("site", site_model(self, execution)?)?
             .with_object("route_params", route_params_model(&execution.route.params))?
-            .with_object("links", links_model(&execution.locale)?)?
+            .with_object("links", links_model(self, execution)?)?
             .with_object("navigation", navigation_model(Some(self))?)?
             .with_bool(
                 "hasFlashMessages",
@@ -343,6 +344,7 @@ impl RuntimePlan {
             Some(self),
             model,
             execution.route.route_name.as_str(),
+            execution.site_id.as_deref(),
             execution.locale.as_str(),
             &execution.route.params,
             &execution.query_params,
@@ -433,28 +435,131 @@ fn primary_navigation_items(
     Ok(items)
 }
 
-fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
+fn site_model(
+    plan: &RuntimePlan,
+    execution: &RequestExecution,
+) -> Result<RenderModel, TemplateModelError> {
+    let canonical_host = plan
+        .config
+        .canonical_host_for_site(execution.site_id.as_deref())
+        .to_string();
+    let display_name = execution
+        .site_display_name
+        .clone()
+        .unwrap_or_else(|| execution.customer_app.clone());
+    let brand_name = execution
+        .brand_name
+        .clone()
+        .unwrap_or_else(|| display_name.clone());
+    let site_id = execution
+        .site_id
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+
     RenderModel::new()
-        .with_value("home", RenderValue::text("/"))?
-        .with_value("catalog", RenderValue::text(localized_shop_path(locale)))?
+        .with_value("id", RenderValue::text(site_id))?
+        .with_value("displayName", RenderValue::text(display_name))?
+        .with_value("requestHost", RenderValue::text(execution.host.clone()))?
+        .with_value("canonicalHost", RenderValue::text(canonical_host))?
+        .with_bool("hasBrandName", true)?
+        .with_value("brandName", RenderValue::text(brand_name))
+}
+
+fn links_model(
+    plan: &RuntimePlan,
+    execution: &RequestExecution,
+) -> Result<RenderModel, TemplateModelError> {
+    let site_id = execution.site_id.as_deref();
+    let locale = execution.locale.as_str();
+    RenderModel::new()
+        .with_value(
+            "home",
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "home",
+                &BTreeMap::new(),
+                Some(locale),
+                "/",
+            )),
+        )?
+        .with_value(
+            "catalog",
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "commerce.catalog",
+                &BTreeMap::new(),
+                Some(locale),
+                &localized_shop_path(locale),
+            )),
+        )?
         .with_value(
             "collections",
-            RenderValue::text(localized_collections_path(locale)),
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "commerce.collections",
+                &BTreeMap::new(),
+                Some(locale),
+                &localized_collections_path(locale),
+            )),
         )?
         .with_value(
             "featuredCollection",
-            RenderValue::text(localized_collection_path(locale, "featured")),
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "commerce.collection-detail",
+                &BTreeMap::from([("collection_slug".to_string(), "featured".to_string())]),
+                Some(locale),
+                &localized_collection_path(locale, "featured"),
+            )),
         )?
         .with_value(
             "membershipsCollection",
-            RenderValue::text(localized_collection_path(locale, "memberships")),
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "commerce.collection-detail",
+                &BTreeMap::from([("collection_slug".to_string(), "memberships".to_string())]),
+                Some(locale),
+                &localized_collection_path(locale, "memberships"),
+            )),
         )?
         .with_value(
             "eventsCollection",
-            RenderValue::text(localized_collection_path(locale, "events")),
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "commerce.collection-detail",
+                &BTreeMap::from([("collection_slug".to_string(), "events".to_string())]),
+                Some(locale),
+                &localized_collection_path(locale, "events"),
+            )),
         )?
-        .with_value("cart", RenderValue::text("/cart"))?
-        .with_value("checkout", RenderValue::text("/checkout"))?
+        .with_value(
+            "cart",
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "commerce.cart",
+                &BTreeMap::new(),
+                None,
+                "/cart",
+            )),
+        )?
+        .with_value(
+            "checkout",
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "commerce.checkout",
+                &BTreeMap::new(),
+                None,
+                "/checkout",
+            )),
+        )?
         .with_value("account", RenderValue::text("/account"))?
         .with_value("orders", RenderValue::text("/account/orders"))?
         .with_value("memberships", RenderValue::text("/account/memberships"))?
@@ -467,14 +572,28 @@ fn links_model(locale: &str) -> Result<RenderModel, TemplateModelError> {
         .with_value("adminRedirects", RenderValue::text("/admin/redirects"))
 }
 
+fn route_link(
+    plan: &RuntimePlan,
+    site_id: Option<&str>,
+    route_name: &str,
+    params: &BTreeMap<String, String>,
+    locale: Option<&str>,
+    fallback: &str,
+) -> String {
+    plan.http
+        .path_for_site(&plan.config, site_id, route_name, params, locale)
+        .unwrap_or_else(|_| fallback.to_string())
+}
+
 fn page_model_for_route(
     execution: &RequestExecution,
     template_name: &str,
     fragment_id: Option<&str>,
 ) -> RenderModel {
+    let brand_name = execution.brand_name.as_deref().unwrap_or("Harbor Shop");
     let title = match execution.route.route_name.as_str() {
-        "home" => "Harbor Shop".to_string(),
-        "commerce.catalog" => "Shop Harbor".to_string(),
+        "home" => brand_name.to_string(),
+        "commerce.catalog" => format!("Shop {brand_name}"),
         "commerce.collections" => "Shop Collections".to_string(),
         "commerce.collection-detail" => execution
             .route
@@ -492,7 +611,7 @@ fn page_model_for_route(
         "commerce.checkout" => "Checkout".to_string(),
         "commerce.checkout-confirmation" => "Order Confirmed".to_string(),
         "commerce.account.orders" => "Order History".to_string(),
-        "admin.dashboard" => "Harbor Shop Admin".to_string(),
+        "admin.dashboard" => format!("{brand_name} Admin"),
         "admin.audit" => "Audit Log".to_string(),
         "commerce.orders" => "Orders".to_string(),
         "commerce.order-detail" => execution
@@ -576,6 +695,7 @@ fn apply_route_specific_bindings(
     plan: Option<&RuntimePlan>,
     mut model: RenderModel,
     route_name: &str,
+    site_id: Option<&str>,
     locale: &str,
     params: &BTreeMap<String, String>,
     query_params: &RequestFieldMap,
@@ -585,7 +705,7 @@ fn apply_route_specific_bindings(
 ) -> Result<RenderModel, TemplateModelError> {
     let effective_catalog = effective_storefront_catalog(plan)?;
     let catalog = &effective_catalog;
-    let fixture = storefront_fixture(locale, catalog, plan)?;
+    let fixture = storefront_fixture(locale, site_id, catalog, plan)?;
 
     match route_name {
         "home" | "commerce.catalog" | "commerce.collections" => {
@@ -602,7 +722,7 @@ fn apply_route_specific_bindings(
                 .get("collection_slug")
                 .map(String::as_str)
                 .unwrap_or("featured");
-            if let Some(_collection) = catalog.visible_collection(slug) {
+            if let Some(_collection) = catalog.visible_collection_for_site(site_id, slug) {
                 let product_cards = fixture.product_cards_for_collection(slug);
                 model = model
                     .with_bool("hasCollection", true)?
@@ -625,7 +745,7 @@ fn apply_route_specific_bindings(
                 .get("product_slug")
                 .map(String::as_str)
                 .unwrap_or("harbor-cap");
-            if catalog.visible_product(slug).is_some() {
+            if catalog.visible_product_for_site(site_id, slug).is_some() {
                 let product_cards = fixture.related_product_cards_for_product(slug);
                 model = model
                     .with_bool("hasProduct", true)?
@@ -3323,13 +3443,18 @@ fn product_cards_by_collection(
 
 fn storefront_fixture(
     locale: &str,
+    site_id: Option<&str>,
     catalog: &StorefrontCatalog,
     plan: Option<&RuntimePlan>,
 ) -> Result<StorefrontFixture, TemplateModelError> {
     let products_data = catalog
         .products
         .iter()
-        .filter(|product| catalog.visible_product(product.handle.as_str()).is_some())
+        .filter(|product| {
+            catalog
+                .visible_product_for_site(site_id, product.handle.as_str())
+                .is_some()
+        })
         .map(|product| ProductFixture {
             handle: product.handle.clone(),
             title: product.title.clone(),
@@ -3360,7 +3485,11 @@ fn storefront_fixture(
     let collections_data = catalog
         .collections
         .iter()
-        .filter(|collection| collection.is_visible)
+        .filter(|collection| {
+            catalog
+                .visible_collection_for_site(site_id, collection.handle.as_str())
+                .is_some()
+        })
         .map(|collection| CollectionFixture {
             handle: collection.handle.clone(),
             title: collection.title.clone(),
@@ -4596,6 +4725,7 @@ cdn_base_url = "https://cdn.example.com"
             None,
             RenderModel::new(),
             route_name,
+            None,
             "en-GB",
             &BTreeMap::new(),
             &RequestFieldMap::new(),
@@ -4620,6 +4750,7 @@ cdn_base_url = "https://cdn.example.com"
             None,
             RenderModel::new(),
             "memberships.account",
+            None,
             "en-GB",
             &BTreeMap::new(),
             &RequestFieldMap::new(),
@@ -4639,6 +4770,7 @@ cdn_base_url = "https://cdn.example.com"
             None,
             RenderModel::new(),
             "memberships.account.dashboard",
+            None,
             "en-GB",
             &BTreeMap::new(),
             &RequestFieldMap::new(),

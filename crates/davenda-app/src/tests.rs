@@ -309,6 +309,68 @@ fn app() -> CustomerAppManifest {
 }
 
 #[test]
+fn manifest_parses_explicit_sites_and_composition_uses_the_first_site_as_primary() {
+    let manifest = CustomerAppManifest::from_toml_str(
+        r#"
+[app]
+name = "harbor-shop"
+display_name = "Harbor Shop"
+
+[domains]
+canonical = "shop.example.com"
+additional = ["www.example.com"]
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[[sites]]
+id = "storefront"
+display_name = "Harbor Shop"
+brand_name = "Harbor"
+canonical_domain = "shop.example.com"
+additional_domains = ["www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[[sites]]
+id = "events"
+display_name = "Harbor Events"
+canonical_domain = "events.example.com"
+default_locale = "en-GB"
+supported_locales = ["en-GB"]
+
+[theme]
+active = "harbor"
+template_namespaces = ["customer-app", "harbor"]
+asset_roots = ["theme/assets"]
+
+[auth]
+mode = "extend"
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms", "commerce"]
+"#,
+    )
+    .unwrap();
+
+    let composition = manifest
+        .compose(&DefaultAuthModelPackage::default(), &module_manifests())
+        .unwrap();
+
+    assert_eq!(composition.sites.len(), 2);
+    assert_eq!(
+        composition.primary_site().unwrap().id.as_str(),
+        "storefront"
+    );
+    assert_eq!(
+        composition.primary_site().unwrap().canonical_domain(),
+        Some("shop.example.com")
+    );
+}
+
+#[test]
 fn theme_profile_builds_a_publication_plan_from_typed_asset_roots() {
     let root = tempfile::tempdir().unwrap();
     let theme_root = root.path().join("theme/assets");

@@ -438,7 +438,6 @@ fn customer_bootstrap_manifest_validates_aligned_runtime_config() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let manifest = CustomerAppBootstrapManifest::new(
         "showcase-events",
-        "www.example.com",
         "en-GB",
         vec!["en-GB".to_string(), "fr-FR".to_string()],
         "platform-default-auth",
@@ -449,6 +448,8 @@ fn customer_bootstrap_manifest_validates_aligned_runtime_config() {
             "events".to_string(),
             "media-library".to_string(),
         ],
+        Vec::new(),
+        "www.example.com",
     );
 
     manifest.validate_runtime_config_alignment(&config).unwrap();
@@ -459,11 +460,12 @@ fn customer_bootstrap_manifest_reports_module_drift() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let manifest = CustomerAppBootstrapManifest::new(
         "showcase-events",
-        "www.example.com",
         "en-GB",
         vec!["en-GB".to_string(), "fr-FR".to_string()],
         "platform-default-auth",
         vec!["cms-pages".to_string(), "memberships".to_string()],
+        Vec::new(),
+        "www.example.com",
     );
 
     let error = manifest
@@ -509,6 +511,58 @@ name = "showcase-events"
 canonical = "www.example.com"
 
 [i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[auth]
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+"#,
+    )
+    .unwrap();
+
+    let manifest = CustomerAppBootstrapManifest::from_file(&manifest_path).unwrap();
+
+    assert_eq!(
+        manifest.enabled_modules(),
+        &["cms-pages".to_string(), "admin-shell".to_string()]
+    );
+
+    std::fs::remove_file(&manifest_path).unwrap();
+    std::fs::remove_dir(&temp_dir).unwrap();
+}
+
+#[test]
+fn customer_bootstrap_manifest_accepts_explicit_sites_with_app_manifest_field_names() {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "davenda-config-customer-bootstrap-sites-{timestamp}"
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let manifest_path = temp_dir.join("app.toml");
+    std::fs::write(
+        &manifest_path,
+        r#"
+[app]
+name = "showcase-events"
+
+[domains]
+canonical = "www.example.com"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[[sites]]
+id = "storefront"
+display_name = "Showcase Storefront"
+canonical_domain = "shop.example.com"
+additional_domains = ["www.shop.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR"]
 

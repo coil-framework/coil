@@ -159,6 +159,15 @@ impl HttpRuntimePlan {
         host: &str,
         path: &str,
     ) -> Option<ResolvedRouteMatch> {
+        let site_id = config
+            .sites
+            .iter()
+            .find(|site| {
+                site.canonical_host == host || site.hosts.iter().any(|candidate| candidate == host)
+            })
+            .map(|site| site.id.clone())
+            .or_else(|| config.default_site().map(|site| site.id.clone()));
+        let supported_locales = config.supported_locales_for_site(site_id.as_deref());
         self.routes.iter().find_map(|route| {
             if route.method != method {
                 return None;
@@ -176,6 +185,7 @@ impl HttpRuntimePlan {
                         route: route.clone(),
                         resolved: ResolvedRoute {
                             route_name: route.name.clone(),
+                            site_id: site_id.clone(),
                             locale: None,
                             auth: route.auth,
                             params,
@@ -184,7 +194,7 @@ impl HttpRuntimePlan {
                     None => None,
                 },
                 LocalePolicy::Localized if config.i18n.localized_routes => {
-                    config.i18n.supported_locales.iter().find_map(|locale| {
+                    supported_locales.iter().find_map(|locale| {
                         let localized_path = format!(
                             "/{}/{}",
                             locale.trim_matches('/'),
@@ -194,6 +204,7 @@ impl HttpRuntimePlan {
                             route: route.clone(),
                             resolved: ResolvedRoute {
                                 route_name: route.name.clone(),
+                                site_id: site_id.clone(),
                                 locale: Some(locale.clone()),
                                 auth: route.auth,
                                 params,
@@ -213,6 +224,17 @@ impl HttpRuntimePlan {
         params: &BTreeMap<String, String>,
         locale: Option<&str>,
     ) -> Result<String, RouteUrlError> {
+        self.path_for_site(config, None, route_name, params, locale)
+    }
+
+    pub fn path_for_site(
+        &self,
+        config: &PlatformConfig,
+        site_id: Option<&str>,
+        route_name: &str,
+        params: &BTreeMap<String, String>,
+        locale: Option<&str>,
+    ) -> Result<String, RouteUrlError> {
         let route = self
             .routes
             .iter()
@@ -223,10 +245,9 @@ impl HttpRuntimePlan {
         let rendered_path = render_route_path(&route.path, params, route_name)?;
 
         if route.locale_policy == LocalePolicy::Localized {
-            let locale = locale.unwrap_or(&config.i18n.default_locale);
+            let locale = locale.unwrap_or(config.default_locale_for_site(site_id));
             if !config
-                .i18n
-                .supported_locales
+                .supported_locales_for_site(site_id)
                 .iter()
                 .any(|item| item == locale)
             {
@@ -253,6 +274,17 @@ impl HttpRuntimePlan {
         params: &BTreeMap<String, String>,
         locale: Option<&str>,
     ) -> Result<String, RouteUrlError> {
+        self.absolute_url_for_site(config, None, route_name, params, locale)
+    }
+
+    pub fn absolute_url_for_site(
+        &self,
+        config: &PlatformConfig,
+        site_id: Option<&str>,
+        route_name: &str,
+        params: &BTreeMap<String, String>,
+        locale: Option<&str>,
+    ) -> Result<String, RouteUrlError> {
         let route = self
             .routes
             .iter()
@@ -260,10 +292,10 @@ impl HttpRuntimePlan {
             .ok_or_else(|| RouteUrlError::UnknownRoute {
                 route: route_name.to_string(),
             })?;
-        let path = self.path_for(config, route_name, params, locale)?;
+        let path = self.path_for_site(config, site_id, route_name, params, locale)?;
         let host = match &route.host {
             HostPattern::Exact(host) => host.as_str(),
-            HostPattern::Any => config.seo.canonical_host.as_str(),
+            HostPattern::Any => config.canonical_host_for_site(site_id),
         };
         Ok(format!("https://{host}{path}"))
     }
@@ -272,6 +304,7 @@ impl HttpRuntimePlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRoute {
     pub route_name: String,
+    pub site_id: Option<String>,
     pub locale: Option<String>,
     pub auth: RouteAuthGate,
     pub params: BTreeMap<String, String>,

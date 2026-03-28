@@ -24,6 +24,7 @@ macro_rules! token_type {
 }
 
 token_type!(CustomerAppId, "customer_app_id");
+token_type!(SiteId, "site_id");
 token_type!(ThemeId, "theme_id");
 token_type!(ContentModelId, "content_model_id");
 token_type!(ContentFieldId, "content_field_id");

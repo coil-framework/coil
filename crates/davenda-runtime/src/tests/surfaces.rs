@@ -949,3 +949,43 @@ fn http_runtime_generates_named_paths_for_module_routes() {
         }
     );
 }
+
+#[test]
+fn http_runtime_generates_site_specific_absolute_urls() {
+    let config = config_with_sites();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(EventsModule::new())
+        .build()
+        .unwrap();
+    let params = BTreeMap::from([("event_slug".to_string(), "summer-gala".to_string())]);
+
+    let shop_url = plan
+        .http
+        .absolute_url_for_site(
+            &plan.config,
+            Some("shop"),
+            "events.detail",
+            &params,
+            Some("fr-FR"),
+        )
+        .unwrap();
+    let tickets_url = plan
+        .http
+        .absolute_url_for_site(
+            &plan.config,
+            Some("tickets"),
+            "events.detail",
+            &params,
+            Some("de-DE"),
+        )
+        .unwrap();
+
+    assert_eq!(
+        shop_url,
+        "https://shop.example.com/fr-FR/events/summer-gala"
+    );
+    assert_eq!(
+        tickets_url,
+        "https://tickets.example.com/de-DE/events/summer-gala"
+    );
+}

@@ -33,8 +33,9 @@ use davenda_storage::{
     DeliveryMode, PathPolicyRule, StorageDeploymentScope, StoragePlanRequest, StoragePolicy,
 };
 use davenda_template::{
-    AttributeNode, ElementNode, Node, TemplateDefinition, TemplateModelError, TemplateName,
-    TemplateNamespace,
+    AttributeNode, DocumentRenderRequest, ElementNode, Node, TemplateDefinition,
+    TemplateModelError, TemplateName, TemplateNamespace, TemplateRegistry, TemplateRuntime,
+    TemplateSelector, TemplateSourceParser,
 };
 use davenda_tls::{
     CertificateFingerprint, CertificateId, CertificateProviderKind, CertificateRecord,
@@ -212,6 +213,160 @@ fn config_with_outbound_http() -> PlatformConfig {
         "\n[[wasm.outbound_http]]\nintegration = \"crm\"\nendpoint = \"https://crm.example.com/api\"\n\n[jobs]\nbackend = \"redis\"\n",
     ))
     .unwrap()
+}
+
+fn config_with_sites() -> PlatformConfig {
+    let config = VALID_CONFIG.replace(
+        "supported_locales = [\"en-GB\", \"fr-FR\"]",
+        "supported_locales = [\"en-GB\", \"fr-FR\", \"de-DE\"]",
+    );
+    PlatformConfig::from_toml_str(&config.replace(
+        "\n[auth]\npackage = \"platform-default-auth\"\nexplain_api = false\ntenant_id = 101\n",
+        "\n[[sites]]\nid = \"shop\"\ndisplay_name = \"Harbor Shop\"\nbrand_name = \"Harbor\"\ncanonical_host = \"shop.example.com\"\nhosts = [\"www.example.com\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"fr-FR\"]\n\n[[sites]]\nid = \"tickets\"\ndisplay_name = \"Harbor Tickets\"\ncanonical_host = \"tickets.example.com\"\nhosts = [\"tickets-alt.example.com\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"de-DE\"]\n\n[auth]\npackage = \"platform-default-auth\"\nexplain_api = false\ntenant_id = 101\n",
+    ))
+    .unwrap()
+}
+
+#[test]
+fn request_execution_resolves_site_context_and_site_locales() {
+    let config = config_with_sites();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(EventsModule::new())
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(
+                HttpMethod::Get,
+                "tickets.example.com",
+                "/de-DE/events/summer-gala",
+            )
+            .unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    assert_eq!(execution.site_id.as_deref(), Some("tickets"));
+    assert_eq!(
+        execution.site_display_name.as_deref(),
+        Some("Harbor Tickets")
+    );
+    assert_eq!(execution.locale, "de-DE");
+    assert!(
+        plan.http
+            .resolve_match(
+                &plan.config,
+                HttpMethod::Get,
+                "tickets.example.com",
+                "/fr-FR/events/summer-gala",
+            )
+            .is_none()
+    );
+}
+
+#[test]
+fn cache_plan_uses_site_identity_for_same_site_alias_hosts() {
+    let config = config_with_sites();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(EventsModule::new())
+        .build()
+        .unwrap();
+
+    let canonical = plan
+        .execute_request(
+            RequestInput::new(
+                HttpMethod::Get,
+                "shop.example.com",
+                "/fr-FR/events/summer-gala",
+            )
+            .unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let alias = plan
+        .execute_request(
+            RequestInput::new(
+                HttpMethod::Get,
+                "www.example.com",
+                "/fr-FR/events/summer-gala",
+            )
+            .unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    assert_eq!(canonical.site_id.as_deref(), Some("shop"));
+    assert_eq!(alias.site_id.as_deref(), Some("shop"));
+    assert_eq!(
+        canonical.cache_plan.headers.get("ETag"),
+        alias.cache_plan.headers.get("ETag")
+    );
+}
+
+#[test]
+fn render_model_and_seo_use_site_aware_links_and_canonical_host() {
+    let config = config_with_sites();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "shop.example.com", "/fr-FR/shop").unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let model = plan
+        .render_model_for_execution(&execution, "commerce/catalog", None)
+        .unwrap();
+    let document = plan
+        .decorate_page_document(
+            &execution,
+            "commerce/catalog",
+            "<!doctype html><html><head></head><body></body></html>".to_string(),
+            None,
+        )
+        .unwrap();
+    let namespace = TemplateNamespace::new("customer-app").unwrap();
+    let template = TemplateSourceParser::new()
+        .parse_layout(
+            namespace.clone(),
+            TemplateName::new("site-check").unwrap(),
+            r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <p class="site" dv:text="${site.id}">default</p>
+    <p class="canonical" dv:text="${site.canonicalHost}">host</p>
+    <p class="catalog" dv:text="${links.catalog}">/shop</p>
+  </body>
+</html>"#,
+        )
+        .unwrap();
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+    let html = TemplateRuntime::new(registry)
+        .render_document(
+            &[namespace],
+            DocumentRenderRequest::new(
+                TemplateSelector::new(TemplateName::new("site-check").unwrap()),
+                model,
+            ),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains("<p class=\"site\">shop</p>"), "{html}");
+    assert!(html.contains("shop.example.com"), "{html}");
+    assert!(html.contains("/fr-FR/shop"), "{html}");
+    assert!(document.contains("https://shop.example.com/fr-FR/shop"));
+    assert!(document.contains("hreflang=\"en-GB\""));
+    assert!(document.contains("https://shop.example.com/en-GB/shop"));
 }
 
 fn installed_admin_widget_extension() -> InstalledExtension {
@@ -915,6 +1070,7 @@ fn runtime_builder_creates_a_runtime_plan() {
         ),
         Some(ResolvedRoute {
             route_name: "events.show".to_string(),
+            site_id: None,
             locale: Some("fr-FR".to_string()),
             auth: RouteAuthGate::Public,
             params: BTreeMap::new(),

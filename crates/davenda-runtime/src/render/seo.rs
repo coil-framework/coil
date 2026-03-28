@@ -6,7 +6,7 @@ use davenda_seo::{HeadMetadata, OpenGraphData, OpenGraphType, RobotsDirective, p
 use davenda_wasm::RobotsDirective as TypedRobotsDirective;
 
 impl RuntimePlan {
-    pub(super) fn decorate_page_document(
+    pub(crate) fn decorate_page_document(
         &self,
         execution: &RequestExecution,
         template_name: &str,
@@ -114,21 +114,25 @@ impl RuntimePlan {
             .find(|route| route.name == execution.route.route_name)
             .expect("request execution routes must resolve from the runtime plan");
         let current_locale = LocaleTag::new(execution.locale.clone())?;
+        let site_id = execution.site_id.as_deref();
         let locales = if route.locale_policy == LocalePolicy::Localized {
             let mut locales = vec![current_locale.clone()];
             locales.extend(
-                self.i18n
-                    .supported_locales
+                self.config
+                    .supported_locales_for_site(site_id)
                     .iter()
-                    .filter(|locale| **locale != current_locale)
-                    .cloned(),
+                    .filter(|locale| locale.as_str() != current_locale.as_str())
+                    .filter_map(|locale| LocaleTag::new(locale.clone()).ok()),
             );
             locales
         } else {
-            vec![self.i18n.default_locale.clone()]
+            vec![LocaleTag::new(
+                self.config.default_locale_for_site(site_id).to_string(),
+            )?]
         };
-        let canonical = self.http.absolute_url_for(
+        let canonical = self.http.absolute_url_for_site(
             &self.config,
+            site_id,
             &execution.route.route_name,
             &execution.route.params,
             Some(current_locale.as_str()),
@@ -137,8 +141,9 @@ impl RuntimePlan {
         for locale in locales {
             alternate_hreflang.insert(
                 locale.to_string(),
-                self.http.absolute_url_for(
+                self.http.absolute_url_for_site(
                     &self.config,
+                    site_id,
                     &execution.route.route_name,
                     &execution.route.params,
                     Some(locale.as_str()),

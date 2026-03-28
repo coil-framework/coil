@@ -65,6 +65,32 @@ pub enum ConfigValidationError {
     },
     #[error("seo.canonical_host must not be empty")]
     EmptyCanonicalHost,
+    #[error("site `{site}` display_name must not be empty")]
+    EmptySiteDisplayName { site: String },
+    #[error("site `{site}` canonical_host must not be empty")]
+    EmptySiteCanonicalHost { site: String },
+    #[error("site `{site}` hosts must not be empty")]
+    MissingSiteHosts { site: String },
+    #[error("site `{site}` is declared more than once")]
+    DuplicateSite { site: String },
+    #[error("site host `{host}` is declared more than once")]
+    DuplicateSiteHost { host: String },
+    #[error(
+        "site `{site}` default locale `{default_locale}` is not in supported_locales {supported_locales:?}"
+    )]
+    SiteDefaultLocaleNotSupported {
+        site: String,
+        default_locale: String,
+        supported_locales: Vec<String>,
+    },
+    #[error(
+        "site `{site}` locale `{locale}` is not in app supported_locales {supported_locales:?}"
+    )]
+    SiteLocaleOutsideAppSupport {
+        site: String,
+        locale: String,
+        supported_locales: Vec<String>,
+    },
     #[error("auth.package must not be empty")]
     EmptyAuthPackage,
     #[error("auth.tenant_id must be greater than zero, got {tenant_id}")]
@@ -235,6 +261,67 @@ impl PlatformConfig {
 
         if self.seo.canonical_host.trim().is_empty() {
             errors.push(ConfigValidationError::EmptyCanonicalHost);
+        }
+
+        let mut site_ids = std::collections::BTreeSet::new();
+        let mut site_hosts = std::collections::BTreeSet::new();
+        for site in &self.sites {
+            if site.id.trim().is_empty() {
+                errors.push(ConfigValidationError::DuplicateSite {
+                    site: site.id.clone(),
+                });
+            } else if !site_ids.insert(site.id.clone()) {
+                errors.push(ConfigValidationError::DuplicateSite {
+                    site: site.id.clone(),
+                });
+            }
+
+            if site.display_name.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptySiteDisplayName {
+                    site: site.id.clone(),
+                });
+            }
+
+            if site.canonical_host.trim().is_empty() {
+                errors.push(ConfigValidationError::EmptySiteCanonicalHost {
+                    site: site.id.clone(),
+                });
+            }
+
+            if site.hosts.is_empty() {
+                errors.push(ConfigValidationError::MissingSiteHosts {
+                    site: site.id.clone(),
+                });
+            }
+
+            if !site.supported_locales.contains(&site.default_locale) {
+                errors.push(ConfigValidationError::SiteDefaultLocaleNotSupported {
+                    site: site.id.clone(),
+                    default_locale: site.default_locale.clone(),
+                    supported_locales: site.supported_locales.clone(),
+                });
+            }
+
+            for locale in &site.supported_locales {
+                if !self.i18n.supported_locales.contains(locale) {
+                    errors.push(ConfigValidationError::SiteLocaleOutsideAppSupport {
+                        site: site.id.clone(),
+                        locale: locale.clone(),
+                        supported_locales: self.i18n.supported_locales.clone(),
+                    });
+                }
+            }
+
+            for host in site
+                .hosts
+                .iter()
+                .cloned()
+                .chain(std::iter::once(site.canonical_host.clone()))
+            {
+                if !site_hosts.insert(host.clone()) {
+                    errors.push(ConfigValidationError::DuplicateSiteHost { host });
+                }
+            }
         }
 
         if self.auth.package.trim().is_empty() {

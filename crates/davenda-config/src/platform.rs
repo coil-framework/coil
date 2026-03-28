@@ -23,6 +23,8 @@ pub struct PlatformConfig {
     pub cache: CacheConfig,
     pub i18n: I18nConfig,
     pub seo: SeoConfig,
+    #[serde(default)]
+    pub sites: Vec<SiteConfig>,
     pub auth: AuthConfig,
     pub modules: ModulesConfig,
     pub wasm: WasmConfig,
@@ -72,6 +74,41 @@ impl PlatformConfig {
     pub fn render_effective_toml(&self) -> Result<String, toml::ser::Error> {
         toml::to_string_pretty(self)
     }
+
+    pub fn site_for_host(&self, host: &str) -> Option<&SiteConfig> {
+        self.sites.iter().find(|site| {
+            site.canonical_host == host || site.hosts.iter().any(|value| value == host)
+        })
+    }
+
+    pub fn site_for_id(&self, site_id: &str) -> Option<&SiteConfig> {
+        self.sites.iter().find(|site| site.id == site_id)
+    }
+
+    pub fn default_site(&self) -> Option<&SiteConfig> {
+        self.sites.first()
+    }
+
+    pub fn canonical_host_for_site(&self, site_id: Option<&str>) -> &str {
+        site_id
+            .and_then(|site_id| self.site_for_id(site_id))
+            .map(|site| site.canonical_host.as_str())
+            .unwrap_or(self.seo.canonical_host.as_str())
+    }
+
+    pub fn default_locale_for_site(&self, site_id: Option<&str>) -> &str {
+        site_id
+            .and_then(|site_id| self.site_for_id(site_id))
+            .map(|site| site.default_locale.as_str())
+            .unwrap_or(self.i18n.default_locale.as_str())
+    }
+
+    pub fn supported_locales_for_site(&self, site_id: Option<&str>) -> &[String] {
+        site_id
+            .and_then(|site_id| self.site_for_id(site_id))
+            .map(|site| site.supported_locales.as_slice())
+            .unwrap_or(self.i18n.supported_locales.as_slice())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -89,6 +126,19 @@ pub struct SeoConfig {
     pub emit_json_ld: bool,
     #[serde(default = "default_sitemap_enabled")]
     pub sitemap_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SiteConfig {
+    pub id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub brand_name: Option<String>,
+    pub canonical_host: String,
+    #[serde(default)]
+    pub hosts: Vec<String>,
+    pub default_locale: String,
+    pub supported_locales: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

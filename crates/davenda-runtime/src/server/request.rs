@@ -954,6 +954,17 @@ fn storefront_form_field_value(execution: &RequestExecution, name: &str) -> Stri
         .to_string()
 }
 
+fn storefront_catalog_product_for_execution<'a>(
+    state: &'a RuntimeServerState,
+    execution: &RequestExecution,
+    sku: &str,
+) -> Option<&'a StorefrontProductDefinition> {
+    state
+        .plan
+        .storefront_catalog
+        .product_by_sku_or_handle_for_site(execution.site_id.as_deref(), sku)
+}
+
 fn storefront_checkout_form_state_from_execution(
     execution: &RequestExecution,
     summary: impl Into<String>,
@@ -982,6 +993,7 @@ fn storefront_checkout_form_state_from_execution(
 struct RuntimeCheckoutCommerceFacade<'a> {
     plan: &'a RuntimePlan,
     catalog: &'a StorefrontCatalog,
+    site_id: Option<&'a str>,
     principal_id: Option<&'a str>,
     recorded_at_unix_seconds: u64,
 }
@@ -990,7 +1002,7 @@ impl CommerceFacade for RuntimeCheckoutCommerceFacade<'_> {
     fn product(&self, sku: &str) -> Result<Option<CommerceProduct>, BackendError> {
         Ok(self
             .catalog
-            .product_by_sku_or_handle(sku)
+            .product_by_sku_or_handle_for_site(self.site_id, sku)
             .map(|product| CommerceProduct {
                 sku: product.sku.clone(),
                 handle: product.handle.clone(),
@@ -1258,13 +1270,14 @@ fn runtime_customer_request_context(
         davenda_config::Environment::Staging => "staging",
         davenda_config::Environment::Production => "production",
     };
-    let customer_app = match execution.locale.trim() {
-        "" => SdkCustomerAppContext::new(execution.customer_app.clone(), environment.to_owned()),
-        locale => {
-            SdkCustomerAppContext::new(execution.customer_app.clone(), environment.to_owned())
-                .with_locale(locale.to_string())
-        }
-    };
+    let mut customer_app =
+        SdkCustomerAppContext::new(execution.customer_app.clone(), environment.to_owned());
+    if let Some(site_id) = execution.site_id.as_deref() {
+        customer_app = customer_app.with_site_id(site_id.to_string());
+    }
+    if !execution.locale.trim().is_empty() {
+        customer_app = customer_app.with_locale(execution.locale.clone());
+    }
     let principal = match (
         execution.principal.principal_id.as_deref(),
         execution.principal.principal_kind,
@@ -2266,7 +2279,7 @@ fn checkout_order_draft(
             let collection_handle = state
                 .plan
                 .storefront_catalog
-                .product_by_sku_or_handle(&line.sku)
+                .product_by_sku_or_handle_for_site(execution.site_id.as_deref(), &line.sku)
                 .map(|product| product.collection_handle.clone());
             OrderLineDraft {
                 sku: line.sku.clone(),
@@ -2342,7 +2355,7 @@ fn storefront_checkout_order_metadata(
     }
     metadata.insert(
         "membership_tier".to_string(),
-        storefront_membership_tier(state, snapshot)
+        storefront_membership_tier(state, execution, snapshot)
             .unwrap_or("guest")
             .to_string(),
     );
@@ -2351,13 +2364,14 @@ fn storefront_checkout_order_metadata(
 
 fn storefront_membership_tier<'a>(
     state: &'a RuntimeServerState,
+    execution: &'a RequestExecution,
     snapshot: &'a StorefrontStateSnapshot,
 ) -> Option<&'static str> {
     snapshot.cart.lines.iter().find_map(|line| {
         let product = state
             .plan
             .storefront_catalog
-            .product_by_sku_or_handle(&line.sku)?;
+            .product_by_sku_or_handle_for_site(execution.site_id.as_deref(), &line.sku)?;
         match product.entitlement_key.as_deref() {
             Some("membership.gold") => Some("gold"),
             Some(entitlement) if entitlement.starts_with("membership.") => Some("standard"),
@@ -2698,6 +2712,7 @@ fn review_checkout_with_customer_hooks(
     let commerce = RuntimeCheckoutCommerceFacade {
         plan: &state.plan,
         catalog: &state.plan.storefront_catalog,
+        site_id: execution.site_id.as_deref(),
         principal_id: execution.principal.principal_id.as_deref(),
         recorded_at_unix_seconds: now.as_unix_seconds(),
     };
@@ -3999,6 +4014,14 @@ async fn apply_native_storefront_mutations(
         "commerce.add-to-cart" => {
             let quantity = storefront_quantity_from_execution(execution);
             let sku = storefront_sku_from_execution(execution)?;
+            if storefront_catalog_product_for_execution(state, execution, sku.as_ref()).is_none() {
+                let form_state = StorefrontFormState::new(
+                    "commerce.cart",
+                    "That product is not available on this site right now.",
+                );
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/cart".to_string()));
+            }
             let snapshot = state.storefront.add_to_cart(
                 session_id,
                 execution.principal.principal_id.as_deref(),
@@ -4043,6 +4066,16 @@ async fn apply_native_storefront_mutations(
         "commerce.checkout-start" => {
             if let Ok(sku) = storefront_sku_from_execution(execution) {
                 let quantity = storefront_quantity_from_execution(execution);
+                if storefront_catalog_product_for_execution(state, execution, sku.as_ref())
+                    .is_none()
+                {
+                    let form_state = StorefrontFormState::new(
+                        "commerce.cart",
+                        "That product is not available on this site right now.",
+                    );
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/cart".to_string()));
+                }
                 let _ = state.storefront.add_to_cart(
                     session_id,
                     execution.principal.principal_id.as_deref(),

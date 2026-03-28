@@ -64,7 +64,13 @@ impl RuntimeHostServiceExecutor {
                 .map_err(|error| runtime_executor_error(context, error))?;
         }
         scope = scope
-            .with_site(context.customer_app.app_id.clone())
+            .with_site(
+                context
+                    .customer_app
+                    .site_id
+                    .clone()
+                    .unwrap_or_else(|| context.customer_app.app_id.clone()),
+            )
             .map_err(|error| runtime_executor_error(context, error))?;
         let freshness =
             FreshnessPolicy::new(Duration::from_secs(60), Some(Duration::from_secs(30)))

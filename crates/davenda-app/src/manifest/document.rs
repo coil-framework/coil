@@ -8,6 +8,8 @@ pub struct CustomerAppManifestDocument {
     pub app: AppDocument,
     pub domains: DomainsDocument,
     pub i18n: I18nDocument,
+    #[serde(default)]
+    pub sites: Vec<SiteDocument>,
     pub theme: ThemeDocument,
     pub auth: AuthDocument,
     #[serde(default)]
@@ -69,6 +71,10 @@ impl CustomerAppManifestDocument {
             manifest = manifest.with_domain(AppDomain::new(hostname, false)?);
         }
 
+        for site in self.sites {
+            manifest = manifest.with_site(site.into_site()?);
+        }
+
         for module in self.modules.enabled {
             manifest = manifest.with_module(InstalledModuleSpec::new(module)?);
         }
@@ -114,6 +120,51 @@ pub struct DomainsDocument {
 pub struct I18nDocument {
     pub default_locale: String,
     pub supported_locales: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SiteDocument {
+    pub id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub brand_name: Option<String>,
+    pub canonical_domain: String,
+    #[serde(default)]
+    pub additional_domains: Vec<String>,
+    pub default_locale: String,
+    pub supported_locales: Vec<String>,
+}
+
+impl SiteDocument {
+    fn into_site(self) -> Result<AppSite, AppModelError> {
+        let default_locale =
+            LocaleTag::new(self.default_locale).map_err(|error| AppModelError::ManifestParse {
+                message: error.to_string(),
+            })?;
+        let supported_locales = self
+            .supported_locales
+            .into_iter()
+            .map(|locale| {
+                LocaleTag::new(locale).map_err(|error| AppModelError::ManifestParse {
+                    message: error.to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut site = AppSite::new(
+            self.id,
+            self.display_name,
+            default_locale,
+            supported_locales,
+        )?;
+        if let Some(brand_name) = self.brand_name {
+            site = site.with_brand_name(brand_name)?;
+        }
+        site = site.with_domain(AppDomain::new(self.canonical_domain, true)?);
+        for hostname in self.additional_domains {
+            site = site.with_domain(AppDomain::new(hostname, false)?);
+        }
+        Ok(site)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

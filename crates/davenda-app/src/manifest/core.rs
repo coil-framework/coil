@@ -5,6 +5,7 @@ pub struct CustomerAppManifest {
     pub id: CustomerAppId,
     pub display_name: String,
     pub domains: Vec<AppDomain>,
+    pub sites: Vec<AppSite>,
     pub default_locale: LocaleTag,
     pub supported_locales: Vec<LocaleTag>,
     pub modules: Vec<InstalledModuleSpec>,
@@ -28,6 +29,7 @@ impl CustomerAppManifest {
             id,
             display_name: require_non_empty("display_name", display_name.into())?,
             domains: Vec::new(),
+            sites: Vec::new(),
             default_locale,
             supported_locales,
             modules: Vec::new(),
@@ -41,6 +43,11 @@ impl CustomerAppManifest {
 
     pub fn with_domain(mut self, domain: AppDomain) -> Self {
         self.domains.push(domain);
+        self
+    }
+
+    pub fn with_site(mut self, site: AppSite) -> Self {
+        self.sites.push(site);
         self
     }
 
@@ -93,6 +100,63 @@ impl CustomerAppManifest {
             });
         }
 
+        let mut sites = BTreeSet::new();
+        let mut all_site_domains = BTreeSet::new();
+        for site in &self.sites {
+            if !sites.insert(site.id.to_string()) {
+                return Err(AppModelError::DuplicateSite {
+                    site: site.id.to_string(),
+                });
+            }
+            if !site
+                .supported_locales
+                .iter()
+                .any(|locale| locale == &site.default_locale)
+            {
+                return Err(AppModelError::SiteDefaultLocaleNotSupported {
+                    site: site.id.to_string(),
+                    default_locale: site.default_locale.to_string(),
+                });
+            }
+
+            for locale in &site.supported_locales {
+                if !self
+                    .supported_locales
+                    .iter()
+                    .any(|supported| supported == locale)
+                {
+                    return Err(AppModelError::SiteLocaleOutsideAppSupport {
+                        site: site.id.to_string(),
+                        locale: locale.to_string(),
+                    });
+                }
+            }
+
+            let mut site_domains = BTreeSet::new();
+            let mut canonical_site_domains = 0usize;
+            for domain in &site.domains {
+                if !site_domains.insert(domain.hostname.clone()) {
+                    return Err(AppModelError::DuplicateDomain {
+                        domain: domain.hostname.clone(),
+                    });
+                }
+                if !all_site_domains.insert(domain.hostname.clone()) {
+                    return Err(AppModelError::DuplicateSiteDomain {
+                        domain: domain.hostname.clone(),
+                    });
+                }
+                if domain.canonical {
+                    canonical_site_domains += 1;
+                }
+            }
+            if canonical_site_domains == 0 {
+                return Err(AppModelError::MissingCanonicalSiteDomain {
+                    app_id: self.id.to_string(),
+                    site: site.id.to_string(),
+                });
+            }
+        }
+
         let mut modules = BTreeSet::new();
         for module in &self.modules {
             if !modules.insert(module.id.to_string()) {
@@ -129,5 +193,22 @@ impl CustomerAppManifest {
         }
 
         Ok(())
+    }
+
+    pub fn resolved_sites(&self) -> Result<Vec<AppSite>, AppModelError> {
+        if !self.sites.is_empty() {
+            return Ok(self.sites.clone());
+        }
+
+        let mut site = AppSite::new(
+            "default",
+            self.display_name.clone(),
+            self.default_locale.clone(),
+            self.supported_locales.clone(),
+        )?;
+        for domain in &self.domains {
+            site = site.with_domain(domain.clone());
+        }
+        Ok(vec![site])
     }
 }

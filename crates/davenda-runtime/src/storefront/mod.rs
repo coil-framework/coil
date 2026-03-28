@@ -367,6 +367,8 @@ pub struct StorefrontCollectionDefinition {
     pub summary: String,
     #[serde(default = "default_catalog_visibility")]
     pub is_visible: bool,
+    #[serde(default)]
+    pub site_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -386,6 +388,10 @@ pub struct StorefrontProductDefinition {
     #[serde(default = "default_product_kind")]
     pub product_kind: String,
     pub entitlement_key: Option<String>,
+    #[serde(default)]
+    pub site_ids: Vec<String>,
+    #[serde(default)]
+    pub inventory_locations: Vec<String>,
 }
 
 impl StorefrontCatalog {
@@ -400,6 +406,7 @@ impl StorefrontCatalog {
                         "Current campaign picks spanning merch, memberships, and event offers."
                             .to_string(),
                     is_visible: true,
+                    site_ids: Vec::new(),
                 },
                 StorefrontCollectionDefinition {
                     handle: "memberships".to_string(),
@@ -409,6 +416,7 @@ impl StorefrontCatalog {
                         "Recurring and premium access products that unlock customer benefits."
                             .to_string(),
                     is_visible: true,
+                    site_ids: Vec::new(),
                 },
                 StorefrontCollectionDefinition {
                     handle: "events".to_string(),
@@ -418,6 +426,7 @@ impl StorefrontCatalog {
                         "Bookable offers and event-linked passes surfaced alongside editorial content."
                             .to_string(),
                     is_visible: true,
+                    site_ids: Vec::new(),
                 },
             ],
             products: vec![
@@ -433,6 +442,8 @@ impl StorefrontCatalog {
                     variant_title: "Standard".to_string(),
                     product_kind: "physical".to_string(),
                     entitlement_key: None,
+                    site_ids: Vec::new(),
+                    inventory_locations: Vec::new(),
                 },
                 StorefrontProductDefinition {
                     sku: "membership-gold".to_string(),
@@ -448,6 +459,8 @@ impl StorefrontCatalog {
                     variant_title: "Annual".to_string(),
                     product_kind: "membership".to_string(),
                     entitlement_key: Some("membership.gold".to_string()),
+                    site_ids: Vec::new(),
+                    inventory_locations: Vec::new(),
                 },
                 StorefrontProductDefinition {
                     sku: "tasting-pass".to_string(),
@@ -462,6 +475,8 @@ impl StorefrontCatalog {
                     variant_title: "Single pass".to_string(),
                     product_kind: "physical".to_string(),
                     entitlement_key: None,
+                    site_ids: Vec::new(),
+                    inventory_locations: Vec::new(),
                 },
             ],
         }
@@ -539,8 +554,16 @@ impl StorefrontCatalog {
     }
 
     pub fn visible_collection(&self, handle: &str) -> Option<&StorefrontCollectionDefinition> {
+        self.visible_collection_for_site(None, handle)
+    }
+
+    pub fn visible_collection_for_site(
+        &self,
+        site_id: Option<&str>,
+        handle: &str,
+    ) -> Option<&StorefrontCollectionDefinition> {
         self.collection(handle)
-            .filter(|collection| collection.is_visible)
+            .filter(|collection| self.is_collection_visible_for_site(collection, site_id))
     }
 
     pub fn product(&self, handle: &str) -> Option<&StorefrontProductDefinition> {
@@ -550,54 +573,115 @@ impl StorefrontCatalog {
     }
 
     pub fn visible_product(&self, handle: &str) -> Option<&StorefrontProductDefinition> {
+        self.visible_product_for_site(None, handle)
+    }
+
+    pub fn visible_product_for_site(
+        &self,
+        site_id: Option<&str>,
+        handle: &str,
+    ) -> Option<&StorefrontProductDefinition> {
         self.product(handle)
-            .filter(|product| self.is_product_visible(product))
+            .filter(|product| self.is_product_visible_for_site(product, site_id))
     }
 
     pub fn product_by_sku_or_handle(&self, value: &str) -> Option<&StorefrontProductDefinition> {
-        self.products
-            .iter()
-            .find(|product| product.sku == value || product.handle == value)
+        self.product_by_sku_or_handle_for_site(None, value)
+    }
+
+    pub fn product_by_sku_or_handle_for_site(
+        &self,
+        site_id: Option<&str>,
+        value: &str,
+    ) -> Option<&StorefrontProductDefinition> {
+        self.products.iter().find(|product| {
+            (product.sku == value || product.handle == value)
+                && self.is_product_visible_for_site(product, site_id)
+        })
     }
 
     pub fn products_for_collection(&self, handle: &str) -> Vec<&StorefrontProductDefinition> {
-        if handle != "featured" && self.visible_collection(handle).is_none() {
+        self.products_for_collection_for_site(None, handle)
+    }
+
+    pub fn products_for_collection_for_site(
+        &self,
+        site_id: Option<&str>,
+        handle: &str,
+    ) -> Vec<&StorefrontProductDefinition> {
+        if handle != "featured" && self.visible_collection_for_site(site_id, handle).is_none() {
             return Vec::new();
         }
         self.products
             .iter()
             .filter(|product| {
-                self.is_product_visible(product)
+                self.is_product_visible_for_site(product, site_id)
                     && (product.collection_handle == handle || handle == "featured")
             })
             .collect()
     }
 
     pub fn related_products_for_product(&self, handle: &str) -> Vec<&StorefrontProductDefinition> {
-        let Some(product) = self.visible_product(handle) else {
+        self.related_products_for_product_for_site(None, handle)
+    }
+
+    pub fn related_products_for_product_for_site(
+        &self,
+        site_id: Option<&str>,
+        handle: &str,
+    ) -> Vec<&StorefrontProductDefinition> {
+        let Some(product) = self.visible_product_for_site(site_id, handle) else {
             return self
                 .products
                 .iter()
-                .filter(|candidate| self.is_product_visible(candidate))
+                .filter(|candidate| self.is_product_visible_for_site(candidate, site_id))
                 .collect();
         };
-        self.products_for_collection(&product.collection_handle)
+        self.products_for_collection_for_site(site_id, &product.collection_handle)
             .into_iter()
             .filter(|candidate| candidate.handle != product.handle)
             .collect()
     }
 
     fn is_product_visible(&self, product: &StorefrontProductDefinition) -> bool {
+        self.is_product_visible_for_site(product, None)
+    }
+
+    fn is_product_visible_for_site(
+        &self,
+        product: &StorefrontProductDefinition,
+        site_id: Option<&str>,
+    ) -> bool {
         product.is_visible
             && self
                 .collection(product.collection_handle.as_str())
-                .is_some_and(|collection| collection.is_visible)
+                .is_some_and(|collection| self.is_collection_visible_for_site(collection, site_id))
+            && self.applies_to_site(&product.site_ids, site_id)
+    }
+
+    fn is_collection_visible_for_site(
+        &self,
+        collection: &StorefrontCollectionDefinition,
+        site_id: Option<&str>,
+    ) -> bool {
+        collection.is_visible && self.applies_to_site(&collection.site_ids, site_id)
+    }
+
+    fn applies_to_site(&self, site_ids: &[String], site_id: Option<&str>) -> bool {
+        site_ids.is_empty()
+            || site_id
+                .map(|site_id| site_ids.iter().any(|candidate| candidate == site_id))
+                .unwrap_or(true)
     }
 
     fn catalog_item(&self, sku: &str) -> Option<CatalogItem> {
+        self.catalog_item_for_site(None, sku)
+    }
+
+    fn catalog_item_for_site(&self, site_id: Option<&str>, sku: &str) -> Option<CatalogItem> {
         let product = self
-            .product_by_sku_or_handle(sku)
-            .filter(|product| self.is_product_visible(product))?;
+            .product_by_sku_or_handle_for_site(site_id, sku)
+            .filter(|product| self.is_product_visible_for_site(product, site_id))?;
         Some(CatalogItem {
             sku: product.sku.clone(),
             title: product.title.clone(),

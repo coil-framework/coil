@@ -10,6 +10,10 @@ pub enum AppModelError {
     InvalidHostname { field: &'static str, value: String },
     #[error("module `{module}` is installed more than once")]
     DuplicateInstalledModule { module: String },
+    #[error("site `{site}` is declared more than once")]
+    DuplicateSite { site: String },
+    #[error("site domain `{domain}` is declared more than once across sites")]
+    DuplicateSiteDomain { domain: String },
     #[error("domain `{domain}` is declared more than once")]
     DuplicateDomain { domain: String },
     #[error("theme namespace `{namespace}` is declared more than once")]
@@ -26,8 +30,25 @@ pub enum AppModelError {
     ExtensionPackagesRequired { app_id: String },
     #[error("default locale `{default_locale}` is not in the supported locale set")]
     DefaultLocaleNotSupported { default_locale: String },
+    #[error(
+        "site `{site}` default locale `{default_locale}` is not in the site's supported locale set"
+    )]
+    SiteDefaultLocaleNotSupported {
+        site: String,
+        default_locale: String,
+    },
+    #[error(
+        "site `{site}` locale `{locale}` is not declared by the customer app supported locale set"
+    )]
+    SiteLocaleOutsideAppSupport { site: String, locale: String },
     #[error("customer app `{app_id}` must declare at least one canonical domain")]
     MissingCanonicalDomain { app_id: String },
+    #[error("customer app `{app_id}` site `{site}` must declare at least one canonical domain")]
+    MissingCanonicalSiteDomain { app_id: String, site: String },
+    #[error("customer app `{app_id}` must declare a primary site when sites are configured")]
+    MissingPrimarySite { app_id: String },
+    #[error("customer app `{app_id}` primary site `{site}` is not declared")]
+    UnknownPrimarySite { app_id: String, site: String },
     #[error("customer app `{app_id}` does not install module `{module}`")]
     UnknownInstalledModule { app_id: String, module: String },
     #[error("module `{module}` requires installed dependency `{dependency}`")]
@@ -74,11 +95,34 @@ pub enum AppModelError {
         configured: String,
     },
     #[error(
+        "customer app primary site `{manifest}` does not match runtime config primary site `{configured}`"
+    )]
+    ConfigPrimarySiteMismatch {
+        manifest: String,
+        configured: String,
+    },
+    #[error(
         "customer app manifest modules differ from runtime config modules; manifest-only={manifest_only:?}, config-only={configured_only:?}"
     )]
     ConfigModulesMismatch {
         manifest_only: Vec<String>,
         configured_only: Vec<String>,
+    },
+    #[error(
+        "customer app manifest sites differ from runtime config sites; manifest-only={manifest_only:?}, config-only={configured_only:?}"
+    )]
+    ConfigSitesMismatch {
+        manifest_only: Vec<String>,
+        configured_only: Vec<String>,
+    },
+    #[error(
+        "customer app site `{site}` field `{field}` differs from runtime config; manifest=`{manifest}`, config=`{configured}`"
+    )]
+    ConfigSiteFieldMismatch {
+        site: String,
+        field: &'static str,
+        manifest: String,
+        configured: String,
     },
     #[error("runtime provided modules not installed by customer app `{app_id}`: {modules:?}")]
     UnexpectedRuntimeModules {

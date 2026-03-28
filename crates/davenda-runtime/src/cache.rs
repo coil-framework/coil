@@ -149,7 +149,12 @@ fn cache_scope_for_request(
         CacheDisposition::Private => CacheScope::private(),
         CacheDisposition::Uncacheable => CacheScope::no_store(),
     }
-    .with_site(request.host.clone())?;
+    .with_site(
+        resolved
+            .site_id
+            .clone()
+            .unwrap_or_else(|| request.host.clone()),
+    )?;
 
     if let Some(locale) = resolved.locale.as_deref() {
         scope = scope.with_locale(locale.to_string())?;
@@ -177,6 +182,9 @@ fn cache_tags_for_request(
         "customer_app:{}",
         runtime.config.app.name
     ))?);
+    if let Some(site_id) = resolved.site_id.as_deref() {
+        tags.insert(InvalidationTag::new(format!("site:{site_id}"))?);
+    }
     tags.insert(InvalidationTag::new(format!(
         "route:{}",
         resolved.route_name
@@ -203,7 +211,10 @@ fn cache_validators_for_request(
     let mut parts = vec![
         "etag".to_string(),
         resolved.route_name.clone(),
-        request.host.clone(),
+        resolved
+            .site_id
+            .clone()
+            .unwrap_or_else(|| request.host.clone()),
         request.path.clone(),
     ];
 

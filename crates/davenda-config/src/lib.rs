@@ -9,7 +9,9 @@ mod tests;
 mod validation;
 
 pub use app::{AppConfig, Environment, ServerConfig};
-pub use customer_app::{CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError};
+pub use customer_app::{
+    CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError, CustomerAppBootstrapSite,
+};
 pub use http::{
     CookieConfig, CookieProtection, CsrfConfig, HttpConfig, SameSitePolicy, SessionConfig,
     SessionStore,
@@ -21,8 +23,8 @@ pub use infra::{
     TlsProvider,
 };
 pub use platform::{
-    AuthConfig, ConfigError, I18nConfig, ModulesConfig, PlatformConfig, SeoConfig, WasmConfig,
-    WasmOutboundHttpIntegration,
+    AuthConfig, ConfigError, I18nConfig, ModulesConfig, PlatformConfig, SeoConfig, SiteConfig,
+    WasmConfig, WasmOutboundHttpIntegration,
 };
 pub use secret::SecretRef;
 pub use validation::{ConfigValidationError, ConfigValidationErrors};

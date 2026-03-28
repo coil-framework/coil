@@ -232,6 +232,9 @@ pub enum CacheDisposition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestExecution {
     pub customer_app: String,
+    pub site_id: Option<String>,
+    pub site_display_name: Option<String>,
+    pub brand_name: Option<String>,
     pub method: HttpMethod,
     pub host: String,
     pub path: String,

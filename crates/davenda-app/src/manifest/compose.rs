@@ -102,10 +102,13 @@ impl CustomerAppManifest {
             });
         }
 
+        let sites = self.resolved_sites()?;
+
         Ok(CustomerAppComposition {
             app_id: self.id.clone(),
             display_name: self.display_name.clone(),
             domains: self.domains.clone(),
+            sites,
             default_locale: self.default_locale.clone(),
             supported_locales: self.supported_locales.clone(),
             installed_modules: self.modules.clone(),

@@ -296,16 +296,9 @@ impl CustomerAppManifest {
         &self,
         config: &PlatformConfig,
     ) -> Result<(), AppModelError> {
-        let canonical_domain = self
-            .domains
-            .iter()
-            .find(|domain| domain.canonical)
-            .expect("validated manifests always declare a canonical domain")
-            .hostname
-            .clone();
+        let resolved_sites = self.resolved_sites()?;
         let bootstrap_manifest = CustomerAppBootstrapManifest::new(
             self.id.to_string(),
-            canonical_domain,
             self.default_locale.to_string(),
             sorted_locale_strings(&self.supported_locales),
             self.auth.package_name.clone(),
@@ -313,6 +306,32 @@ impl CustomerAppManifest {
                 .iter()
                 .map(|module| module.id.to_string())
                 .collect::<Vec<_>>(),
+            resolved_sites
+                .iter()
+                .map(|site| {
+                    davenda_config::CustomerAppBootstrapSite::new(
+                        site.id.to_string(),
+                        site.display_name.clone(),
+                        site.brand_name.clone(),
+                        site.canonical_domain()
+                            .expect("validated app sites always have a canonical domain")
+                            .to_string(),
+                        site.domains
+                            .iter()
+                            .filter(|domain| !domain.canonical)
+                            .map(|domain| domain.hostname.clone())
+                            .collect::<Vec<_>>(),
+                        site.default_locale.to_string(),
+                        sorted_locale_strings(&site.supported_locales),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            self.domains
+                .iter()
+                .find(|domain| domain.canonical)
+                .expect("validated manifests always declare a canonical domain")
+                .hostname
+                .clone(),
         );
         bootstrap_manifest
             .validate_runtime_config_alignment(config)
@@ -402,6 +421,24 @@ fn customer_bootstrap_manifest_error_into_app_model(
         } => AppModelError::ConfigModulesMismatch {
             manifest_only,
             configured_only,
+        },
+        CustomerAppBootstrapManifestError::SitesMismatch {
+            manifest_only,
+            configured_only,
+        } => AppModelError::ConfigSitesMismatch {
+            manifest_only,
+            configured_only,
+        },
+        CustomerAppBootstrapManifestError::SiteFieldMismatch {
+            site,
+            field,
+            manifest,
+            configured,
+        } => AppModelError::ConfigSiteFieldMismatch {
+            site,
+            field,
+            manifest,
+            configured,
         },
         CustomerAppBootstrapManifestError::Read { path, reason }
         | CustomerAppBootstrapManifestError::Parse { path, reason } => {

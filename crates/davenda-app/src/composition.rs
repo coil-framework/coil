@@ -5,6 +5,7 @@ pub struct CustomerAppComposition {
     pub app_id: CustomerAppId,
     pub display_name: String,
     pub domains: Vec<AppDomain>,
+    pub sites: Vec<AppSite>,
     pub default_locale: LocaleTag,
     pub supported_locales: Vec<LocaleTag>,
     pub installed_modules: Vec<InstalledModuleSpec>,
@@ -55,10 +56,22 @@ impl CustomerAppComposition {
     }
 
     pub fn canonical_domain(&self) -> Option<&str> {
-        self.domains
-            .iter()
-            .find(|domain| domain.canonical)
-            .map(|domain| domain.hostname.as_str())
+        self.primary_site()
+            .and_then(|site| site.canonical_domain())
+            .or_else(|| {
+                self.domains
+                    .iter()
+                    .find(|domain| domain.canonical)
+                    .map(|domain| domain.hostname.as_str())
+            })
+    }
+
+    pub fn primary_site(&self) -> Option<&AppSite> {
+        self.sites.first()
+    }
+
+    pub fn site(&self, site_id: &str) -> Option<&AppSite> {
+        self.sites.iter().find(|site| site.id.as_str() == site_id)
     }
 
     pub fn release_doctor(&self, config: Option<&PlatformConfig>) -> ReleaseDoctorReport {

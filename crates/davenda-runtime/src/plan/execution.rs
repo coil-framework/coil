@@ -55,7 +55,7 @@ impl RuntimePlan {
         });
 
         self.enforce_maintenance_mode(&matched.route, request.method, &request)?;
-        self.enforce_feature_flags(&matched.route)?;
+        self.enforce_feature_flags(&matched.route, &matched.resolved)?;
         self.enforce_route_auth(&matched.resolved, &session, &principal)?;
         self.enforce_browser_policy(
             &matched.route,
@@ -87,6 +87,19 @@ impl RuntimePlan {
 
         Ok(RequestExecution {
             customer_app: self.config.app.name.clone(),
+            site_id: matched.resolved.site_id.clone(),
+            site_display_name: matched
+                .resolved
+                .site_id
+                .as_deref()
+                .and_then(|site_id| self.config.site_for_id(site_id))
+                .map(|site| site.display_name.clone()),
+            brand_name: matched
+                .resolved
+                .site_id
+                .as_deref()
+                .and_then(|site_id| self.config.site_for_id(site_id))
+                .and_then(|site| site.brand_name.clone()),
             method: request.method,
             host: request.host,
             path: request.path,
@@ -97,11 +110,11 @@ impl RuntimePlan {
             raw_body: request.raw_body,
             route: matched.resolved.clone(),
             route_area: matched.route.area,
-            locale: matched
-                .resolved
-                .locale
-                .clone()
-                .unwrap_or_else(|| self.config.i18n.default_locale.clone()),
+            locale: matched.resolved.locale.clone().unwrap_or_else(|| {
+                self.config
+                    .default_locale_for_site(matched.resolved.site_id.as_deref())
+                    .to_string()
+            }),
             trace,
             session: session.clone(),
             principal,
@@ -198,7 +211,11 @@ impl RuntimePlan {
         }
     }
 
-    fn enforce_feature_flags(&self, route: &RouteDefinition) -> Result<(), RequestExecutionError> {
+    fn enforce_feature_flags(
+        &self,
+        route: &RouteDefinition,
+        resolved: &ResolvedRoute,
+    ) -> Result<(), RequestExecutionError> {
         let Some(feature_flag) = route.feature_flag.as_deref() else {
             return Ok(());
         };
@@ -212,8 +229,16 @@ impl RuntimePlan {
         let context = FeatureFlagContext {
             environment: self.config.app.environment,
             customer_app: CustomerAppId::new(self.config.app.name.clone()).ok(),
-            site: None,
-            brand: None,
+            site: resolved
+                .site_id
+                .as_deref()
+                .and_then(|site| SiteId::new(site.to_string()).ok()),
+            brand: resolved
+                .site_id
+                .as_deref()
+                .and_then(|site_id| self.config.site_for_id(site_id))
+                .and_then(|site| site.brand_name.as_deref())
+                .and_then(|brand| BrandId::new(brand.to_string()).ok()),
             cohorts: BTreeSet::new(),
         };
 

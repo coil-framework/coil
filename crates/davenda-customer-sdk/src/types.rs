@@ -36,6 +36,7 @@ impl CustomerPluginDescriptor {
 pub struct CustomerAppContext {
     pub app_id: String,
     pub environment: String,
+    pub site_id: Option<String>,
     pub locale: Option<String>,
 }
 
@@ -44,8 +45,14 @@ impl CustomerAppContext {
         Self {
             app_id: app_id.into(),
             environment: environment.into(),
+            site_id: None,
             locale: None,
         }
+    }
+
+    pub fn with_site_id(mut self, site_id: impl Into<String>) -> Self {
+        self.site_id = Some(site_id.into());
+        self
     }
 
     pub fn with_locale(mut self, locale: impl Into<String>) -> Self {

@@ -69,7 +69,7 @@ Shoppr is meant to show the boundary described in `docs/design`:
 
 - Davenda core provides the runtime, routing, storage, cache, auth execution, jobs, TLS, and asset publication
 - official modules provide reusable product batteries like CMS, commerce, memberships, events, admin, and ops
-- Shoppr provides composition, branding, templates, app policy, and customer-specific behavior
+- Shoppr provides composition, branding, templates, app policy, and customer-specific behaviour
 
 That is why this folder matters. It is the customer-app layer, not a random demo directory.
 
@@ -81,7 +81,7 @@ That is the chapter 96 shape in repo form:
 
 - Davenda is modeled here as normal upstream `0.1.0` dependencies
 - Shoppr owns a binary crate that links the official modules it needs
-- Shoppr owns a linked backend crate that registers customer-specific behavior through public Davenda APIs
+- Shoppr owns a linked backend crate that registers customer-specific behaviour through public Davenda APIs
 - the checked-in backend library remains customer-owned code, but the store consumes it through the linked plugin path rather than a separate service boundary
 
 The optional sidecar adapter still exists for integrations that genuinely need a separate
@@ -278,7 +278,7 @@ The intended first-run path is:
 That is a complete local walkthrough. You do not need a seeded SQL user to exercise account or
 admin routes in the default development stack.
 
-If you want to inspect the linked backend behavior directly from the customer workspace, use:
+If you want to inspect the linked backend behaviour directly from the customer workspace, use:
 
 ```bash
 ./scripts/prepare-local-dev.sh
@@ -298,7 +298,7 @@ live Stripe credentials.
 That is good enough for local UI development, account flows, catalog work, CMS work, and most
 template/theme changes.
 
-If you want real Stripe test-mode webhook behavior:
+If you want real Stripe test-mode webhook behaviour:
 
 1. set real test values in `.env`
 2. start the stack
@@ -311,7 +311,7 @@ stripe listen --forward-to http://localhost:8080/webhooks/commerce/payment-provi
 Then update `.env` with the webhook secret that Stripe CLI gives you and restart the stack.
 
 Use real Stripe test credentials only when you specifically want to validate third-party provider
-handoff behavior. They are not required for the default end-to-end local customer journey.
+handoff behaviour. They are not required for the default end-to-end local customer journey.
 
 ## Working On The Storefront
 
@@ -383,7 +383,7 @@ WASM remains the right path for bounded runtime-installed or third-party work, a
 - `docs/design/62-extension-packaging-versioning-and-distribution.md`
 - `docs/design/80-customer-extensions-and-integration-patterns.md`
 
-Use a WASM extension when the behavior is bounded, replaceable, and should stay capability-scoped
+Use a WASM extension when the behaviour is bounded, replaceable, and should stay capability-scoped
 at runtime rather than being linked into the customer build.
 
 Examples:
@@ -419,14 +419,14 @@ The coexistence model is concrete:
 2. the app manifest also installs a bounded runtime extension from `extensions/`
 3. the runtime serves both paths in the same checked-in app
 
-If the customization starts owning shared data, deep transaction logic, or broadly reused product behavior, it is usually the wrong thing to keep in WASM.
+If the customization starts owning shared data, deep transaction logic, or broadly reused product behaviour, it is usually the wrong thing to keep in WASM.
 
 ## Adding Custom Business Rules In Rust
 
 This is the primary Shoppr customization path for customer-owned first-party logic, per
 chapter 96.
 
-Use a linked Rust crate when the behavior ships with the customer app, needs direct hook
+Use a linked Rust crate when the behaviour ships with the customer app, needs direct hook
 registration, or wants to participate in the customer build as first-party code. The design intent
 for that is in:
 
@@ -439,7 +439,7 @@ The practical rule is:
 - use Shoppr templates, config, auth bindings, and linked customer Rust crates for first-party customer product logic
 - use WASM extensions for bounded third-party or runtime-installed customization
 - use native Rust modules when you need deeper access to transactions, shared data ownership, or widely reused domain logic
-- use `crates/` only when the behavior is becoming a reusable native module or needs platform-level ownership
+- use `crates/` only when the behaviour is becoming a reusable native module or needs platform-level ownership
 
 For customer-specific native Rust work, the right place is a customer-app-owned crate in the
 customer workspace, not random edits scattered through core.
@@ -484,7 +484,7 @@ The checked-in `review_order(...)` example is still the fastest rule to copy:
 
 - define request/response types and a pure rule in `backend/shoppr-loyalty-backend/src/lib.rs`
 - re-export or register it in `crates/shoppr-backend/src/lib.rs`
-- keep the behavior behind the linked plugin boundary
+- keep the behaviour behind the linked plugin boundary
 - add tests for both the pure rule and the Shoppr runtime surface that consumes it
 
 If you want to work on the shared backend library directly without Docker Compose:

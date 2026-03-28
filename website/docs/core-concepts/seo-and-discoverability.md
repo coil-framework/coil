@@ -3,7 +3,7 @@ title: SEO And Discoverability
 ---
 
 This page explains how Davenda’s routing, site, locale, and rendering model combine into search and
-discoverability behavior.
+discoverability behaviour.
 
 ## What Is This?
 
@@ -25,7 +25,7 @@ Search-facing correctness depends on the same core facts as the rest of the app:
 
 - which host is canonical
 - which locale the route is serving
-- whether equivalent localized routes exist
+- whether equivalent localised routes exist
 - whether the content is public
 
 If those are guessed in templates, they drift.
@@ -51,7 +51,7 @@ Davenda’s render layer currently injects:
 - Open Graph fields
 - baseline JSON-LD page nodes when enabled
 
-That behavior lives in:
+That behaviour lives in:
 
 - `crates/davenda-runtime/src/render/seo.rs`
 
@@ -121,7 +121,7 @@ Shoppr demonstrates:
 - one customer app
 - multiple sites
 - different canonical hosts per site
-- localized routes
+- localised routes
 - site-aware catalog availability
 
 Without a site-aware SEO model, those pages would quickly emit the wrong canonical host or wrong
@@ -135,9 +135,9 @@ That matters because:
 
 - canonical host must come from the resolved site
 - alternate locales must come from the resolved site’s supported locale set
-- localized route generation must match the actual route policy
+- localised route generation must match the actual route policy
 
-This is why SEO, site resolution, and internationalization cannot be documented as separate
+This is why SEO, site resolution, and internationalisation cannot be documented as separate
 unrelated topics.
 
 ## What Templates Should And Should Not Do
@@ -170,11 +170,11 @@ Discoverability should follow publication state.
 
 ### Assuming JSON-LD is entirely template-owned
 
-The current runtime model is designed to inject it from typed metadata and configured behavior.
+The current runtime model is designed to inject it from typed metadata and configured behaviour.
 
 ## What Should I Read Next?
 
 - [SEO](../reference/seo.md)
-- [Internationalization](../reference/internationalization.md)
+- [Internationalisation](../reference/internationalization.md)
 - [Themes, Rendering, And Assets](./themes-rendering-and-assets.md)
 - `crates/davenda-runtime/src/render/seo.rs`

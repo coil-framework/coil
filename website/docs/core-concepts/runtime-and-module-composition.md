@@ -188,7 +188,7 @@ Linking a module into the binary is not the same as enabling it in the customer 
 
 ### Treating module boundaries as presentation-only
 
-Modules affect runtime behavior, auth, data model shape, and operations, not just templates.
+Modules affect runtime behaviour, auth, data model shape, and operations, not just templates.
 
 ### Hiding composition in too many helpers
 

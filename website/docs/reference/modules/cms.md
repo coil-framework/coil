@@ -108,7 +108,7 @@ There are two clean extension seams in the module manifest:
 - admin widget slot: `cms.page.editor.sidebar`
 - render hook slot: `cms.page.render`
 
-Customer apps can also change CMS behavior through:
+Customer apps can also change CMS behaviour through:
 
 - linked CMS hooks
 - customer templates

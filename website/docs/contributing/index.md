@@ -89,7 +89,7 @@ A good PR should:
 - explain why the change exists
 - call out tests run
 - mention intentional tradeoffs or deferred work
-- update docs when the behavior or story changed
+- update docs when the behaviour or story changed
 
 Avoid:
 
@@ -129,7 +129,7 @@ When filing an issue, include:
 
 - what you were trying to do
 - the exact files, commands, or docs pages involved
-- whether the problem is product behavior, docs clarity, or a demo gap
+- whether the problem is product behaviour, docs clarity, or a demo gap
 - the smallest credible fix you can see
 
 The best issues are concrete and reproducible. “This area feels wrong” is usually too vague to be

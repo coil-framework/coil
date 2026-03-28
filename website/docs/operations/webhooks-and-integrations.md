@@ -40,7 +40,7 @@ Before trusting a webhook path in production, verify:
 - signature or shared-secret verification is enabled
 - duplicate delivery is safe
 - downstream dependencies are healthy
-- retry behavior is understood
+- retry behaviour is understood
 
 ## A Practical Local Test Flow
 
@@ -63,7 +63,7 @@ carefully.
 
 ## Linked Rust And Webhook Handling
 
-If the webhook behavior is truly customer-owned product logic, linked customer Rust is the right
+If the webhook behaviour is truly customer-owned product logic, linked customer Rust is the right
 place for the business rule.
 
 That still does not mean the webhook should bypass the host. The runtime should own ingress and
@@ -97,7 +97,7 @@ Ingress verification and replay safety are operational concerns, not just app co
 
 ### Testing only with unsigned local requests
 
-That produces a fake green path and hides the real verification behavior.
+That produces a fake green path and hides the real verification behaviour.
 
 ### Ignoring duplicate delivery
 

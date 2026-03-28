@@ -74,11 +74,11 @@ product surface through `apps/shoppr/app.toml` and `apps/shoppr/platform.dev.tom
 
 Use an official module when:
 
-- the behavior is reusable across more than one product
+- the behaviour is reusable across more than one product
 - the platform should support it as a stable contract
 - it needs shared migrations, auth, jobs, and operator surfaces
 
-Keep the behavior in customer code when:
+Keep the behaviour in customer code when:
 
 - it is product-specific policy
 - it only makes sense for one app

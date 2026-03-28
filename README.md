@@ -11,7 +11,7 @@ It leads with ecommerce because that is where the architecture is most demanding
 - content and merchandising need to move fast
 - checkout, payments, auth, and customer data need to be safe
 - operations need to stay boring under load
-- product teams still need room for customer-specific behavior
+- product teams still need room for customer-specific behaviour
 
 But Davenda is not ecommerce-only. The same platform shape also powers non-commerce products like the checked-in Gitly demo. The point is not "Rust for storefronts only." The point is "Rust for serious web applications, with batteries included and strong opinions about where complexity belongs."
 
@@ -171,7 +171,7 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 
-Davenda is ambitious on purpose. It is opinionated, product-focused, and optimized for teams that want a coherent Rust web platform rather than a thin request router.
+Davenda is ambitious on purpose. It is opinionated, product-focused, and optimised for teams that want a coherent Rust web platform rather than a thin request router.
 
 If that is what you are looking for, start with Shoppr and the public docs. They are the shortest route from curiosity to understanding.
 

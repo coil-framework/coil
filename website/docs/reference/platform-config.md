@@ -7,7 +7,7 @@ title: platform.toml And platform.dev.toml
 They describe:
 
 - environment and server policy
-- HTTP session, flash, and CSRF behavior
+- HTTP session, flash, and CSRF behaviour
 - TLS mode
 - database, storage, cache, jobs, and observability
 - site host bindings at runtime

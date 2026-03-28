@@ -21,7 +21,7 @@ Customer applications are the actual products built with Davenda. They decide:
 - which modules are linked
 - which modules are enabled
 - which sites and locales exist
-- which templates, theme assets, and product-specific behaviors define the application
+- which templates, theme assets, and product-specific behaviours define the application
 
 ## Why This Distinction Exists
 
@@ -30,7 +30,7 @@ Without it, reusable batteries and product-specific code start to bleed into eac
 That usually creates two bad outcomes:
 
 - the framework turns into a pile of one-off application assumptions
-- product teams start forking reusable behavior because the boundary is unclear
+- product teams start forking reusable behaviour because the boundary is unclear
 
 Davenda tries to avoid both.
 
@@ -89,7 +89,7 @@ The lesson is that official modules provide reusable batteries, but the customer
 
 Ask this question:
 
-"Would this behavior plausibly belong in many customer applications without being rewritten around one product's identity?"
+"Would this behaviour plausibly belong in many customer applications without being rewritten around one product's identity?"
 
 If yes, it is a candidate for an official module.
 
@@ -134,7 +134,7 @@ That makes modules harder to reuse and harder to evolve independently.
 
 ### Rebuilding shared batteries inside the customer app
 
-That weakens the value of the module layer and tends to duplicate auth, route, and operational behavior.
+That weakens the value of the module layer and tends to duplicate auth, route, and operational behaviour.
 
 ### Confusing customer Rust with a module
 

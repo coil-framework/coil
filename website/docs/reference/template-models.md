@@ -385,5 +385,5 @@ Full implementation:
 
 - [Template Language](./template-language.md)
 - [Theme Asset Delivery](./theme-asset-delivery.md)
-- [Internationalization](./internationalization.md)
+- [Internationalisation](./internationalization.md)
 - [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)

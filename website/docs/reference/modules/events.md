@@ -89,7 +89,7 @@ Shoppr is the main example because it enables `events` alongside commerce and me
 
 ## Common Mistakes
 
-- Treating bookings as static forms instead of a lifecycle with capacity and waitlist behavior.
+- Treating bookings as static forms instead of a lifecycle with capacity and waitlist behaviour.
 - Forgetting that reminders and reservation expiry are scheduled jobs.
 - Skipping auth capability design for check-in surfaces.
 

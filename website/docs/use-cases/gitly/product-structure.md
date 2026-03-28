@@ -119,7 +119,7 @@ Today its repository, profile, and actions pages lean more heavily on:
 
 - static HTML structure
 - `data-*` attributes
-- client-side localization and enhancement
+- client-side localisation and enhancement
 - separate custom JSON endpoints for GitHub-style API payloads
 
 So if you want to understand "how does a route get tied to a template?" Gitly is a strong example.
@@ -164,6 +164,6 @@ Use those after reading this page, not instead of reading this page.
 
 ## Read Next
 
-- [Theming, Localization, And Accessibility](./theming-localization-and-accessibility.md)
+- [Theming, Localisation, And Accessibility](./theming-localization-and-accessibility.md)
 - [API And Background Work](./api-and-background-work.md)
 - [Gitly Overview](./overview.md)

@@ -195,7 +195,7 @@ The operational rule is simple:
 - do not wait to discover auth mistakes through a broken admin or storefront flow
 - validate and inspect the package first
 
-### 6. Explain a decision when behavior is unclear
+### 6. Explain a decision when behaviour is unclear
 
 If the grant path is surprising, use auth explain tooling rather than guessing from relation names.
 

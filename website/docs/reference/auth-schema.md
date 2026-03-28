@@ -21,7 +21,7 @@ Read this page when you are:
 
 ## Why The Schema Exists
 
-The schema defines what authorization means for one deployment.
+The schema defines what authorisation means for one deployment.
 
 It answers questions like:
 

@@ -56,8 +56,8 @@ Shoppr uses WASM for a bounded storefront embellishment, not for first-party ord
 
 That is the main architectural lesson:
 
-- linked Rust is the primary path for customer-owned commerce behavior
-- WASM is the constrained path for runtime-installed behavior
+- linked Rust is the primary path for customer-owned commerce behaviour
+- WASM is the constrained path for runtime-installed behaviour
 
 ## What The Package Does Not Do
 

@@ -95,7 +95,7 @@ Read:
 These show:
 
 - one-site non-commerce routing
-- locales and localized routes
+- locales and localised routes
 - a narrow module set
 - jobs, storage, cache, and asset config that look like any other Davenda app
 
@@ -146,7 +146,7 @@ commerce vocabulary dominating the example.
 - keep the customer binary as the first operational surface
 - use customer-owned modules and routes to define product vocabulary
 - use linked Rust for first-party data and policy
-- use WASM for bounded installable behavior
+- use WASM for bounded installable behaviour
 
 ## Full Implementation Pointers
 

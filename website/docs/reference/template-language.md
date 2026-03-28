@@ -312,7 +312,7 @@ Not supported:
 
 Davenda escapes by default.
 
-Current behavior:
+Current behaviour:
 
 - `dv:text` escapes HTML
 - dynamic attribute bindings escape attribute content
@@ -353,5 +353,5 @@ Concrete supporting files:
 
 - [Template Models](./template-models.md)
 - [Theme Structure](./theme-structure.md)
-- [Internationalization](./internationalization.md)
+- [Internationalisation](./internationalization.md)
 - [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)

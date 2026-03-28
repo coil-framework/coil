@@ -94,7 +94,7 @@ Current cache commands:
 - `cache inspect`
 - `cache invalidate`
 
-Concrete parser behavior in `crates/davenda-cli/src/cli/args.rs` already enforces:
+Concrete parser behaviour in `crates/davenda-cli/src/cli/args.rs` already enforces:
 
 - `cache warm` requires at least one `--route`
 - `cache inspect` requires exactly one `--route`
@@ -138,7 +138,7 @@ The import cutover flags are modeled in `crates/davenda-cli/src/cli/import.rs`, 
 
 ## Output, Dry Run, And Confirmation
 
-The command model in `crates/davenda-cli/src/command.rs` exposes three important behaviors:
+The command model in `crates/davenda-cli/src/command.rs` exposes three important behaviours:
 
 - `supports_json`
 - `supports_dry_run`

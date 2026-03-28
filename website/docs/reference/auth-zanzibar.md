@@ -2,7 +2,7 @@
 title: Zanzibar And Core Auth
 ---
 
-Davenda authorization is Zanzibar-inspired.
+Davenda authorisation is Zanzibar-inspired.
 
 That means access is modeled as relationships between subjects and resources, not as one global role table.
 
@@ -162,7 +162,7 @@ That keeps customer policy flexible without turning every official module into a
 
 - Explaining Zanzibar only as "graph auth." The important boundary is not just graph traversal; it is the separation of engine, schema, and capability contracts.
 - Treating capability names as equivalent to stored tuple relations. They are not.
-- Assuming customer code or WASM should read raw auth tables directly. Davenda is designed to keep authorization decisions inside the core auth service.
+- Assuming customer code or WASM should read raw auth tables directly. Davenda is designed to keep authorisation decisions inside the core auth service.
 
 ## Read Next
 

@@ -128,7 +128,7 @@ That can break public pages even if the runtime is healthy.
 
 ### Assuming local-only paths prove production correctness
 
-Production CDN behavior still needs deliberate validation and rollback planning.
+Production CDN behaviour still needs deliberate validation and rollback planning.
 
 ## What To Read Next
 

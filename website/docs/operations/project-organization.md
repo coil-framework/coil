@@ -65,7 +65,7 @@ What each area is for:
 
 - `product-bin/`: the composition root and operator-facing binary
 - `product-app/`: app/bootstrap logic and customer-specific runtime assembly
-- `product-backend/`: linked customer Rust behavior
+- `product-backend/`: linked customer Rust behaviour
 - `app.toml`: product composition and app identity
 - `platform*.toml`: environment-specific runtime topology
 - `auth/`: customer auth package files
@@ -131,12 +131,12 @@ When adding a crate to a customer workspace:
 
 Good rule:
 
-- if the crate owns product-specific behavior, it belongs in customer code
+- if the crate owns product-specific behaviour, it belongs in customer code
 - if the crate is becoming generic enough for many apps, reevaluate whether it wants to be an official module instead
 
 ## How To Add A Backend Crate
 
-If you need customer-specific backend behavior:
+If you need customer-specific backend behaviour:
 
 1. create a dedicated backend crate
 2. implement supported customer SDK hooks or facades there
@@ -170,7 +170,7 @@ The Davenda shape is:
 - one customer workspace
 - one app manifest
 - one deployment surface
-- site-specific behavior expressed in config and content
+- site-specific behaviour expressed in config and content
 
 That keeps rollout, auth, jobs, and operations coherent.
 

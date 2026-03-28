@@ -71,7 +71,7 @@ Important routes from the manifest:
 - `/admin/media/storage`
 - `/media/files/{asset_id}`
 
-In practice, the public delivery behavior is also shaped by storage policy and publication state.
+In practice, the public delivery behaviour is also shaped by storage policy and publication state.
 
 ## Required Auth Capabilities
 

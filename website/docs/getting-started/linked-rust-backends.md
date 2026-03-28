@@ -4,7 +4,7 @@ title: Linked Rust Backends
 
 Davenda's preferred customization model is linked customer Rust.
 
-That means customer-specific backend behavior lives in ordinary Rust crates that are compiled into the customer application, not in a separate API service by default.
+That means customer-specific backend behaviour lives in ordinary Rust crates that are compiled into the customer application, not in a separate API service by default.
 
 ## How To Use This Page
 
@@ -25,7 +25,7 @@ Typical responsibilities include:
 - product-specific checkout rules
 - CMS publish validation
 - verified webhook handling
-- customer-specific admin or integration behavior
+- customer-specific admin or integration behaviour
 
 The exact extension points are intentionally explicit. Davenda does not expose the whole runtime as an ambient bag of internals.
 
@@ -54,7 +54,7 @@ At a high level:
 3. The runtime exposes stable facades instead of leaking arbitrary internals.
 4. Request-time or lifecycle-time hooks are invoked through those public surfaces.
 
-This model is strong enough to let customer code participate in first-party behavior while still preserving a stable runtime boundary.
+This model is strong enough to let customer code participate in first-party behaviour while still preserving a stable runtime boundary.
 
 ## Where To See This In Practice
 
@@ -87,7 +87,7 @@ The point is not "everything must be linked." The point is that Davenda has a cl
 
 ### Recreating a sidecar by habit
 
-If the code is product-specific and needs first-party access to application behavior, starting with an external service is usually the wrong default.
+If the code is product-specific and needs first-party access to application behaviour, starting with an external service is usually the wrong default.
 
 ### Expecting runtime internals as the API
 

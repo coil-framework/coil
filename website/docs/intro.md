@@ -32,7 +32,7 @@ Davenda is probably the wrong choice if you want:
 - a minimal unopinionated HTTP toolkit
 - a framework where routing, rendering, and product structure are entirely ad hoc
 - a plugin model where third-party code runs with the same trust level as the core runtime
-- a frontend-first architecture where the browser owns most application behavior
+- a frontend-first architecture where the browser owns most application behaviour
 
 ## How To Read These Docs
 

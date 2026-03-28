@@ -102,7 +102,7 @@ It keeps together:
 - related product browsing
 
 This is a good Davenda page to copy structurally because it stays HTML-first even when the theme
-adds richer behavior.
+adds richer behaviour.
 
 ## How The Product Template Gets Its Model
 
@@ -138,12 +138,12 @@ The interaction layer lives in:
 
 On the storefront, that layer currently owns:
 
-- home carousel behavior
+- home carousel behaviour
 - market and locale switcher panels
 - PDP gallery thumbnails
 - PDP accordions
 - size selection state
-- visible focus styling and reduced-motion behavior
+- visible focus styling and reduced-motion behaviour
 
 That is the pattern to copy:
 
@@ -184,7 +184,7 @@ If you are building a Davenda storefront, copy this structure before you copy Sh
 
 - Putting all storefront logic into one oversized home or catalog page.
 - Treating the customer app as a template override layer instead of the real storefront owner.
-- Letting JavaScript own critical product behavior that the server-rendered page should still
+- Letting JavaScript own critical product behaviour that the server-rendered page should still
   express.
 
 ## Read Next

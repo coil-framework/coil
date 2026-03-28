@@ -12,7 +12,7 @@ This page explains the runtime's service-state controls:
 - `/health`
 - `/ready`
 - maintenance mode
-- operator bypass behavior
+- operator bypass behaviour
 
 ## Why Does This Matter?
 
@@ -86,7 +86,7 @@ Before cutover:
 If maintenance is intentionally enabled:
 
 - confirm which traffic is blocked
-- confirm bypass behavior is limited to the right operators
+- confirm bypass behaviour is limited to the right operators
 
 After maintenance:
 

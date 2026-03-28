@@ -138,7 +138,7 @@ If those answers require database spelunking, the jobs surface is not being used
 
 ## Release Guidance
 
-Before deploying code that changes job behavior, verify:
+Before deploying code that changes job behaviour, verify:
 
 - whether pending jobs were created by older code
 - whether new jobs depend on new schema

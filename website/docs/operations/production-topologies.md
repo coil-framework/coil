@@ -87,7 +87,7 @@ You also need to choose whether assets are:
 - same-origin with the app
 - served from object storage or a CDN
 
-That choice affects cutover, cache behavior, and rollback.
+That choice affects cutover, cache behaviour, and rollback.
 
 ## Choosing Between Topologies
 

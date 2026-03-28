@@ -77,7 +77,7 @@ Read:
 - `apps/shoppr/crates/shoppr-app/src/lib.rs`
 - `apps/shoppr/crates/shoppr-bin/src/main.rs`
 
-Important behaviors:
+Important behaviours:
 
 - `validate(...)` reports `manual_customer_migration_entries`
 - `migrate_apply(...)` builds the runtime bootstrap and applies executable steps

@@ -183,7 +183,7 @@ cargo run -p gitly -- up
 ```
 
 Gitly is especially useful when you want to confirm that these operational rules are about the
-platform rather than Shoppr-specific commerce behavior.
+platform rather than Shoppr-specific commerce behaviour.
 
 ## Same-Domain Versus CDN Asset Delivery
 
@@ -192,8 +192,8 @@ Davenda supports both same-origin and CDN-style asset delivery, but the choice s
 Use same-domain delivery when:
 
 - you want the simplest deployment shape
-- you do not yet need CDN behavior
-- cache behavior is easy to reason about without an extra edge layer
+- you do not yet need CDN behaviour
+- cache behaviour is easy to reason about without an extra edge layer
 
 Use a CDN when:
 

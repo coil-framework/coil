@@ -55,7 +55,7 @@ Ops depends mainly on shared runtime services:
 - data
 - auth
 
-The concrete module behavior changes depending on which other modules are installed, because ops
+The concrete module behaviour changes depending on which other modules are installed, because ops
 has optional dependencies on CMS, commerce, memberships, events, and media.
 
 ## Routes And Surfaces

@@ -39,7 +39,7 @@ Open:
 
 What to inspect:
 
-- the public storefront pages and localized routes
+- the public storefront pages and localised routes
 - the cart and checkout flow
 - the admin and CMS surfaces
 - the way one customer app serves multiple sites and locales
@@ -71,7 +71,7 @@ npm run start
 When you run the demos, pay attention to these questions:
 
 - Where does the customer application's own Rust code live?
-- Which behaviors come from official modules versus customer code?
+- Which behaviours come from official modules versus customer code?
 - How much of the public UI is plain server-rendered HTML?
 - How do site, locale, and route resolution show up in the running app?
 - What would need to change if you replaced the example product with your own?

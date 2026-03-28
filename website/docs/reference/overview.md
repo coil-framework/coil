@@ -53,7 +53,7 @@ Use these when you need to know exactly which blocks exist, what keys are suppor
 - [Auth packages](./auth-packages.md)
 - [Custom auth schema guidance](./custom-auth-schema.md)
 
-Use this subsection when you need to understand how Davenda expresses authorization and how to extend or replace the shipped auth model.
+Use this subsection when you need to understand how Davenda expresses authorisation and how to extend or replace the shipped auth model.
 
 ### Rendering, Themes, Locales, Accessibility, And SEO
 

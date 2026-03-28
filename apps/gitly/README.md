@@ -120,7 +120,7 @@ These packages are runtime-installed, hash-pinned in `app.toml`, and intentional
 the linked Rust backend. That is the split Davenda is supposed to show:
 
 - linked Rust for first-party customer logic
-- WASM for bounded runtime-installed behavior
+- WASM for bounded runtime-installed behaviour
 
 ## API Surface
 

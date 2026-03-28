@@ -45,7 +45,7 @@ Use this page as a launch point, not just a definitions list.
 
 Core is the platform layer that provides runtime primitives: routing, rendering, config loading, auth boundaries, jobs, storage integration, and other shared infrastructure.
 
-Core should not quietly grow product batteries. If a capability looks like reusable domain behavior, it probably belongs in a module instead.
+Core should not quietly grow product batteries. If a capability looks like reusable domain behaviour, it probably belongs in a module instead.
 
 Where to see it in practice:
 
@@ -87,7 +87,7 @@ Where to see it in practice:
 
 ### Linked customer Rust
 
-This is customer-owned Rust logic compiled into the application through stable public APIs. It is the preferred path for product-specific backend behavior.
+This is customer-owned Rust logic compiled into the application through stable public APIs. It is the preferred path for product-specific backend behaviour.
 
 Where to see it in practice:
 
@@ -123,7 +123,7 @@ Where to see it in practice:
 
 - [Sites, locales, and markets](sites-locales-and-markets.md)
 - [Gitly overview](../use-cases/gitly/overview.md)
-- [Internationalization](../reference/internationalization.md)
+- [Internationalisation](../reference/internationalization.md)
 
 ### Market
 
@@ -154,7 +154,7 @@ If a term here is still too abstract, jump directly to one of these:
   [Customer project layout](../getting-started/customer-project-layout.md)
 - "How does a request actually move through the runtime?":
   [Request and render lifecycle](request-and-render-lifecycle.md)
-- "Where do sites and locales become real runtime behavior?":
+- "Where do sites and locales become real runtime behaviour?":
   [Sites, locales, and markets](sites-locales-and-markets.md),
   [Configuration and secrets](../operations/configuration-and-secrets.md)
 - "Where is the customer/backend boundary explained concretely?":

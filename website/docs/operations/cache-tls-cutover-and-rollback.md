@@ -47,7 +47,7 @@ Use only `l1` when:
 Use both when:
 
 - you have more than one runtime node
-- you need shared invalidation behavior
+- you need shared invalidation behaviour
 - cache correctness has to survive restarts or horizontal scaling better
 
 ### Operator Commands
@@ -84,7 +84,7 @@ mode = "external"
 
 That split is healthy:
 
-- local stacks use externally terminated or dev-safe HTTP behavior
+- local stacks use externally terminated or dev-safe HTTP behaviour
 - production expresses the real certificate lifecycle
 
 ### Operator Commands
@@ -142,7 +142,7 @@ Operators should know:
 Before you call a cutover safe, confirm:
 
 - canonical hosts resolve correctly
-- localized routes resolve correctly
+- localised routes resolve correctly
 - assets are serving from the intended origin or CDN
 - payments and webhooks are still flowing
 - admin and account surfaces still work

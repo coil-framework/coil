@@ -75,7 +75,7 @@ Check:
 - `app.toml` site definitions
 - `platform.dev.toml` or `platform.toml` site blocks
 - request host
-- localized route expectations
+- localised route expectations
 
 Concrete files:
 
@@ -156,7 +156,7 @@ Symptoms:
 
 - new release starts but behaves like old schema
 - deploy blocks on startup
-- data-plane behavior differs between nodes
+- data-plane behaviour differs between nodes
 
 Check:
 
@@ -197,8 +197,8 @@ Concrete Shoppr examples:
 
 Symptoms:
 
-- an expected route or scheduled behavior does not appear
-- extension behavior differs from linked Rust behavior
+- an expected route or scheduled behaviour does not appear
+- extension behaviour differs from linked Rust behaviour
 - startup fails only when extensions are enabled
 
 Check:
@@ -220,7 +220,7 @@ Symptoms:
 
 - new binary is live but old assets appear
 - wrong hosts serve the new release
-- rollback does not restore expected behavior
+- rollback does not restore expected behaviour
 
 Check:
 

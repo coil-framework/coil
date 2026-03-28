@@ -189,7 +189,7 @@ The theme then makes those choices visible through:
 - `apps/shoppr/theme/assets/site.js`
 - `apps/shoppr/theme/tokens.toml`
 
-That is the practical Davenda story: site policy, locale policy, and theme behavior all live in
+That is the practical Davenda story: site policy, locale policy, and theme behaviour all live in
 the customer app.
 
 ## Linked Rust And WASM In One Commerce App
@@ -231,7 +231,7 @@ If you are building a Davenda store, copy these ideas before copying markup:
 - keep market and locale policy in manifest and config
 - own the full browse, account, and operator journey in one app
 - use linked Rust for first-party store policy
-- use WASM only for bounded runtime-installed behavior
+- use WASM only for bounded runtime-installed behaviour
 
 ## Read Next
 

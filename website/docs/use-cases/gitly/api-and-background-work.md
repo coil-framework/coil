@@ -16,7 +16,7 @@ For a product that needs some JSON surfaces and some deferred work:
 1. keep the main app server-rendered
 2. mount customer-owned API routes in the app crate
 3. use linked Rust for first-party payload shaping
-4. use explicit extension slots or jobs for bounded add-on behavior
+4. use explicit extension slots or jobs for bounded add-on behaviour
 
 That is the model Gitly demonstrates.
 

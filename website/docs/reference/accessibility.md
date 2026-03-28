@@ -23,7 +23,7 @@ over:
 
 - document landmarks
 - form semantics
-- focus behavior
+- focus behaviour
 - keyboard access
 - route and navigation structure
 - locale metadata
@@ -135,7 +135,7 @@ Customer apps still own:
 - contrast in every supported theme mode
 - error message wording and placement
 - screen-reader labels for customer-owned controls
-- accessible dialog, drawer, or widget behavior introduced by customer JS
+- accessible dialog, drawer, or widget behaviour introduced by customer JS
 
 Davenda gives you the contract and the right rendering shape. You still need to use it correctly.
 

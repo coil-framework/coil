@@ -7,7 +7,7 @@ Auth in Davenda is the contract between:
 - the core relationship engine
 - the app-selected auth package
 - official module capability checks
-- customer-specific authorization semantics
+- customer-specific authorisation semantics
 
 Start with this concrete example:
 

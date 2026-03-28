@@ -46,7 +46,7 @@ Even though Shoppr uses multiple sites, each site still supports multiple locale
 That gives the app two different levers:
 
 - site for market boundary and host identity
-- locale for language and route localization inside that site
+- locale for language and route localisation inside that site
 
 This is the model to copy when you want one shared product with multiple regional surfaces.
 
@@ -89,7 +89,7 @@ Add a new site when:
 Add a locale when:
 
 - the product is still the same site
-- you mainly need language and route localization changes
+- you mainly need language and route localisation changes
 
 Shoppr is the concrete example to use when making that call.
 
@@ -97,4 +97,4 @@ Shoppr is the concrete example to use when making that call.
 
 - [Shoppr Overview](./overview.md)
 - [Sites, Locales, And Markets](../../core-concepts/sites-locales-and-markets.md)
-- [Internationalization Reference](../../reference/internationalization.md)
+- [Internationalisation Reference](../../reference/internationalization.md)

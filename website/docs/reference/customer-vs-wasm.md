@@ -57,7 +57,7 @@ Concrete examples:
 
 That path is for:
 
-- bounded runtime-installed behavior
+- bounded runtime-installed behaviour
 - marketplace-style or third-party integrations
 - explicit slot-based contributions
 
@@ -135,7 +135,7 @@ Package linked code as part of the customer workspace.
 
 ### WASM
 
-Package runtime-installed behavior with a package manifest, handlers, built artifact, and a pinned checksum in `app.toml`.
+Package runtime-installed behaviour with a package manifest, handlers, built artifact, and a pinned checksum in `app.toml`.
 
 ## When To Choose Which
 
@@ -143,17 +143,17 @@ Choose linked Rust when:
 
 - the logic is first-party
 - the customer owns the release
-- the behavior needs richer facades or tighter typing
+- the behaviour needs richer facades or tighter typing
 
 Choose WASM when:
 
-- the behavior should stay bounded
+- the behaviour should stay bounded
 - you want explicit host grants
 - you want the runtime-installed package model
 
 ## A Good Heuristic
 
-If the behavior needs:
+If the behaviour needs:
 
 - customer-specific checkout policy
 - customer-specific webhook logic
@@ -161,7 +161,7 @@ If the behavior needs:
 
 use linked Rust.
 
-If the behavior needs:
+If the behaviour needs:
 
 - a render slot
 - a narrow API handler
@@ -173,7 +173,7 @@ use WASM.
 ## Common Mistakes
 
 - Putting first-party business rules into WASM just because it feels “more pluggable.”
-- Using linked Rust for behavior that really needs a harder trust boundary.
+- Using linked Rust for behaviour that really needs a harder trust boundary.
 - Treating WASM as a second unrestricted backend instead of a host-governed extension model.
 
 ## Full Implementation

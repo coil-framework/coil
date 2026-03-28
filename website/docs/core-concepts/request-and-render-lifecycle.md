@@ -32,7 +32,7 @@ Davenda tries to keep those concerns unified, because real products usually mix:
 - account surfaces
 - admin pages
 - stateful form actions
-- localized routes
+- localised routes
 
 ## The Short Version
 
@@ -41,7 +41,7 @@ The exact internals are deeper than this page, but the shape is consistent:
 1. the runtime resolves the request against host, site, locale, and route surfaces
 2. auth and capability checks run against the resolved route
 3. request input is normalized and validated
-4. handlers execute page, action, or API behavior
+4. handlers execute page, action, or API behaviour
 5. a render model is assembled for page-shaped responses
 6. templates render HTML using explicit data rather than arbitrary code execution
 
@@ -235,7 +235,7 @@ It does not mean:
 
 - no interactivity
 - no JavaScript
-- no typed backend behavior
+- no typed backend behaviour
 
 ## Common Mistakes
 
@@ -256,7 +256,7 @@ The page contract actually comes from both:
 
 If either side is missing, the template will feel disconnected.
 
-### Treating form actions as second-class behavior
+### Treating form actions as second-class behaviour
 
 In Davenda, stateful form flows are part of the primary model, especially for storefronts, account areas, and admin surfaces.
 

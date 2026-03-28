@@ -49,7 +49,7 @@ Recommended order:
 5. [Sites, locales, and markets](sites-locales-and-markets.md)
 6. [Customer apps vs official modules](customer-apps-vs-official-modules.md)
 7. [Themes, rendering, and assets](themes-rendering-and-assets.md)
-8. [Internationalization, localization, and content](internationalization-localization-and-content.md)
+8. [Internationalisation, localisation, and content](internationalization-localization-and-content.md)
 9. [Accessibility as a platform contract](accessibility-as-a-platform-contract.md)
 10. [SEO and discoverability](seo-and-discoverability.md)
 

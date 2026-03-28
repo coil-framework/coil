@@ -79,7 +79,7 @@ Use it for:
 Do not use it for:
 
 - temporary folder aliases
-- environment-specific behavior
+- environment-specific behaviour
 
 ### `template_namespaces`
 
@@ -200,7 +200,7 @@ This keeps one template tree while allowing site-aware branding and links.
 ### Treating `theme/` as only a CSS folder
 
 The actual theme contract includes namespace precedence, published assets, and customer-owned shell
-behavior.
+behaviour.
 
 ### Hardcoding final asset URLs
 

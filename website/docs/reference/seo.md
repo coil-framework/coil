@@ -75,7 +75,7 @@ Davenda currently generates these pieces automatically at the document boundary:
 - Open Graph title, description, and type
 - baseline JSON-LD page nodes when enabled
 
-Important practical behavior:
+Important practical behaviour:
 
 - if the page already has `</head>`, the runtime injects before it
 - if the page has no `<head>`, the runtime creates one
@@ -108,18 +108,18 @@ Davenda builds canonical and alternate URLs from:
 - route locale policy
 - supported locales for that site
 
-So for a localized route:
+So for a localised route:
 
 1. the site resolves from the request host
 2. the locale resolves from the route and site policy
 3. the runtime emits the canonical URL for that exact route/site/locale
-4. the runtime emits alternates only for equivalent localized routes
+4. the runtime emits alternates only for equivalent localised routes
 
 That is why hardcoding canonical links in templates is almost always the wrong move.
 
 ## JSON-LD
 
-Current behavior:
+Current behaviour:
 
 - if `emit_json_ld = true`, the runtime emits a page-level JSON-LD node automatically
 - extra JSON-LD nodes can be appended through typed metadata
@@ -145,7 +145,7 @@ That is the fastest way to produce wrong-host or wrong-language head output.
 
 SEO output should follow actual publication state.
 
-### Rebuilding `<head>` behavior inside every template
+### Rebuilding `<head>` behaviour inside every template
 
 That defeats the whole runtime-owned metadata model.
 
@@ -163,6 +163,6 @@ Concrete supporting files:
 
 ## What Should I Read Next?
 
-- [Internationalization](./internationalization.md)
+- [Internationalisation](./internationalization.md)
 - [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
 - [SEO And Discoverability](../core-concepts/seo-and-discoverability.md)

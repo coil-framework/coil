@@ -385,7 +385,7 @@ package = "shoppr-auth"
 Use:
 
 - `extend` when the default platform auth vocabulary is mostly right and you need to refine it
-- `replace` when your domain needs a fully customer-owned authorization model
+- `replace` when your domain needs a fully customer-owned authorisation model
 
 Read next:
 
@@ -488,7 +488,7 @@ Do not think of `[[content_models]]` as just a field list. Think of it as the pu
 
 - validation
 - editing surfaces
-- localization behaviour
+- localisation behaviour
 - routing or lookup patterns when slugs are involved
 
 If you add a model such as `lookbook_entry` or `campaign_page`, document its intended editor workflow as well as its field list.

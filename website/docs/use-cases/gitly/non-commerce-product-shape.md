@@ -78,9 +78,9 @@ Those helpers are then used by the customer app in
 This is a useful pattern to study because it shows how the customer app can keep presentation data
 close to its own product shape instead of forcing everything through an ecommerce abstraction.
 
-## Theme Switching And Product-Specific Frontend Behavior
+## Theme Switching And Product-Specific Frontend Behaviour
 
-Gitly's frontend behavior is intentionally customer-owned.
+Gitly's frontend behaviour is intentionally customer-owned.
 
 Read:
 
@@ -94,7 +94,7 @@ Read:
 - keyboard-visible focus states
 - search, tabs, summary-card, and table styling
 
-`site.js` provides the product behavior:
+`site.js` provides the product behaviour:
 
 - translation dictionaries for `en-GB`, `fr-FR`, and `de-DE`
 - route-aware language switching
@@ -106,16 +106,16 @@ Read:
 This is one of the most important Gitly lessons. The customer app can own a richer application
 frontend without becoming a JavaScript-first shell.
 
-## Localization In A Non-Commerce Product
+## Localisation In A Non-Commerce Product
 
-Gitly's localization story is visible in three places:
+Gitly's localisation story is visible in three places:
 
 - `apps/gitly/app.toml`
-  - declares supported locales and localized routes
+  - declares supported locales and localised routes
 - `apps/gitly/platform.dev.toml`
   - repeats localized-route runtime config for the active environment
 - `apps/gitly/theme/assets/site.js`
-  - carries the translation tables and route-localization behavior
+  - carries the translation tables and route-localisation behaviour
 
 The templates under `apps/gitly/templates/gitly/` are written to support that runtime:
 

@@ -2,7 +2,7 @@
 title: Auth Packages
 ---
 
-An auth package is the deployable unit of authorization semantics in Davenda.
+An auth package is the deployable unit of authorisation semantics in Davenda.
 
 It packages:
 
@@ -18,7 +18,7 @@ It does not replace the core auth engine. Core still owns tuple storage, checks,
 Davenda separates three concerns that are often collapsed together:
 
 - tuple storage
-- authorization semantics
+- authorisation semantics
 - module capability contracts
 
 The package exists so a customer app can extend or replace auth semantics without forking official modules or modifying the engine.
@@ -210,7 +210,7 @@ Choose `extend` when:
 
 - the default platform concepts are mostly right
 - you need extra roles or extra resources
-- you want to preserve default capability coverage and add customer-specific behavior
+- you want to preserve default capability coverage and add customer-specific behaviour
 
 Choose `replace` only when:
 

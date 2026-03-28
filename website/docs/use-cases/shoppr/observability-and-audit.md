@@ -125,7 +125,7 @@ Relevant test areas in that file cover:
 - diagnostics probe access control
 - metadata audit backend selection
 - verified webhook hook execution
-- linked customer asset and repository behavior
+- linked customer asset and repository behaviour
 
 If you want proof the observability boundary is real, not just documented, start there.
 

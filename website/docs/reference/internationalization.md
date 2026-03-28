@@ -1,14 +1,16 @@
 ---
-title: Internationalization
+title: Internationalisation
 ---
 
-Davenda internationalization starts at request resolution, not in a browser-only translation helper.
+Davenda internationalisation starts at request resolution, not in a browser-only translation
+helper.
 
 ## Start With The Two Real Patterns
 
-Current Davenda apps use two honest patterns.
+Current Davenda apps use two honest patterns, but they sit on top of richer server-side runtime
+primitives than the demos currently make obvious.
 
-### Pattern 1: server-rendered localized values
+### Pattern 1: server-rendered localised values
 
 ```html
 <html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
@@ -41,6 +43,25 @@ The key distinction is important:
 
 - Davenda resolves locale at the runtime level
 - a translation-key dictionary is currently a customer convention, not a built-in template API
+
+## What Already Exists In Core
+
+Davenda already has server-side i18n runtime primitives in core:
+
+- locale tags
+- locale contexts
+- fallback chains
+- translation catalogs
+- translation runtime lookup
+- locale-aware URL routing
+
+So the platform is not limited to browser-only translation.
+
+What is still missing from the public customer-facing story is narrower:
+
+- a first-class customer translation file convention
+- a template-native translation helper
+- a checked-in demo that wires customer translation catalogs into server-rendered page copy
 
 ## What Is Configured?
 
@@ -96,7 +117,7 @@ supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
 - Required: runtime-level field in current checked-in configs
 - Type: locale tag string
-- Meaning: fallback behavior for runtime locale handling
+- Meaning: fallback behaviour for runtime locale handling
 
 ## How Request Resolution Works
 
@@ -108,7 +129,7 @@ Davenda resolves:
 
 That keeps these things aligned:
 
-- localized URLs
+- localised URLs
 - render values
 - canonical URLs
 - alternate locale links
@@ -146,10 +167,11 @@ template runs.
 
 Current honest state:
 
-- Davenda does not yet ship a framework-owned translation file format
+- Davenda does not yet ship a framework-owned customer translation file format
 - Davenda does not yet ship a template-native `t("key")` helper
 - Gitly demonstrates a customer-owned locale dictionary in frontend JS
-- Shoppr demonstrates server-rendered, locale-aware values and multi-site locale configuration
+- Shoppr demonstrates server-rendered, locale-aware values, multi-site locale configuration, and
+  route-aware server-rendered market and locale switch URLs
 
 So if you need translation keys today, define a customer-owned convention and document it clearly.
 
@@ -172,8 +194,8 @@ The practical sequence is:
 2. add it to the relevant site’s `supported_locales`
 3. decide whether the site’s `default_locale` changes
 4. update customer-owned translation dictionaries if you use them
-5. update localized content and server-rendered copy
-6. verify localized routes and SEO output
+5. update localised content and server-rendered copy
+6. verify localised routes and SEO output
 
 If the host, brand, or assortment also changes, you probably need a new site, not just a new locale.
 
@@ -182,6 +204,10 @@ If the host, brand, or assortment also changes, you probably need a new site, no
 ### Pretending there is already a built-in translation-file system and `t()` helper
 
 There is not. Be explicit about the current customer convention.
+
+### Mistaking the Gitly `site.js` dictionary for the platform boundary
+
+It is a demo choice, not the architectural limit of Davenda.
 
 ### Hardcoding `/en-GB/` or `/fr/` paths in templates
 
@@ -215,4 +241,4 @@ Concrete supporting files:
 - [Template Models](./template-models.md)
 - [SEO](./seo.md)
 - [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
-- [Internationalization, Localization, And Content](../core-concepts/internationalization-localization-and-content.md)
+- [Internationalisation, Localisation, And Content](../core-concepts/internationalization-localization-and-content.md)

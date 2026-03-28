@@ -4,7 +4,7 @@ title: Sites, Locales, And Markets
 
 Davenda treats site and locale as runtime concerns. They are not just view-layer labels.
 
-If you skip this distinction, multi-site behavior becomes confusing quickly.
+If you skip this distinction, multi-site behaviour becomes confusing quickly.
 
 ## What It Is
 
@@ -32,7 +32,7 @@ Examples:
 - one site can support multiple locales
 - one market strategy can span multiple sites, or one site can map to one market
 
-If those distinctions are flattened together, route resolution and commerce behavior become much harder to reason about.
+If those distinctions are flattened together, route resolution and commerce behaviour become much harder to reason about.
 
 ## How It Works
 
@@ -137,7 +137,7 @@ Examples:
 Use a locale when:
 
 - you are translating one site
-- you want alternate localized routes under the same product surface
+- you want alternate localised routes under the same product surface
 
 Use a site when:
 
@@ -172,7 +172,7 @@ Locale affects routing, metadata, and content shape, not just strings.
 
 ### Treating market as a synonym for site
 
-Sometimes they line up. Often they do not. Keeping them distinct makes commerce behavior more composable.
+Sometimes they line up. Often they do not. Keeping them distinct makes commerce behaviour more composable.
 
 ### Using sites where simple locales would be enough
 

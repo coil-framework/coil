@@ -100,7 +100,7 @@ Use it for:
 - bind address
 - trusted proxies
 
-Do not use it for product identity, site catalog policy, or theme behavior.
+Do not use it for product identity, site catalog policy, or theme behaviour.
 
 ### `[database]`
 
@@ -136,11 +136,11 @@ This is an operational performance choice, not an app-manifest concern.
 Use them for:
 
 - default and supported locales
-- route localization policy
+- route localisation policy
 - host and canonical host mapping
 
 These are runtime-facing because they affect routing and delivery, even though they are also part
-of product behavior.
+of product behaviour.
 
 ### `[auth]`
 
@@ -199,7 +199,7 @@ Use it for:
 ## Development Versus Production
 
 Development and production do not need identical infrastructure, but they should preserve the same
-behavioral model.
+behavioural model.
 
 Good differences:
 
@@ -256,7 +256,7 @@ Use those examples as proofs of the model, not as the primary teaching material.
 
 ## Common Mistakes
 
-### Putting product behavior in `platform.toml`
+### Putting product behaviour in `platform.toml`
 
 Product composition belongs in the app manifest unless it is genuinely an operational concern.
 

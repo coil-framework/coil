@@ -28,7 +28,7 @@ A Davenda theme contributes four practical things:
 - document structure
 - reusable fragments
 - published frontend assets
-- customer-owned presentation behavior such as theme mode or small enhancements
+- customer-owned presentation behaviour such as theme mode or small enhancements
 
 This is why the theme is broader than “the CSS folder.”
 

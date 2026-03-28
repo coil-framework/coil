@@ -72,7 +72,7 @@ The hardened backend lives in:
 
 - `crates/davenda-runtime/src/wasm/host/services/http/backend.rs`
 
-Important behaviors already implemented there:
+Important behaviours already implemented there:
 
 - network can be disabled entirely through runtime config
 - extensions name an integration, not an arbitrary raw destination
@@ -105,7 +105,7 @@ The runtime metadata backends live under:
 - `crates/davenda-runtime/src/wasm/host/services/metadata/local.rs`
 - `crates/davenda-runtime/src/wasm/host/services/metadata/shared.rs`
 
-These files are worth reading because they show two important host behaviors:
+These files are worth reading because they show two important host behaviours:
 
 - local single-node metadata and audit persistence
 - shared Postgres-backed metadata and audit persistence
@@ -162,7 +162,7 @@ This is useful because it shows the smallest possible bounded extension:
 - one render hook target
 - no extra grants
 
-Use this pattern when you want "small injected behavior", not "customer-owned product policy".
+Use this pattern when you want "small injected behaviour", not "customer-owned product policy".
 
 ## Runtime Configuration That Affects Host APIs
 

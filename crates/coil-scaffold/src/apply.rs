@@ -574,13 +574,16 @@ fn platform_config(descriptor: &ProjectDescriptor, production: bool) -> String {
         .sites
         .iter()
         .map(|site| {
+            let mut hosts = Vec::with_capacity(1 + site.additional_domains.len());
+            hosts.push(site.canonical_domain.clone());
+            hosts.extend(site.additional_domains.iter().cloned());
             format!(
                 "[[sites]]\nid = \"{id}\"\ndisplay_name = \"{display_name}\"\nbrand_name = \"{brand_name}\"\ncanonical_host = \"{canonical_host}\"\nhosts = {hosts}\ndefault_locale = \"{default_locale}\"\nsupported_locales = {supported_locales}\n",
                 id = site.id,
                 display_name = site.display_name,
                 brand_name = site.brand_name,
                 canonical_host = site.canonical_domain,
-                hosts = toml_array(&site.additional_domains),
+                hosts = toml_array(&hosts),
                 default_locale = site.default_locale,
                 supported_locales = toml_array(&site.supported_locales),
             )
@@ -1200,5 +1203,32 @@ mod tests {
         let report = crate::doctor(workspace.path()).unwrap();
 
         assert!(report.issues.is_empty(), "{:?}", report.issues);
+    }
+
+    #[test]
+    fn platform_config_includes_canonical_host_in_site_hosts() {
+        let workspace = tempdir().unwrap();
+        let mut descriptor = ProjectDescriptor::new(
+            "shop".to_string(),
+            "Shop".to_string(),
+            "en-GB".to_string(),
+        );
+        descriptor
+            .add_site(SiteDescriptor {
+                id: "shop-fr".to_string(),
+                display_name: "Shop France".to_string(),
+                brand_name: "Shop".to_string(),
+                canonical_domain: "shop-fr.localhost".to_string(),
+                additional_domains: Vec::new(),
+                default_locale: "fr-FR".to_string(),
+                supported_locales: vec!["fr-FR".to_string()],
+            })
+            .unwrap();
+
+        apply_descriptor(workspace.path(), &descriptor).unwrap();
+
+        let config = std::fs::read_to_string(workspace.path().join("platform.dev.toml")).unwrap();
+        assert!(config.contains("canonical_host = \"shop-fr.localhost\""));
+        assert!(config.contains("hosts = [\"shop-fr.localhost\"]"));
     }
 }

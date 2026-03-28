@@ -103,16 +103,6 @@ of truth.
 - `crates-io`
 - `path`
 
-When you run `cargo coil` from inside a Coil checkout, it automatically prefers local `path`
-dependencies so you can use the generator immediately from the repository.
-
-When you run it outside the Coil checkout, it falls back to crates.io dependencies unless you
-explicitly pass:
-
-```bash
-cargo coil new my-store --source path --coil-path /path/to/coil
-```
-
 For a fully registry-backed new project, the generated workspace also expects the public framework
 crates such as `coil-rs` and `coil-customer-sdk` to be available on crates.io.
 

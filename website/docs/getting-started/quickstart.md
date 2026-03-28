@@ -47,15 +47,6 @@ Interactive mode is the default. The wizard asks for:
 
 When it finishes, Coil writes a customer-root workspace under `my-store/`.
 
-If you are developing Coil itself from a local checkout before the published crates have propagated,
-the equivalent source-driven path is:
-
-```bash
-git clone git@github.com:coil-framework/coil.git
-cd coil
-cargo run -p cargo-coil -- new my-store
-```
-
 ## Start The Local Dependencies
 
 The generated starter uses Postgres and Redis:
@@ -101,7 +92,7 @@ What to inspect:
 The generator is descriptor-backed, so you can evolve the project structure safely:
 
 ```bash
-cargo run -p cargo-coil -- site add eu \
+cargo coil site add eu \
   --root ./my-store \
   --display-name "EU Store" \
   --brand-name "My Store EU" \
@@ -110,7 +101,7 @@ cargo run -p cargo-coil -- site add eu \
 ```
 
 ```bash
-cargo run -p cargo-coil -- locale add pl-PL --root ./my-store --site eu
+cargo coil locale add pl-PL --root ./my-store --site eu
 ```
 
 Then validate again:

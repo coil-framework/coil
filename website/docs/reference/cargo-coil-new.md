@@ -52,20 +52,11 @@ cargo coil new my-store \
 
 You can control how the generated workspace depends on Coil.
 
-### Use the local checkout
-
-```bash
-cargo coil new my-store --source path --coil-path /path/to/coil
-```
-
 ### Use crates.io
 
 ```bash
 cargo coil new my-store --source crates-io
 ```
-
-If neither flag is passed, `cargo coil` detects whether it is running from inside a Coil checkout
-and prefers `path` dependencies when it can.
 
 ## Example End-To-End Flow
 
@@ -73,20 +64,6 @@ Normal installed flow:
 
 ```bash
 cargo coil new my-store
-cd my-store
-docker compose up -d
-export DATABASE_URL=postgres://coil:coil@127.0.0.1:5432/my-store
-export REDIS_URL=redis://127.0.0.1:6379/0
-export COIL_COOKIE_SECRET=replace-me-with-a-long-random-secret
-export COIL_CSRF_SECRET=replace-me-with-a-long-random-secret
-cargo run -p my-store -- validate
-cargo run -p my-store -- serve
-```
-
-If you are working from a local Coil checkout instead, use:
-
-```bash
-cargo run -p cargo-coil -- new my-store
 cd my-store
 docker compose up -d
 export DATABASE_URL=postgres://coil:coil@127.0.0.1:5432/my-store

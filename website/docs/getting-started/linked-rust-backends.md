@@ -6,6 +6,16 @@ Davenda's preferred customization model is linked customer Rust.
 
 That means customer-specific backend behavior lives in ordinary Rust crates that are compiled into the customer application, not in a separate API service by default.
 
+## How To Use This Page
+
+Use this page as the launch point for the customer-owned backend lane.
+
+- Read it if you want to know when Davenda expects linked Rust instead of an external service.
+- From here, jump into the customer-root workspace model, the reference boundary between customer
+  Rust and WASM, and the checked-in Shoppr and Gitly examples.
+- If you are already convinced and just need the app shape, go back to
+  [Customer project layout](customer-project-layout.md).
+
 ## What It Is
 
 A linked Rust backend is customer-owned code that plugs into Davenda through supported public APIs and hook/facade boundaries.
@@ -46,6 +56,21 @@ At a high level:
 
 This model is strong enough to let customer code participate in first-party behavior while still preserving a stable runtime boundary.
 
+## Where To See This In Practice
+
+Use these pages together rather than in isolation:
+
+- [Customer-root workspace](../core-concepts/customer-root-workspace.md)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
+- [Shoppr overview](../use-cases/shoppr/overview.md)
+- [Gitly overview](../use-cases/gitly/overview.md)
+
+Operationally relevant follow-ons:
+
+- [Jobs and schedulers](../operations/jobs-and-schedulers.md)
+- [Observability, monitoring, and audit](../operations/observability.md)
+- [Webhooks and integrations](../operations/webhooks-and-integrations.md)
+
 ## When Not To Use It
 
 Do not force everything into linked Rust.
@@ -77,3 +102,6 @@ Linked customer Rust and bounded WASM extensions serve different goals and opera
 - [Customer-root workspace](../core-concepts/customer-root-workspace.md)
 - [Customer apps vs official modules](../core-concepts/customer-apps-vs-official-modules.md)
 - [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
+- [Shoppr overview](../use-cases/shoppr/overview.md)
+- [Gitly overview](../use-cases/gitly/overview.md)
+- [Observability, monitoring, and audit](../operations/observability.md)

@@ -34,6 +34,19 @@ customer-product/
 
 The exact folder names can vary, but the responsibilities should stay recognizable.
 
+## How To Use This Page
+
+Use this page when you already accept the customer-root model and need to answer:
+
+- what folders and crates should exist
+- what belongs in the app root versus the Rust workspace
+- where to look next for exact `app.toml`, platform config, module composition, and deploy guidance
+
+If you are still deciding whether linked customer Rust should exist at all, read
+[Linked Rust backends](linked-rust-backends.md) next. If you need the exact architecture model
+behind this layout, jump to
+[Customer-root workspace](../core-concepts/customer-root-workspace.md).
+
 ## Why This Shape Exists
 
 This layout solves a few recurring problems in Rust web applications.
@@ -84,6 +97,12 @@ The repo includes two customer-root examples:
 
 Use them to see how the workspace, app root, and runtime fit together in a real application instead of a stripped-down tutorial.
 
+Practical follow-on pages for those examples:
+
+- [Shoppr overview](../use-cases/shoppr/overview.md)
+- [Gitly overview](../use-cases/gitly/overview.md)
+- [Project organization](../operations/project-organization.md)
+
 ## Common Mistakes
 
 ### Treating the app root as the whole project
@@ -103,3 +122,6 @@ If module composition, site configuration, or customer hooks are difficult to id
 - [Linked Rust backends](linked-rust-backends.md)
 - [Customer-root workspace](../core-concepts/customer-root-workspace.md)
 - [Runtime and module composition](../core-concepts/runtime-and-module-composition.md)
+- [Composition and davenda-all](../reference/composition.md)
+- [Build and deploy](../operations/build-and-deploy.md)
+- [Configuration and secrets](../operations/configuration-and-secrets.md)

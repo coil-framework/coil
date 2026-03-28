@@ -3,6 +3,12 @@ name = "coil-wasm"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "WASM extension runtime and host APIs for the Coil framework."
 [dependencies]
 hex = "0.4"
 sha2 = "0.10"

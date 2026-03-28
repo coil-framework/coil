@@ -39,4 +39,4 @@ version = "0.1.0"
 rust-version = "1.85"
 
 [workspace.dependencies]
-zanzibar = { path = "third_party/zanzibar" }
+zanzibar = "0.1.0"

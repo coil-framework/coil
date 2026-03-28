@@ -3,8 +3,14 @@ name = "coil-storage"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Object storage primitives for the Coil framework."
 [dependencies]
-coil-config = { path = "../coil-config" }
+coil-config = { version = "0.1.0", path = "../coil-config" }
 bytes = "1"
 futures = "0.3"
 object_store = { version = "0.13.1", default-features = false, features = ["aws"] }

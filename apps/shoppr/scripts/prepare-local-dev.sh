@@ -10,7 +10,7 @@ mkdir -p "$CONFIG_DIR"
 cat >"$CONFIG_PATH" <<'EOF'
 [patch.crates-io]
 coil-admin = { path = "../../crates/coil-admin" }
-coil = { path = "../../crates/coil" }
+coil = { package = "coil-rs", path = "../../crates/coil" }
 coil-app = { path = "../../crates/coil-app" }
 coil-assets = { path = "../../crates/coil-assets" }
 coil-auth = { path = "../../crates/coil-auth" }

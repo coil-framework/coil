@@ -3,10 +3,16 @@ name = "coil-events"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Events capabilities for the Coil framework."
 [dependencies]
-coil-auth = { path = "../coil-auth" }
-coil-commerce = { path = "../coil-commerce" }
-coil-core = { path = "../coil-core" }
-coil-data = { path = "../coil-data" }
-coil-jobs = { path = "../coil-jobs" }
-coil-memberships = { path = "../coil-memberships" }
+coil-auth = { version = "0.1.0", path = "../coil-auth" }
+coil-commerce = { version = "0.1.0", path = "../coil-commerce" }
+coil-core = { version = "0.1.0", path = "../coil-core" }
+coil-data = { version = "0.1.0", path = "../coil-data" }
+coil-jobs = { version = "0.1.0", path = "../coil-jobs" }
+coil-memberships = { version = "0.1.0", path = "../coil-memberships" }

@@ -3,23 +3,29 @@ name = "coil-app"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Customer application composition and bootstrap helpers for the Coil framework."
 [dependencies]
-coil-auth = { path = "../coil-auth" }
-coil-assets = { path = "../coil-assets" }
-coil-config = { path = "../coil-config" }
-coil-core = { path = "../coil-core" }
-coil-customer-sdk = { path = "../coil-customer-sdk" }
-coil-data = { path = "../coil-data" }
-coil-i18n = { path = "../coil-i18n" }
-coil-jobs = { path = "../coil-jobs" }
-coil-report = { path = "../coil-report" }
-coil-runtime = { path = "../coil-runtime" }
-coil-template = { path = "../coil-template" }
-coil-wasm = { path = "../coil-wasm" }
+coil-auth = { version = "0.1.0", path = "../coil-auth" }
+coil-assets = { version = "0.1.0", path = "../coil-assets" }
+coil-config = { version = "0.1.0", path = "../coil-config" }
+coil-core = { version = "0.1.0", path = "../coil-core" }
+coil-customer-sdk = { version = "0.1.0", path = "../coil-customer-sdk" }
+coil-data = { version = "0.1.0", path = "../coil-data" }
+coil-i18n = { version = "0.1.0", path = "../coil-i18n" }
+coil-jobs = { version = "0.1.0", path = "../coil-jobs" }
+coil-report = { version = "0.1.0", path = "../coil-report" }
+coil-runtime = { version = "0.1.0", path = "../coil-runtime" }
+coil-template = { version = "0.1.0", path = "../coil-template" }
+coil-wasm = { version = "0.1.0", path = "../coil-wasm" }
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.8.23"
 thiserror = "2.0.17"
 
 [dev-dependencies]
-coil-storage = { path = "../coil-storage" }
+coil-storage = { version = "0.1.0", path = "../coil-storage" }
 tempfile = "3"

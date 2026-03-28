@@ -19,7 +19,7 @@ clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 coil-admin = "0.1.0"
-coil = "0.1.0"
+coil = { package = "coil-rs", version = "0.1.0" }
 coil-app = "0.1.0"
 coil-assets = "0.1.0"
 coil-auth = "0.1.0"

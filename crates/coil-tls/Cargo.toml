@@ -3,11 +3,17 @@ name = "coil-tls"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "TLS management primitives for the Coil framework."
 [dependencies]
 aes-gcm = "0.10"
 async-trait = "0.1"
-coil-data = { path = "../coil-data" }
-coil-config = { path = "../coil-config" }
+coil-data = { version = "0.1.0", path = "../coil-data" }
+coil-config = { version = "0.1.0", path = "../coil-config" }
 lers = { version = "0.4.0", default-features = false, features = ["http-01", "dns-01-cloudflare", "tls-alpn-01"] }
 openssl = "0.10"
 rand = "0.8"

@@ -81,7 +81,7 @@ The convenience path is to use `coil` in the customer workspace:
 
 ```toml
 [workspace.dependencies]
-coil = "0.1.0"
+coil = { package = "coil-rs", version = "0.1.0" }
 ```
 
 Then the customer app crate can rely on the official module battery and let the manifest choose which modules are active.

@@ -4,29 +4,35 @@ version = "0.1.0"
 edition = "2024"
 default-run = "coil"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Command-line tooling for building, operating, and releasing Coil applications."
 [dependencies]
 async-trait = "0.1"
 axum = "0.8"
-coil-admin = { path = "../coil-admin" }
-coil-assets = { path = "../coil-assets" }
-coil-auth = { path = "../coil-auth" }
-coil-app = { path = "../coil-app" }
-coil-cache = { path = "../coil-cache" }
-coil-core = { path = "../coil-core" }
-coil-cms = { path = "../coil-cms" }
-coil-commerce = { path = "../coil-commerce" }
-coil-config = { path = "../coil-config" }
-coil-data = { path = "../coil-data" }
-coil-events = { path = "../coil-events" }
-coil-import = { path = "../coil-import" }
-coil-jobs = { path = "../coil-jobs" }
-coil-media = { path = "../coil-media" }
-coil-memberships = { path = "../coil-memberships" }
-coil-ops = { path = "../coil-ops" }
-coil-report = { path = "../coil-report" }
-coil-runtime = { path = "../coil-runtime" }
-coil-storage = { path = "../coil-storage" }
-coil-tls = { path = "../coil-tls" }
+coil-admin = { version = "0.1.0", path = "../coil-admin" }
+coil-assets = { version = "0.1.0", path = "../coil-assets" }
+coil-auth = { version = "0.1.0", path = "../coil-auth" }
+coil-app = { version = "0.1.0", path = "../coil-app" }
+coil-cache = { version = "0.1.0", path = "../coil-cache" }
+coil-core = { version = "0.1.0", path = "../coil-core" }
+coil-cms = { version = "0.1.0", path = "../coil-cms" }
+coil-commerce = { version = "0.1.0", path = "../coil-commerce" }
+coil-config = { version = "0.1.0", path = "../coil-config" }
+coil-data = { version = "0.1.0", path = "../coil-data" }
+coil-events = { version = "0.1.0", path = "../coil-events" }
+coil-import = { version = "0.1.0", path = "../coil-import" }
+coil-jobs = { version = "0.1.0", path = "../coil-jobs" }
+coil-media = { version = "0.1.0", path = "../coil-media" }
+coil-memberships = { version = "0.1.0", path = "../coil-memberships" }
+coil-ops = { version = "0.1.0", path = "../coil-ops" }
+coil-report = { version = "0.1.0", path = "../coil-report" }
+coil-runtime = { version = "0.1.0", path = "../coil-runtime" }
+coil-storage = { version = "0.1.0", path = "../coil-storage" }
+coil-tls = { version = "0.1.0", path = "../coil-tls" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

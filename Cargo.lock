@@ -320,27 +320,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "coil"
-version = "0.1.0"
-dependencies = [
- "coil-admin",
- "coil-app",
- "coil-auth",
- "coil-cms",
- "coil-commerce",
- "coil-config",
- "coil-core",
- "coil-customer-sdk",
- "coil-events",
- "coil-media",
- "coil-memberships",
- "coil-ops",
- "coil-runtime",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
 name = "coil-a11y"
 version = "0.1.0"
 dependencies = [
@@ -611,6 +590,27 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-rs"
+version = "0.1.0"
+dependencies = [
+ "coil-admin",
+ "coil-app",
+ "coil-auth",
+ "coil-cms",
+ "coil-commerce",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-events",
+ "coil-media",
+ "coil-memberships",
+ "coil-ops",
+ "coil-runtime",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -5434,6 +5434,8 @@ dependencies = [
 [[package]]
 name = "zanzibar"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1ffeb3d5a8e03a8763503a214b245310ce9ea16c3ec2ebe35d4ee28ede65a10"
 dependencies = [
  "anyhow",
  "async-trait",

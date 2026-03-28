@@ -47,7 +47,7 @@ export default function Home(): JSX.Element {
             <p className={styles.panelEyebrow}>Minimal customer app shape</p>
             <pre className={styles.codeBlock}>
 {`[dependencies]
-coil = "0.1.0"
+coil = { package = "coil-rs", version = "0.1.0" }
 
 fn main() -> Result<(), anyhow::Error> {
     coil::builder()

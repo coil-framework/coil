@@ -3,6 +3,12 @@ name = "coil-report"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Reporting helpers for the Coil framework."
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"

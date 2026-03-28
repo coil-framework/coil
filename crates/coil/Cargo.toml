@@ -1,21 +1,30 @@
 [package]
-name = "coil"
+name = "coil-rs"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Coil is an opinionated Rust framework for building web applications with batteries included."
+[lib]
+name = "coil"
+
 [dependencies]
-coil-admin = { path = "../coil-admin" }
-coil-app = { path = "../coil-app" }
-coil-auth = { path = "../coil-auth" }
-coil-cms = { path = "../coil-cms" }
-coil-commerce = { path = "../coil-commerce" }
-coil-config = { path = "../coil-config" }
-coil-core = { path = "../coil-core" }
-coil-customer-sdk = { path = "../coil-customer-sdk" }
-coil-events = { path = "../coil-events" }
-coil-media = { path = "../coil-media" }
-coil-memberships = { path = "../coil-memberships" }
-coil-ops = { path = "../coil-ops" }
-coil-runtime = { path = "../coil-runtime" }
+coil-admin = { version = "0.1.0", path = "../coil-admin" }
+coil-app = { version = "0.1.0", path = "../coil-app" }
+coil-auth = { version = "0.1.0", path = "../coil-auth" }
+coil-cms = { version = "0.1.0", path = "../coil-cms" }
+coil-commerce = { version = "0.1.0", path = "../coil-commerce" }
+coil-config = { version = "0.1.0", path = "../coil-config" }
+coil-core = { version = "0.1.0", path = "../coil-core" }
+coil-customer-sdk = { version = "0.1.0", path = "../coil-customer-sdk" }
+coil-events = { version = "0.1.0", path = "../coil-events" }
+coil-media = { version = "0.1.0", path = "../coil-media" }
+coil-memberships = { version = "0.1.0", path = "../coil-memberships" }
+coil-ops = { version = "0.1.0", path = "../coil-ops" }
+coil-runtime = { version = "0.1.0", path = "../coil-runtime" }
 thiserror = "1.0"
 tokio = { version = "1", features = ["net", "rt-multi-thread"] }

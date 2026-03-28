@@ -3,8 +3,14 @@ name = "coil-data"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Data access and persistence primitives for the Coil framework."
 [dependencies]
-coil-config = { path = "../coil-config" }
+coil-config = { version = "0.1.0", path = "../coil-config" }
 sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls"] }
 thiserror = "1.0"
 

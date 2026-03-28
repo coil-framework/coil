@@ -3,9 +3,15 @@ name = "coil-admin"
 version = "0.1.0"
 edition = "2024"
 
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil-framework.github.io/coil/"
+documentation = "https://coil-framework.github.io/coil/"
+description = "Admin surfaces and operator workflows for the Coil framework."
 [dependencies]
-coil-auth = { path = "../coil-auth" }
-coil-core = { path = "../coil-core" }
-coil-data = { path = "../coil-data" }
-coil-jobs = { path = "../coil-jobs" }
-coil-wasm = { path = "../coil-wasm" }
+coil-auth = { version = "0.1.0", path = "../coil-auth" }
+coil-core = { version = "0.1.0", path = "../coil-core" }
+coil-data = { version = "0.1.0", path = "../coil-data" }
+coil-jobs = { version = "0.1.0", path = "../coil-jobs" }
+coil-wasm = { version = "0.1.0", path = "../coil-wasm" }

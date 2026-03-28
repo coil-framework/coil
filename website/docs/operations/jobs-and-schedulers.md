@@ -8,108 +8,178 @@ That includes:
 
 - scheduled jobs
 - retryable work
-- domain-event-driven jobs
+- domain-event-driven work
 - queue inspection and recovery
+
+## What Is This?
+
+This page explains:
+
+- what kinds of work belong in Davenda jobs
+- how the checked-in apps demonstrate jobs and schedulers
+- which operator commands and signals matter
+
+## Why Does Davenda Care About Jobs So Much?
+
+Because async work is where many products become operationally unsafe:
+
+- side effects are retried blindly
+- queues are opaque
+- release rollouts ignore background work entirely
+- dead letters accumulate without ownership
+
+Davenda is trying to make jobs inspectable and recoverable instead.
 
 ## What Runs In The Job System
 
 Typical uses include:
 
-- email or notification delivery
 - webhook fan-out
-- report exports
-- asset or content follow-up work
-- integration refreshes
-- operational backfills and recovery tasks
+- follow-up integration work
+- scheduled refreshes
+- exports and reports
+- asset housekeeping
+- retryable operational tasks
 
-The point is not “do everything async.” The point is to make async work explicit, inspectable, and
-recoverable.
+The goal is not "make everything async." The goal is to move the right work off the request path
+without making it invisible.
 
-## Operational Expectations
+## Concrete Repo Examples
 
-A production team should know:
+### Gitly scheduled work
+
+Gitly is the clearest checked-in public jobs example.
+
+Relevant files:
+
+- `apps/gitly/extensions/gitly-actions-scheduler/`
+- `apps/gitly/app.toml`
+- `apps/gitly/platform.dev.toml`
+
+Gitly uses a bounded runtime-installed extension to simulate GitHub Actions refresh work. That
+gives you a real scheduled-work example without turning the whole repo into a queue tutorial.
+
+### Runtime config
+
+Both checked-in apps currently use Redis-backed jobs:
+
+```toml
+[jobs]
+backend = "redis"
+```
+
+Concrete files:
+
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/platform.toml`
+- `apps/gitly/platform.dev.toml`
+- `apps/gitly/platform.toml`
+
+## How To Operate Jobs
+
+The operator surface is the platform jobs command group.
+
+Representative commands:
+
+```bash
+platform jobs status --config apps/shoppr/platform.toml
+platform jobs run --config apps/shoppr/platform.toml --worker-id worker-a --limit 25
+platform jobs ready --config apps/shoppr/platform.toml --queue jobs.work --limit 25
+platform jobs dead-letters --config apps/shoppr/platform.toml --queue jobs.dead-letter --limit 25
+platform jobs in-flight --config apps/shoppr/platform.toml --queue jobs.work --worker-id worker-a --limit 25
+platform jobs retry dead-letter:job-retry --config apps/shoppr/platform.toml --dry-run
+platform jobs promote --config apps/shoppr/platform.toml --dry-run
+```
+
+That is the control-plane shape operators should build around:
+
+- inspect
+- run
+- observe ready work
+- inspect dead letters
+- inspect in-flight work
+- retry safely
+- promote safely
+
+## How To Think About Job Types
+
+### Scheduled jobs
+
+Use these when work should be promoted on a schedule.
+
+Current public example:
+
+- Gitly Actions refresh simulation
+
+### Retryable jobs
+
+Use these when a side effect can legitimately fail and should be retried under a bounded policy.
+
+### Domain-event-driven jobs
+
+Use these when the request path should emit a durable event and let follow-up work happen
+asynchronously.
+
+The public repo demonstrates the runtime and CLI surfaces for this lane, but the public website
+docs are still thinner than ideal on a single polished end-to-end domain-event example.
+
+## What Operators Need To Know
+
+At minimum, operators should be able to answer:
 
 - which queues exist
-- which jobs are ready, in flight, failed, or dead-lettered
-- how retries are bounded
-- how scheduler leadership is coordinated
-- how to re-run or promote work safely
+- what is ready right now
+- what is in flight
+- what is retrying
+- what is dead-lettered
+- which worker is currently making progress
 
-If the queue is opaque, incidents will cascade.
+If those answers require database spelunking, the jobs surface is not being used properly.
 
-## Scheduler Model
+## Release Guidance
 
-Schedulers should promote due work predictably and without duplicate execution under normal
-conditions. In multi-node environments, leadership and coordination need to be explicit rather than
-assumed.
+Before deploying code that changes job behavior, verify:
 
-From an operator perspective, that means:
+- whether pending jobs were created by older code
+- whether new jobs depend on new schema
+- whether a rollback would replay external side effects
+- whether workers should be paused, drained, or restarted during cutover
 
-- one node or coordinator should own promotion at a time
-- queue lag should be visible
-- promotion failures should be observable
-- operator workflows should exist for inspect, promote, retry, and dead-letter handling
+Jobs are part of release planning, not an afterthought.
 
-## Retry And Dead-Letter Policy
+## Current Example Coverage And Limits
 
-Retries are part of the product contract, not an implementation detail.
+Strong public example coverage exists for:
 
-Teams should decide and document:
+- job backend config
+- worker/operator command surface
+- scheduled work through Gitly
 
-- which jobs are retry-safe
-- how many attempts are allowed
-- what counts as permanent failure
-- when a job moves to dead letter
-- who is responsible for retrying or abandoning dead-letter work
+Public example coverage is still thinner for:
 
-Blind infinite retry loops are not production behavior.
+- a polished linked-Rust customer job definition walkthrough
+- a public end-to-end domain-event job tutorial page
 
-## Jobs In Release Operations
+So use Gitly as the current canonical scheduler example, and treat the general jobs contract as
+stable even where the public examples are still catching up.
 
-Before or during deployment, pay attention to:
+## Common Mistakes
 
-- jobs that depend on schema changes
-- jobs that depend on newly deployed code paths
-- jobs that may replay work after cutover
-- jobs that must be drained or paused before rollback
+### Treating dead letters as an archive
 
-Release planning should include background work, not only HTTP traffic.
+Dead letters are an operational signal that needs ownership and follow-up.
 
-## Monitoring Guidance
+### Running workers without queue inspection
 
-Track at least:
+If operators cannot see ready, in-flight, and dead-letter state, they are operating blind.
 
-- ready queue depth
-- in-flight count
-- retry count
-- dead-letter count
-- oldest pending job age
-- scheduler leadership or promotion status
+### Forgetting job impact during rollout
 
-Those signals let operators distinguish “system healthy but busy” from “system stuck.”
+Background work can replay, stall, or corrupt expectations during a bad deploy just as easily as
+request-path logic can.
 
-## Safe Operator Commands
+## What To Read Next
 
-A serious jobs toolchain should support:
-
-- status and queue inspection
-- ready and in-flight views
-- dead-letter inspection
-- controlled retry
-- controlled promotion
-- bounded worker execution
-
-Any destructive or replay-capable command should require clear confirmation and operator intent.
-
-## Incident Questions To Answer Fast
-
-When jobs misbehave, operators should be able to answer:
-
-- is the queue progressing
-- is a dependency failing
-- did a deploy change job behavior
-- are retries causing duplicate external side effects
-- which jobs can be safely replayed
-
-If those answers are not available quickly, jobs become an operational risk rather than a safety
-tool.
+- [Observability, monitoring, and audit](observability.md)
+- [Troubleshooting](troubleshooting.md)
+- [Build and deploy](build-and-deploy.md)

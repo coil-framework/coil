@@ -14,140 +14,184 @@ That matters because teams need to operate:
 - cutover and rollback flows
 - auth, payments, storage, and extension boundaries
 
-## The Four Operational Signals
+## What Is This?
 
-For production, assume you need all four:
+This page covers the built-in operational signals Davenda exposes today and how the checked-in
+apps use them:
 
-- structured logs
+- logs
 - metrics
 - traces
-- audit records or operator evidence
+- health and readiness probes
+- audit evidence
 
-Each answers a different question.
+## Why Does Observability Matter Here?
+
+Davenda is intentionally opinionated about runtime composition and operations. That only works if
+operators can see what the runtime is doing without resorting to shell access as the first step in
+every incident.
+
+## The Four Main Signal Types
 
 ### Logs
 
 Use logs to answer:
 
 - what happened
-- which request, job, or operation failed
-- which dependency or provider returned the error
-- whether the runtime failed closed or continued in a degraded mode
-
-Logs should be structured and machine-searchable.
+- which request or job failed
+- which dependency failed
+- whether the runtime failed closed or degraded
 
 ### Metrics
 
 Use metrics to answer:
 
-- is the service healthy right now
-- are error rates increasing
-- are caches effective
-- are jobs backing up
-- is latency or resource pressure changing over time
-
-Metrics support alerting and capacity planning.
+- whether the system is healthy right now
+- whether latency or error rates are drifting
+- whether queues or dependencies are backing up
 
 ### Traces
 
 Use traces to answer:
 
-- where latency is actually being spent
-- which hop or integration made a request slow
-- how a request interacted with storage, auth, jobs, or provider calls
+- where latency is really being spent
+- which dependency or runtime phase is slow
+- how a request or workflow crossed subsystem boundaries
 
-Traces are especially useful for multi-step user journeys and operational flows.
-
-### Audit And Operator Evidence
+### Audit evidence
 
 Use audit evidence to answer:
 
-- who changed or approved a release
-- who executed a migration, publish, or cutover command
-- what rollback or recovery action was performed
-- what state the platform observed before and after a sensitive operation
+- who performed a privileged action
+- what administrative workflow was executed
+- what changed during release or recovery operations
 
-This is not the same thing as general application logging.
+Audit is not a replacement for logs. It is the durable operator-history lane.
 
-## Minimum Production Dashboard Areas
+## Concrete Davenda Surfaces
 
-At minimum, teams should track:
+### `/health` and `/ready`
 
-- request rate, latency, and error rate
-- background job queue depth, retries, and dead letters
-- cache hit rate and invalidation activity
-- database connectivity and latency
+Davenda exposes health and readiness probes as first-class runtime endpoints.
+
+The checked-in Docker stacks already use them:
+
+- Shoppr app healthcheck hits `/ready`
+- Gitly app healthcheck hits `/ready`
+- Shoppr sidecar backend exposes `/health`
+
+That makes health an operator-visible contract, not an undocumented implementation detail.
+
+### Metrics and tracing switches
+
+Both checked-in apps currently enable observability in platform config:
+
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/platform.toml`
+- `apps/gitly/platform.dev.toml`
+- `apps/gitly/platform.toml`
+
+Each uses:
+
+```toml
+[observability]
+metrics = true
+tracing = true
+```
+
+### Audit in Shoppr
+
+Shoppr is the strongest checked-in audit example.
+
+Concrete operator surface:
+
+- `/admin/audit`
+
+That page is meant to prove that administrative and privileged actions can be inspected as durable
+operator history rather than inferred from general request logs.
+
+### Customer-owned audit hooks
+
+Shoppr's linked backend also uses the audit facade in customer-owned Rust. That matters because it
+shows the supported path for customer-specific operator evidence without exposing unstable runtime
+internals.
+
+## Suggested Operator Dashboard Areas
+
+At minimum, build dashboards for:
+
+- request rate, error rate, and latency
+- queue depth, retries, and dead letters
+- database and cache health
 - object-store errors and latency
-- payment webhook failures or replay rejections
-- TLS renewal and certificate health
-- migration and cutover execution outcomes
+- webhook failure rate
+- readiness and health status
+- audit volume for privileged workflows
 
-If those are invisible, production operation becomes guesswork.
+If these areas are invisible, the runtime may still work, but the operational model is incomplete.
 
-## Logging Guidance
+## How To Use These Surfaces In Practice
 
-Good operational logging in Davenda should include:
+### For local development
 
-- request identifiers
-- job identifiers
-- correlation or causation identifiers for event-driven work
-- site and locale context where relevant
-- operator command names for CLI-initiated changes
-- dependency/provider names when external services fail
+Use Docker Compose health output and app logs first:
 
-Do not rely on free-form strings alone.
+```bash
+docker compose logs app
+docker compose ps
+```
 
-## Monitoring Guidance
+Check:
 
-Alert on symptoms that matter to customers and operators:
+- `/ready` for the main app
+- `/health` for sidecars or integration adapters where present
 
-- sustained request failures
-- elevated checkout or webhook failure rates
-- scheduler leadership or promotion failures
-- dead-letter growth
-- asset publication failures
-- TLS renewal failures
-- storage or cache backend unavailability
+### For deployed environments
 
-Avoid noisy alerts that do not map to action.
+Expose and monitor:
 
-## Audit Scope
+- `/health`
+- `/ready`
+- structured logs
+- metrics collection
+- trace export
+- audit UI or audit-store access
 
-Audit evidence should exist for:
+## Current Example Coverage And Limits
 
-- release and deployment approvals
-- migration application
-- asset publication
-- module enable/disable/install operations
-- cutover apply and rollback
-- privileged administrative workflows
+The public repo already gives you strong examples for:
 
-If these actions cannot be reconstructed after the fact, operational trust will suffer.
+- readiness and health endpoints
+- audit evidence in Shoppr
+- linked-backend audit recording in Shoppr
+- observability config toggles in both apps
 
-## Cutover And Incident Monitoring
+The public examples are still thinner for:
 
-During a migration or cutover, broaden monitoring temporarily:
+- custom application metrics
+- custom tracing spans documented end to end
+- custom audit dashboards outside the Shoppr admin surface
 
-- watch critical customer journeys explicitly
-- inspect cache behavior and leakage
-- verify webhook and callback behavior
-- verify canonical hosts and media delivery
-- confirm rollback triggers remain observable
+So this page can document the current operator surfaces honestly, but it should not pretend the
+repo already contains a complete public cookbook for every custom observability lane.
 
-A calm steady-state dashboard is not enough during live traffic transitions.
+## Common Mistakes
 
-## Troubleshooting Posture
+### Treating `/ready` as a nicety
 
-Observability should support safe debugging without requiring production shell access as the first
-response.
+Readiness is part of deployment control and rollback safety, not just a convenience ping.
 
-Teams should be able to answer common questions through:
+### Relying only on logs
 
-- logs
-- traces
-- metrics
-- operator commands
-- deployment records
+Logs alone will not answer queue health, latency trends, or operator-history questions.
 
-If the first step in every incident is “ssh into a box and guess,” the observability model is not
-finished.
+### Forgetting audit for privileged actions
+
+If refunds, publishes, redirects, or cutover actions are not reconstructible, operational trust
+degrades quickly.
+
+## What To Read Next
+
+- [Health, readiness, and maintenance mode](health-readiness-and-maintenance-mode.md)
+- [Jobs and schedulers](jobs-and-schedulers.md)
+- [Troubleshooting](troubleshooting.md)

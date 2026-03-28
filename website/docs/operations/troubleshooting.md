@@ -4,80 +4,233 @@ title: Troubleshooting
 
 Troubleshooting in Davenda should start with explicit evidence, not guesswork.
 
-Use this page as a framework for incident response and operator debugging.
+Use this page to classify a problem by subsystem first, then inspect the right operator surface.
 
-## First Questions
+## What Is This?
 
-Before changing anything, determine:
+This page is the symptom-driven troubleshooting entry point for:
 
-- is the problem request-path, job-path, provider-path, or deployment-path
-- did the problem begin after a config or release change
-- is it isolated to one site, locale, or host
-- is it affecting only one operator workflow or customer journey
+- startup failures
+- readiness failures
+- site and locale routing bugs
+- asset and CDN problems
+- session and CSRF problems
+- jobs and queue failures
+- migration and release mistakes
+- webhook and extension failures
 
-That classification narrows the search quickly.
+## Why Start Here?
+
+Davenda has explicit subsystems. That is an advantage only if operators and developers know which
+one to inspect first.
+
+The fastest first question is:
+
+"Is this request-path, job-path, provider-path, or deployment-path?"
 
 ## Startup Failures
 
 If the runtime will not start, check:
 
-- manifest and config alignment
+- app manifest and platform config alignment
 - auth package loading
 - required secrets
 - database, cache, and storage configuration
-- extension package resolution
+- extension resolution
 - linked customer plugin registration
 
-Most startup failures should fail closed and surface clearly before the service accepts traffic.
+Concrete inspection commands:
 
-## Request Path Problems
+```bash
+cargo run -p shoppr -- validate
+cargo run -p gitly -- validate
+```
 
-If public or admin requests fail, inspect:
+Most startup failures should fail closed before traffic is accepted.
 
-- request logs and traces
-- route and host resolution
-- locale resolution
-- session and CSRF behavior
-- auth and capability checks
-- template or render model mismatches
+## Readiness Failures
 
-For multi-site apps, confirm the issue is not site-specific before assuming a global regression.
+If the service starts but is not healthy for traffic:
+
+- query `/ready`
+- query `/health`
+- inspect container health output
+- inspect dependency readiness such as Postgres, Redis, and object storage
+
+Concrete checked-in healthchecks:
+
+- `apps/shoppr/docker-compose.yml`
+- `apps/gitly/docker-compose.yml`
+
+## Site Or Locale Routing Problems
+
+Symptoms:
+
+- wrong site content under the right host
+- locale prefixes resolving incorrectly
+- canonical URL mismatches
+
+Check:
+
+- `app.toml` site definitions
+- `platform.dev.toml` or `platform.toml` site blocks
+- request host
+- localized route expectations
+
+Concrete files:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/gitly/app.toml`
+- `apps/gitly/platform.dev.toml`
+
+## Asset Problems
+
+Symptoms:
+
+- CSS or JS 404s
+- stale frontend after deploy
+- wrong asset origin
+
+Check:
+
+- whether `assets publish` ran
+- the configured `cdn_base_url`
+- whether the published asset manifest matches the release
+- object-store or CDN health
+
+Concrete commands:
+
+```bash
+cargo run -p shoppr -- assets publish
+platform assets publish --config apps/shoppr/platform.toml --dry-run
+```
+
+## Session, Cookie, And CSRF Problems
+
+Symptoms:
+
+- browser loops between authenticated and unauthenticated state
+- POSTs fail unexpectedly
+- forms break only in one environment
+
+Check:
+
+- cookie `secure` and `same_site` settings
+- whether TLS and proxy headers match the environment
+- CSRF config in platform config
+- session backend health
+
+Concrete files:
+
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/platform.toml`
+- `apps/gitly/platform.dev.toml`
 
 ## Jobs Problems
 
-If background work fails or stalls, inspect:
+Symptoms:
 
-- queue depth
+- async work does not complete
+- retries loop
+- queues never drain
+
+Check:
+
+- ready queue depth
 - in-flight jobs
-- retry churn
-- dead-letter entries
-- scheduler promotion behavior
-- dependency failures shared by those jobs
+- dead letters
+- scheduler leadership or worker execution
 
-Do not treat a dead-letter queue as an archive. It is an operational signal that needs ownership.
+Concrete commands:
 
-## Provider And Integration Failures
+```bash
+platform jobs status --config apps/shoppr/platform.toml
+platform jobs ready --config apps/shoppr/platform.toml --queue jobs.work --limit 25
+platform jobs dead-letters --config apps/shoppr/platform.toml --queue jobs.dead-letter --limit 25
+```
 
-If payments, storage, TLS, or outbound integrations fail, verify:
+## Migration Problems
 
-- the configured provider is actually enabled
-- required secrets are present and current
-- provider callbacks or webhook signatures are valid
-- the failure is not a rollout mismatch between old and new config
+Symptoms:
 
-When an external dependency is involved, capture provider-specific errors in the incident record.
+- new release starts but behaves like old schema
+- deploy blocks on startup
+- data-plane behavior differs between nodes
 
-## Release And Migration Problems
+Check:
 
-If a deployment looks wrong, verify:
+- whether migrations were planned
+- whether they were actually applied
+- whether manual customer migration entries were present
+- whether the target binary and config match the migration run
 
-- the expected binary and config were promoted
-- migrations applied as planned
-- assets were published for the current release
-- cache state matches the release
-- cutover actually switched the intended target
+Concrete commands:
 
-Never debug a release issue without first confirming what was actually deployed.
+```bash
+cargo run -p shoppr -- migrate apply --dry-run
+cargo run -p gitly -- migrate apply --dry-run
+```
+
+## Webhook Problems
+
+Symptoms:
+
+- payment callbacks do not settle
+- provider retries repeat forever
+- signed webhooks fail verification
+
+Check:
+
+- webhook secret configuration
+- local forwarding tool or provider dashboard
+- callback endpoint path
+- request logs and health of downstream dependencies
+
+Concrete Shoppr examples:
+
+- payment callback: `/webhooks/commerce/payment-provider`
+- sidecar CRM example: `POST http://localhost:8081/webhooks/crm/contact-updated`
+- secrets in `apps/shoppr/.env.example`
+
+## Extension Problems
+
+Symptoms:
+
+- an expected route or scheduled behavior does not appear
+- extension behavior differs from linked Rust behavior
+- startup fails only when extensions are enabled
+
+Check:
+
+- extension directory
+- manifest registration
+- hash-pinned package entry in `app.toml`
+- runtime limits and secret bindings in platform config
+
+Concrete examples:
+
+- `apps/shoppr/extensions/shoppr-waitlist-tools/`
+- `apps/gitly/extensions/gitly-community-pulse/`
+- `apps/gitly/extensions/gitly-actions-scheduler/`
+
+## Release And Cutover Problems
+
+Symptoms:
+
+- new binary is live but old assets appear
+- wrong hosts serve the new release
+- rollback does not restore expected behavior
+
+Check:
+
+- release inputs
+- asset publication
+- cache state
+- `/ready` on the target
+- traffic routing target
+
+Do not debug a cutover issue until you verify what was actually deployed.
 
 ## Safe Response Rules
 
@@ -86,19 +239,10 @@ During troubleshooting:
 - prefer inspection before mutation
 - prefer reversible actions before destructive ones
 - record what changed and why
-- avoid manual fixes that bypass the documented operator path unless the incident requires it
+- avoid bypassing the documented operator path unless the incident requires it
 
-Emergency changes without records often become the next incident.
+## What To Read Next
 
-## Build Your Own Runbooks
-
-Each customer product should extend this with product-specific runbooks for:
-
-- checkout failures
-- webhook failures
-- asset publication failures
-- admin or editorial lockouts
-- jobs backlog incidents
-- cutover rollback
-
-Davenda gives you the operational surfaces. Teams still need product-specific incident habits.
+- [Health, readiness, and maintenance mode](health-readiness-and-maintenance-mode.md)
+- [Webhooks and integrations](webhooks-and-integrations.md)
+- [Database migrations](database-migrations.md)

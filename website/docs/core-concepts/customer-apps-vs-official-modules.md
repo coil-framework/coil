@@ -52,6 +52,39 @@ A customer app then composes those modules into a concrete product and adds:
 - customer-specific hooks
 - product decisions that are not general-purpose batteries
 
+## Shoppr Example
+
+Shoppr is a customer app. It uses official modules such as:
+
+- CMS
+- media
+- commerce
+- memberships
+- events
+- admin
+- ops
+
+Those modules are enabled in:
+
+- `apps/shoppr/app.toml`
+
+But Shoppr itself still owns:
+
+- its market structure
+- its templates
+- its theme assets
+- its auth package choice
+- its linked customer backend
+- its runtime-installed waitlist extension
+
+That is the intended separation.
+
+## Gitly Example
+
+Gitly proves the same pattern outside commerce. It is still a customer app even though the product shape is closer to a code-hosting experience than a store.
+
+The lesson is that official modules provide reusable batteries, but the customer app still owns the actual product.
+
 ## A Useful Rule Of Thumb
 
 Ask this question:
@@ -61,6 +94,37 @@ Ask this question:
 If yes, it is a candidate for an official module.
 
 If no, it probably belongs in the customer app.
+
+## What Official Modules Should Own
+
+Official modules are the right place for:
+
+- reusable admin workflows
+- reusable route surfaces
+- reusable capability contracts
+- reusable data contracts
+- reusable jobs and integration surfaces
+
+## What Customer Apps Should Own
+
+Customer apps are the right place for:
+
+- brand identity
+- site and locale structure
+- market-specific product decisions
+- customer-specific templates and presentation
+- linked Rust business rules
+- runtime-installed extensions selected for that one product
+
+## What Not To Confuse With An Official Module
+
+Customer-owned Rust can be first-party without becoming an official reusable battery.
+
+That means:
+
+- linked Rust backend code is still customer code
+- runtime-installed WASM is still product-selected extension behaviour
+- neither of those automatically becomes an official module
 
 ## Common Mistakes
 
@@ -76,8 +140,13 @@ That weakens the value of the module layer and tends to duplicate auth, route, a
 
 Customer-owned Rust can be first-party without becoming an official reusable battery.
 
-## What To Read Next
+### Treating modules as template bundles only
+
+They are runtime batteries, not just UI packages.
+
+## Read Next
 
 - [Runtime and module composition](runtime-and-module-composition.md)
 - [Official modules](../reference/modules.md)
 - [Customer project layout](../getting-started/customer-project-layout.md)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)

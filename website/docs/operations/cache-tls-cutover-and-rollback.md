@@ -2,100 +2,172 @@
 title: Cache, TLS, Cutover, And Rollback
 ---
 
-Davenda exposes cache, TLS, migration cutover, and rollback as operator-visible concerns because
-they are common sources of production risk.
+Davenda exposes cache, TLS, cutover, and rollback as operator-visible concerns because they are
+common sources of production risk.
 
 Treat them as explicit release surfaces, not hidden implementation details.
 
-## Cache Operations
+## What Is This?
 
-Caching is valuable only when teams can reason about correctness.
+This page explains how to operate four areas that often determine whether a release is merely
+"working" or actually safe:
 
-Operators should be able to answer:
+- cache topology and invalidation
+- TLS mode and certificate lifecycle
+- cutover preparation and execution
+- rollback preparation and execution
 
-- which routes or surfaces are cacheable
-- what invalidation tags or keys are in play
-- whether a route is leaking state between users, locales, or sites
-- whether cache warm and invalidate operations match the release being deployed
+## Cache Topology
 
-For production readiness, teams need:
+Davenda supports a two-layer cache model:
 
-- cache inspection
-- cache warm planning and execution
-- explicit invalidation
-- confidence that cache partitioning respects site, locale, and visibility boundaries
+- `l1`: in-process cache such as Moka
+- `l2`: shared cache such as Redis or Valkey
+
+Concrete checked-in example:
+
+```toml
+[cache]
+l1 = "moka"
+l2 = "redis"
+```
+
+This configuration is used by both Shoppr and Gitly.
+
+### When To Use Only `l1`
+
+Use only `l1` when:
+
+- you are running a single node
+- you want the simplest setup
+- shared invalidation is not yet required
+
+### When To Use `l1` And `l2`
+
+Use both when:
+
+- you have more than one runtime node
+- you need shared invalidation behavior
+- cache correctness has to survive restarts or horizontal scaling better
+
+### Operator Commands
+
+Representative cache commands:
+
+```bash
+platform cache warm --config apps/shoppr/platform.toml --scope public --route /en-GB/shop
+platform cache inspect --config apps/shoppr/platform.toml --route /en-GB/shop
+platform cache invalidate --config apps/shoppr/platform.toml --tag route:events.list --tag locale:en-GB --yes
+```
+
+Use them to make caching legible, not magical.
 
 ## TLS Operations
 
-TLS is part of the product surface, not only an infrastructure checkbox.
+TLS is part of the product surface, not just an infrastructure checkbox.
 
-Davenda deployments should make it explicit:
+Shoppr production config demonstrates a real automated TLS lane:
 
-- which TLS mode is active
-- whether certificates are manually managed, externally terminated, or automated
-- which provider is responsible for DNS or origin automation
-- whether renewal is healthy
+```toml
+[tls]
+mode = "acme"
+challenge = "dns-01"
+provider = "cloudflare-dns"
+```
 
-Operators should have a clear workflow for:
+Development configs for Shoppr and Gitly use:
 
-- status
-- validation of challenge prerequisites
-- renewal
-- investigating provider failures
+```toml
+[tls]
+mode = "external"
+```
 
-If a team cannot tell whether renewal is about to fail, the deployment is not operationally ready.
+That split is healthy:
+
+- local stacks use externally terminated or dev-safe HTTP behavior
+- production expresses the real certificate lifecycle
+
+### Operator Commands
+
+Representative TLS commands:
+
+```bash
+platform tls status --config apps/shoppr/platform.toml
+platform tls validate-challenge --config apps/shoppr/platform.toml
+platform tls renew --config apps/shoppr/platform.toml --certificate cert-live --replacement cert-next --dry-run
+```
+
+If operators cannot tell whether challenge setup and renewal are healthy, the deployment is not
+production-ready.
 
 ## Cutover Planning
 
-Cutover is the moment when “the new system exists” becomes “traffic depends on it.”
+Cutover is when the new release starts receiving real traffic.
 
-That step should not happen on instinct.
+Minimum cutover checklist:
 
-A proper cutover plan should capture:
-
-- readiness checks
-- migration state
-- asset publication state
-- dependency health
-- critical journey verification
-- DNS, load balancer, or routing switch details
-- rollback triggers and rollback targets
+1. config validated
+2. migrations reviewed and applied as intended
+3. assets published
+4. `/ready` is healthy on the target release
+5. critical product journeys are verified
+6. rollback target is known
+7. cache invalidation or warming plan is ready
 
 ## Rollback Planning
 
-Rollback should be prepared before cutover, not invented after the incident starts.
+Rollback should be prepared before the switch, not improvised after the incident.
 
-At minimum, operators should know:
+Operators should know:
 
-- what traffic target rollback restores
-- which migrations are safe to leave in place
-- which follow-up tasks must be reversed manually
-- whether background jobs need to be paused, drained, or redirected
-- which cache invalidations or asset versions must change again after rollback
+- which binary and config are the previous known-good target
+- whether migrations are backward-safe
+- whether queues need draining or pausing
+- whether caches need rewarming or invalidation
+- which asset release should become active again
 
-## Verification During Live Transitions
+## A Practical Davenda Cutover Sequence
 
-Before and after cutover, check:
+1. Validate the target release.
+2. Apply approved migrations.
+3. Publish assets.
+4. Start the new runtime beside the old one if your topology allows.
+5. Check `/health` and `/ready`.
+6. Verify critical journeys such as storefront, admin, and webhook paths.
+7. Switch traffic.
+8. Watch health, logs, queues, and audit surfaces closely.
 
-- canonical hosts
-- localized routes
-- media and asset delivery
-- checkout and payment callbacks
-- account and admin flows
-- cache correctness and leakage
-- webhook processing
+## Production Checklist
 
-The release is not “done” when the switch flips. It is done when the post-switch verification is
-clean.
+Before you call a cutover safe, confirm:
 
-## Operator Posture
+- canonical hosts resolve correctly
+- localized routes resolve correctly
+- assets are serving from the intended origin or CDN
+- payments and webhooks are still flowing
+- admin and account surfaces still work
+- caches are not leaking stale or cross-site state
 
-For these areas, strong documentation should always prefer:
+## Common Mistakes
 
-- explicit confirmation
-- reversible steps
-- recorded evidence
-- clear failure handling
+### Treating TLS as "set and forget"
 
-Cache, TLS, cutover, and rollback are where mature teams distinguish between “it works” and “it is
-safe to run.”
+Certificate lifecycle and challenge validation need operator visibility.
+
+### Switching traffic before assets are confirmed
+
+A healthy backend plus stale frontend assets is still a broken release.
+
+### Forgetting cache state during rollback
+
+Rollback can fail if the old runtime meets the new cache or asset state unexpectedly.
+
+### Skipping post-cutover verification
+
+The switch itself is not the end of the release. Clean post-switch verification is.
+
+## What To Read Next
+
+- [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md)
+- [Health, readiness, and maintenance mode](health-readiness-and-maintenance-mode.md)
+- [Troubleshooting](troubleshooting.md)

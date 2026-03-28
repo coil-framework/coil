@@ -8,7 +8,7 @@ If you skip this distinction, multi-site behavior becomes confusing quickly.
 
 ## What It Is
 
-These three terms are related but different:
+These three terms are related but different.
 
 ### Site
 
@@ -48,9 +48,115 @@ That lets the runtime carry site and locale through:
 
 Markets then layer on top where commerce rules need them.
 
+## Shoppr As The Concrete Example
+
+Shoppr is the current multi-site reference example. It defines three sites in:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/platform.toml`
+
+Those sites are:
+
+- `shoppr-uk`
+- `shoppr-fr`
+- `shoppr-pl`
+
+They share one customer app and one binary, but differ in:
+
+- canonical host
+- additional host bindings
+- display name
+- brand name
+- default locale
+
+That is exactly the kind of case where `[[sites]]` is the right tool.
+
+## Worked Example
+
+Shoppr’s app manifest declares:
+
+```toml
+[[sites]]
+id = "shoppr-uk"
+display_name = "Shoppr UK"
+brand_name = "Shoppr"
+canonical_domain = "uk.127.0.0.1.nip.io"
+additional_domains = ["shop.example.com", "www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
+
+[[sites]]
+id = "shoppr-fr"
+display_name = "Shoppr France"
+brand_name = "Shoppr Paris"
+canonical_domain = "fr.127.0.0.1.nip.io"
+default_locale = "fr-FR"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
+```
+
+That means:
+
+- requests to the UK hosts resolve the UK site first
+- requests to the French host resolve the French site first
+- the same locale set is available across sites
+- the default locale changes by site
+- branding can differ by site even though the product family is still one app
+
+## When A Locale Is Enough
+
+Add a locale when:
+
+- the hostname stays the same
+- the site identity stays the same
+- the product battery stays the same
+- the main change is language and regional presentation
+
+Examples:
+
+- English and French versions of the same UK store
+- localized copy for one global product with shared inventory and routing logic
+
+## When You Need A Site
+
+Add a site when:
+
+- the hostname changes meaningfully
+- the brand display differs
+- the default locale differs by market
+- inventory, pricing, promotions, or operational policy diverge
+- editorial or SEO behaviour should be anchored to a different site identity
+
+Examples:
+
+- UK, France, and Poland under one brand
+- one product with distinct market hosts and merchandising
+
+## A Practical Decision Matrix
+
+Use a locale when:
+
+- you are translating one site
+- you want alternate localized routes under the same product surface
+
+Use a site when:
+
+- you are modelling a distinct market-facing delivery surface
+- you need different hostnames or brand identity
+- you need distinct default locale behaviour
+
+Use a separate app only when:
+
+- the product is no longer really the same application
+- module battery, deployment, auth, or business identity diverge so far that sharing one customer app stops making sense
+
 ## Why This Matters For Developers
 
-This model prevents a common failure mode where "multi-language support" is treated as template text replacement while the rest of the application still assumes a single host, a single assortment, and a single canonical route graph.
+This model prevents a common failure mode where "multi-language support" is treated as template text replacement while the rest of the application still assumes:
+
+- a single host
+- a single assortment
+- a single canonical route graph
 
 Davenda is trying to keep those concerns aligned from the start.
 
@@ -68,8 +174,13 @@ Locale affects routing, metadata, and content shape, not just strings.
 
 Sometimes they line up. Often they do not. Keeping them distinct makes commerce behavior more composable.
 
-## What To Read Next
+### Using sites where simple locales would be enough
+
+That creates unnecessary host and routing complexity.
+
+## Read Next
 
 - [Request and render lifecycle](request-and-render-lifecycle.md)
+- [app.toml](../reference/app-toml.md)
 - [Shoppr use case overview](../use-cases/shoppr/overview.md)
 - [Gitly use case overview](../use-cases/gitly/overview.md)

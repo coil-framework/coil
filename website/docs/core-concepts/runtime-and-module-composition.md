@@ -32,6 +32,31 @@ Davenda tries to keep composition explicit because it affects:
 - which operational surfaces are available
 - which customer hooks can participate
 
+## The Practical Rule
+
+Davenda composition has two layers:
+
+- Cargo dependencies decide what the binary can register
+- the customer app manifest decides what the application actually enables
+
+That means:
+
+- linking a module makes it available
+- enabling it in `app.toml` makes it active for the product
+
+Those are intentionally separate decisions.
+
+## Shoppr As The Concrete Example
+
+Shoppr shows the full composition story in one place:
+
+- `apps/shoppr/Cargo.toml`
+- `apps/shoppr/crates/shoppr-bin/src/main.rs`
+- `apps/shoppr/crates/shoppr-app/src/lib.rs`
+- `apps/shoppr/app.toml`
+
+If you want to see what “real Davenda composition” looks like in code, those files are the right starting point.
+
 ## How It Works
 
 At a high level, the customer binary:
@@ -39,7 +64,7 @@ At a high level, the customer binary:
 1. chooses the runtime entrypoint
 2. registers official modules
 3. registers customer plugins
-4. loads app/config inputs
+4. loads app and config inputs
 5. builds a runtime plan
 6. starts the server or operator process
 
@@ -49,6 +74,86 @@ That split matters:
 
 - linking a module makes it available to the application
 - enabling it in the customer app makes it part of the product shape
+
+## Minimal Composition Example
+
+The convenience path is to use `davenda-all` in the customer workspace:
+
+```toml
+[workspace.dependencies]
+davenda-all = "0.1.0"
+```
+
+Then the customer app crate can rely on the official module battery and let the manifest choose which modules are active.
+
+In Shoppr, the runtime bootstrap uses `official_modules_from_config` through the Shoppr app crate in `apps/shoppr/crates/shoppr-app/src/lib.rs`.
+
+That path is a good default when:
+
+- you want the full official stack available
+- you are starting quickly
+- you do not yet need tight dependency minimisation
+
+## Narrow Composition Example
+
+The convenience battery is not the only model. A customer workspace can choose to depend on narrower crates directly:
+
+```toml
+[workspace.dependencies]
+davenda-runtime = "0.1.0"
+davenda-cms = "0.1.0"
+davenda-commerce = "0.1.0"
+davenda-admin = "0.1.0"
+davenda-customer-sdk = "0.1.0"
+```
+
+Then the customer binary or bootstrap layer explicitly registers only those modules.
+
+This path makes sense when:
+
+- you want strict control over the official battery
+- you are building a narrower product
+- you want dependency visibility to stay very tight
+
+## Linked Versus Enabled
+
+This is the most important practical distinction in Davenda composition.
+
+### Linked
+
+A module is linked when the customer binary has the code available at build time.
+
+### Enabled
+
+A module is enabled when the customer app manifest includes it under:
+
+- [modules.enabled in `app.toml`](../reference/app-toml.md)
+
+### What Happens If They Drift
+
+If the manifest enables a module the binary did not link, the runtime build should fail rather than half-starting an incoherent system.
+
+That is a feature, not a nuisance. It prevents "looks configured, fails at runtime" behaviour.
+
+## What The Customer Plugin Layer Adds
+
+Module composition is not the whole story. The runtime plan is also shaped by linked customer plugins.
+
+In Shoppr, the bootstrap layer registers:
+
+- linked customer Rust hooks
+- runtime-installed WASM extension packages
+
+That happens in `apps/shoppr/crates/shoppr-app/src/lib.rs`.
+
+So a full runtime plan is composed from:
+
+- official modules
+- app manifest
+- auth package
+- templates
+- linked customer plugins
+- installed runtime extensions
 
 ## Why `davenda-all` Exists
 
@@ -61,6 +166,19 @@ It is useful when:
 - you do not yet need tight dependency control
 
 It is not the only valid entrypoint. Narrower composition is still part of the intended model.
+
+## A Good Composition Checklist
+
+Before calling a Davenda app “properly composed”, you should be able to answer all of these:
+
+- Which official modules are linked into the binary?
+- Which of those modules are enabled in `app.toml`?
+- Which auth package is selected?
+- Which linked customer plugins are registered?
+- Which runtime-installed extensions are declared?
+- Which templates and asset roots are active?
+
+If you cannot answer those quickly, the composition story is too hidden.
 
 ## Common Mistakes
 
@@ -76,8 +194,13 @@ Modules affect runtime behavior, auth, data model shape, and operations, not jus
 
 The customer binary should still make the product shape understandable. If composition becomes hard to trace, debugging the runtime will get harder too.
 
-## What To Read Next
+### Treating `davenda-all` as mandatory
+
+It is a convenience battery, not the only valid composition story.
+
+## Read Next
 
 - [Request and render lifecycle](request-and-render-lifecycle.md)
 - [Customer apps vs official modules](customer-apps-vs-official-modules.md)
 - [Composition and davenda-all](../reference/composition.md)
+- [Official modules](../reference/modules.md)

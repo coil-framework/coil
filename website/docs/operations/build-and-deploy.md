@@ -2,175 +2,237 @@
 title: Build And Deploy
 ---
 
-Davenda expects production teams to treat build, deploy, migrate, asset publication, and cutover as
-separate operational steps with explicit verification between them.
+Davenda expects production teams to treat build, migration, asset publication, runtime startup,
+and cutover as separate operational steps with explicit verification in between.
 
-That separation is deliberate. A customer app is not only a crate that compiles. It is a product
-bundle made of:
+That separation is deliberate. A release is not just a compiled binary. It is the coordinated
+bundle of:
 
-- a customer binary
-- a customer app manifest
-- platform configuration
-- auth package data
+- customer binary
+- app manifest
+- platform config
+- auth package files
 - templates and theme assets
-- linked Rust backend code
-- optional runtime-installed WASM packages
+- linked customer Rust code
+- optional runtime-installed extensions
 
-## Build Outputs
+## What Is This?
 
-For a serious deployment, produce and version these artifacts together:
+This page describes the operational release flow for a Davenda customer app:
+
+- what to build
+- which commands to run
+- when to migrate
+- when to publish assets
+- how to start the runtime
+- how to think about production rollout
+
+## Why Does Davenda Separate These Steps?
+
+Because they fail differently.
+
+- build failures are code or dependency problems
+- migration failures are data-plane problems
+- asset publication failures are delivery problems
+- startup failures are config, dependency, or composition problems
+- cutover failures are live traffic problems
+
+If you collapse all of those into one "deploy" button, incident recovery gets much harder.
+
+## A Practical Davenda Release Sequence
+
+For a serious deployment, use the same high-level order everywhere:
+
+1. validate the app and config
+2. build the customer binary
+3. run tests and smoke checks
+4. plan migrations
+5. apply migrations deliberately
+6. publish assets deliberately
+7. start the new runtime
+8. verify health and critical journeys
+9. cut traffic over
+10. keep rollback inputs available until the release is proven stable
+
+## Concrete Local And CI Commands
+
+Shoppr exposes the relevant lifecycle from the customer binary:
+
+```bash
+cd apps/shoppr
+./scripts/prepare-local-dev.sh
+cargo run -p shoppr -- describe
+cargo run -p shoppr -- validate
+cargo run -p shoppr -- migrate apply --dry-run
+cargo run -p shoppr -- assets publish
+cargo run -p shoppr -- up --config platform.dev.toml
+```
+
+Gitly exposes the same shape:
+
+```bash
+cd apps/gitly
+./scripts/prepare-local-dev.sh
+cargo run -p gitly -- validate
+cargo run -p gitly -- migrate apply --dry-run
+cargo run -p gitly -- up
+```
+
+Those commands are not throwaway examples. They are the checked-in operator surface for the demo
+apps.
+
+## Generic Platform Commands
+
+At the platform level, the CLI contract is the same even if the binary name differs:
+
+```bash
+platform migrate plan --config apps/shoppr/platform.toml
+platform migrate apply --config apps/shoppr/platform.toml --dry-run
+platform assets publish --config apps/shoppr/platform.toml --dry-run
+platform jobs status --config apps/shoppr/platform.toml
+platform tls status --config apps/shoppr/platform.toml
+```
+
+Use the customer binary when the app re-exports that control plane. Use `platform` when you are
+operating the generic CLI directly.
+
+## What To Build
+
+A production release should version and promote at least:
 
 - the customer binary
-- the exact app manifest used for the release
-- the exact platform config used for the target environment
-- the auth package and customer content/config committed with that release
-- published asset metadata or release manifest when asset publication is enabled
-- the release note or deployment record tying those inputs together
+- the exact `app.toml`
+- the exact environment-specific `platform.toml`
+- the auth package files
+- templates and theme assets
+- published asset manifest output when asset publication is enabled
 
-Do not treat the binary alone as the release.
+Do not treat the binary alone as "the release."
 
-## Recommended Promotion Flow
+## Migration Execution
 
-Use the same flow in CI, staging, and production so operational behavior stays consistent:
+Migration execution is a separate step because it changes live state.
 
-1. Resolve the customer workspace and configuration for the target environment.
-2. Run config and composition validation.
-3. Build the customer binary.
-4. Run tests and any environment-specific smoke checks.
-5. Plan and, when approved, apply executable migrations.
-6. Publish theme and managed assets.
-7. Start the new runtime alongside existing infrastructure or within the target rollout strategy.
-8. Verify health, logs, metrics, jobs, and critical product journeys.
-9. Execute cutover only after readiness gates pass.
-10. Keep rollback inputs available until the new release is proven stable.
+Minimum safe pattern:
 
-## CI Expectations
+1. run a dry plan
+2. review executable and manual migration entries
+3. apply when approved
+4. record what happened
 
-At minimum, CI should prove:
+Shoppr and Gitly both already expose migration reporting from the customer binary. Their validate
+and migrate output includes the count of migration contracts and any manual customer migration
+entries.
 
-- the workspace compiles
-- the documented customer apps still build
-- critical tests pass
-- configuration validation still succeeds for checked-in examples
-- docs and reference material still match the current command and product shape
+Important current limitation:
 
-For production-oriented teams, CI should also emit:
+- the repo currently proves the migration reporting surface
+- but it does not yet ship a polished public example of a custom customer-owned SQL table
+  migration beyond the built-in reporting path
 
-- a versioned binary artifact
-- a software bill of materials or equivalent dependency inventory
-- a release record tied to the git revision and customer app revision
+So document and operate customer-specific schema changes carefully, but do not assume there is a
+fully finished example app walkthrough for that lane yet.
 
-## Packaging Strategy
+For more detail, read [Database migrations](database-migrations.md).
 
-Davenda supports multiple packaging approaches, but they should all preserve the same operator
-contract.
+## Asset Publication
 
-### Customer Workspace Binary
+Asset publication is a distinct release step because a healthy binary can still serve the wrong
+frontend assets if the manifest or CDN state is stale.
 
-This is the primary model:
+Concrete examples:
 
-- the customer app owns the binary
-- the binary links the selected official modules
-- linked customer Rust logic is compiled into the same binary
-- operators run customer-owned commands for validate, migrate, publish, and serve
+- Shoppr local dev publishes assets through `cargo run -p shoppr -- assets publish`
+- Shoppr and Gitly both set `cdn_base_url` in `platform.dev.toml` and `platform.toml`
 
-This is the cleanest path for controlled deployments.
+Read [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md) before treating
+frontend delivery as part of startup.
 
-### Container Delivery
+## Production Deployment Example: Shoppr
 
-Containers are appropriate when teams want:
+A practical Shoppr deployment flow looks like this:
 
-- a single immutable runtime image
-- predictable runtime dependencies
-- consistent local, staging, and production behavior
+```bash
+cd apps/shoppr
+./scripts/prepare-local-dev.sh
+cargo run -p shoppr -- validate
+cargo run -p shoppr -- migrate apply --dry-run
+cargo run -p shoppr -- assets publish
+cargo run -p shoppr -- up --config platform.toml
+```
 
-When using containers, keep the lifecycle explicit. A good deployment still validates config,
-applies migrations deliberately, publishes assets deliberately, and records cutover state.
+During local development, the repo-maintainer override path is:
 
-### Repo-Maintainer Overrides
+```bash
+docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build
+```
 
-Examples like `docker-compose.repo.yml` or local Cargo patching are maintainer conveniences for
-developing against the monorepo before upstream publication. They are not the public deployment
-model and should be documented as such.
+That override is for working against the monorepo before upstream crates are published. It is not
+the public deployment model.
 
-## Environment Separation
+## Production Deployment Example: Gitly
 
-Keep at least three distinct operational environments:
+Gitly is the non-commerce example, but the operational contract is the same:
 
-- local development
-- pre-production or staging
-- production
+```bash
+cd apps/gitly
+./scripts/prepare-local-dev.sh
+cargo run -p gitly -- validate
+cargo run -p gitly -- migrate apply --dry-run
+cargo run -p gitly -- up
+```
 
-The goal is not identical infrastructure. The goal is behaviorally honest infrastructure:
+Gitly is especially useful when you want to confirm that these operational rules are about the
+platform rather than Shoppr-specific commerce behavior.
 
-- the same modules enabled
-- the same auth package shape
-- the same route and template tree
-- the same jobs and webhook surfaces
-- the same storage and asset publication model, as far as practical
+## Same-Domain Versus CDN Asset Delivery
 
-Avoid “toy staging” that removes the exact components most likely to fail in production.
+Davenda supports both same-origin and CDN-style asset delivery, but the choice should be explicit.
 
-## Deployment Roles And Responsibilities
+Use same-domain delivery when:
 
-Separate the operational concerns clearly:
+- you want the simplest deployment shape
+- you do not yet need CDN behavior
+- cache behavior is easy to reason about without an extra edge layer
 
-- product teams own the customer app, templates, linked Rust logic, and release intent
-- platform operators own infrastructure, secrets distribution, runtime health, and cutover safety
-- CI or release automation owns artifact assembly, validation, and evidence capture
+Use a CDN when:
 
-That makes it possible to approve releases without hiding who changed what.
+- you want aggressive asset caching
+- you need better geographic delivery
+- you want runtime traffic and asset traffic to scale independently
 
-## Pre-Deploy Checks
+Concrete examples:
 
-Before any production rollout, require:
+- Shoppr dev: `cdn_base_url = "http://localhost:9000/shoppr"`
+- Gitly dev: `cdn_base_url = "http://localhost:9002/gitly"`
+- Shoppr prod: `cdn_base_url = "https://cdn.example.com"`
 
-- config validation
-- release doctor or compatibility checks
-- migration plan review
-- asset publication readiness
-- provider credential validation for payments, TLS, object storage, or external integrations
-- health and dependency readiness for database, cache, jobs, and object storage
+If the CDN path is used, asset publication must be treated as part of release promotion, not as a
+background detail.
 
-If any of those fail, stop the rollout. Do not rely on the runtime to “figure it out later.”
+## Common Mistakes
 
-## Runtime Startup Contract
+### Treating `up` as the whole release flow
 
-A production startup should be predictable and boring:
+`up` is runtime startup. It is not a substitute for validation, migration review, and asset
+publication.
 
-- config loads successfully
-- auth package loads successfully
-- official modules compose successfully
-- runtime-installed extensions resolve successfully
-- linked customer plugins register successfully
-- migrations are already in the expected state
-- assets are already published or the release intentionally allows draft state
+### Applying migrations implicitly during live cutover
 
-If the runtime cannot satisfy that contract, fail closed and keep the previous release in service.
+Migration execution should be deliberate and recorded.
 
-## Artifact And Release Traceability
+### Publishing assets too late
 
-Every production deployment should answer:
+If the new runtime starts before assets are in place, public pages can break even when the backend
+is healthy.
 
-- which git revision produced this binary
-- which customer app manifest and config were used
-- which migrations were pending, applied, or intentionally deferred
-- which asset release was published
-- which operator approved the rollout
-- which cutover execution switched traffic
+### Forgetting customer-specific files in the release record
 
-If those answers are not easy to retrieve, release confidence will degrade quickly.
+If you cannot answer which manifest, config, and auth package were deployed, rollback confidence
+will be poor.
 
-## Production Readiness Checklist
+## What To Read Next
 
-Before you call a Davenda customer app production-ready, make sure the delivery path proves:
-
-- reproducible build inputs
-- environment-specific config validation
-- explicit migration execution
-- explicit asset publication
-- observable startup and health signals
-- rollback readiness
-- documented operator workflows for common incidents
-
-The framework is designed to support that model. Teams still need to operate it with discipline.
+- [Database migrations](database-migrations.md)
+- [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md)
+- [Cache, TLS, cutover, and rollback](cache-tls-cutover-and-rollback.md)

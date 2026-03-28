@@ -117,6 +117,18 @@ Customer apps also extend commerce through:
 - linked checkout and verified-webhook hooks
 - optional module bridges to memberships and events
 
+Concrete example:
+
+```html title="templates/commerce/product-detail.html"
+<form method="post" action="/cart">
+  <input type="hidden" name="sku" dv:attr="value=${product.sku}" />
+  <button type="submit">Add to bag</button>
+</form>
+```
+
+Commerce still owns cart, checkout, and order state. The customer app owns the product-detail page,
+copy, merchandising layout, and progressive enhancement around that workflow.
+
 ## Where To See It
 
 Shoppr is the canonical example:

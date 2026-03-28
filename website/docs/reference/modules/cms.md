@@ -115,6 +115,24 @@ Customer apps can also change CMS behaviour through:
 - auth package bindings
 - theme assets
 
+Concrete example:
+
+```html title="templates/cms/page.html"
+<article xmlns:dv="https://davenda.dev">
+  <header>
+    <h1 dv:text="${page.title}">Page title</h1>
+  </header>
+  <section dv:utext="${page.body}"></section>
+  <aside dv:insert="~{fragments/editorial-signpost}"></aside>
+</article>
+```
+
+That is a real customer-app extension point in practice:
+
+- CMS still owns the route and publication model
+- the customer app owns the rendered page shape
+- the customer app can add fragments or render-hook output without forking the module
+
 ## Where To See It
 
 Shoppr is the canonical example:

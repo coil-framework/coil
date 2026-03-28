@@ -96,6 +96,21 @@ Customer apps usually extend the Stripe path through:
 
 Shoppr demonstrates all three.
 
+Concrete example:
+
+```toml title="platform.dev.toml"
+[modules."commerce-payments-stripe"]
+provider = "stripe"
+checkout_mode = "hosted-checkout"
+publishable_key = { kind = "env", var = "STRIPE_PUBLISHABLE_KEY" }
+webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
+```
+
+That is the extension seam in practice:
+
+- the module owns Stripe checkout and webhook plumbing
+- the customer app owns provider secrets, confirmation UX, and any linked webhook policy
+
 ## Where To See It
 
 - `apps/shoppr/platform.dev.toml`

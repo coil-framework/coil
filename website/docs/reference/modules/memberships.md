@@ -85,6 +85,19 @@ Customer apps typically extend the module by:
 - shaping the account UX in templates
 - using linked hooks for post-purchase policy
 
+Concrete example:
+
+```html title="templates/memberships/account.html"
+<section xmlns:dv="https://davenda.dev">
+  <h2>Your membership</h2>
+  <p dv:text="${membership.tierName}">Founders</p>
+  <p dv:text="${membership.stateLabel}">Active</p>
+</section>
+```
+
+Memberships still owns entitlement and renewal state. The customer app owns how that state is
+explained to members.
+
 ## Where To See It
 
 Shoppr uses memberships in:

@@ -10,19 +10,16 @@ Use this page when you want to answer:
 - who owns which migration step
 - where those steps are declared
 - why customer-app migrations can be manual even when module migrations are executable
+- how to run the real commands and interpret the output
 
 ## The Ownership Model
 
-The low-level migration owner enum lives in `crates/davenda-data/src/migration.rs`.
-
-Current owners:
+Current owners are:
 
 - `Core`
 - `Module(String)`
 - `CustomerApp(String)`
 - `AuthPackage(String)`
-
-The higher-level app migration summary lives in `crates/davenda-app/src/migration.rs`.
 
 The customer-app-facing summary categories are:
 
@@ -54,30 +51,70 @@ These are the steps the customer app itself owns and must explain explicitly.
 
 That is why the demo customer binaries report `manual_customer_migration_entries`.
 
-## Where Migration Plans Are Built
+## What The Platform CLI Shows You
 
-The important files are:
+The platform CLI gives you the composed migration plan across modules and auth.
 
-- `crates/davenda-data/src/migration.rs`
-  - executable migration steps and compiled batches
-- `crates/davenda-app/src/migration.rs`
-  - composed migration summaries for customer apps
-- `apps/shoppr/crates/shoppr-app/src/lib.rs`
-  - Shoppr workspace validation and apply flow
-- `apps/gitly/crates/gitly-app/src/lib.rs`
-  - Gitly workspace validation and apply flow
+Real command:
+
+```bash
+cargo run -p davenda-cli -- migrate plan --config apps/shoppr/platform.dev.toml
+```
+
+Real output includes rows like:
+
+```text
+owner: module:commerce
+step: 001_catalog_products
+order: 10
+online_safe: true
+description: create catalog products and variants tables
+```
+
+and:
+
+```text
+owner: auth:shoppr-auth
+step: version-check
+order: 0
+online_safe: true
+description: validate auth package `shoppr-auth` schema, model, and capability bindings before release
+```
+
+That tells you two important things:
+
+- executable module work is visible as planned steps
+- auth-package validation is also part of the migration contract even when it is not raw SQL
 
 ## Shoppr Example
 
 Shoppr’s workspace binary is the clearest example because it reports both executable and manual
 customer-owned migration work.
 
-Read:
+Real command:
 
-- `apps/shoppr/crates/shoppr-app/src/lib.rs`
-- `apps/shoppr/crates/shoppr-bin/src/main.rs`
+```bash
+cd apps/shoppr
+cargo run -p shoppr -- validate
+```
 
-Important behaviours:
+Real output today:
+
+```text
+Shoppr validation passed
+app id: shoppr
+route surfaces: 49
+jobs: 16
+migration contracts: 20
+manual customer migrations: none
+```
+
+That is the honest current state of the demo:
+
+- Shoppr has real composed migration contracts
+- Shoppr currently has no manual customer migration entries
+
+Real customer-binary behaviour:
 
 - `validate(...)` reports `manual_customer_migration_entries`
 - `migrate_apply(...)` builds the runtime bootstrap and applies executable steps
@@ -87,14 +124,40 @@ Important behaviours:
 That is the right migration story for a real product: executable where possible, explicit where
 human ownership is still required.
 
+## What The Customer Binary Adds
+
+The customer binary owns the app-shaped migration workflow:
+
+```bash
+cd apps/shoppr
+cargo run -p shoppr -- migrate apply --dry-run
+```
+
+If the app cannot build a valid runtime bootstrap, the command fails early. For example, the current
+Shoppr dry-run path still requires runtime secrets such as `OBJECT_STORE_URL` to be present.
+
+That is useful, not annoying. It stops the app from pretending it can apply migrations for a runtime
+it cannot actually boot.
+
 ## Gitly Example
 
 Gitly follows the same pattern:
 
-- `apps/gitly/crates/gitly-app/src/lib.rs`
-- `apps/gitly/crates/gitly-bin/src/main.rs`
+- `gitly validate` also reports the composed migration-contract count
+- `gitly migrate apply --dry-run` follows the same customer-binary ownership model
 
 This matters because Gitly proves migration ownership is not a commerce-only concept.
+
+## How Manual Customer Migrations Become Real
+
+Customer migrations are declared through the customer app composition layer and surfaced into the
+app-facing migration summary. That means:
+
+- module migrations come from installed modules
+- auth migration checks come from the selected auth package
+- customer migration entries come from the customer app manifest/composition
+
+The docs should emphasise the boundary, not force the reader to reverse-engineer it from core Rust.
 
 ## Ordering Rules
 
@@ -122,11 +185,6 @@ A customer app should commit:
 - customer migration declarations in the app manifest/composition layer
 - a customer binary that exposes validate and migrate commands
 
-Concrete demo binaries:
-
-- `apps/shoppr/crates/shoppr-bin/src/main.rs`
-- `apps/gitly/crates/gitly-bin/src/main.rs`
-
 ## Common Mistakes
 
 - Do not hide customer-owned migration work inside ad hoc README notes only.
@@ -138,5 +196,6 @@ Concrete demo binaries:
 ## Read Next
 
 - [CLI Commands](./cli-commands.md)
+- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
 - [Composition And davenda-all](./composition.md)
 - [Shoppr Checkout And Operations](../use-cases/shoppr/checkout-and-operations.md)

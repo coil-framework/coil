@@ -91,6 +91,18 @@ Customer apps typically extend ops by:
 - integrating search adapters
 - wiring customer-specific recovery guidance into the operator story
 
+Concrete example:
+
+```html title="templates/admin/dashboard.html"
+<section xmlns:dv="https://davenda.dev">
+  <h3>Recovery</h3>
+  <p>Last catalogue rebuild: <span dv:text="${ops.lastRebuildAt}">never</span></p>
+</section>
+```
+
+Ops still owns the operator workflows and background jobs. The customer app owns the domain-specific
+guidance and summary panels that make those workflows usable.
+
 ## Where To See It
 
 Shoppr enables `ops` in both `apps/shoppr/app.toml` and `apps/shoppr/platform.dev.toml` and uses

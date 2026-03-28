@@ -12,15 +12,44 @@ Use this page when you want to answer:
 - which commands the platform CLI already supports
 - when to use the customer binary instead
 - which commands are safe to expose in docs and automation
+- why there is a customer binary at all
+
+## The Relationship Between The Two CLIs
+
+There are two binaries because they solve different problems.
+
+The platform CLI is generic:
+
+- auth
+- modules
+- cache
+- jobs
+- TLS
+- storage
+- imports
+- release planning
+
+The customer binary is app-shaped:
+
+- validate the customer workspace
+- describe the customer composition
+- run app-specific asset and migration flows
+- expose app-specific diagnostics such as linked-backend or extension checksums
+
+The customer binary does not replace the platform CLI, and the platform CLI does not replace the
+customer binary.
 
 ## Root Platform CLI
 
-The canonical command registry lives in `crates/davenda-cli/src/command.rs`.
+The `davenda-cli` crate currently builds the `platform` binary. Real help output starts like this:
 
-The parser lives in:
-
-- `crates/davenda-cli/src/cli/args.rs`
-- `crates/davenda-cli/src/cli/import.rs`
+```text
+platform dev server [--config <path>]
+platform config validate [--config <path>] [--json]
+platform auth check [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]
+platform module list [--config <path>] [--json]
+platform migrate plan [--config <path>] [--json]
+```
 
 The baseline command families are:
 
@@ -52,6 +81,10 @@ Current auth surfaces include:
 - `auth package inspect`
 
 These are grounded in the live auth package and runtime state, not just static files.
+
+Each auth subcommand now has its own detailed page:
+
+- [CLI Auth And Module Commands](./cli-auth-and-modules.md)
 
 ## Module Commands
 
@@ -86,6 +119,10 @@ Release:
 Use these when you need the platform’s composed view across modules, auth, and customer-app
 contracts.
 
+Detailed command usage lives here:
+
+- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
+
 ## Cache Commands
 
 Current cache commands:
@@ -94,7 +131,7 @@ Current cache commands:
 - `cache inspect`
 - `cache invalidate`
 
-Concrete parser behaviour in `crates/davenda-cli/src/cli/args.rs` already enforces:
+Concrete parser behaviour already enforces:
 
 - `cache warm` requires at least one `--route`
 - `cache inspect` requires exactly one `--route`
@@ -114,6 +151,10 @@ Current jobs commands:
 
 This is one of the clearest signs that Davenda treats jobs as a real operator surface, not just a
 library feature.
+
+Detailed usage lives here:
+
+- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets.md)
 
 ## TLS, Storage, Assets, And Import
 
@@ -138,7 +179,7 @@ The import cutover flags are modeled in `crates/davenda-cli/src/cli/import.rs`, 
 
 ## Output, Dry Run, And Confirmation
 
-The command model in `crates/davenda-cli/src/command.rs` exposes three important behaviours:
+The command model exposes three important behaviours:
 
 - `supports_json`
 - `supports_dry_run`
@@ -150,10 +191,20 @@ That means the CLI is intentionally machine-facing as well as human-facing.
 
 The demo apps also own their lifecycle through customer binaries.
 
-Concrete entrypoints:
+Actual Shoppr help output:
 
-- `apps/shoppr/crates/shoppr-bin/src/main.rs`
-- `apps/gitly/crates/gitly-bin/src/main.rs`
+```text
+Usage: shoppr [OPTIONS] <COMMAND>
+
+Commands:
+  describe
+  validate
+  assets
+  migrate
+  serve
+  up
+  linked-backend
+```
 
 Shoppr commands:
 
@@ -197,6 +248,10 @@ Use the customer binary when you need:
 
 ## Read Next
 
+- [Customer Workspace Binaries](./customer-workspace-binaries.md)
+- [CLI Auth And Module Commands](./cli-auth-and-modules.md)
+- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
+- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets.md)
 - [Environment Variables](./environment-variables.md)
 - [Migration Files And Ownership](./migration-files-and-ownership.md)
 - [Shoppr Jobs, Webhooks, And Background Work](../use-cases/shoppr/jobs-webhooks-and-background-work.md)

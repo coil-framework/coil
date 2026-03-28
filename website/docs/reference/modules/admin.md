@@ -83,6 +83,18 @@ Customer apps usually extend it by:
 - letting official modules contribute resources into the shared shell
 - adding customer summary widgets
 
+Concrete example:
+
+```html title="templates/admin/dashboard.html"
+<section xmlns:dv="https://davenda.dev">
+  <h2>Shoppr operator overview</h2>
+  <div dv:insert="~{admin/widgets/revenue-summary}"></div>
+</section>
+```
+
+The admin module still owns shell access, audit routes, and shared operator navigation. The
+customer app owns the dashboard content that appears inside that shell.
+
 ## Where To See It
 
 - `apps/shoppr/templates/admin/dashboard.html`

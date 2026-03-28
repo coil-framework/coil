@@ -82,6 +82,18 @@ Customer apps usually extend events by:
 - integrating event booking with commerce or memberships
 - adding customer widgets around booking and attendance views
 
+Concrete example:
+
+```html title="templates/events/event-detail.html"
+<form method="post" dv:attr="action=${event.bookingAction}">
+  <input type="hidden" name="event_id" dv:attr="value=${event.id}" />
+  <button type="submit">Reserve a place</button>
+</form>
+```
+
+The events module still owns booking lifecycle, waitlist promotion, and reminders. The customer app
+owns the public event presentation and the surrounding product story.
+
 ## Where To See It
 
 Shoppr is the main example because it enables `events` alongside commerce and memberships in

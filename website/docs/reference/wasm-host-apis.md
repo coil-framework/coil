@@ -28,7 +28,46 @@ Use this page when you want to answer:
 - what a WASM package can actually ask the host to do
 - how grants gate those calls
 - what the runtime already supports today
-- where the hardened host backends live
+- how to build a real package without reverse-engineering core crates
+
+## Start With A Full End-To-End Example
+
+Gitly’s API extension is a complete real example:
+
+```toml title="apps/gitly/extensions/gitly-community-pulse/package.toml"
+publisher = "gitly-demo"
+artifact = "artifacts/gitly-community-pulse.wasm"
+artifact_sha256 = "ef2b0bc15aa0baf178df23d3671bf0a2914c618e394f985441e27a5fdd7c89d7"
+
+[manifest]
+id = "gitly-community-pulse"
+display_name = "Gitly Community Pulse"
+version = "0.1.0"
+host_api_version = "1.0.0"
+
+[[handlers]]
+id = "community-pulse"
+export = "exports.community_pulse"
+point = "api"
+target = "/api/github/pulse"
+grants = []
+```
+
+And the customer app installs it like this:
+
+```toml title="apps/gitly/app.toml"
+[[extensions]]
+id = "gitly-community-pulse"
+package_version = "0.1.0"
+artifact_sha256 = "ef2b0bc15aa0baf178df23d3671bf0a2914c618e394f985441e27a5fdd7c89d7"
+customer_app_id = "gitly"
+
+[[extensions.handlers]]
+id = "community-pulse"
+grants = []
+```
+
+That pair is the real contract.
 
 ## What The Host API Surface Is
 
@@ -38,10 +77,11 @@ The simplest mental model is:
 2. installation grants or denies that action
 3. runtime host implementation enforces the decision
 
-That split matters:
+For a third-party extension author, the important operational split is:
 
-- `davenda-wasm` defines the contract and grant vocabulary
-- `davenda-runtime` provides the concrete host implementation
+- your package declares handlers and requested grants
+- the customer app installs those handlers and approves grants
+- the host enforces the runtime boundary
 
 ## Current Host Capability Families
 
@@ -64,13 +104,23 @@ If a package does not have the grant, the host should fail closed.
 
 That is the main point of this model: a WASM package is not a second backend. It is a guest asking the host for a bounded operation.
 
+## What You Can Build Today
+
+The checked-in demos already prove three concrete package shapes:
+
+- a render hook
+  - Shoppr waitlist banner
+- an API handler
+  - Gitly community pulse
+- a scheduled job
+  - Gitly actions refresh
+
+If your package does not fit one of those patterns yet, you need to check whether the customer app
+has exposed the right slot and whether the host surface exists.
+
 ## Outbound HTTP
 
 The most important security boundary is outbound HTTP.
-
-The hardened backend lives in:
-
-- `crates/davenda-runtime/src/wasm/host/services/http/backend.rs`
 
 Important behaviours already implemented there:
 
@@ -100,12 +150,9 @@ result:              denied
 
 ## Metadata And Durable Shared State
 
-The runtime metadata backends live under:
+The metadata host surface gives packages a way to persist bounded runtime-owned state.
 
-- `crates/davenda-runtime/src/wasm/host/services/metadata/local.rs`
-- `crates/davenda-runtime/src/wasm/host/services/metadata/shared.rs`
-
-These files are worth reading because they show two important host behaviours:
+In practice, that means:
 
 - local single-node metadata and audit persistence
 - shared Postgres-backed metadata and audit persistence
@@ -113,17 +160,12 @@ These files are worth reading because they show two important host behaviours:
 The shared backend now also stores durable customer managed-asset records, which is the concrete
 example of a WASM/host-adjacent API becoming production-grade instead of request-local state.
 
-In practice, this means an extension can contribute durable metadata or managed assets without owning the storage backend itself.
+In practice, this means an extension can contribute durable metadata or managed assets without
+owning the storage backend itself.
 
 ## Storage And Managed Assets
 
 Asset publication and delivery planning are not implemented inside the WASM package itself.
-
-Relevant files:
-
-- `crates/davenda-runtime/src/storage/host.rs`
-- `crates/davenda-assets/src/delivery.rs`
-- `crates/davenda-assets/src/release.rs`
 
 This means:
 
@@ -138,14 +180,6 @@ That keeps storage policy enforceable at the platform layer instead of inside ex
 WASM packages can target scheduled jobs and other background work, but only through explicit host
 contracts and installed handlers.
 
-Concrete package example:
-
-- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
-
-Concrete app loader:
-
-- `apps/gitly/crates/gitly-app/src/extensions.rs`
-
 The important boundary is that packages do not start their own scheduler. They plug into a host
 job system the customer app already composed.
 
@@ -153,8 +187,14 @@ job system the customer app already composed.
 
 Shoppr’s waitlist package is the clearest render-hook example:
 
-- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
+```toml title="apps/shoppr/extensions/shoppr-waitlist-tools/package.toml"
+[[handlers]]
+id = "home.waitlist.banner"
+export = "exports.home_waitlist_banner"
+point = "render-hook"
+target = "cms.page.render"
+grants = []
+```
 
 This is useful because it shows the smallest possible bounded extension:
 
@@ -165,11 +205,6 @@ This is useful because it shows the smallest possible bounded extension:
 Use this pattern when you want "small injected behaviour", not "customer-owned product policy".
 
 ## Runtime Configuration That Affects Host APIs
-
-The demo apps expose the main knobs in `platform.dev.toml`:
-
-- `apps/shoppr/platform.dev.toml`
-- `apps/gitly/platform.dev.toml`
 
 Important settings:
 
@@ -217,33 +252,18 @@ If a package needs broad host powers or deep product context, it probably belong
 
 ## Full Implementation
 
-Contract and grant model:
-
-- `crates/davenda-wasm/src/manifest/manifests.rs`
-- `crates/davenda-wasm/src/grants.rs`
-
-Runtime host implementations:
-
-- `crates/davenda-runtime/src/wasm/host/services/`
-
-Concrete package examples:
+If you want to study a full working implementation after reading this page, start with:
 
 - `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
 - `apps/gitly/extensions/gitly-community-pulse/package.toml`
 - `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
-
-Concrete app loaders:
-
 - `apps/shoppr/crates/shoppr-app/src/extensions.rs`
 - `apps/gitly/crates/gitly-app/src/extensions.rs`
-
-Runtime settings examples:
-
-- `apps/shoppr/platform.dev.toml`
-- `apps/gitly/platform.dev.toml`
 
 ## Read Next
 
 - [Extension Package Format](./extension-package-format.md)
+- [Writing And Installing WASM Extensions](./wasm-writing-and-installing-extensions.md)
+- [WASM Host Service Examples](./wasm-host-service-examples.md)
 - [Linked Rust Hook APIs](./linked-rust-hook-apis.md)
 - [Gitly Extensions And Host APIs](../use-cases/gitly/extensions-and-host-apis.md)

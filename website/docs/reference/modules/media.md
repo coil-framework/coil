@@ -97,6 +97,18 @@ Customer apps usually extend media by:
 - connecting media into CMS and commerce pages
 - customizing storage policy defaults in platform config
 
+Concrete example:
+
+```html title="templates/commerce/product-detail.html"
+<img
+  alt="Product image"
+  dv:attr="src=${product.heroImage.url},alt=${product.heroImage.alt}"
+/>
+```
+
+The media module still owns managed-asset identity and delivery. The customer template chooses how
+that media is presented in the product UI.
+
 ## Where To See It
 
 Shoppr uses media as part of the broader store workflow:

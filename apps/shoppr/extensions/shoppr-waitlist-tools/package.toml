@@ -1,6 +1,6 @@
 publisher = "harbor-marketplace"
 artifact = "shoppr-waitlist-tools/shoppr-waitlist-tools.wasm"
-artifact_sha256 = "a86d1a1646e818bf600653ba6cf3585162157517acf74d76c20ecba3328694dc"
+artifact_sha256 = "3ad7b44218d04a3eba602051cbcb991bdd1ab69fd55ad995cd688af26ca6d067"
 source_wat = "shoppr-waitlist-tools.wat"
 
 [manifest]

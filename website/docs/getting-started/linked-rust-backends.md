@@ -2,31 +2,78 @@
 title: Linked Rust Backends
 ---
 
-Davenda’s preferred customization model is linked customer Rust, not “go build a separate API and hope it lines up.”
+Davenda's preferred customization model is linked customer Rust.
 
-## The Model
+That means customer-specific backend behavior lives in ordinary Rust crates that are compiled into the customer application, not in a separate API service by default.
 
-- Davenda core owns the runtime and official modules.
-- The customer app owns a linked Rust backend crate.
-- That backend crate plugs into Davenda through stable public APIs.
-- Third-party integrations that should not participate in the build use WASM instead.
+## What It Is
 
-## Why It Matters
+A linked Rust backend is customer-owned code that plugs into Davenda through supported public APIs and hook/facade boundaries.
 
-This gives customer teams:
+Typical responsibilities include:
 
-- real Rust ergonomics
-- compile-time safety
-- first-party access through supported APIs
-- fewer deployment boundaries
+- product-specific checkout rules
+- CMS publish validation
+- verified webhook handling
+- customer-specific admin or integration behavior
 
-It also gives the platform a clearer separation between:
+The exact extension points are intentionally explicit. Davenda does not expose the whole runtime as an ambient bag of internals.
 
-- customer-owned code
-- official modules
-- third-party runtime extensions
+## Why It Exists
 
-See:
+Davenda makes this the primary customization path because it keeps the application honest.
 
-- Shoppr for the ecommerce-oriented example
-- chapter 96 in the architecture section for the deeper design record
+### You get compile-time integration
+
+Your product logic is built, typed, and tested together with the application instead of floating in a separate service boundary.
+
+### You avoid unnecessary infrastructure
+
+Many teams default to "add another API" because their framework has no good first-party customization path. Davenda is trying to remove that pressure.
+
+### You keep trust boundaries explicit
+
+Customer-owned Rust has a different trust model from third-party extensions. Davenda treats those as different things on purpose.
+
+## How It Works
+
+At a high level:
+
+1. The customer binary links Davenda crates plus customer-owned crates.
+2. The customer backend implements supported plugin or hook traits.
+3. The runtime exposes stable facades instead of leaking arbitrary internals.
+4. Request-time or lifecycle-time hooks are invoked through those public surfaces.
+
+This model is strong enough to let customer code participate in first-party behavior while still preserving a stable runtime boundary.
+
+## When Not To Use It
+
+Do not force everything into linked Rust.
+
+You may still want:
+
+- a separate service when the boundary is operationally real
+- a third-party WASM extension when the code is lower-trust or marketplace-style
+- plain HTTP integration when the dependency should remain external
+
+The point is not "everything must be linked." The point is that Davenda has a clear default path when the code is truly customer-owned application logic.
+
+## Common Mistakes
+
+### Recreating a sidecar by habit
+
+If the code is product-specific and needs first-party access to application behavior, starting with an external service is usually the wrong default.
+
+### Expecting runtime internals as the API
+
+The supported contract is the customer SDK and stable facades, not direct access to every internal runtime type.
+
+### Confusing customer Rust with third-party extensions
+
+Linked customer Rust and bounded WASM extensions serve different goals and operate under different trust assumptions.
+
+## What To Read Next
+
+- [Customer-root workspace](../core-concepts/customer-root-workspace.md)
+- [Customer apps vs official modules](../core-concepts/customer-apps-vs-official-modules.md)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)

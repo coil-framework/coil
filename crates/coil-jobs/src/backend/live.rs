@@ -20,7 +20,9 @@ use sqlx::{Postgres, Row};
 #[cfg(not(test))]
 use std::future::Future;
 #[cfg(not(test))]
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
+#[cfg(not(test))]
+use tokio::task;
 
 #[cfg(not(test))]
 pub fn live_shared_runtime(
@@ -187,7 +189,10 @@ impl ProductionPostgresSharedJobsStore {
     }
 
     fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
-        self.runtime.block_on(future)
+        match Handle::try_current() {
+            Ok(handle) => task::block_in_place(|| handle.block_on(future)),
+            Err(_) => self.runtime.block_on(future),
+        }
     }
 
     async fn ensure_table(&self) -> Result<(), JobsModelError> {

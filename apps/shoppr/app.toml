@@ -3,20 +3,34 @@ name = "shoppr"
 display_name = "Shoppr"
 
 [domains]
-canonical = "uk.127.0.0.1.nip.io"
-additional = ["fr.127.0.0.1.nip.io", "pl.127.0.0.1.nip.io", "shop.example.com", "www.example.com"]
+canonical = "uk.localhost"
+additional = ["www.localhost", "fr.localhost", "pl.localhost", "shop.example.com", "www.example.com"]
 
 [i18n]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 localized_routes = true
 
+[translations]
+
+[[translations.catalogs]]
+locale = "en-GB"
+path = "translations/en-GB.toml"
+
+[[translations.catalogs]]
+locale = "fr-FR"
+path = "translations/fr-FR.toml"
+
+[[translations.catalogs]]
+locale = "pl-PL"
+path = "translations/pl-PL.toml"
+
 [[sites]]
 id = "shoppr-uk"
 display_name = "Shoppr UK"
 brand_name = "Shoppr"
-canonical_domain = "uk.127.0.0.1.nip.io"
-additional_domains = ["shop.example.com", "www.example.com"]
+canonical_domain = "uk.localhost"
+additional_domains = ["www.localhost", "shop.example.com", "www.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
@@ -24,8 +38,8 @@ supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 id = "shoppr-fr"
 display_name = "Shoppr France"
 brand_name = "Shoppr Paris"
-canonical_domain = "fr.127.0.0.1.nip.io"
-additional_domains = ["fr-store.127.0.0.1.nip.io"]
+canonical_domain = "fr.localhost"
+additional_domains = ["fr-store.localhost"]
 default_locale = "fr-FR"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
@@ -33,8 +47,8 @@ supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 id = "shoppr-pl"
 display_name = "Shoppr Polska"
 brand_name = "Shoppr Studio"
-canonical_domain = "pl.127.0.0.1.nip.io"
-additional_domains = ["pl-store.127.0.0.1.nip.io"]
+canonical_domain = "pl.localhost"
+additional_domains = ["pl-store.localhost"]
 default_locale = "pl-PL"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 

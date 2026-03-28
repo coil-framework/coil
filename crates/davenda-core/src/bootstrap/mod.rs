@@ -4,7 +4,9 @@ mod factories;
 mod registry;
 mod services;
 
-pub use registry::bootstrap_core_services;
+pub use registry::{
+    bootstrap_core_services, bootstrap_core_services_with_translation_catalogs,
+};
 pub use services::{
     A11yRuntimeServices, CacheRuntimeServices, CliRuntimeServices, CoreBootstrap,
     DataRuntimeServices, I18nRuntimeServices, JobsRuntimeServices, ObservabilityRuntimeServices,

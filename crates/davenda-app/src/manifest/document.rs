@@ -12,6 +12,8 @@ pub struct CustomerAppManifestDocument {
     pub i18n: I18nDocument,
     #[serde(default)]
     pub sites: Vec<SiteDocument>,
+    #[serde(default)]
+    pub translations: TranslationsDocument,
     pub theme: ThemeDocument,
     pub auth: AuthDocument,
     #[serde(default)]
@@ -111,6 +113,10 @@ impl CustomerAppManifestDocument {
             manifest = manifest.with_site(site);
         }
 
+        for catalog in self.translations.catalogs {
+            manifest = manifest.with_translation_catalog(catalog.into_catalog()?);
+        }
+
         for module in self.modules.enabled {
             manifest = manifest.with_module(InstalledModuleSpec::new(module)?);
         }
@@ -185,6 +191,29 @@ pub struct SiteDocument {
     pub supported_locales: Vec<String>,
     #[serde(default)]
     pub localized_routes: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+pub struct TranslationsDocument {
+    #[serde(default)]
+    pub catalogs: Vec<TranslationCatalogDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct TranslationCatalogDocument {
+    pub locale: String,
+    pub path: String,
+}
+
+impl TranslationCatalogDocument {
+    fn into_catalog(self) -> Result<AppTranslationCatalog, AppModelError> {
+        AppTranslationCatalog::new(
+            LocaleTag::new(self.locale).map_err(|error| AppModelError::ManifestParse {
+                message: error.to_string(),
+            })?,
+            self.path,
+        )
+    }
 }
 
 impl SiteDocument {

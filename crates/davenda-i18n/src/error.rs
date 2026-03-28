@@ -34,3 +34,24 @@ impl fmt::Display for I18nError {
 }
 
 impl Error for I18nError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TranslationCatalogLoadError {
+    Read { path: String, reason: String },
+    Parse { path: String, reason: String },
+}
+
+impl fmt::Display for TranslationCatalogLoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, reason } => {
+                write!(f, "failed to read translation catalog `{path}`: {reason}")
+            }
+            Self::Parse { path, reason } => {
+                write!(f, "failed to parse translation catalog `{path}`: {reason}")
+            }
+        }
+    }
+}
+
+impl Error for TranslationCatalogLoadError {}

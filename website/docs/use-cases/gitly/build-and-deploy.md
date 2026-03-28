@@ -126,6 +126,7 @@ Read:
 These show:
 
 - local port overrides
+- the self-contained `gitly.localhost` host contract for local development
 - first-run local walkthrough
 - non-Docker development path
 

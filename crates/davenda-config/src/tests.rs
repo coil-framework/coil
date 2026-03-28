@@ -441,6 +441,7 @@ fn customer_bootstrap_manifest_validates_aligned_runtime_config() {
         "en-GB",
         vec!["en-GB".to_string(), "fr-FR".to_string()],
         true,
+        Vec::new(),
         "platform-default-auth",
         vec![
             "cms-pages".to_string(),
@@ -464,6 +465,7 @@ fn customer_bootstrap_manifest_reports_module_drift() {
         "en-GB",
         vec!["en-GB".to_string(), "fr-FR".to_string()],
         true,
+        Vec::new(),
         "platform-default-auth",
         vec!["cms-pages".to_string(), "memberships".to_string()],
         Vec::new(),
@@ -583,6 +585,59 @@ enabled = ["cms-pages", "admin-shell"]
         manifest.enabled_modules(),
         &["cms-pages".to_string(), "admin-shell".to_string()]
     );
+
+    std::fs::remove_file(&manifest_path).unwrap();
+    std::fs::remove_dir(&temp_dir).unwrap();
+}
+
+#[test]
+fn customer_bootstrap_manifest_parses_translation_catalogs() {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "davenda-config-customer-bootstrap-translations-{timestamp}"
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let manifest_path = temp_dir.join("app.toml");
+    std::fs::write(
+        &manifest_path,
+        r#"
+[app]
+name = "showcase-events"
+
+[domains]
+canonical = "www.example.com"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[translations]
+
+[[translations.catalogs]]
+locale = "en-GB"
+path = "translations/en-GB.toml"
+
+[[translations.catalogs]]
+locale = "fr-FR"
+path = "translations/fr-FR.toml"
+
+[auth]
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms-pages", "admin-shell"]
+"#,
+    )
+    .unwrap();
+
+    let manifest = CustomerAppBootstrapManifest::from_file(&manifest_path).unwrap();
+
+    assert_eq!(manifest.translation_catalogs().len(), 2);
+    assert_eq!(manifest.translation_catalogs()[0].locale(), "en-GB");
+    assert_eq!(manifest.translation_catalogs()[0].path(), "translations/en-GB.toml");
 
     std::fs::remove_file(&manifest_path).unwrap();
     std::fs::remove_dir(&temp_dir).unwrap();

@@ -106,7 +106,10 @@ fn temp_workspace_without_theme_assets() -> TempAppRoot {
     fs::create_dir_all(&temp_root).unwrap();
     copy_dir_recursive(&source_root.join("auth"), &temp_root.join("auth"));
     copy_dir_recursive(&source_root.join("templates"), &temp_root.join("templates"));
-    copy_dir_recursive(&source_root.join("extensions"), &temp_root.join("extensions"));
+    copy_dir_recursive(
+        &source_root.join("extensions"),
+        &temp_root.join("extensions"),
+    );
     if source_root.join("theme").is_dir() {
         copy_dir_recursive(&source_root.join("theme"), &temp_root.join("theme"));
     }
@@ -152,17 +155,23 @@ fn extension_package_hash_helpers_match_the_checked_in_manifests() {
     let scheduler = gitly_actions_scheduler_demo_sha256(workspace.app_root()).unwrap();
     let app_manifest = include_str!("../../../app.toml");
     let pulse_package = include_str!("../../../extensions/gitly-community-pulse/package.toml");
-    let scheduler_package = include_str!("../../../extensions/gitly-actions-scheduler/package.toml");
+    let scheduler_package =
+        include_str!("../../../extensions/gitly-actions-scheduler/package.toml");
 
     assert!(app_manifest.contains(&pulse), "{app_manifest}");
     assert!(app_manifest.contains(&scheduler), "{app_manifest}");
     assert!(pulse_package.contains(&pulse), "{pulse_package}");
-    assert!(scheduler_package.contains(&scheduler), "{scheduler_package}");
+    assert!(
+        scheduler_package.contains(&scheduler),
+        "{scheduler_package}"
+    );
 }
 
 #[test]
 fn bootstrap_registers_linked_backend_extensions_and_mock_actions_job() {
-    let _env_lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _env_lock = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _runtime_env = set_runtime_env_vars();
     let temp_root = temp_workspace_without_theme_assets();
     let workspace = GitlyWorkspace::at(&temp_root.path).unwrap();
@@ -174,31 +183,39 @@ fn bootstrap_registers_linked_backend_extensions_and_mock_actions_job() {
             .contains(&"gitly-backend".to_string())
     );
     assert_eq!(bootstrap.runtime_plan.runtime.installed_extensions.len(), 2);
-    assert!(bootstrap
-        .runtime_plan
-        .runtime
-        .registered_runtime_jobs
-        .iter()
-        .any(|job| job.contract.name == "github.actions.refresh"));
-    assert!(bootstrap
-        .runtime_plan
-        .runtime
-        .http
-        .routes
-        .iter()
-        .any(|route| route.path == "/api/github/repository"));
-    assert!(bootstrap
-        .runtime_plan
-        .runtime
-        .http
-        .routes
-        .iter()
-        .any(|route| route.path == "/fr/octocorp/platform-ui"));
+    assert!(
+        bootstrap
+            .runtime_plan
+            .runtime
+            .registered_runtime_jobs
+            .iter()
+            .any(|job| job.contract.name == "github.actions.refresh")
+    );
+    assert!(
+        bootstrap
+            .runtime_plan
+            .runtime
+            .http
+            .routes
+            .iter()
+            .any(|route| route.path == "/api/github/repository")
+    );
+    assert!(
+        bootstrap
+            .runtime_plan
+            .runtime
+            .http
+            .routes
+            .iter()
+            .any(|route| route.path == "/fr/octocorp/platform-ui")
+    );
 }
 
 #[test]
 fn server_serves_gitly_home_and_wasm_extended_api_surface() {
-    let _env_lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _env_lock = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _runtime_env = set_runtime_env_vars();
     let temp_root = temp_workspace_without_theme_assets();
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -206,171 +223,171 @@ fn server_serves_gitly_home_and_wasm_extended_api_surface() {
         .build()
         .unwrap();
 
-    let (home_body, localhost_body, api_body, fr_body, de_body, issues_body, search_body) =
-        runtime.block_on(async move {
-        let workspace = GitlyWorkspace::at(&temp_root.path).unwrap();
-        let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
-        let resolver = EnvironmentSecretResolver::default();
-        let server = bootstrap
-            .server_host(
-                &resolver,
-                b"01234567012345670123456701234567",
-                b"76543210765432107654321076543210",
-            )
-            .unwrap();
+    let (home_body, localhost_body, api_body, fr_body, de_body, issues_body, search_body) = runtime
+        .block_on(async move {
+            let workspace = GitlyWorkspace::at(&temp_root.path).unwrap();
+            let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
+            let resolver = EnvironmentSecretResolver::default();
+            let server = bootstrap
+                .server_host(
+                    &resolver,
+                    b"01234567012345670123456701234567",
+                    b"76543210765432107654321076543210",
+                )
+                .unwrap();
 
-        let home_response: axum::http::Response<Body> = server
-            .respond(
-                Request::builder()
-                    .method("GET")
-                    .uri("/")
-                    .header("host", "gitly.127.0.0.1.nip.io")
-                    .header("x-forwarded-proto", "https")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let home_body = String::from_utf8(
-            to_bytes(home_response.into_body(), usize::MAX)
+            let home_response: axum::http::Response<Body> = server
+                .respond(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/")
+                        .header("host", "gitly.localhost")
+                        .header("x-forwarded-proto", "https")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
                 .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
-
-        let localhost_response: axum::http::Response<Body> = server
-            .respond(
-                Request::builder()
-                    .method("GET")
-                    .uri("/")
-                    .header("host", "gitly.127.0.0.1.nip.io:58080")
-                    .header("x-forwarded-proto", "https")
-                    .body(Body::empty())
-                    .unwrap(),
+                .unwrap();
+            let home_body = String::from_utf8(
+                to_bytes(home_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
             )
-            .await
             .unwrap();
-        let localhost_body = String::from_utf8(
-            to_bytes(localhost_response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
 
-        let api_response: axum::http::Response<Body> = server
-            .respond(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/github/pulse")
-                    .header("host", "gitly.127.0.0.1.nip.io")
-                    .header("x-forwarded-proto", "https")
-                    .body(Body::empty())
-                    .unwrap(),
+            let localhost_response: axum::http::Response<Body> = server
+                .respond(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/")
+                        .header("host", "gitly.localhost:58080")
+                        .header("x-forwarded-proto", "https")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let localhost_body = String::from_utf8(
+                to_bytes(localhost_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
             )
-            .await
             .unwrap();
-        let api_body = String::from_utf8(
-            to_bytes(api_response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
 
-        let fr_response: axum::http::Response<Body> = server
-            .respond(
-                Request::builder()
-                    .method("GET")
-                    .uri("/fr")
-                    .header("host", "gitly.127.0.0.1.nip.io")
-                    .header("x-forwarded-proto", "https")
-                    .body(Body::empty())
-                    .unwrap(),
+            let api_response: axum::http::Response<Body> = server
+                .respond(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/github/pulse")
+                        .header("host", "gitly.localhost")
+                        .header("x-forwarded-proto", "https")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let api_body = String::from_utf8(
+                to_bytes(api_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
             )
-            .await
             .unwrap();
-        let fr_body = String::from_utf8(
-            to_bytes(fr_response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
 
-        let de_response: axum::http::Response<Body> = server
-            .respond(
-                Request::builder()
-                    .method("GET")
-                    .uri("/de")
-                    .header("host", "gitly.127.0.0.1.nip.io")
-                    .header("x-forwarded-proto", "https")
-                    .body(Body::empty())
-                    .unwrap(),
+            let fr_response: axum::http::Response<Body> = server
+                .respond(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/fr")
+                        .header("host", "gitly.localhost")
+                        .header("x-forwarded-proto", "https")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let fr_body = String::from_utf8(
+                to_bytes(fr_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
             )
-            .await
             .unwrap();
-        let de_body = String::from_utf8(
-            to_bytes(de_response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
 
-        let issues_response: axum::http::Response<Body> = server
-            .respond(
-                Request::builder()
-                    .method("GET")
-                    .uri("/octocorp/platform-ui/issues")
-                    .header("host", "gitly.127.0.0.1.nip.io")
-                    .header("x-forwarded-proto", "https")
-                    .body(Body::empty())
-                    .unwrap(),
+            let de_response: axum::http::Response<Body> = server
+                .respond(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/de")
+                        .header("host", "gitly.localhost")
+                        .header("x-forwarded-proto", "https")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let de_body = String::from_utf8(
+                to_bytes(de_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
             )
-            .await
             .unwrap();
-        let issues_body = String::from_utf8(
-            to_bytes(issues_response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
 
-        let search_response: axum::http::Response<Body> = server
-            .respond(
-                Request::builder()
-                    .method("GET")
-                    .uri("/search?q=platform")
-                    .header("host", "gitly.127.0.0.1.nip.io")
-                    .header("x-forwarded-proto", "https")
-                    .body(Body::empty())
-                    .unwrap(),
+            let issues_response: axum::http::Response<Body> = server
+                .respond(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/octocorp/platform-ui/issues")
+                        .header("host", "gitly.localhost")
+                        .header("x-forwarded-proto", "https")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let issues_body = String::from_utf8(
+                to_bytes(issues_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
             )
-            .await
             .unwrap();
-        let search_body = String::from_utf8(
-            to_bytes(search_response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
 
-        std::mem::forget(server);
-        std::mem::forget(bootstrap);
-        (
-            home_body,
-            localhost_body,
-            api_body,
-            fr_body,
-            de_body,
-            issues_body,
-            search_body,
-        )
-    });
+            let search_response: axum::http::Response<Body> = server
+                .respond(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/search?q=platform")
+                        .header("host", "gitly.localhost")
+                        .header("x-forwarded-proto", "https")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let search_body = String::from_utf8(
+                to_bytes(search_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap();
+
+            std::mem::forget(server);
+            std::mem::forget(bootstrap);
+            (
+                home_body,
+                localhost_body,
+                api_body,
+                fr_body,
+                de_body,
+                issues_body,
+                search_body,
+            )
+        });
 
     assert!(
         home_body.contains("One Davenda app can look like a forge"),
@@ -378,15 +395,30 @@ fn server_serves_gitly_home_and_wasm_extended_api_surface() {
     );
     assert!(home_body.contains("data-route=\"home\""), "{home_body}");
     assert!(home_body.contains("/octocorp/platform-ui"), "{home_body}");
-    assert!(localhost_body.contains("data-route=\"home\""), "{localhost_body}");
+    assert!(
+        localhost_body.contains("data-route=\"home\""),
+        "{localhost_body}"
+    );
     assert!(api_body.contains("\"status\":\"active\""), "{api_body}");
     assert!(api_body.contains("\"extension\":\"ok\""), "{api_body}");
     assert!(fr_body.contains("data-route=\"home\""), "{fr_body}");
     assert!(fr_body.contains("href=\"/fr\""), "{fr_body}");
     assert!(de_body.contains("data-route=\"home\""), "{de_body}");
     assert!(de_body.contains("href=\"/de\""), "{de_body}");
-    assert!(issues_body.contains("data-route=\"issues\""), "{issues_body}");
-    assert!(issues_body.contains("#402 Add keyboard shortcuts"), "{issues_body}");
-    assert!(search_body.contains("data-route=\"search\""), "{search_body}");
-    assert!(search_body.contains("data-search-results=\"results\""), "{search_body}");
+    assert!(
+        issues_body.contains("data-route=\"issues\""),
+        "{issues_body}"
+    );
+    assert!(
+        issues_body.contains("#402 Add keyboard shortcuts"),
+        "{issues_body}"
+    );
+    assert!(
+        search_body.contains("data-route=\"search\""),
+        "{search_body}"
+    );
+    assert!(
+        search_body.contains("data-search-results=\"results\""),
+        "{search_body}"
+    );
 }

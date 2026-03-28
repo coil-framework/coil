@@ -1,0 +1,149 @@
+[nav]
+market = "Marché"
+language = "Langue"
+current = "Actuel"
+
+[shell.utility]
+summary = "Shoppr Studio. Une marque, trois marchés, des routes localisées et une vitrine interactive."
+dev_tools = "Outils dev"
+admin = "Admin"
+account = "Compte"
+
+[shell.footer]
+developer = "Pied de page développeur"
+summary = "Starter retail montrant le multi-site, le multi-locale, le Rust lié au client et le WASM tiers."
+inspect = "Inspection"
+commerce = "Commerce"
+platform = "Plateforme"
+catalog = "Catalogue"
+collections = "Collections"
+cart = "Panier"
+catalog_admin = "Admin catalogue"
+orders = "Commandes"
+cms = "CMS"
+
+[home.meta]
+title = "Shoppr"
+
+[home.utility]
+summary = "Shoppr reprend le rythme et la finition d'un vaisseau amiral mode moderne tout en exposant la surface modulaire de Davenda."
+
+[home.hero]
+title = "Luxe discret, routes rapides et boucle storefront complète dans un seul starter."
+summary = "Shoppr est maintenant une démo orientée mode: campagnes immersives, profondeur catalogue, fiche produit interactive et changement visible de marché et de langue dans une seule application cliente."
+primary_cta = "Voir les nouveautés"
+secondary_cta = "Parcourir les collections"
+
+[home.hero_secondary]
+eyebrow = "Couche interactive"
+title = "Des pages statiques d'abord, enrichies par le mouvement, les panneaux, les galeries et les actions commerce."
+summary = "La démo garde le contrat HTML-first tout en montrant la couche d'interaction plus riche attendue d'une boutique multi-région premium."
+cart_cta = "Ouvrir le panier"
+account_cta = "Voir le compte"
+controls = "Contrôles du carrousel"
+previous = "Campagne précédente"
+next = "Campagne suivante"
+
+[home.editorial.store]
+eyebrow = "Vue magasin"
+title = "Trois marchés, un seul système de marque."
+summary = "Pilotez le Royaume-Uni, la France et la Pologne depuis un seul workspace client tout en gardant un inventaire et des histoires adaptés à chaque marché."
+
+[home.editorial.developer]
+eyebrow = "Visible pour les développeurs"
+title = "Chaque page soignée expose encore la plateforme."
+summary = "Admin, compte, connexion dev, CMS et extensions Rust liées restent faciles à découvrir depuis la coque publique."
+cta = "Ouvrir l'admin"
+
+[home.markets]
+eyebrow = "Démo multi-site"
+title = "Une application cliente, trois marchés Shoppr."
+summary = "Chaque marché garde son propre hôte, sa locale par défaut, son accent assortiment et son ton marchand tout en partageant la même application centrale."
+
+[home.markets.uk]
+eyebrow = "shoppr-uk"
+title = "Vitrine phare UK"
+summary = "Mettez en avant les nouveautés, une fiche produit nette et tout le parcours de navigation au paiement."
+cta = "Ouvrir la boutique UK"
+
+[home.markets.fr]
+eyebrow = "shoppr-fr"
+title = "Sélection France"
+summary = "Donnez au marché parisien une voix de campagne plus serrée et une sélection orientée événements sans forker l'application."
+cta = "Ouvrir la sélection France"
+
+[home.markets.pl]
+eyebrow = "shoppr-pl"
+title = "Sélection hivernale Pologne"
+summary = "Montrez un assortiment d'hiver différent et des routes polonaises localisées sur la même plateforme partagée."
+cta = "Ouvrir le produit Pologne"
+
+[home.sections.interactivity]
+eyebrow = "Interactivité superposée"
+title = "La boutique reste HTML-first tout en se comportant comme un flagship moderne."
+summary = "Les contrôles de carrousel, les sélecteurs de marché et de langue, les accordéons produit et les états de galerie se superposent sans remplacer le contrat de rendu de base."
+
+[home.sections.shortcuts]
+eyebrow = "Raccourcis développeur"
+title = "Rien d'important n'est caché."
+summary = "Les pages publiques relient proprement le compte, le panier, l'admin et les outils dev locaux afin que les développeurs puissent évaluer toute la frontière de l'application dès le premier lancement."
+dev_tools = "Ouvrir les outils dev"
+admin = "Ouvrir l'admin"
+
+[home.footer]
+brand = "Shoppr"
+summary = "Starter Davenda orienté mode avec multi-site visible, multi-locale, backend Rust et frontières d'extensions WASM."
+explore = "Explorer"
+inspect = "Inspection"
+platform = "Plateforme"
+
+[product.meta]
+title = "Fiche produit"
+
+[product.utility]
+summary = "La fiche produit montre directement la couche interactive: changement de galerie, accordéons, quantité et passage rapide au panier."
+
+[product.gallery]
+main = "Principale"
+detail = "Détail"
+mood = "Ambiance"
+alt = "Image du produit"
+
+[product.copy]
+collections = "Collections"
+shop = "Boutique"
+availability = "Disponible au Royaume-Uni, en France et en Pologne avec changement de route local depuis l'en-tête."
+quantity = "Quantité"
+add_to_cart = "Ajouter au panier"
+buy_now = "Acheter maintenant"
+back_to_collection = "Retour à la collection"
+review_cart = "Voir le panier"
+
+[product.accordions.description]
+title = "Description"
+body = "Le contenu produit structuré peut rester rendu côté serveur pendant que les accordéons superposent le comportement interactif."
+
+[product.accordions.delivery]
+title = "Livraison et paiements"
+body = "Les messages de livraison et les options de paiement peuvent varier par marché sans changer la famille de routes centrale."
+
+[product.accordions.availability]
+title = "Disponibilité par marché"
+body = "Utilisez les sites pour une vraie divergence d'inventaire ou de merchandising. Utilisez les locales quand l'assortiment est partagé."
+
+[product.assurance]
+title = "Étape suivante: ajouter au panier ou continuer dans cette collection"
+summary = "Les clients ne doivent pas chercher la prochaine action ici. Gardez visibles à la fois le passage au panier et le retour vers la collection."
+
+[product.unavailable]
+title = "Ce produit n'est pas disponible actuellement."
+summary = "Shoppr a retiré cet article de la vitrine active. Revenez au catalogue ou aux collections en cours pour continuer vos achats."
+catalog = "Ouvrir le catalogue"
+collections = "Parcourir les collections"
+
+[product.related]
+eyebrow = "Plus de cette collection"
+title = "Continuer à parcourir des produits proches"
+summary = "Les produits liés gardent le client dans le même contexte marchand sans le renvoyer en haut du catalogue."
+view = "Voir le look"
+add_to_cart = "Ajouter au panier"

@@ -96,6 +96,7 @@ pub enum TemplateExpression {
     LiteralText(String),
     LiteralBool(bool),
     AssetPath(String),
+    TranslationKey(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +128,8 @@ pub enum Node {
     StaticText(String),
     Value(String),
     RawValue(String),
+    Expression(TemplateExpression),
+    RawExpression(TemplateExpression),
     Element(ElementNode),
     Slot(SlotNode),
     Include(TemplateSelector),
@@ -157,6 +160,14 @@ impl Node {
 
     pub fn raw_value(key: impl Into<String>) -> Result<Self, TemplateModelError> {
         Ok(Self::RawValue(validate_token("render_key", key.into())?))
+    }
+
+    pub fn expression(expression: TemplateExpression) -> Self {
+        Self::Expression(expression)
+    }
+
+    pub fn raw_expression(expression: TemplateExpression) -> Self {
+        Self::RawExpression(expression)
     }
 
     pub fn include(selector: TemplateSelector) -> Self {

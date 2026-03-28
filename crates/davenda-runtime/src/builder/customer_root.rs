@@ -1,6 +1,7 @@
 use super::*;
 use davenda_auth::{LoadedAuthModelPackage, load_auth_model_package_at};
 use davenda_config::{CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError};
+use davenda_i18n::TranslationCatalog;
 use std::collections::BTreeSet;
 use std::env;
 use std::path::Path;
@@ -25,6 +26,7 @@ pub struct CustomerRootBootstrapInputs {
     pub config: PlatformConfig,
     pub auth_package_name: String,
     pub auth_package: LoadedAuthModelPackage,
+    pub translation_catalogs: Vec<TranslationCatalog>,
 }
 
 pub fn customer_root_runtime<P>(
@@ -174,6 +176,19 @@ where
         self
     }
 
+    pub fn with_translation_catalog(mut self, catalog: TranslationCatalog) -> Self {
+        self.inner = self.inner.with_translation_catalog(catalog);
+        self
+    }
+
+    pub fn with_translation_catalogs<I>(mut self, catalogs: I) -> Self
+    where
+        I: IntoIterator<Item = TranslationCatalog>,
+    {
+        self.inner = self.inner.with_translation_catalogs(catalogs);
+        self
+    }
+
     pub fn with_maintenance_mode(mut self, maintenance_mode: MaintenanceMode) -> Self {
         self.inner = self.inner.with_maintenance_mode(maintenance_mode);
         self
@@ -221,8 +236,9 @@ impl CustomerRootRuntimeBuilder<LoadedAuthModelPackage> {
     }
 
     pub fn from_bootstrap_inputs(inputs: CustomerRootBootstrapInputs) -> Self {
-        let mut builder =
-            Self::new(inputs.config, inputs.auth_package).with_customer_root(inputs.app_root);
+        let mut builder = Self::new(inputs.config, inputs.auth_package)
+            .with_customer_root(inputs.app_root)
+            .with_translation_catalogs(inputs.translation_catalogs);
         builder.enabled_modules = inputs.enabled_modules;
         builder
     }
@@ -275,6 +291,11 @@ impl CustomerRootBootstrapInputs {
         manifest
             .validate_runtime_config_alignment(&config)
             .map_err(|error| customer_root_manifest_error_into_bootstrap(&manifest_path, error))?;
+        let translation_catalogs = load_customer_translation_catalogs(&app_root, &manifest)
+            .map_err(|reason| RuntimeBootstrapError::ManifestLoad {
+                path: manifest_path.clone(),
+                reason,
+            })?;
         let auth_package_name = config.auth.package.clone();
         let auth_package =
             load_auth_model_package_at(&auth_package_name, &app_root).map_err(|error| {
@@ -293,6 +314,7 @@ impl CustomerRootBootstrapInputs {
             config,
             auth_package_name,
             auth_package,
+            translation_catalogs,
         })
     }
 }
@@ -361,6 +383,44 @@ fn customer_root_manifest_error_into_build(
             reason: other.to_string(),
         },
     }
+}
+
+fn load_customer_translation_catalogs(
+    app_root: &Path,
+    manifest: &CustomerAppBootstrapManifest,
+) -> Result<Vec<TranslationCatalog>, String> {
+    let supported_locales = manifest.supported_locales();
+    let mut seen_locales = BTreeSet::new();
+    manifest
+        .translation_catalogs()
+        .iter()
+        .map(|catalog| {
+            if !supported_locales.iter().any(|locale| locale == catalog.locale()) {
+                return Err(format!(
+                    "translation catalog locale `{}` is not declared in the customer app supported locale set",
+                    catalog.locale()
+                ));
+            }
+            if !seen_locales.insert(catalog.locale().to_string()) {
+                return Err(format!(
+                    "translation catalog for locale `{}` is declared more than once",
+                    catalog.locale()
+                ));
+            }
+            let path = app_root.join(catalog.path());
+            TranslationCatalog::from_toml_file(
+                davenda_i18n::LocaleTag::new(catalog.locale()).map_err(|error| error.to_string())?,
+                &path,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to load translation catalog `{}` for locale `{}`: {error}",
+                    catalog.path(),
+                    catalog.locale()
+                )
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn resolve_enabled_customer_modules(

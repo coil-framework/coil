@@ -340,6 +340,11 @@ impl RuntimePlan {
             }
         }
 
+        let locale_context = self.i18n.request_context(Some(execution.locale.as_str()));
+        for (key, value) in self.i18n.translations.resolved_messages(&locale_context) {
+            model = model.with_translation(key.as_str(), value)?;
+        }
+
         apply_route_specific_bindings(
             Some(self),
             model,

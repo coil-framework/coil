@@ -119,6 +119,7 @@ impl RenderValue {
 pub struct RenderModel {
     values: BTreeMap<String, RenderValue>,
     asset_paths: BTreeMap<String, String>,
+    translations: BTreeMap<String, String>,
 }
 
 impl RenderModel {
@@ -171,6 +172,17 @@ impl RenderModel {
         Ok(self)
     }
 
+    pub fn with_translation(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, TemplateModelError> {
+        let key = validate_token("translation_key", key.into())?;
+        let value = require_non_empty("translation_value", value.into())?;
+        self.translations.insert(key, value);
+        Ok(self)
+    }
+
     pub(crate) fn get(&self, key: &str) -> Option<&RenderValue> {
         if let Some(value) = self.values.get(key) {
             return Some(value);
@@ -189,14 +201,21 @@ impl RenderModel {
         self.asset_paths.get(logical_path).map(String::as_str)
     }
 
+    pub(crate) fn get_translation(&self, key: &str) -> Option<&str> {
+        self.translations.get(key).map(String::as_str)
+    }
+
     pub(crate) fn merged_with(&self, overlay: &RenderModel) -> RenderModel {
         let mut values = self.values.clone();
         values.extend(overlay.values.clone());
         let mut asset_paths = self.asset_paths.clone();
         asset_paths.extend(overlay.asset_paths.clone());
+        let mut translations = self.translations.clone();
+        translations.extend(overlay.translations.clone());
         RenderModel {
             values,
             asset_paths,
+            translations,
         }
     }
 }

@@ -12,9 +12,29 @@ pub struct CustomerAppManifest {
     pub modules: Vec<InstalledModuleSpec>,
     pub theme: ThemeProfile,
     pub auth: AuthStrategy,
+    pub translations: Vec<AppTranslationCatalog>,
     pub content_models: Vec<ContentModel>,
     pub customer_migrations: Vec<MigrationContract>,
     pub extensions: Vec<CustomerExtension>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppTranslationCatalog {
+    pub locale: LocaleTag,
+    pub path: String,
+}
+
+impl AppTranslationCatalog {
+    pub fn new(locale: LocaleTag, path: impl Into<String>) -> Result<Self, AppModelError> {
+        let path = require_non_empty("translation_catalog_path", path.into())?;
+        if std::path::Path::new(&path).is_absolute() {
+            return Err(AppModelError::InvalidRelativePath {
+                field: "translation_catalog_path",
+                value: path,
+            });
+        }
+        Ok(Self { locale, path })
+    }
 }
 
 impl CustomerAppManifest {
@@ -37,6 +57,7 @@ impl CustomerAppManifest {
             modules: Vec::new(),
             theme,
             auth,
+            translations: Vec::new(),
             content_models: Vec::new(),
             customer_migrations: Vec::new(),
             extensions: Vec::new(),
@@ -65,6 +86,11 @@ impl CustomerAppManifest {
 
     pub fn with_content_model(mut self, model: ContentModel) -> Self {
         self.content_models.push(model);
+        self
+    }
+
+    pub fn with_translation_catalog(mut self, catalog: AppTranslationCatalog) -> Self {
+        self.translations.push(catalog);
         self
     }
 
@@ -195,6 +221,24 @@ impl CustomerAppManifest {
                     extension_id: extension.id.to_string(),
                     extension_customer_app: extension.installation.customer_app_id.clone(),
                     app_id: self.id.to_string(),
+                });
+            }
+        }
+
+        let mut translation_catalog_locales = BTreeSet::new();
+        for catalog in &self.translations {
+            if !self
+                .supported_locales
+                .iter()
+                .any(|supported| supported == &catalog.locale)
+            {
+                return Err(AppModelError::TranslationCatalogLocaleOutsideAppSupport {
+                    locale: catalog.locale.to_string(),
+                });
+            }
+            if !translation_catalog_locales.insert(catalog.locale.to_string()) {
+                return Err(AppModelError::DuplicateTranslationCatalog {
+                    locale: catalog.locale.to_string(),
                 });
             }
         }

@@ -824,6 +824,10 @@ dependencies = [
 [[package]]
 name = "davenda-i18n"
 version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "toml",
+]
 
 [[package]]
 name = "davenda-import"

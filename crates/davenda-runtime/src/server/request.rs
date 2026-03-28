@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
 const STOREFRONT_ORDER_HISTORY_JSON_PATH: &str = "/account/orders.json";
@@ -413,6 +413,22 @@ pub(crate) async fn serve_runtime_request(
 }
 
 pub(super) async fn execute_live_request(
+    state: &RuntimeServerState,
+    request: Request<Body>,
+    remote_addr: Option<SocketAddr>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let telemetry = &state.plan.observability.telemetry;
+    let started_at = Instant::now();
+    let _ = telemetry.adjust_gauge("davenda.http.requests.in_flight", 1);
+    let result = execute_live_request_inner(state, request, remote_addr).await;
+    let elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let _ = telemetry.adjust_gauge("davenda.http.requests.in_flight", -1);
+    let _ = telemetry.increment_counter("davenda.http.requests.total", 1);
+    let _ = telemetry.record_histogram("davenda.http.request.latency_ms", elapsed_ms);
+    result
+}
+
+async fn execute_live_request_inner(
     state: &RuntimeServerState,
     request: Request<Body>,
     remote_addr: Option<SocketAddr>,

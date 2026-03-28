@@ -1,0 +1,149 @@
+[nav]
+market = "Rynek"
+language = "Język"
+current = "Bieżący"
+
+[shell.utility]
+summary = "Shoppr Studio. Jedna marka, trzy rynki, zlokalizowane trasy i interaktywny storefront."
+dev_tools = "Narzędzia dev"
+admin = "Admin"
+account = "Konto"
+
+[shell.footer]
+developer = "Stopka deweloperska"
+summary = "Starter retail pokazujący multi-site, multi-locale, klientowski Rust i zewnętrzny WASM."
+inspect = "Podgląd"
+commerce = "Commerce"
+platform = "Platforma"
+catalog = "Katalog"
+collections = "Kolekcje"
+cart = "Koszyk"
+catalog_admin = "Admin katalogu"
+orders = "Zamówienia"
+cms = "CMS"
+
+[home.meta]
+title = "Shoppr"
+
+[home.utility]
+summary = "Shoppr łączy tempo i dopracowanie nowoczesnego flagowego sklepu modowego z widoczną modułową powierzchnią Davendy."
+
+[home.hero]
+title = "Cichy luksus, szybkie trasy i pełna pętla storefrontu w jednym starterze."
+summary = "Shoppr to teraz demo nastawione na modę: immersyjne kampanie, głęboki katalog, interaktywna karta produktu oraz widoczne przełączanie rynku i języka w jednej aplikacji klienta."
+primary_cta = "Zobacz nowości"
+secondary_cta = "Przeglądaj kolekcje"
+
+[home.hero_secondary]
+eyebrow = "Warstwa interaktywna"
+title = "Najpierw statyczne strony, potem ruch, panele, galerie i akcje commerce."
+summary = "Demo zachowuje kontrakt HTML-first, a jednocześnie pokazuje bogatszą warstwę interakcji oczekiwaną od premium sklepu wieloregionalnego."
+cart_cta = "Otwórz koszyk"
+account_cta = "Zobacz konto"
+controls = "Sterowanie karuzelą"
+previous = "Poprzednia kampania"
+next = "Następna kampania"
+
+[home.editorial.store]
+eyebrow = "Widok sklepu"
+title = "Trzy rynki, jeden system marki."
+summary = "Prowadź Wielką Brytanię, Francję i Polskę z jednego workspace klienta, zachowując dopasowany asortyment i narrację dla każdego rynku."
+
+[home.editorial.developer]
+eyebrow = "Widoczne dla dewelopera"
+title = "Każda dopracowana strona nadal odsłania platformę."
+summary = "Admin, konto, logowanie dev, CMS i powiązane rozszerzenia Rust są łatwe do odkrycia z poziomu publicznej powłoki."
+cta = "Otwórz admin"
+
+[home.markets]
+eyebrow = "Demo multi-site"
+title = "Jedna aplikacja klienta, trzy rynki Shoppr."
+summary = "Każdy rynek zachowuje własny host, domyślną lokalizację, nacisk na asortyment i ton merchandisingowy, współdzieląc tę samą centralną aplikację."
+
+[home.markets.uk]
+eyebrow = "shoppr-uk"
+title = "Flagowy sklep UK"
+summary = "Pokaż nowości, dopracowaną kartę produktu i całą drogę od przeglądania do checkoutu."
+cta = "Otwórz sklep UK"
+
+[home.markets.fr]
+eyebrow = "shoppr-fr"
+title = "Edycja Francja"
+summary = "Nadaj rynkowi paryskiemu ciaśniejszy głos kampanii i ofertę opartą na wydarzeniach bez forka aplikacji."
+cta = "Otwórz edycję Francja"
+
+[home.markets.pl]
+eyebrow = "shoppr-pl"
+title = "Zimowa edycja Polska"
+summary = "Pokaż inny zimowy asortyment i polskie zlokalizowane trasy na tej samej współdzielonej platformie."
+cta = "Otwórz produkt Polska"
+
+[home.sections.interactivity]
+eyebrow = "Interaktywność warstwowa"
+title = "Storefront pozostaje HTML-first, a jednocześnie zachowuje się jak nowoczesny flagship."
+summary = "Sterowanie karuzelą, przełączniki rynku i języka, akordeony produktu i stany galerii są dokładane jako warstwa, a nie zastępują bazowego kontraktu renderowania."
+
+[home.sections.shortcuts]
+eyebrow = "Skróty dla dewelopera"
+title = "Nic ważnego nie jest ukryte."
+summary = "Strony publiczne czytelnie prowadzą do konta, koszyka, admina i lokalnych narzędzi dev, żeby deweloper mógł ocenić całą granicę aplikacji od pierwszego uruchomienia."
+dev_tools = "Otwórz narzędzia dev"
+admin = "Otwórz admin"
+
+[home.footer]
+brand = "Shoppr"
+summary = "Modowy starter Davendy z widocznym multi-site, multi-locale, backendem Rust i granicami rozszerzeń WASM."
+explore = "Eksploruj"
+inspect = "Podgląd"
+platform = "Platforma"
+
+[product.meta]
+title = "Karta produktu"
+
+[product.utility]
+summary = "Karta produktu pokazuje warstwę interaktywną bezpośrednio: przełączanie galerii, akordeony, ilość i szybkie przejście do koszyka."
+
+[product.gallery]
+main = "Główne"
+detail = "Detal"
+mood = "Klimat"
+alt = "Zdjęcie produktu"
+
+[product.copy]
+collections = "Kolekcje"
+shop = "Sklep"
+availability = "Dostępne w Wielkiej Brytanii, Francji i Polsce z lokalnym przełączaniem tras w nagłówku."
+quantity = "Ilość"
+add_to_cart = "Dodaj do koszyka"
+buy_now = "Kup teraz"
+back_to_collection = "Wróć do kolekcji"
+review_cart = "Przejrzyj koszyk"
+
+[product.accordions.description]
+title = "Opis"
+body = "Ustrukturyzowana treść produktu może pozostać renderowana po stronie serwera, a akordeony dokładają zachowanie interaktywne."
+
+[product.accordions.delivery]
+title = "Dostawa i płatności"
+body = "Komunikaty o dostawie i opcje płatności mogą się różnić między rynkami bez zmiany rodziny głównych tras."
+
+[product.accordions.availability]
+title = "Dostępność rynkowa"
+body = "Używaj sites przy realnym rozjeździe stanów magazynowych lub merchandisingu. Używaj locales, gdy asortyment jest współdzielony."
+
+[product.assurance]
+title = "Następny krok: dodaj do koszyka albo przeglądaj dalej tę kolekcję"
+summary = "Klient nie powinien szukać kolejnej akcji w tym miejscu. Przekazanie do koszyka i powrót do kolekcji powinny być widoczne równocześnie."
+
+[product.unavailable]
+title = "Ten produkt nie jest obecnie dostępny."
+summary = "Shoppr usunął ten produkt z aktywnego storefrontu. Wróć do bieżącego katalogu lub kolekcji, aby kontynuować zakupy."
+catalog = "Otwórz katalog"
+collections = "Przeglądaj kolekcje"
+
+[product.related]
+eyebrow = "Więcej z tej kolekcji"
+title = "Przeglądaj dalej podobne produkty"
+summary = "Produkty powiązane utrzymują klienta w tym samym kontekście merchandisingowym bez wyrzucania go na początek katalogu."
+view = "Zobacz look"
+add_to_cart = "Dodaj do koszyka"

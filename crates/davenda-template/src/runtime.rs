@@ -93,6 +93,27 @@ impl TemplateRuntime {
                         }
                     }
                 }
+                Node::Expression(expression) => {
+                    let value = self.evaluate_expression(model, expression)?;
+                    rendered.push_str(&escape_html_text(&render_expression_as_text(
+                        expression, value,
+                    )?));
+                }
+                Node::RawExpression(expression) => {
+                    let value = self.evaluate_expression(model, expression)?;
+                    match value {
+                        RenderValue::TrustedHtml(value) => rendered.push_str(value.as_str()),
+                        RenderValue::Text(_)
+                        | RenderValue::Bool(_)
+                        | RenderValue::List(_)
+                        | RenderValue::Object(_) => {
+                            return Err(TemplateModelError::ValueTypeMismatch {
+                                key: expression_label(expression),
+                                expected: "trusted_html",
+                            });
+                        }
+                    }
+                }
                 Node::Element(element) => {
                     if element.tag == "dv:block" {
                         rendered.push_str(&self.render_nodes(
@@ -291,6 +312,10 @@ impl TemplateRuntime {
                     .unwrap_or(value.as_str())
                     .to_string(),
             )),
+            TemplateExpression::TranslationKey(key) => model
+                .get_translation(key)
+                .map(|value| RenderValue::text(value.to_string()))
+                .ok_or_else(|| TemplateModelError::MissingTranslation { key: key.clone() }),
         }
     }
 
@@ -382,4 +407,31 @@ pub(crate) fn escape_html_attribute(value: &str) -> String {
     escape_html_text(value)
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+fn render_expression_as_text(
+    expression: &TemplateExpression,
+    value: RenderValue,
+) -> Result<String, TemplateModelError> {
+    match value {
+        RenderValue::Text(value) => Ok(value),
+        RenderValue::TrustedHtml(value) => Ok(value.as_str().to_string()),
+        RenderValue::Bool(value) => Ok(value.to_string()),
+        RenderValue::List(_) | RenderValue::Object(_) => {
+            Err(TemplateModelError::ValueTypeMismatch {
+                key: expression_label(expression),
+                expected: "text",
+            })
+        }
+    }
+}
+
+fn expression_label(expression: &TemplateExpression) -> String {
+    match expression {
+        TemplateExpression::ModelKey(key) => key.clone(),
+        TemplateExpression::LiteralText(value) => value.clone(),
+        TemplateExpression::LiteralBool(value) => value.to_string(),
+        TemplateExpression::AssetPath(path) => format!("asset({path})"),
+        TemplateExpression::TranslationKey(key) => format!("t('{key}')"),
+    }
 }

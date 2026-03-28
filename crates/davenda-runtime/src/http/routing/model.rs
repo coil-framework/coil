@@ -161,6 +161,7 @@ impl HttpRuntimePlan {
     ) -> Option<ResolvedRouteMatch> {
         let site = config.site_for_host(host);
         let site_id = site.map(|site| site.id.clone());
+        let default_locale = config.default_locale_for_site(site_id.as_deref());
         let supported_locales = site
             .map(|site| site.supported_locales.as_slice())
             .unwrap_or(config.i18n.supported_locales.as_slice());
@@ -193,7 +194,37 @@ impl HttpRuntimePlan {
                     None => None,
                 },
                 LocalePolicy::Localized if localized_routes => {
+                    if route.path == "/" && path == "/" {
+                        return Some(ResolvedRouteMatch {
+                            route: route.clone(),
+                            resolved: ResolvedRoute {
+                                route_name: route.name.clone(),
+                                site_id: site_id.clone(),
+                                locale: Some(default_locale.to_string()),
+                                auth: route.auth,
+                                params: BTreeMap::new(),
+                            },
+                        });
+                    }
+
                     supported_locales.iter().find_map(|locale| {
+                        if route.path == "/" {
+                            let localized_root = format!("/{}", locale.trim_matches('/'));
+                            if path == localized_root || path == format!("{localized_root}/") {
+                                return Some(ResolvedRouteMatch {
+                                    route: route.clone(),
+                                    resolved: ResolvedRoute {
+                                        route_name: route.name.clone(),
+                                        site_id: site_id.clone(),
+                                        locale: Some(locale.clone()),
+                                        auth: route.auth,
+                                        params: BTreeMap::new(),
+                                    },
+                                });
+                            }
+                            return None;
+                        }
+
                         let localized_path = format!(
                             "/{}/{}",
                             locale.trim_matches('/'),
@@ -254,6 +285,13 @@ impl HttpRuntimePlan {
                     route: route_name.to_string(),
                     locale: locale.to_string(),
                 });
+            }
+
+            if rendered_path == "/" {
+                if locale == config.default_locale_for_site(site_id) {
+                    return Ok("/".to_string());
+                }
+                return Ok(format!("/{}", locale.trim_matches('/')));
             }
 
             return Ok(format!(

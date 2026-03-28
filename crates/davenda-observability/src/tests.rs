@@ -25,6 +25,18 @@ fn telemetry_baseline_carries_required_metrics_dimensions_and_trace_policy() {
             .metric("davenda.http.request.latency_ms")
             .is_some()
     );
+    assert!(
+        runtime
+            .telemetry
+            .metric("davenda.http.requests.total")
+            .is_some()
+    );
+    assert!(
+        runtime
+            .telemetry
+            .metric("davenda.http.requests.in_flight")
+            .is_some()
+    );
 }
 
 #[test]
@@ -120,5 +132,40 @@ fn registry_rejects_duplicate_flags() {
         ObservabilityError::DuplicateFlag {
             flag: "new-checkout".to_string(),
         }
+    );
+}
+
+#[test]
+fn telemetry_catalog_records_live_counter_gauge_and_histogram_values() {
+    let config = davenda_config::ObservabilityConfig {
+        metrics: true,
+        tracing: true,
+    };
+    let runtime =
+        ObservabilityRuntime::baseline(&config, davenda_config::Environment::Development).unwrap();
+
+    assert!(runtime.telemetry.increment_counter("davenda.http.requests.total", 1));
+    assert!(runtime.telemetry.adjust_gauge("davenda.http.requests.in_flight", 1));
+    assert!(runtime.telemetry.record_histogram("davenda.http.request.latency_ms", 27));
+
+    assert_eq!(
+        runtime.telemetry.metric_reading("davenda.http.requests.total"),
+        Some(MetricReading::Counter(1))
+    );
+    assert_eq!(
+        runtime
+            .telemetry
+            .metric_reading("davenda.http.requests.in_flight"),
+        Some(MetricReading::Gauge(1))
+    );
+    assert_eq!(
+        runtime
+            .telemetry
+            .metric_reading("davenda.http.request.latency_ms"),
+        Some(MetricReading::Histogram(HistogramReading {
+            samples: 1,
+            last: 27,
+            max: 27,
+        }))
     );
 }

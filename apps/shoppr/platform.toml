@@ -61,15 +61,15 @@ fallback_locale = "en-GB"
 localized_routes = true
 
 [seo]
-canonical_host = "uk.127.0.0.1.nip.io"
+canonical_host = "uk.localhost"
 emit_json_ld = true
 
 [[sites]]
 id = "shoppr-uk"
 display_name = "Shoppr UK"
 brand_name = "Shoppr"
-canonical_host = "uk.127.0.0.1.nip.io"
-hosts = ["shop.example.com", "www.example.com"]
+canonical_host = "uk.localhost"
+hosts = ["www.localhost", "shop.example.com", "www.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
@@ -77,8 +77,8 @@ supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 id = "shoppr-fr"
 display_name = "Shoppr France"
 brand_name = "Shoppr Paris"
-canonical_host = "fr.127.0.0.1.nip.io"
-hosts = ["fr-store.127.0.0.1.nip.io"]
+canonical_host = "fr.localhost"
+hosts = ["fr-store.localhost"]
 default_locale = "fr-FR"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
@@ -86,8 +86,8 @@ supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 id = "shoppr-pl"
 display_name = "Shoppr Polska"
 brand_name = "Shoppr Studio"
-canonical_host = "pl.127.0.0.1.nip.io"
-hosts = ["pl-store.127.0.0.1.nip.io"]
+canonical_host = "pl.localhost"
+hosts = ["pl-store.localhost"]
 default_locale = "pl-PL"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 

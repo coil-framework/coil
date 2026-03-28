@@ -131,19 +131,19 @@ Shoppr also demonstrates three sites under one customer app boundary:
 
 - `shoppr-uk`
   - flagship UK storefront
-  - host: `uk.127.0.0.1.nip.io`
+  - host: `uk.localhost`
   - default locale: `en-GB`
 - `shoppr-fr`
   - French editorial storefront
-  - host: `fr.127.0.0.1.nip.io`
+  - host: `fr.localhost`
   - default locale: `fr-FR`
 - `shoppr-pl`
   - Polish assortment with localized merchandising
-  - host: `pl.127.0.0.1.nip.io`
+  - host: `pl.localhost`
   - default locale: `pl-PL`
 
-Those `*.127.0.0.1.nip.io` hosts resolve to localhost automatically, so the three-site demo works
-without editing your hosts file.
+Those `*.localhost` hosts resolve locally without external DNS or `/etc/hosts` edits, so the
+three-site demo stays self-contained.
 
 Once Shoppr is running, the same linked-backend shape is visible inside the app itself:
 
@@ -194,14 +194,14 @@ docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build
 
 Then open:
 
-- `http://localhost:8080/`
-- `http://localhost:8080/__dev`
+- `http://uk.localhost:8080/`
+- `http://uk.localhost:8080/__dev`
 
 If you want to exercise the three-site demo explicitly, open these real local hosts:
 
-- `http://uk.127.0.0.1.nip.io:8080/en-GB/shop`
-- `http://fr.127.0.0.1.nip.io:8080/fr-FR/shop`
-- `http://pl.127.0.0.1.nip.io:8080/pl-PL/shop/products/harbor-scarf`
+- `http://uk.localhost:8080/en-GB/shop`
+- `http://fr.localhost:8080/fr-FR/shop`
+- `http://pl.localhost:8080/pl-PL/shop/products/harbor-scarf`
 
 The `__dev` page gives you one-click local login shortcuts for the checked-in customer and admin
 paths. This is the local bootstrap mechanism for authenticated walkthroughs; Shoppr does not
@@ -260,16 +260,16 @@ Start with these routes:
 
 Use these dev shortcuts for authenticated flows:
 
-- `http://localhost:8080/__dev/login/customer?next=/account`
-- `http://localhost:8080/__dev/login/admin?next=/admin`
+- `http://uk.localhost:8080/__dev/login/customer?next=/account`
+- `http://uk.localhost:8080/__dev/login/admin?next=/admin`
 
 The intended first-run path is:
 
 1. open `/` and confirm the storefront home renders with CSS
-2. open `http://uk.127.0.0.1.nip.io:8080/en-GB/shop` and browse the UK catalog
-3. open `http://us.127.0.0.1.nip.io:8080/en-US/events` and confirm the US events-led surface
-4. open `http://de.127.0.0.1.nip.io:8080/de-DE/shop/products/harbor-scarf` and confirm the DE-only product
-5. add an item to cart from the UK or DE site
+2. open `http://uk.localhost:8080/en-GB/shop` and browse the UK catalog
+3. open `http://fr.localhost:8080/fr-FR/events` and confirm the FR events-led edit
+4. open `http://pl.localhost:8080/pl-PL/shop/products/harbor-scarf` and confirm the PL-only product path
+5. add an item to cart from the UK or PL site
 6. open `/cart`
 7. open `/checkout`
 8. use the dev login shortcut and inspect `/account`
@@ -305,7 +305,7 @@ If you want real Stripe test-mode webhook behaviour:
 3. run Stripe CLI and forward events:
 
 ```bash
-stripe listen --forward-to http://localhost:8080/webhooks/commerce/payment-provider
+stripe listen --forward-to http://uk.localhost:8080/webhooks/commerce/payment-provider
 ```
 
 Then update `.env` with the webhook secret that Stripe CLI gives you and restart the stack.

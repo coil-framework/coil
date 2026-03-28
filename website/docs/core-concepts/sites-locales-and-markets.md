@@ -81,8 +81,8 @@ Shoppr’s app manifest declares:
 id = "shoppr-uk"
 display_name = "Shoppr UK"
 brand_name = "Shoppr"
-canonical_domain = "uk.127.0.0.1.nip.io"
-additional_domains = ["shop.example.com", "www.example.com"]
+canonical_domain = "uk.localhost"
+additional_domains = ["www.localhost", "shop.example.com", "www.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
@@ -90,7 +90,7 @@ supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 id = "shoppr-fr"
 display_name = "Shoppr France"
 brand_name = "Shoppr Paris"
-canonical_domain = "fr.127.0.0.1.nip.io"
+canonical_domain = "fr.localhost"
 default_locale = "fr-FR"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 ```

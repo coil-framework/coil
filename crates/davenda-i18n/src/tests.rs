@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 
 use crate::{
     CurrencyCode, Formatter, LocaleContext, LocaleRouter, LocaleTag, LocaleUrlConfig, MessageKey,
@@ -49,6 +50,46 @@ fn translation_runtime_uses_fallback_chain() {
     assert_eq!(
         runtime.translate(&context, &key("events.book")).unwrap(),
         "Book now"
+    );
+}
+
+#[test]
+fn translation_runtime_resolves_merged_messages_for_render_models() {
+    let runtime = TranslationRuntime::new(
+        locale("en-GB"),
+        vec![
+            TranslationCatalog::new(
+                locale("en-GB"),
+                vec![
+                    (key("checkout.title"), "Checkout".to_string()),
+                    (key("events.book"), "Book now".to_string()),
+                ],
+            )
+            .unwrap(),
+            TranslationCatalog::new(
+                locale("fr-FR"),
+                vec![(key("checkout.title"), "Paiement".to_string())],
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+
+    let context = LocaleContext::new(
+        locale("fr-FR"),
+        vec![locale("en-GB")],
+        CurrencyCode::new("EUR").unwrap(),
+        TimeZoneId::new("Europe/Paris").unwrap(),
+    );
+    let resolved = runtime.resolved_messages(&context);
+
+    assert_eq!(
+        resolved.get(&key("checkout.title")).map(String::as_str),
+        Some("Paiement")
+    );
+    assert_eq!(
+        resolved.get(&key("events.book")).map(String::as_str),
+        Some("Book now")
     );
 }
 
@@ -111,4 +152,54 @@ fn formatter_handles_numbers_money_and_plural_rules() {
         Formatter::plural_category(&locale("fr-FR"), 0),
         PluralCategory::One
     );
+}
+
+#[test]
+fn translation_catalog_loads_nested_toml_messages() {
+    let catalog = TranslationCatalog::from_toml_str(
+        locale("fr-FR"),
+        r#"
+[home]
+title = "Accueil"
+
+[nav]
+checkout = "Paiement"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(catalog.translate(&key("home.title")), Some("Accueil"));
+    assert_eq!(catalog.translate(&key("nav.checkout")), Some("Paiement"));
+}
+
+#[test]
+fn translation_catalog_reads_toml_file() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("fr-FR.toml");
+    fs::write(
+        &path,
+        r#"
+[checkout]
+title = "Paiement"
+"#,
+    )
+    .unwrap();
+
+    let catalog = TranslationCatalog::from_toml_file(locale("fr-FR"), &path).unwrap();
+
+    assert_eq!(catalog.translate(&key("checkout.title")), Some("Paiement"));
+}
+
+#[test]
+fn translation_catalog_rejects_non_string_values() {
+    let error = TranslationCatalog::from_toml_str(
+        locale("en-GB"),
+        r#"
+[checkout]
+attempts = 3
+"#,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("checkout.attempts"));
 }

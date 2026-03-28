@@ -23,6 +23,9 @@ pub enum TemplateModelError {
     MissingValue {
         key: String,
     },
+    MissingTranslation {
+        key: String,
+    },
     MissingSlotFill {
         slot: SlotName,
     },
@@ -71,6 +74,9 @@ impl fmt::Display for TemplateModelError {
                 "template `{name}` resolved to kind `{actual}` but `{expected}` was required"
             ),
             Self::MissingValue { key } => write!(f, "render value `{key}` was not provided"),
+            Self::MissingTranslation { key } => {
+                write!(f, "translation `{key}` was not provided")
+            }
             Self::MissingSlotFill { slot } => write!(f, "slot `{slot}` has no fill or fallback"),
             Self::TemplateRead { path, message } => {
                 write!(f, "failed to read template `{path}`: {message}")

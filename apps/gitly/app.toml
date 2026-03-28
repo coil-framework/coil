@@ -3,8 +3,8 @@ name = "gitly"
 display_name = "Gitly"
 
 [domains]
-canonical = "gitly.example.com"
-additional = ["gitly.127.0.0.1.nip.io", "www.example.com"]
+canonical = "gitly.localhost"
+additional = ["www.localhost", "gitly.example.com", "www.example.com"]
 
 [i18n]
 default_locale = "en-GB"
@@ -15,8 +15,8 @@ localized_routes = true
 id = "default"
 display_name = "Gitly"
 brand_name = "Gitly"
-canonical_domain = "gitly.example.com"
-additional_domains = ["gitly.127.0.0.1.nip.io", "www.example.com"]
+canonical_domain = "gitly.localhost"
+additional_domains = ["www.localhost", "gitly.example.com", "www.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "de-DE"]
 localized_routes = true

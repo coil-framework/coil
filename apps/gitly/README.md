@@ -29,16 +29,19 @@ published host ports before running Compose.
 
 Then open:
 
-- `http://gitly.127.0.0.1.nip.io:58080/`
-- `http://gitly.127.0.0.1.nip.io:58080/explore`
-- `http://gitly.127.0.0.1.nip.io:58080/octocorp/platform-ui`
-- `http://gitly.127.0.0.1.nip.io:58080/octocorp/platform-ui/issues`
-- `http://gitly.127.0.0.1.nip.io:58080/octocorp/platform-ui/pulls`
-- `http://gitly.127.0.0.1.nip.io:58080/octocorp/platform-ui/actions`
-- `http://gitly.127.0.0.1.nip.io:58080/orgs/octocorp`
-- `http://gitly.127.0.0.1.nip.io:58080/alexmariner`
-- `http://gitly.127.0.0.1.nip.io:58080/fr`
-- `http://gitly.127.0.0.1.nip.io:58080/de`
+- `http://gitly.localhost:58080/`
+- `http://gitly.localhost:58080/explore`
+- `http://gitly.localhost:58080/octocorp/platform-ui`
+- `http://gitly.localhost:58080/octocorp/platform-ui/issues`
+- `http://gitly.localhost:58080/octocorp/platform-ui/pulls`
+- `http://gitly.localhost:58080/octocorp/platform-ui/actions`
+- `http://gitly.localhost:58080/orgs/octocorp`
+- `http://gitly.localhost:58080/alexmariner`
+- `http://gitly.localhost:58080/fr`
+- `http://gitly.localhost:58080/de`
+
+Those `*.localhost` hosts resolve locally without external DNS or `/etc/hosts` edits, so the
+single-site Gitly stack stays self-contained in the same way Shoppr's multi-site local setup does.
 
 What you should see:
 
@@ -140,7 +143,7 @@ extension boundary.
 
 The default local stack publishes:
 
-- the app on `localhost:58080`
+- the app on `gitly.localhost:58080`
 - MinIO asset delivery on `localhost:9002`
 - the MinIO console on `localhost:9003`
 

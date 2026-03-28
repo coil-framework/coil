@@ -116,7 +116,10 @@ pub(crate) fn template_runtime_services() -> TemplateRuntimeServices {
     }
 }
 
-pub(crate) fn i18n_runtime_from_config(config: &PlatformConfig) -> I18nRuntimeServices {
+pub(crate) fn i18n_runtime_from_config(
+    config: &PlatformConfig,
+    customer_catalogs: Vec<TranslationCatalog>,
+) -> I18nRuntimeServices {
     let default_locale =
         LocaleTag::new(config.i18n.default_locale.clone()).expect("validated locale");
     let supported_locales = config
@@ -133,20 +136,20 @@ pub(crate) fn i18n_runtime_from_config(config: &PlatformConfig) -> I18nRuntimeSe
         LocaleUrlConfig::path_prefix(config.seo.canonical_host.clone())
             .expect("validated canonical host"),
     );
+    let customer_catalogs_by_locale = customer_catalogs
+        .into_iter()
+        .map(|catalog| (catalog.locale().clone(), catalog))
+        .collect::<std::collections::HashMap<_, _>>();
     let translations = TranslationRuntime::new(
         default_locale.clone(),
         supported_locales
             .iter()
             .cloned()
             .map(|locale| {
-                TranslationCatalog::new(
+                merged_translation_catalog(
                     locale.clone(),
-                    vec![(
-                        davenda_i18n::MessageKey::new("core.locale").expect("static key"),
-                        locale.to_string(),
-                    )],
+                    customer_catalogs_by_locale.get(&locale),
                 )
-                .expect("static catalog")
             })
             .collect::<Vec<_>>(),
     )
@@ -159,6 +162,26 @@ pub(crate) fn i18n_runtime_from_config(config: &PlatformConfig) -> I18nRuntimeSe
         router,
         translations,
     }
+}
+
+fn merged_translation_catalog(
+    locale: LocaleTag,
+    customer_catalog: Option<&TranslationCatalog>,
+) -> TranslationCatalog {
+    let core_locale_key = davenda_i18n::MessageKey::new("core.locale").expect("static key");
+    let mut messages = vec![(
+        core_locale_key.clone(),
+        locale.to_string(),
+    )];
+    if let Some(customer_catalog) = customer_catalog {
+        messages.extend(
+            customer_catalog
+                .messages()
+                .filter(|(key, _)| *key != &core_locale_key)
+                .map(|(key, value)| (key.clone(), value.to_string())),
+        );
+    }
+    TranslationCatalog::new(locale, messages).expect("merged translation catalog")
 }
 
 pub(crate) fn seo_runtime_from_config(config: &PlatformConfig) -> SeoRuntimeServices {

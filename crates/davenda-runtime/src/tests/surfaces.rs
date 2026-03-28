@@ -3,6 +3,7 @@ use davenda_customer_sdk::{
     AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade, CustomerPluginDescriptor,
     OrderDraft, OrderReviewDecision, RequestContext,
 };
+use davenda_i18n::MessageKey;
 use davenda_storage::StoragePolicyOverride;
 use davenda_template::{DocumentRenderRequest, RenderModel, TemplateName, TemplateSelector};
 use std::path::Path;
@@ -477,6 +478,86 @@ fn direct_builder_bootstraps_customer_root_from_paths() {
     assert!(plan.modules.iter().any(|module| module.name == "cms"));
     assert_eq!(plan.auth_package_name, "shoppr-auth");
     assert_eq!(plan.linked_customer_plugins.len(), 1);
+}
+
+#[test]
+fn direct_builder_loads_customer_translation_catalogs_from_manifest() {
+    let customer_root = unique_temp_template_root("direct-runtime-builder-translations");
+    write_template_file(
+        &customer_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main>direct-builder-i18n</main></body>
+</html>"#,
+    );
+    write_template_file(
+        &customer_root,
+        "translations/en-GB.toml",
+        r#"
+[checkout]
+title = "Checkout now"
+"#,
+    );
+    fs::write(
+        customer_root.join("platform.toml"),
+        VALID_CONFIG.replace(
+            "enabled = [\"cms-pages\", \"admin-shell\"]",
+            "enabled = [\"cms\"]",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        customer_root.join("app.toml"),
+        r#"[app]
+name = "showcase-events"
+display_name = "Showcase Events"
+
+[domains]
+canonical = "www.example.com"
+additional = []
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+localized_routes = true
+
+[translations]
+
+[[translations.catalogs]]
+locale = "en-GB"
+path = "translations/en-GB.toml"
+
+[theme]
+active = "showcase"
+template_namespaces = ["customer-app"]
+asset_roots = []
+
+[auth]
+mode = "extend"
+package = "platform-default-auth"
+
+[modules]
+enabled = ["cms"]
+"#,
+    )
+    .unwrap();
+
+    let plan = Builder::new()
+        .register_module(davenda_cms::CmsModule::new())
+        .build_from_paths(&customer_root, "platform.toml")
+        .unwrap();
+
+    fs::remove_dir_all(&customer_root).unwrap();
+
+    let context = plan.i18n.request_context(Some("en-GB"));
+    assert_eq!(
+        plan.i18n
+            .translations
+            .translate(&context, &MessageKey::new("checkout.title").unwrap())
+            .unwrap(),
+        "Checkout now"
+    );
 }
 
 #[test]

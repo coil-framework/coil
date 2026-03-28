@@ -1298,7 +1298,16 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
         )
         .await
         .unwrap();
-    assert_eq!(readiness.status(), StatusCode::OK);
+    assert_eq!(readiness.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let readiness_body = String::from_utf8(
+        to_bytes(readiness.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(readiness_body.contains("\"kind\":\"database\""));
+    assert!(readiness_body.contains("\"status\":\"unhealthy\""));
 
     let readiness_alias = server
         .router()
@@ -1311,7 +1320,21 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
         )
         .await
         .unwrap();
-    assert_eq!(readiness_alias.status(), StatusCode::OK);
+    assert_eq!(readiness_alias.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let storefront_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(storefront_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
     let metrics = server
         .router()
@@ -1333,6 +1356,47 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
     .unwrap();
     assert!(metrics_body.contains("davenda.http.request.latency_ms"));
     assert!(metrics_body.contains("\"metrics_enabled\":true"));
+    let metrics_json: serde_json::Value = serde_json::from_str(&metrics_body).unwrap();
+    let metrics = metrics_json
+        .get("metrics")
+        .and_then(serde_json::Value::as_array)
+        .unwrap();
+    let request_total = metrics
+        .iter()
+        .find(|metric| metric.get("name") == Some(&serde_json::Value::String("davenda.http.requests.total".to_string())))
+        .unwrap();
+    assert_eq!(
+        request_total
+            .get("reading")
+            .and_then(|reading| reading.get("counter"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    let in_flight = metrics
+        .iter()
+        .find(|metric| metric.get("name") == Some(&serde_json::Value::String("davenda.http.requests.in_flight".to_string())))
+        .unwrap();
+    assert_eq!(
+        in_flight
+            .get("reading")
+            .and_then(|reading| reading.get("gauge"))
+            .and_then(serde_json::Value::as_i64),
+        Some(0)
+    );
+    let latency = metrics
+        .iter()
+        .find(|metric| metric.get("name") == Some(&serde_json::Value::String("davenda.http.request.latency_ms".to_string())))
+        .unwrap();
+    let latency_histogram = latency
+        .get("reading")
+        .and_then(|reading| reading.get("histogram"))
+        .unwrap();
+    assert_eq!(
+        latency_histogram
+            .get("samples")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
 
     let public_diagnostics = server
         .public_router()

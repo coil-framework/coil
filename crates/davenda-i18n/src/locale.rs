@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
+use std::fs;
+use std::path::Path;
 
 use crate::validation::require_non_empty;
-use crate::{I18nError, validation::validate_token};
+use crate::{I18nError, TranslationCatalogLoadError, validation::validate_token};
 
 macro_rules! token_type {
     ($name:ident, $field:literal) => {
@@ -104,6 +106,108 @@ impl TranslationCatalog {
     pub fn translate(&self, key: &MessageKey) -> Option<&str> {
         self.messages.get(key).map(String::as_str)
     }
+
+    pub fn locale(&self) -> &LocaleTag {
+        &self.locale
+    }
+
+    pub fn messages(&self) -> impl Iterator<Item = (&MessageKey, &str)> {
+        self.messages.iter().map(|(key, value)| (key, value.as_str()))
+    }
+
+    pub fn from_toml_file(
+        locale: LocaleTag,
+        path: impl AsRef<Path>,
+    ) -> Result<Self, TranslationCatalogLoadError> {
+        let path = path.as_ref();
+        let source =
+            fs::read_to_string(path).map_err(|error| TranslationCatalogLoadError::Read {
+                path: path.display().to_string(),
+                reason: error.to_string(),
+            })?;
+        Self::from_toml_str_with_source(locale, &source, path.display().to_string())
+    }
+
+    pub fn from_toml_str(
+        locale: LocaleTag,
+        input: &str,
+    ) -> Result<Self, TranslationCatalogLoadError> {
+        Self::from_toml_str_with_source(locale, input, "<inline>".to_string())
+    }
+
+    fn from_toml_str_with_source(
+        locale: LocaleTag,
+        input: &str,
+        source_name: String,
+    ) -> Result<Self, TranslationCatalogLoadError> {
+        let value: toml::Value =
+            toml::from_str(input).map_err(|error| TranslationCatalogLoadError::Parse {
+                path: source_name.clone(),
+                reason: error.to_string(),
+            })?;
+        let table = value
+            .as_table()
+            .ok_or_else(|| TranslationCatalogLoadError::Parse {
+                path: source_name.clone(),
+                reason: "translation catalogs must be TOML tables of string messages".to_string(),
+            })?;
+        let mut messages = Vec::new();
+        flatten_toml_translation_table(table, &mut Vec::new(), &mut messages, &source_name)?;
+        Self::new(locale, messages).map_err(|error| TranslationCatalogLoadError::Parse {
+            path: source_name,
+            reason: error.to_string(),
+        })
+    }
+}
+
+fn flatten_toml_translation_table(
+    table: &toml::value::Table,
+    segments: &mut Vec<String>,
+    messages: &mut Vec<(MessageKey, String)>,
+    source_name: &str,
+) -> Result<(), TranslationCatalogLoadError> {
+    for (key, value) in table {
+        segments.push(key.clone());
+        match value {
+            toml::Value::String(message) => {
+                let message_key = MessageKey::new(segments.join(".")).map_err(|error| {
+                    TranslationCatalogLoadError::Parse {
+                        path: source_name.to_string(),
+                        reason: error.to_string(),
+                    }
+                })?;
+                messages.push((message_key, message.clone()));
+            }
+            toml::Value::Table(nested) => {
+                flatten_toml_translation_table(nested, segments, messages, source_name)?;
+            }
+            other => {
+                let key = segments.join(".");
+                return Err(TranslationCatalogLoadError::Parse {
+                    path: source_name.to_string(),
+                    reason: format!(
+                        "translation key `{key}` must map to a string value, found `{}`",
+                        toml_type_name(other)
+                    ),
+                });
+            }
+        }
+        segments.pop();
+    }
+
+    Ok(())
+}
+
+fn toml_type_name(value: &toml::Value) -> &'static str {
+    match value {
+        toml::Value::String(_) => "string",
+        toml::Value::Integer(_) => "integer",
+        toml::Value::Float(_) => "float",
+        toml::Value::Boolean(_) => "boolean",
+        toml::Value::Datetime(_) => "datetime",
+        toml::Value::Array(_) => "array",
+        toml::Value::Table(_) => "table",
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,5 +262,32 @@ impl TranslationRuntime {
             .translate(key)
             .unwrap_or(key.as_str())
             .to_string())
+    }
+
+    pub fn resolved_messages(&self, context: &LocaleContext) -> BTreeMap<MessageKey, String> {
+        let mut resolved = BTreeMap::new();
+
+        if let Some(default_catalog) = self.catalogs.get(&self.default_locale) {
+            for (key, value) in default_catalog.messages() {
+                resolved.insert(key.clone(), value.to_string());
+            }
+        }
+
+        let mut overlay_locales = context
+            .locale_candidates()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        overlay_locales.reverse();
+
+        for locale in overlay_locales {
+            if let Some(catalog) = self.catalogs.get(&locale) {
+                for (key, value) in catalog.messages() {
+                    resolved.insert(key.clone(), value.to_string());
+                }
+            }
+        }
+
+        resolved
     }
 }

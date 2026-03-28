@@ -2,6 +2,7 @@ use super::*;
 use davenda_auth::DefaultAuthModelPackage;
 use davenda_cache::DistributedCacheBackend;
 use davenda_config::PlatformConfig;
+use davenda_i18n::MessageKey;
 use davenda_template::TemplateNamespace;
 use davenda_wasm::ExtensionPointKind;
 
@@ -337,6 +338,41 @@ fn validates_module_capabilities_against_auth_package() {
             id: "search.pages".to_string(),
             reason: "public search indexes must require publication state".to_string(),
         }
+    );
+}
+
+#[test]
+fn bootstrap_core_services_merges_customer_translation_catalogs() {
+    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let bootstrap = bootstrap_core_services_with_translation_catalogs(
+        &config,
+        vec![TranslationCatalog::new(
+            LocaleTag::new("fr-FR").unwrap(),
+            vec![(
+                MessageKey::new("checkout.title").unwrap(),
+                "Paiement".to_string(),
+            )],
+        )
+        .unwrap()],
+    )
+    .unwrap();
+
+    let context = bootstrap.i18n.request_context(Some("fr-FR"));
+    assert_eq!(
+        bootstrap
+            .i18n
+            .translations
+            .translate(&context, &MessageKey::new("checkout.title").unwrap())
+            .unwrap(),
+        "Paiement"
+    );
+    assert_eq!(
+        bootstrap
+            .i18n
+            .translations
+            .translate(&context, &MessageKey::new("core.locale").unwrap())
+            .unwrap(),
+        "fr-FR"
     );
 }
 

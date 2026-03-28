@@ -20,6 +20,7 @@ pub(crate) async fn serve_health_probe(
     State(state): State<Arc<RuntimeServerState>>,
 ) -> Response<Body> {
     let liveness = state.plan.observability.liveness.overall_status();
+    let readiness = live_readiness_report(&state).await;
     let status = match liveness {
         davenda_observability::DependencyStatus::Healthy => StatusCode::OK,
         davenda_observability::DependencyStatus::Degraded
@@ -32,7 +33,7 @@ pub(crate) async fn serve_health_probe(
         json!({
             "status": health_status_string(liveness),
             "liveness": health_report_json(&state.plan.observability.liveness),
-            "readiness": health_report_json(&state.plan.observability.readiness),
+            "readiness": health_report_json(&readiness),
             "maintenance": maintenance_mode_json(&state.plan.observability.maintenance),
         }),
     )
@@ -41,7 +42,8 @@ pub(crate) async fn serve_health_probe(
 pub(crate) async fn serve_readiness_probe(
     State(state): State<Arc<RuntimeServerState>>,
 ) -> Response<Body> {
-    let readiness = state.plan.observability.readiness.overall_status();
+    let readiness_report = live_readiness_report(&state).await;
+    let readiness = readiness_report.overall_status();
     let status = match readiness {
         davenda_observability::DependencyStatus::Healthy => StatusCode::OK,
         davenda_observability::DependencyStatus::Degraded
@@ -53,7 +55,7 @@ pub(crate) async fn serve_readiness_probe(
         status,
         json!({
             "status": health_status_string(readiness),
-            "readiness": health_report_json(&state.plan.observability.readiness),
+            "readiness": health_report_json(&readiness_report),
         }),
     )
 }
@@ -66,6 +68,7 @@ pub(crate) async fn serve_metrics_probe(
         .metrics
         .values()
         .map(|metric| {
+            let reading = telemetry.metric_reading(metric.name.as_str());
             json!({
                 "name": metric.name.to_string(),
                 "kind": metric_kind_string(metric.kind),
@@ -75,6 +78,7 @@ pub(crate) async fn serve_metrics_probe(
                     .iter()
                     .map(|dimension| dimension.to_string())
                     .collect::<Vec<_>>(),
+                "reading": metric_reading_json(reading),
             })
         })
         .collect::<Vec<_>>();
@@ -116,6 +120,117 @@ pub(super) fn health_report_json(
             "status": health_status_string(dependency.status),
         })).collect::<Vec<_>>(),
     })
+}
+
+async fn live_readiness_report(state: &RuntimeServerState) -> davenda_observability::HealthReport {
+    let mut readiness = state.plan.observability.readiness.clone();
+
+    let database_status = if readiness
+        .dependency(davenda_observability::DependencyKind::Database)
+        .is_some()
+    {
+        Some(live_database_status(state).await)
+    } else {
+        None
+    };
+
+    if let Some(status) = database_status {
+        readiness.set_dependency_status(davenda_observability::DependencyKind::Database, status);
+    }
+
+    if readiness
+        .dependency(davenda_observability::DependencyKind::Queue)
+        .is_some()
+    {
+        let status = match database_status {
+            Some(davenda_observability::DependencyStatus::Healthy) => {
+                davenda_observability::DependencyStatus::Healthy
+            }
+            Some(status) => status,
+            None => davenda_observability::DependencyStatus::Unknown,
+        };
+        readiness.set_dependency_status(davenda_observability::DependencyKind::Queue, status);
+    }
+
+    if readiness
+        .dependency(davenda_observability::DependencyKind::DistributedCache)
+        .is_some()
+    {
+        let status = if state.backends.distributed_cache.is_some() {
+            davenda_observability::DependencyStatus::Healthy
+        } else {
+            davenda_observability::DependencyStatus::Unhealthy
+        };
+        readiness.set_dependency_status(
+            davenda_observability::DependencyKind::DistributedCache,
+            status,
+        );
+    }
+
+    if readiness
+        .dependency(davenda_observability::DependencyKind::ObjectStore)
+        .is_some()
+    {
+        let status = if state.backends.object_store.is_some() {
+            davenda_observability::DependencyStatus::Healthy
+        } else {
+            davenda_observability::DependencyStatus::Unhealthy
+        };
+        readiness.set_dependency_status(davenda_observability::DependencyKind::ObjectStore, status);
+    }
+
+    if readiness
+        .dependency(davenda_observability::DependencyKind::Secrets)
+        .is_some()
+    {
+        readiness.set_dependency_status(
+            davenda_observability::DependencyKind::Secrets,
+            davenda_observability::DependencyStatus::Healthy,
+        );
+    }
+
+    if readiness
+        .dependency(davenda_observability::DependencyKind::Tls)
+        .is_some()
+    {
+        readiness.set_dependency_status(
+            davenda_observability::DependencyKind::Tls,
+            davenda_observability::DependencyStatus::Healthy,
+        );
+    }
+
+    if readiness
+        .dependency(davenda_observability::DependencyKind::ExtensionRegistry)
+        .is_some()
+    {
+        readiness.set_dependency_status(
+            davenda_observability::DependencyKind::ExtensionRegistry,
+            davenda_observability::DependencyStatus::Healthy,
+        );
+    }
+
+    readiness
+}
+
+async fn live_database_status(
+    state: &RuntimeServerState,
+) -> davenda_observability::DependencyStatus {
+    if state.plan.data.driver != davenda_config::DatabaseDriver::Postgres {
+        return davenda_observability::DependencyStatus::Healthy;
+    }
+
+    let Some(connection_url) = state.backends.database.url.clone() else {
+        return davenda_observability::DependencyStatus::Unhealthy;
+    };
+    let client = match state.plan.data.with_resolved_connection_url(connection_url).connect_lazy_postgres() {
+        Ok(client) => client,
+        Err(_) => return davenda_observability::DependencyStatus::Unhealthy,
+    };
+
+    match client.ping().await {
+        Ok(()) => davenda_observability::DependencyStatus::Healthy,
+        Err(_) => davenda_observability::DependencyStatus::Unhealthy,
+    }
 }
 
 pub(super) fn maintenance_mode_json(
@@ -162,5 +277,24 @@ fn metric_unit_string(unit: davenda_observability::MetricUnit) -> &'static str {
         davenda_observability::MetricUnit::Milliseconds => "milliseconds",
         davenda_observability::MetricUnit::Bytes => "bytes",
         davenda_observability::MetricUnit::Ratio => "ratio",
+    }
+}
+
+fn metric_reading_json(reading: Option<davenda_observability::MetricReading>) -> serde_json::Value {
+    match reading {
+        Some(davenda_observability::MetricReading::Counter(value)) => json!({
+            "counter": value,
+        }),
+        Some(davenda_observability::MetricReading::Gauge(value)) => json!({
+            "gauge": value,
+        }),
+        Some(davenda_observability::MetricReading::Histogram(value)) => json!({
+            "histogram": {
+                "samples": value.samples,
+                "last": value.last,
+                "max": value.max,
+            }
+        }),
+        None => serde_json::Value::Null,
     }
 }

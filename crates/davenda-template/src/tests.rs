@@ -38,6 +38,14 @@ fn model_with_assets() -> RenderModel {
         .unwrap()
 }
 
+fn model_with_translations() -> RenderModel {
+    model()
+        .with_translation("home.title", "Bonjour & bienvenue")
+        .unwrap()
+        .with_translation("home.cta", "Voir les nouveautes")
+        .unwrap()
+}
+
 fn base_registry() -> TemplateRegistry {
     let mut registry = TemplateRegistry::new();
 
@@ -252,6 +260,65 @@ fn asset_expressions_resolve_through_the_render_model_manifest_map() {
 
     assert!(html.contains("https://cdn.example.com/theme/assets/site.abc123.css"));
     assert!(!html.contains("href=\"theme/assets/site.css\""));
+}
+
+#[test]
+fn translation_expressions_render_locale_aware_text_from_the_model() {
+    let parser = TemplateSourceParser::new();
+    let template = parser
+        .parse_fragment(
+            TemplateNamespace::new("core").unwrap(),
+            TemplateName::new("home").unwrap(),
+            r#"
+<section dv:fragment="home" xmlns:dv="https://davenda.dev">
+  <h1 dv:t="home.title">Fallback</h1>
+  <a dv:title="${t('home.cta')}" dv:t="home.cta">Fallback</a>
+</section>
+"#,
+        )
+        .unwrap();
+
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+
+    let html = TemplateRuntime::new(registry)
+        .render_fragment(
+            &[TemplateNamespace::new("core").unwrap()],
+            FragmentRenderRequest::new(selector("home"), model_with_translations()),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains("<h1>Bonjour &amp; bienvenue</h1>"));
+    assert!(html.contains("title=\"Voir les nouveautes\""));
+    assert!(html.contains(">Voir les nouveautes</a>"));
+}
+
+#[test]
+fn missing_translation_keys_fail_closed_at_render_time() {
+    let parser = TemplateSourceParser::new();
+    let template = parser
+        .parse_fragment(
+            TemplateNamespace::new("core").unwrap(),
+            TemplateName::new("home").unwrap(),
+            r#"<h1 dv:fragment="home" xmlns:dv="https://davenda.dev" dv:t="home.title">Fallback</h1>"#,
+        )
+        .unwrap();
+
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+
+    assert_eq!(
+        TemplateRuntime::new(registry)
+            .render_fragment(
+                &[TemplateNamespace::new("core").unwrap()],
+                FragmentRenderRequest::new(selector("home"), RenderModel::new()),
+            )
+            .unwrap_err(),
+        TemplateModelError::MissingTranslation {
+            key: "home.title".to_string(),
+        }
+    );
 }
 
 #[test]

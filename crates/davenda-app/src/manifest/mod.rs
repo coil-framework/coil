@@ -5,4 +5,4 @@ mod core;
 mod document;
 mod runtime;
 
-pub use core::CustomerAppManifest;
+pub use core::{AppTranslationCatalog, CustomerAppManifest};

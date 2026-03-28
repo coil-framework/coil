@@ -1,6 +1,7 @@
 use super::*;
 use davenda_config::{CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError};
 use davenda_customer_sdk::CustomerBackendPlugin;
+use davenda_i18n::TranslationCatalog;
 use std::path::Path;
 
 impl CustomerAppManifest {
@@ -173,9 +174,11 @@ impl CustomerAppManifest {
             Some(&config),
         )?;
         let installed_extensions = self.resolve_extension_packages(&extension_packages)?;
+        let translation_catalogs = load_customer_translation_catalogs(self, app_root)?;
 
         let mut builder = RuntimeBuilder::new(config.clone(), auth_package);
         builder = builder.with_template_root(app_root);
+        builder = builder.with_translation_catalogs(translation_catalogs);
         for module in modules {
             builder = builder.with_boxed_module(module);
         }
@@ -252,9 +255,11 @@ impl CustomerAppManifest {
             Some(&config),
         )?;
         let installed_extensions = self.resolve_extension_packages(&extension_packages)?;
+        let translation_catalogs = load_customer_translation_catalogs(self, app_root)?;
 
         let mut builder = RuntimeBuilder::for_customer_root(config.clone(), auth_package)
-            .with_customer_root(app_root);
+            .with_customer_root(app_root)
+            .with_translation_catalogs(translation_catalogs);
         for module in modules {
             builder = builder.with_boxed_module(module);
         }
@@ -313,6 +318,15 @@ impl CustomerAppManifest {
             self.default_locale.to_string(),
             sorted_locale_strings(&self.supported_locales),
             self.localized_routes,
+            self.translations
+                .iter()
+                .map(|catalog| {
+                    davenda_config::CustomerAppBootstrapTranslationCatalog::new(
+                        catalog.locale.to_string(),
+                        catalog.path.clone(),
+                    )
+                })
+                .collect::<Vec<_>>(),
             self.auth.package_name.clone(),
             self.modules
                 .iter()
@@ -382,6 +396,28 @@ impl CustomerAppManifest {
 
         Ok(Some(receipt))
     }
+}
+
+fn load_customer_translation_catalogs(
+    manifest: &CustomerAppManifest,
+    app_root: &Path,
+) -> Result<Vec<TranslationCatalog>, AppModelError> {
+    manifest
+        .translations
+        .iter()
+        .map(|catalog| {
+            let path = app_root.join(&catalog.path);
+            TranslationCatalog::from_toml_file(catalog.locale.clone(), &path).map_err(|error| {
+                AppModelError::RuntimeBuild {
+                    message: format!(
+                        "failed to load customer translation catalog `{}` for locale `{}`: {error}",
+                        catalog.path,
+                        catalog.locale
+                    ),
+                }
+            })
+        })
+        .collect()
 }
 
 fn customer_bootstrap_manifest_error_into_app_model(

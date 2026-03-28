@@ -11,6 +11,7 @@ use davenda_core::{
     SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
     SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility,
 };
+use davenda_i18n::MessageKey;
 use davenda_data::{
     MigrationId, MigrationOwner as DataMigrationOwner, MigrationPlan, MigrationStep,
 };
@@ -243,6 +244,21 @@ fn theme_workspace() -> TempDir {
     workspace
 }
 
+fn theme_workspace_with_translation_catalog() -> TempDir {
+    let workspace = theme_workspace();
+    let translations_root = workspace.path().join("translations");
+    fs::create_dir_all(&translations_root).unwrap();
+    fs::write(
+        translations_root.join("en-GB.toml"),
+        r#"
+[home]
+title = "Shoppr home"
+"#,
+    )
+    .unwrap();
+    workspace
+}
+
 fn auth() -> AuthStrategy {
     AuthStrategy::new(
         AuthMode::Extend,
@@ -306,6 +322,12 @@ fn app() -> CustomerAppManifest {
             ExtensionConfigValue::String("harbor-club".to_string()),
         )
         .unwrap(),
+    )
+}
+
+fn app_with_translation_catalog() -> CustomerAppManifest {
+    app().with_translation_catalog(
+        AppTranslationCatalog::new(locale("en-GB"), "translations/en-GB.toml").unwrap(),
     )
 }
 
@@ -1091,6 +1113,48 @@ fn runtime_build_requires_customer_template_tree() {
                 workspace.path().join("templates").display()
             ),
         }
+    );
+}
+
+#[test]
+fn runtime_build_loads_customer_translation_catalogs() {
+    let _lock = object_store_env_lock();
+    let server = ObjectStoreTestServer::spawn();
+    let _guard = set_object_store_secret(server.endpoint());
+    let workspace = theme_workspace_with_translation_catalog();
+
+    let runtime = app_with_translation_catalog()
+        .build_runtime_plan_with_extensions_at(
+            runtime_config_with_environment("shoppr", "development"),
+            DefaultAuthModelPackage::default(),
+            module_manifests()
+                .into_iter()
+                .map(StaticModule::new)
+                .map(|module| Box::new(module) as Box<dyn PlatformModule>)
+                .collect(),
+            vec![extension_package()],
+            workspace.path(),
+        )
+        .unwrap();
+
+    let context = runtime.runtime.i18n.request_context(Some("en-GB"));
+    assert_eq!(
+        runtime
+            .runtime
+            .i18n
+            .translations
+            .translate(&context, &MessageKey::new("home.title").unwrap())
+            .unwrap(),
+        "Shoppr home"
+    );
+    assert_eq!(
+        runtime
+            .runtime
+            .i18n
+            .translations
+            .translate(&context, &MessageKey::new("core.locale").unwrap())
+            .unwrap(),
+        "en-GB"
     );
 }
 

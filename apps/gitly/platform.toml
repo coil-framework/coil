@@ -61,15 +61,15 @@ fallback_locale = "en-GB"
 localized_routes = true
 
 [seo]
-canonical_host = "gitly.example.com"
+canonical_host = "gitly.localhost"
 emit_json_ld = true
 
 [[sites]]
 id = "default"
 display_name = "Gitly"
 brand_name = "Gitly"
-canonical_host = "gitly.example.com"
-hosts = ["gitly.127.0.0.1.nip.io", "www.example.com"]
+canonical_host = "gitly.localhost"
+hosts = ["www.localhost", "gitly.example.com", "www.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "de-DE"]
 localized_routes = true

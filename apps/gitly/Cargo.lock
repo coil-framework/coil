@@ -880,6 +880,9 @@ dependencies = [
 [[package]]
 name = "davenda-i18n"
 version = "0.1.0"
+dependencies = [
+ "toml",
+]
 
 [[package]]
 name = "davenda-jobs"

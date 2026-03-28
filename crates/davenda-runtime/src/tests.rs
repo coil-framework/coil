@@ -70,7 +70,6 @@ impl LiveRouteCapabilityAuthorizer for PermissiveLiveRouteCapabilityAuthorizer {
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod extensions;
@@ -264,6 +263,82 @@ fn request_execution_resolves_site_context_and_site_locales() {
             )
             .is_none()
     );
+}
+
+#[test]
+fn localized_home_routes_resolve_default_and_non_default_locale_paths() {
+    let config = config_with_sites();
+    let template_root = unique_temp_template_root("localized-home");
+    fs::create_dir_all(&template_root).unwrap();
+    write_template_file(
+        &template_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body><main dv:t="home.title">Fallback</main></body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_translation_catalog(
+            davenda_i18n::TranslationCatalog::from_toml_str(
+                davenda_i18n::LocaleTag::new("en-GB").unwrap(),
+                "[home]\ntitle = \"Home\"\n",
+            )
+            .unwrap(),
+        )
+        .with_translation_catalog(
+            davenda_i18n::TranslationCatalog::from_toml_str(
+                davenda_i18n::LocaleTag::new("fr-FR").unwrap(),
+                "[home]\ntitle = \"Accueil\"\n",
+            )
+            .unwrap(),
+        )
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+
+    let bare = plan
+        .http
+        .resolve_match(&plan.config, HttpMethod::Get, "shop.example.com", "/")
+        .unwrap()
+        .resolved;
+    let localized = plan
+        .http
+        .resolve_match(&plan.config, HttpMethod::Get, "shop.example.com", "/fr-FR")
+        .unwrap()
+        .resolved;
+
+    assert_eq!(bare.route_name, "home");
+    assert_eq!(bare.locale.as_deref(), Some("en-GB"));
+    assert_eq!(localized.route_name, "home");
+    assert_eq!(localized.locale.as_deref(), Some("fr-FR"));
+    assert_eq!(
+        plan.http
+            .path_for_site(
+                &plan.config,
+                Some("shop"),
+                "home",
+                &BTreeMap::new(),
+                Some("en-GB"),
+            )
+            .unwrap(),
+        "/"
+    );
+    assert_eq!(
+        plan.http
+            .path_for_site(
+                &plan.config,
+                Some("shop"),
+                "home",
+                &BTreeMap::new(),
+                Some("fr-FR"),
+            )
+            .unwrap(),
+        "/fr-FR"
+    );
+
+    fs::remove_dir_all(&template_root).unwrap();
 }
 
 #[test]
@@ -2226,6 +2301,66 @@ product_kind = "physical"
     assert!(html.contains("£19.00"), "{html}");
     assert!(html.contains("customer-app-backed product"), "{html}");
     assert!(!html.contains("Harbor Cap"), "{html}");
+}
+
+#[test]
+fn render_page_response_injects_runtime_translations_into_template_models() {
+    let config = config_with_sites();
+    let template_root = unique_temp_template_root("catalog-backed-translations");
+    fs::create_dir_all(&template_root).unwrap();
+    write_template_file(
+        &template_root,
+        "templates/pages/home.html",
+        r#"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <main>
+      <h1 dv:t="home.title">Fallback</h1>
+      <p dv:t="home.summary">Fallback summary</p>
+    </main>
+  </body>
+</html>"#,
+    );
+
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_translation_catalog(
+            davenda_i18n::TranslationCatalog::from_toml_str(
+                davenda_i18n::LocaleTag::new("en-GB").unwrap(),
+                "[home]\ntitle = \"Home\"\nsummary = \"English summary\"\n",
+            )
+            .unwrap(),
+        )
+        .with_translation_catalog(
+            davenda_i18n::TranslationCatalog::from_toml_str(
+                davenda_i18n::LocaleTag::new("fr-FR").unwrap(),
+                "[home]\ntitle = \"Accueil\"\nsummary = \"Résumé français\"\n",
+            )
+            .unwrap(),
+        )
+        .with_template_root(&template_root)
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "shop.example.com", "/fr-FR")
+                .unwrap()
+                .with_session_id("session-i18n-home"),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let page = match &execution.response {
+        HandlerResponse::Page(page) => page,
+        _ => panic!("expected page response"),
+    };
+    let html = plan.render_page_response(&execution, page, None).unwrap();
+
+    fs::remove_dir_all(&template_root).unwrap();
+
+    assert!(html.contains("Accueil"), "{html}");
+    assert!(html.contains("Résumé français"), "{html}");
+    assert!(!html.contains("English summary"), "{html}");
 }
 
 #[test]

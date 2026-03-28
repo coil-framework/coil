@@ -59,9 +59,9 @@ docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build
 
 Then open:
 
-- `http://uk.127.0.0.1.nip.io:8080/`
-- `http://fr.127.0.0.1.nip.io:8080/`
-- `http://pl.127.0.0.1.nip.io:8080/`
+- `http://uk.localhost:8080/`
+- `http://fr.localhost:8080/`
+- `http://pl.localhost:8080/`
 - `http://localhost:8080/__dev`
 
 ### 2. Read The Public Docs

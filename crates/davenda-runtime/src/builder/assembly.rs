@@ -6,6 +6,7 @@ use crate::builder::http::*;
 use crate::builder::state::RuntimeBuilderParts;
 use crate::builder::templates;
 use crate::plan::shared_state_root;
+use davenda_core::bootstrap_core_services_with_translation_catalogs;
 use davenda_template::TemplateRuntime;
 
 pub(crate) fn build_runtime_plan<P>(
@@ -19,6 +20,7 @@ where
         auth_package,
         modules,
         customer_plugins,
+        translation_catalogs,
         extensions,
         templates,
         template_roots,
@@ -38,7 +40,7 @@ where
         });
     }
 
-    let bootstrap = bootstrap_core_services(&config)?;
+    let bootstrap = bootstrap_core_services_with_translation_catalogs(&config, translation_catalogs)?;
     let mut registry = bootstrap.registry;
     let mut template = bootstrap.template;
     let mut observability = bootstrap.observability;
@@ -117,14 +119,14 @@ where
         collected_modules.push((module, manifest));
     }
 
-    let core_service_id_storage = registry
+    let core_service_id_storage: Vec<String> = registry
         .services()
         .map(|service| service.id.clone())
-        .collect::<Vec<_>>();
-    let core_service_ids = core_service_id_storage
+        .collect();
+    let core_service_ids: Vec<&str> = core_service_id_storage
         .iter()
         .map(|service_id| service_id.as_str())
-        .collect::<Vec<_>>();
+        .collect();
 
     for (_, manifest) in &collected_modules {
         validate_module_installation(manifest, &installed_modules, &core_service_ids)?;
@@ -354,7 +356,7 @@ fn append_customer_home_route(
         return Ok(());
     }
 
-    routes.push(RouteDefinition::new("home", HttpMethod::Get, "/")?);
+    routes.push(RouteDefinition::new("home", HttpMethod::Get, "/")?.localized());
     handlers.push(HandlerDefinition::page("home", "pages/home")?);
     Ok(())
 }

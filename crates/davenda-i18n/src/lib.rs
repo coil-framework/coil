@@ -6,7 +6,7 @@ mod routing;
 mod tests;
 mod validation;
 
-pub use error::I18nError;
+pub use error::{I18nError, TranslationCatalogLoadError};
 pub use formatter::{Formatter, PluralCategory};
 pub use locale::{
     CurrencyCode, LocaleContext, LocaleTag, MessageKey, TimeZoneId, TranslationCatalog,

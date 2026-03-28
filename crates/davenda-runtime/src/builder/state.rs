@@ -1,5 +1,6 @@
 use super::*;
 use crate::builder::assembly;
+use davenda_i18n::TranslationCatalog;
 use davenda_template::TemplateDefinition;
 use std::env;
 use std::path::Path;
@@ -52,7 +53,8 @@ impl Builder {
         bootstrap: CustomerRootBootstrapInputs,
     ) -> Result<RuntimePlan, RuntimeBootstrapError> {
         let mut builder = RuntimeBuilder::new(bootstrap.config, bootstrap.auth_package)
-            .with_template_root(bootstrap.app_root);
+            .with_template_root(bootstrap.app_root)
+            .with_translation_catalogs(bootstrap.translation_catalogs);
         for module in self.modules {
             builder = builder.with_boxed_module(module);
         }
@@ -71,6 +73,7 @@ pub struct RuntimeBuilder<P> {
     auth_package: P,
     modules: Vec<Box<dyn PlatformModule>>,
     customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
+    translation_catalogs: Vec<TranslationCatalog>,
     extensions: Vec<InstalledExtension>,
     templates: Vec<TemplateDefinition>,
     template_roots: Vec<PathBuf>,
@@ -86,6 +89,7 @@ pub(crate) struct RuntimeBuilderParts<P> {
     pub(crate) auth_package: P,
     pub(crate) modules: Vec<Box<dyn PlatformModule>>,
     pub(crate) customer_plugins: Vec<Box<dyn CustomerBackendPlugin>>,
+    pub(crate) translation_catalogs: Vec<TranslationCatalog>,
     pub(crate) extensions: Vec<InstalledExtension>,
     pub(crate) templates: Vec<TemplateDefinition>,
     pub(crate) template_roots: Vec<PathBuf>,
@@ -110,6 +114,7 @@ where
             auth_package,
             modules: Vec::new(),
             customer_plugins: Vec::new(),
+            translation_catalogs: Vec::new(),
             extensions: Vec::new(),
             templates: Vec::new(),
             template_roots: Vec::new(),
@@ -159,6 +164,19 @@ where
 
     pub fn with_boxed_customer_plugin(mut self, plugin: Box<dyn CustomerBackendPlugin>) -> Self {
         self.customer_plugins.push(plugin);
+        self
+    }
+
+    pub fn with_translation_catalog(mut self, catalog: TranslationCatalog) -> Self {
+        self.translation_catalogs.push(catalog);
+        self
+    }
+
+    pub fn with_translation_catalogs<I>(mut self, catalogs: I) -> Self
+    where
+        I: IntoIterator<Item = TranslationCatalog>,
+    {
+        self.translation_catalogs.extend(catalogs);
         self
     }
 
@@ -250,6 +268,7 @@ where
             auth_package: self.auth_package,
             modules: self.modules,
             customer_plugins: self.customer_plugins,
+            translation_catalogs: self.translation_catalogs,
             extensions: self.extensions,
             templates: self.templates,
             template_roots: self.template_roots,

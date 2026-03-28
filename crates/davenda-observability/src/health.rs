@@ -139,6 +139,25 @@ impl HealthReport {
 
         DependencyStatus::Healthy
     }
+
+    pub fn dependency(&self, kind: DependencyKind) -> Option<ProbeDependency> {
+        self.dependencies
+            .iter()
+            .find(|dependency| dependency.kind == kind)
+            .copied()
+    }
+
+    pub fn set_dependency_status(&mut self, kind: DependencyKind, status: DependencyStatus) -> bool {
+        let Some(dependency) = self
+            .dependencies
+            .iter_mut()
+            .find(|dependency| dependency.kind == kind)
+        else {
+            return false;
+        };
+        dependency.status = status;
+        true
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

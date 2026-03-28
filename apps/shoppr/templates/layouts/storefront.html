@@ -25,11 +25,11 @@
   <body class="shoppr-shell">
     <header class="site-header">
       <div class="site-header__utility">
-        <p>Shoppr Studio. One brand, three markets, localized routes, interactive storefront.</p>
+        <p dv:t="shell.utility.summary">Shoppr Studio. One brand, three markets, localized routes, interactive storefront.</p>
         <div class="site-header__utility-links">
-          <a href="/__dev">Dev Tools</a>
-          <a href="/admin">Admin</a>
-          <a href="/account">Account</a>
+          <a href="/__dev" dv:t="shell.utility.dev_tools">Dev Tools</a>
+          <a href="/admin" dv:t="shell.utility.admin">Admin</a>
+          <a href="/account" dv:t="shell.utility.account">Account</a>
         </div>
       </div>
       <div class="site-header__main">
@@ -41,20 +41,20 @@
       </div>
       <div class="site-header__panels">
         <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Market</p>
+          <p class="switcher-panel__eyebrow" dv:t="nav.market">Market</p>
           <ul>
             <li dv:each="item : ${links.siteSwitches}">
               <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">Shoppr UK</a>
-              <span dv:if="${item.active}">Current</span>
+              <span dv:if="${item.active}" dv:t="nav.current">Current</span>
             </li>
           </ul>
         </div>
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Language</p>
+          <p class="switcher-panel__eyebrow" dv:t="nav.language">Language</p>
           <ul>
             <li dv:each="item : ${links.localeSwitches}">
               <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">English</a>
-              <span dv:if="${item.active}">Current</span>
+              <span dv:if="${item.active}" dv:t="nav.current">Current</span>
             </li>
           </ul>
         </div>
@@ -65,27 +65,27 @@
     </main>
     <footer class="site-footer">
       <div>
-        <p class="site-footer__eyebrow">Developer footer</p>
+        <p class="site-footer__eyebrow" dv:t="shell.footer.developer">Developer footer</p>
         <strong>Shoppr</strong>
-        <p>Retail starter showing multi-site, multi-locale, customer-linked Rust, and third-party WASM.</p>
+        <p dv:t="shell.footer.summary">Retail starter showing multi-site, multi-locale, customer-linked Rust, and third-party WASM.</p>
       </div>
       <div>
-        <p class="site-footer__eyebrow">Inspect</p>
-        <a href="/admin">Admin</a>
-        <a href="/__dev">Dev login</a>
-        <a href="/account">Account</a>
+        <p class="site-footer__eyebrow" dv:t="shell.footer.inspect">Inspect</p>
+        <a href="/admin" dv:t="shell.utility.admin">Admin</a>
+        <a href="/__dev" dv:t="shell.utility.dev_tools">Dev login</a>
+        <a href="/account" dv:t="shell.utility.account">Account</a>
       </div>
       <div>
-        <p class="site-footer__eyebrow">Commerce</p>
-        <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Catalog</a>
-        <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
-        <a href="/cart" dv:attr="href=${links.cart}">Cart</a>
+        <p class="site-footer__eyebrow" dv:t="shell.footer.commerce">Commerce</p>
+        <a href="/en-GB/shop" dv:attr="href=${links.catalog}" dv:t="shell.footer.catalog">Catalog</a>
+        <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}" dv:t="shell.footer.collections">Collections</a>
+        <a href="/cart" dv:attr="href=${links.cart}" dv:t="shell.footer.cart">Cart</a>
       </div>
       <div>
-        <p class="site-footer__eyebrow">Platform</p>
-        <a href="/admin/catalog">Catalog admin</a>
-        <a href="/admin/orders">Orders</a>
-        <a href="/admin/pages">CMS</a>
+        <p class="site-footer__eyebrow" dv:t="shell.footer.platform">Platform</p>
+        <a href="/admin/catalog" dv:t="shell.footer.catalog_admin">Catalog admin</a>
+        <a href="/admin/orders" dv:t="shell.footer.orders">Orders</a>
+        <a href="/admin/pages" dv:t="shell.footer.cms">CMS</a>
       </div>
     </footer>
   </body>

@@ -260,8 +260,8 @@ fn render_element<'a>(
     let mut dynamic_attrs = Vec::new();
     let mut include_selector: Option<IncludeTarget> = None;
     let mut slot_name: Option<String> = None;
-    let mut text_key: Option<String> = None;
-    let mut raw_text_key: Option<String> = None;
+    let mut text_expression: Option<TemplateExpression> = None;
+    let mut raw_text_expression: Option<TemplateExpression> = None;
     let mut with_bindings: Vec<TemplateBinding> = Vec::new();
     let mut each_binding: Option<(String, String)> = None;
     let mut condition: Option<(ConditionExpression, bool)> = None;
@@ -276,8 +276,9 @@ fn render_element<'a>(
         if let Some(directive) = name.strip_prefix("dv:") {
             match directive {
                 "fragment" => {}
-                "text" => text_key = Some(parse_render_key(&value)),
-                "utext" => raw_text_key = Some(parse_render_key(&value)),
+                "text" => text_expression = Some(parse_template_expression(&value)?),
+                "t" => text_expression = Some(parse_translation_expression(&value)?),
+                "utext" => raw_text_expression = Some(parse_template_expression(&value)?),
                 "replace" => {
                     include_selector = Some(IncludeTarget::Replace(parse_selector_ref(&value)?))
                 }
@@ -312,10 +313,10 @@ fn render_element<'a>(
     }
 
     let mut rendered_children = render_children(children, path)?;
-    if let Some(key) = text_key {
-        rendered_children = vec![Node::value(key)?];
-    } else if let Some(key) = raw_text_key {
-        rendered_children = vec![Node::raw_value(key)?];
+    if let Some(expression) = text_expression {
+        rendered_children = vec![Node::expression(expression)];
+    } else if let Some(expression) = raw_text_expression {
+        rendered_children = vec![Node::raw_expression(expression)];
     }
 
     let mut element = if tag.eq_ignore_ascii_case("dv:block") {
@@ -495,6 +496,11 @@ fn parse_condition(value: &str) -> Result<ConditionExpression, TemplateModelErro
         TemplateExpression::ModelKey(value) | TemplateExpression::AssetPath(value) => {
             Ok(ConditionExpression::Key(value))
         }
+        TemplateExpression::TranslationKey(_) => Err(TemplateModelError::ParseError {
+            line: 0,
+            column: 0,
+            message: "translation expressions are not valid in dv:if or dv:unless".to_string(),
+        }),
     }
 }
 
@@ -578,7 +584,7 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
                 .and_then(|value| value.strip_suffix('}'))
         })
     {
-        return Ok(TemplateExpression::ModelKey(inner.trim().to_string()));
+        return parse_template_expression(inner.trim());
     }
 
     if let Some(inner) = trimmed
@@ -598,10 +604,25 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
     }
 
     if let Some(inner) = trimmed
-        .strip_prefix("@{")
-        .and_then(|value| value.strip_suffix('}'))
+        .strip_prefix("t(")
+        .and_then(|value| value.strip_suffix(')'))
     {
-        return Ok(TemplateExpression::AssetPath(inner.trim().to_string()));
+        let inner = inner.trim();
+        let key = inner
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .or_else(|| inner.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))
+            .ok_or_else(|| TemplateModelError::ParseError {
+                line: 0,
+                column: 0,
+                message: format!(
+                    "translation helper expects a quoted key like t('checkout.title'), got `{trimmed}`"
+                ),
+            })?;
+        return Ok(TemplateExpression::TranslationKey(validate_token(
+            "translation_key",
+            key.to_string(),
+        )?));
     }
 
     if let Some(inner) = trimmed
@@ -621,6 +642,25 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
         "true" => Ok(TemplateExpression::LiteralBool(true)),
         "false" => Ok(TemplateExpression::LiteralBool(false)),
         other => Ok(TemplateExpression::ModelKey(other.to_string())),
+    }
+}
+
+fn parse_translation_expression(value: &str) -> Result<TemplateExpression, TemplateModelError> {
+    let trimmed = value.trim();
+    let is_wrapped_expression =
+        trimmed.starts_with("${") || trimmed.starts_with("#{") || trimmed.starts_with("*{");
+    match parse_template_expression(trimmed)? {
+        TemplateExpression::TranslationKey(key) => Ok(TemplateExpression::TranslationKey(key)),
+        TemplateExpression::ModelKey(key) if !is_wrapped_expression => Ok(
+            TemplateExpression::TranslationKey(validate_token("translation_key", key)?),
+        ),
+        _ => Err(TemplateModelError::ParseError {
+            line: 0,
+            column: 0,
+            message: format!(
+                "dv:t expects a translation key like `home.title` or `t('home.title')`, got `{trimmed}`"
+            ),
+        }),
     }
 }
 
@@ -727,5 +767,115 @@ mod tests {
     fn rejects_invalid_each_expressions() {
         let error = parse_each_expression("collection").unwrap_err();
         assert!(matches!(error, TemplateModelError::ParseError { .. }));
+    }
+
+    #[test]
+    fn parses_translation_expressions_in_text_and_attributes() {
+        let root = unique_root("translations");
+        let path = root.join("templates/pages/home.html");
+        write_file(
+            &path,
+            r#"<section xmlns:dv="https://davenda.dev" dv:fragment="home">
+  <h1 dv:text="t('home.title')">Fallback</h1>
+  <a dv:title="${t('home.cta')}">Link</a>
+</section>"#,
+        );
+
+        let parser = TemplateSourceParser::new();
+        let template = parser
+            .parse_file(
+                root.join("templates"),
+                &path,
+                TemplateNamespace::new("customer-app").unwrap(),
+            )
+            .unwrap();
+
+        fn contains_translation_node(nodes: &[Node], key: &str) -> bool {
+            nodes.iter().any(|node| match node {
+                Node::Expression(TemplateExpression::TranslationKey(found)) => found == key,
+                Node::RawExpression(TemplateExpression::TranslationKey(found)) => found == key,
+                Node::Expression(_) | Node::RawExpression(_) => false,
+                Node::Element(element) => {
+                    element.attributes.iter().any(|attribute| {
+                        attribute.value
+                            == AttributeValue::DynamicExpression(
+                                TemplateExpression::TranslationKey(key.to_string()),
+                            )
+                    }) || contains_translation_node(&element.children, key)
+                }
+                Node::With { children, .. }
+                | Node::Conditional { children, .. }
+                | Node::Each { children, .. } => contains_translation_node(children, key),
+                Node::Slot(slot) => slot
+                    .fallback
+                    .as_ref()
+                    .is_some_and(|children| contains_translation_node(children, key)),
+                Node::StaticText(_) | Node::Value(_) | Node::RawValue(_) | Node::Include(_) => {
+                    false
+                }
+            })
+        }
+
+        assert!(contains_translation_node(&template.nodes, "home.title"));
+        assert!(contains_translation_node(&template.nodes, "home.cta"));
+    }
+
+    #[test]
+    fn parses_dv_t_as_a_first_class_translation_directive() {
+        let root = unique_root("directive-translations");
+        let path = root.join("templates/pages/home.html");
+        write_file(
+            &path,
+            r#"<section xmlns:dv="https://davenda.dev" dv:fragment="home">
+  <h1 dv:t="home.title">Fallback</h1>
+  <p dv:t="${t('home.summary')}">Fallback</p>
+</section>"#,
+        );
+
+        let parser = TemplateSourceParser::new();
+        let template = parser
+            .parse_file(
+                root.join("templates"),
+                &path,
+                TemplateNamespace::new("customer-app").unwrap(),
+            )
+            .unwrap();
+
+        fn contains_translation_node(nodes: &[Node], key: &str) -> bool {
+            nodes.iter().any(|node| match node {
+                Node::Expression(TemplateExpression::TranslationKey(found)) => found == key,
+                Node::RawExpression(TemplateExpression::TranslationKey(found)) => found == key,
+                Node::Expression(_) | Node::RawExpression(_) => false,
+                Node::Element(element) => contains_translation_node(&element.children, key),
+                Node::With { children, .. }
+                | Node::Conditional { children, .. }
+                | Node::Each { children, .. } => contains_translation_node(children, key),
+                Node::Slot(slot) => slot
+                    .fallback
+                    .as_ref()
+                    .is_some_and(|children| contains_translation_node(children, key)),
+                Node::StaticText(_) | Node::Value(_) | Node::RawValue(_) | Node::Include(_) => {
+                    false
+                }
+            })
+        }
+
+        assert!(contains_translation_node(&template.nodes, "home.title"));
+        assert!(contains_translation_node(&template.nodes, "home.summary"));
+    }
+
+    #[test]
+    fn rejects_non_translation_expressions_in_dv_t() {
+        let error = parse_translation_expression("${headline}").unwrap_err();
+        assert_eq!(
+            error,
+            TemplateModelError::ParseError {
+                line: 0,
+                column: 0,
+                message:
+                    "dv:t expects a translation key like `home.title` or `t('home.title')`, got `${headline}`"
+                        .to_string(),
+            }
+        );
     }
 }

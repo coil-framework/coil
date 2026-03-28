@@ -3,6 +3,7 @@ use crate::health::ErrorCategory;
 use crate::validation::{DimensionKey, MetricName};
 use davenda_config::{Environment, ObservabilityConfig};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MetricKind {
@@ -25,6 +26,25 @@ pub struct MetricDefinition {
     pub kind: MetricKind,
     pub unit: MetricUnit,
     pub dimensions: BTreeSet<DimensionKey>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistogramReading {
+    pub samples: u64,
+    pub last: u64,
+    pub max: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetricReading {
+    Counter(u64),
+    Gauge(i64),
+    Histogram(HistogramReading),
+}
+
+#[derive(Debug, Default)]
+struct TelemetryState {
+    readings: BTreeMap<MetricName, MetricReading>,
 }
 
 impl MetricDefinition {
@@ -71,13 +91,14 @@ impl TracePolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TelemetryCatalog {
     pub metrics_enabled: bool,
     pub required_log_dimensions: BTreeSet<DimensionKey>,
     pub metrics: BTreeMap<MetricName, MetricDefinition>,
     pub trace: TracePolicy,
     pub error_categories: BTreeSet<ErrorCategory>,
+    live_state: Arc<Mutex<TelemetryState>>,
 }
 
 impl TelemetryCatalog {
@@ -117,6 +138,7 @@ impl TelemetryCatalog {
                 Environment::Production => 1_000,
             },
         )?;
+        let initial_readings = initial_metric_readings(&metrics);
 
         Ok(Self {
             metrics_enabled: config.metrics,
@@ -133,13 +155,85 @@ impl TelemetryCatalog {
                 ErrorCategory::InvariantViolation,
                 ErrorCategory::ExtensionTrap,
             ]),
+            live_state: Arc::new(Mutex::new(TelemetryState {
+                readings: initial_readings,
+            })),
         })
     }
 
     pub fn metric(&self, name: &str) -> Option<&MetricDefinition> {
         self.metrics.get(&MetricName::new(name.to_string()).ok()?)
     }
+
+    pub fn metric_reading(&self, name: &str) -> Option<MetricReading> {
+        let metric = MetricName::new(name.to_string()).ok()?;
+        self.live_state
+            .lock()
+            .expect("telemetry mutex poisoned")
+            .readings
+            .get(&metric)
+            .copied()
+    }
+
+    pub fn increment_counter(&self, name: &str, delta: u64) -> bool {
+        self.update_metric(name, |reading| match reading {
+            MetricReading::Counter(value) => {
+                *value = value.saturating_add(delta);
+                true
+            }
+            _ => false,
+        })
+    }
+
+    pub fn adjust_gauge(&self, name: &str, delta: i64) -> bool {
+        self.update_metric(name, |reading| match reading {
+            MetricReading::Gauge(value) => {
+                *value = value.saturating_add(delta);
+                true
+            }
+            _ => false,
+        })
+    }
+
+    pub fn record_histogram(&self, name: &str, sample: u64) -> bool {
+        self.update_metric(name, |reading| match reading {
+            MetricReading::Histogram(value) => {
+                value.samples = value.samples.saturating_add(1);
+                value.last = sample;
+                value.max = value.max.max(sample);
+                true
+            }
+            _ => false,
+        })
+    }
+
+    fn update_metric(
+        &self,
+        name: &str,
+        mut update: impl FnMut(&mut MetricReading) -> bool,
+    ) -> bool {
+        let Ok(metric_name) = MetricName::new(name.to_string()) else {
+            return false;
+        };
+        let mut state = self.live_state.lock().expect("telemetry mutex poisoned");
+        let Some(reading) = state.readings.get_mut(&metric_name) else {
+            return false;
+        };
+        update(reading)
+    }
 }
+
+impl PartialEq for TelemetryCatalog {
+    fn eq(&self, other: &Self) -> bool {
+        self.metrics_enabled == other.metrics_enabled
+            && self.required_log_dimensions == other.required_log_dimensions
+            && self.metrics == other.metrics
+            && self.trace == other.trace
+            && self.error_categories == other.error_categories
+    }
+}
+
+impl Eq for TelemetryCatalog {}
 
 fn baseline_metrics() -> Result<Vec<MetricDefinition>, ObservabilityError> {
     let customer_dimensions = ["customer_app", "route", "outcome"];
@@ -147,6 +241,18 @@ fn baseline_metrics() -> Result<Vec<MetricDefinition>, ObservabilityError> {
     let extension_dimensions = ["customer_app", "extension_point", "outcome"];
 
     Ok(vec![
+        metric(
+            "davenda.http.requests.total",
+            MetricKind::Counter,
+            MetricUnit::Count,
+            &["customer_app", "outcome"],
+        )?,
+        metric(
+            "davenda.http.requests.in_flight",
+            MetricKind::Gauge,
+            MetricUnit::Count,
+            &["customer_app"],
+        )?,
         metric(
             "davenda.http.request.latency_ms",
             MetricKind::Histogram,
@@ -203,4 +309,24 @@ fn metric(
         definition = definition.with_dimension(*dimension)?;
     }
     Ok(definition)
+}
+
+fn initial_metric_readings(
+    metrics: &BTreeMap<MetricName, MetricDefinition>,
+) -> BTreeMap<MetricName, MetricReading> {
+    metrics
+        .iter()
+        .map(|(name, definition)| {
+            let reading = match definition.kind {
+                MetricKind::Counter => MetricReading::Counter(0),
+                MetricKind::Gauge => MetricReading::Gauge(0),
+                MetricKind::Histogram => MetricReading::Histogram(HistogramReading {
+                    samples: 0,
+                    last: 0,
+                    max: 0,
+                }),
+            };
+            (name.clone(), reading)
+        })
+        .collect()
 }

@@ -1,0 +1,149 @@
+[nav]
+market = "Market"
+language = "Language"
+current = "Current"
+
+[shell.utility]
+summary = "Shoppr Studio. One brand, three markets, localized routes, interactive storefront."
+dev_tools = "Dev Tools"
+admin = "Admin"
+account = "Account"
+
+[shell.footer]
+developer = "Developer footer"
+summary = "Retail starter showing multi-site, multi-locale, customer-linked Rust, and third-party WASM."
+inspect = "Inspect"
+commerce = "Commerce"
+platform = "Platform"
+catalog = "Catalog"
+collections = "Collections"
+cart = "Cart"
+catalog_admin = "Catalog admin"
+orders = "Orders"
+cms = "CMS"
+
+[home.meta]
+title = "Shoppr"
+
+[home.utility]
+summary = "Shoppr mirrors the pace and polish of a modern fashion flagship while still exposing Davenda's modular surface."
+
+[home.hero]
+title = "Quiet luxury, fast routes, and the full storefront loop in one starter."
+summary = "Shoppr is now a fashion-first demo: immersive campaigns, catalog depth, interactive product detail, and visible market and language switching across one customer app."
+primary_cta = "Shop new arrivals"
+secondary_cta = "Browse collections"
+
+[home.hero_secondary]
+eyebrow = "Interactive layering"
+title = "Static-first pages with motion, panels, galleries, and commerce actions layered on."
+summary = "The demo keeps the HTML-first contract intact while showing the richer interaction layer real customers expect from a premium multi-region storefront."
+cart_cta = "Open cart"
+account_cta = "Explore account"
+controls = "Campaign carousel controls"
+previous = "Previous campaign"
+next = "Next campaign"
+
+[home.editorial.store]
+eyebrow = "Store view"
+title = "Three markets, one brand system."
+summary = "Run UK, France, and Poland from one customer workspace while keeping inventory and stories market-aware."
+
+[home.editorial.developer]
+eyebrow = "Developer-visible"
+title = "Every polished page still exposes the platform underneath."
+summary = "Admin, account, dev login, CMS, and linked backend affordances stay easy to discover from the public shell."
+cta = "Open admin"
+
+[home.markets]
+eyebrow = "Multi-site demo"
+title = "One customer app, three Shoppr markets."
+summary = "Each market keeps its own host, default locale, assortment emphasis, and merchandising mood while sharing the same core application."
+
+[home.markets.uk]
+eyebrow = "shoppr-uk"
+title = "UK flagship storefront"
+summary = "Lead with new arrivals, sharp product detail, and the full path from browse to checkout."
+cta = "Open UK shop"
+
+[home.markets.fr]
+eyebrow = "shoppr-fr"
+title = "France city edit"
+summary = "Give the Paris market a tighter campaign voice and an event-led edit without forking the app."
+cta = "Open France edit"
+
+[home.markets.pl]
+eyebrow = "shoppr-pl"
+title = "Poland cold-weather edit"
+summary = "Show a different winter assortment and localized Polish routes on the same shared platform."
+cta = "Open Poland product"
+
+[home.sections.interactivity]
+eyebrow = "Layered interactivity"
+title = "The storefront stays HTML-first while behaving like a modern flagship."
+summary = "Carousel controls, market and locale switchers, product accordions, and gallery states are layered on rather than replacing the base render contract."
+
+[home.sections.shortcuts]
+eyebrow = "Developer shortcuts"
+title = "Nothing important is hidden."
+summary = "Public pages link cleanly into account, cart, admin, and local dev tools so developers can evaluate the whole app boundary from first run."
+dev_tools = "Open dev tools"
+admin = "Open admin"
+
+[home.footer]
+brand = "Shoppr"
+summary = "Fashion-led Davenda starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries."
+explore = "Explore"
+inspect = "Inspect"
+platform = "Platform"
+
+[product.meta]
+title = "Product detail"
+
+[product.utility]
+summary = "Product detail shows the interactive layer directly: gallery switching, accordions, quantity, and fast cart handoff."
+
+[product.gallery]
+main = "Main"
+detail = "Detail"
+mood = "Mood"
+alt = "Product image"
+
+[product.copy]
+collections = "Collections"
+shop = "Shop"
+availability = "Available in UK, France, and Poland with local route switching from the header."
+quantity = "Quantity"
+add_to_cart = "Add to cart"
+buy_now = "Buy now"
+back_to_collection = "Back to collection"
+review_cart = "Review cart"
+
+[product.accordions.description]
+title = "Description"
+body = "Structured product content can stay server-rendered while accordions layer the interactive behavior on top."
+
+[product.accordions.delivery]
+title = "Delivery and payments"
+body = "Delivery messaging and payment options can vary per market without changing the core route family."
+
+[product.accordions.availability]
+title = "Market availability"
+body = "Use sites for true inventory or merchandising divergence. Use locales when the assortment is shared."
+
+[product.assurance]
+title = "Next step: add to cart or keep browsing this collection"
+summary = "Customers should not have to hunt for the next action here. Keep the cart handoff and the route back to the collection visible at the same time."
+
+[product.unavailable]
+title = "This product is not currently available."
+summary = "Shoppr has removed this item from the live storefront. Return to the current catalog or collections view to keep shopping."
+catalog = "Open catalog"
+collections = "Browse collections"
+
+[product.related]
+eyebrow = "More from this collection"
+title = "Continue browsing nearby products"
+summary = "Related products keep the customer inside the same merchandising context without throwing them back to the top of the catalog."
+view = "View look"
+add_to_cart = "Add to cart"

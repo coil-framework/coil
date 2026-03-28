@@ -32,9 +32,9 @@ docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build
 
 Open:
 
-- `http://uk.127.0.0.1.nip.io:8080/`
-- `http://fr.127.0.0.1.nip.io:8080/`
-- `http://pl.127.0.0.1.nip.io:8080/`
+- `http://uk.localhost:8080/`
+- `http://fr.localhost:8080/`
+- `http://pl.localhost:8080/`
 - `http://localhost:8080/__dev`
 
 What to inspect:
@@ -55,6 +55,14 @@ docker compose up --build
 ```
 
 Use Gitly to compare the same runtime model against a different product shape. The point is not feature parity with Shoppr. The point is to see that the composition model remains the same even when the domain changes.
+
+Open:
+
+- `http://gitly.localhost:58080/`
+- `http://gitly.localhost:58080/explore`
+
+Like Shoppr's `*.localhost` market hosts, `gitly.localhost` resolves locally without external DNS
+or `/etc/hosts` edits.
 
 ## Run The Docs Site
 

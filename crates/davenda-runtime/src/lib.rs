@@ -17,7 +17,7 @@ use davenda_core::{
     ModuleInstallationError, ModuleManifest, ObservabilityRuntimeServices, PlatformModule,
     RegistrationError, ReportDefinition, SearchIndexContribution, SeoRuntimeServices,
     ServiceDescriptor, TemplateRuntimeServices, TlsRuntimeServices, WasmRuntimeServices,
-    bootstrap_core_services, validate_module_capabilities, validate_module_installation,
+    validate_module_capabilities, validate_module_installation,
 };
 use davenda_data::{DataModelError, MigrationPlan};
 use davenda_jobs::{
@@ -41,7 +41,7 @@ use davenda_storage::{
 };
 use davenda_tls::{
     CertificateId, CertificateInventory, CertificateProviderKind, CertificateRecord,
-    ChallengeTicket, EdgeMode, HostnameBinding, HotReloadEvent, IssuancePlan, RenewalPlan,
+    ChallengeTicket, EdgeMode, HotReloadEvent, IssuancePlan, RenewalPlan,
     TlsControlPlaneRuntime, TlsInstant, TlsModelError,
 };
 use davenda_wasm::{

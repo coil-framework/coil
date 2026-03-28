@@ -20,6 +20,8 @@ pub enum AppModelError {
     DuplicateThemeNamespace { namespace: String },
     #[error("content model `{model_id}` is declared more than once")]
     DuplicateContentModel { model_id: String },
+    #[error("translation catalog for locale `{locale}` is declared more than once")]
+    DuplicateTranslationCatalog { locale: String },
     #[error("content model `{model_id}` declares duplicate field `{field_id}`")]
     DuplicateContentField { model_id: String, field_id: String },
     #[error("extension `{extension_id}` is declared more than once")]
@@ -41,6 +43,10 @@ pub enum AppModelError {
         "site `{site}` locale `{locale}` is not declared by the customer app supported locale set"
     )]
     SiteLocaleOutsideAppSupport { site: String, locale: String },
+    #[error(
+        "translation catalog locale `{locale}` is not declared by the customer app supported locale set"
+    )]
+    TranslationCatalogLocaleOutsideAppSupport { locale: String },
     #[error("customer app `{app_id}` must declare at least one canonical domain")]
     MissingCanonicalDomain { app_id: String },
     #[error("customer app `{app_id}` site `{site}` must declare at least one canonical domain")]

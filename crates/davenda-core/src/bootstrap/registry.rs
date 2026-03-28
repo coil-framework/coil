@@ -3,6 +3,13 @@ use super::*;
 pub fn bootstrap_core_services(
     config: &PlatformConfig,
 ) -> Result<CoreBootstrap, RegistrationError> {
+    bootstrap_core_services_with_translation_catalogs(config, Vec::new())
+}
+
+pub fn bootstrap_core_services_with_translation_catalogs(
+    config: &PlatformConfig,
+    customer_translation_catalogs: Vec<TranslationCatalog>,
+) -> Result<CoreBootstrap, RegistrationError> {
     let mut registry = ServiceRegistry::new();
     let cache_topology = cache_topology_from_config(config);
     let cache = CacheRuntimeServices {
@@ -14,7 +21,7 @@ pub fn bootstrap_core_services(
     let data = data_runtime_from_config(config);
     let jobs = jobs_runtime_from_config(config);
     let observability = observability_runtime_from_config(config);
-    let i18n = i18n_runtime_from_config(config);
+    let i18n = i18n_runtime_from_config(config, customer_translation_catalogs);
     let seo = seo_runtime_from_config(config);
     let a11y = a11y_runtime_services();
     let template = template_runtime_services();

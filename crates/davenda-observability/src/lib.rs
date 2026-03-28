@@ -15,7 +15,10 @@ pub use health::{
     ProbeDependency,
 };
 pub use runtime::ObservabilityRuntime;
-pub use telemetry::{MetricDefinition, MetricKind, MetricUnit, TelemetryCatalog, TracePolicy};
+pub use telemetry::{
+    HistogramReading, MetricDefinition, MetricKind, MetricReading, MetricUnit, TelemetryCatalog,
+    TracePolicy,
+};
 pub use validation::{
     BrandId, CohortId, CustomerAppId, DimensionKey, FeatureFlagId, MetricName, SiteId,
     validate_token,

@@ -10,6 +10,8 @@ pub struct CustomerAppBootstrapManifest {
     i18n: CustomerAppBootstrapI18n,
     #[serde(default)]
     sites: Vec<CustomerAppBootstrapSite>,
+    #[serde(default)]
+    translations: CustomerAppBootstrapTranslations,
     auth: CustomerAppBootstrapAuth,
     modules: CustomerAppBootstrapModules,
 }
@@ -33,6 +35,35 @@ struct CustomerAppBootstrapI18n {
     supported_locales: Vec<String>,
     #[serde(default)]
     localized_routes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+struct CustomerAppBootstrapTranslations {
+    #[serde(default)]
+    catalogs: Vec<CustomerAppBootstrapTranslationCatalog>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CustomerAppBootstrapTranslationCatalog {
+    locale: String,
+    path: String,
+}
+
+impl CustomerAppBootstrapTranslationCatalog {
+    pub fn new(locale: impl Into<String>, path: impl Into<String>) -> Self {
+        Self {
+            locale: locale.into(),
+            path: path.into(),
+        }
+    }
+
+    pub fn locale(&self) -> &str {
+        &self.locale
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -171,6 +202,7 @@ impl CustomerAppBootstrapManifest {
         default_locale: impl Into<String>,
         supported_locales: Vec<String>,
         localized_routes: bool,
+        translation_catalogs: Vec<CustomerAppBootstrapTranslationCatalog>,
         auth_package: impl Into<String>,
         enabled_modules: Vec<String>,
         sites: Vec<CustomerAppBootstrapSite>,
@@ -188,6 +220,9 @@ impl CustomerAppBootstrapManifest {
                 supported_locales,
                 localized_routes,
             },
+            translations: CustomerAppBootstrapTranslations {
+                catalogs: translation_catalogs,
+            },
             sites,
             auth: CustomerAppBootstrapAuth {
                 package: auth_package.into(),
@@ -200,6 +235,24 @@ impl CustomerAppBootstrapManifest {
 
     pub fn enabled_modules(&self) -> &[String] {
         &self.modules.enabled
+    }
+
+    pub fn translation_catalogs(&self) -> &[CustomerAppBootstrapTranslationCatalog] {
+        &self.translations.catalogs
+    }
+
+    pub fn supported_locales(&self) -> Vec<String> {
+        let mut locales = if self.sites.is_empty() {
+            self.i18n.supported_locales.clone()
+        } else {
+            self.resolved_sites()
+                .into_iter()
+                .flat_map(|site| site.supported_locales)
+                .collect::<Vec<_>>()
+        };
+        locales.sort();
+        locales.dedup();
+        locales
     }
 
     fn resolved_sites(&self) -> Vec<CustomerAppBootstrapSite> {

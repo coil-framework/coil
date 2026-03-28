@@ -111,6 +111,13 @@ That is the extension seam in practice:
 - the module owns Stripe checkout and webhook plumbing
 - the customer app owns provider secrets, confirmation UX, and any linked webhook policy
 
+The practical sequence is:
+
+1. enable `commerce` and `commerce-payments-stripe`
+2. configure the Stripe keys and webhook secret in platform config
+3. keep checkout and confirmation templates in the customer app
+4. add linked verified-webhook hooks when customer-owned post-payment policy is needed
+
 ## Where To See It
 
 - `apps/shoppr/platform.dev.toml`

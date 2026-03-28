@@ -12,6 +12,18 @@ Use this page when you want to answer:
 - why customer-app migrations can be manual even when module migrations are executable
 - how to run the real commands and interpret the output
 
+## The Practical Answer
+
+If your linked backend or customer app needs extra tables, projections, or backfills, the answer
+today is:
+
+- yes, customer-owned migration work is first-class in the composed plan
+- no, Davenda does not yet auto-run arbitrary customer SQL files for you
+
+That is why migration ownership is explicit in the docs. The platform records and surfaces the
+contract; the customer app still owns the concrete rollout step for purely customer-managed schema
+work.
+
 ## The Ownership Model
 
 Current owners are:
@@ -114,6 +126,33 @@ That is the honest current state of the demo:
 - Shoppr has real composed migration contracts
 - Shoppr currently has no manual customer migration entries
 
+## How To Declare A Customer Migration
+
+The manifest shape is:
+
+```toml
+[[customer_migrations]]
+id = "customer.content"
+order = 90
+description = "Creates customer app landing-page projections"
+```
+
+Each field means:
+
+- `id`
+  - the stable operator-facing name for the migration entry
+- `order`
+  - where it appears relative to module and auth-owned steps
+- `description`
+  - the human explanation that shows up in planning and rollout output
+
+Use a customer migration entry for:
+
+- customer-owned projection tables
+- backfills
+- external-system cutover checkpoints
+- manual schema work that belongs to the customer app rather than an official module
+
 Real customer-binary behaviour:
 
 - `validate(...)` reports `manual_customer_migration_entries`
@@ -139,6 +178,20 @@ Shoppr dry-run path still requires runtime secrets such as `OBJECT_STORE_URL` to
 That is useful, not annoying. It stops the app from pretending it can apply migrations for a runtime
 it cannot actually boot.
 
+## Real Workflow For Customer-Owned Schema Changes
+
+Use this sequence when your linked backend needs new schema or projection work:
+
+1. add a `[[customer_migrations]]` entry to `app.toml`
+2. describe the change clearly in `description`
+3. run `platform migrate plan` to inspect the composed owner/order view
+4. run `shoppr validate` or `gitly validate`
+5. execute the actual customer-owned SQL or data step in your deployment workflow
+6. re-run `release doctor` and `release plan`
+
+That is the current Davenda workflow. The important thing is to be explicit about ownership rather
+than pretending the platform already has a hidden arbitrary-SQL runner.
+
 ## Gitly Example
 
 Gitly follows the same pattern:
@@ -161,14 +214,14 @@ The docs should emphasise the boundary, not force the reader to reverse-engineer
 
 ## Ordering Rules
 
-The low-level ordering in `crates/davenda-data/src/migration.rs` is:
+The low-level ordering is:
 
 1. core
 2. module
 3. auth package
 4. customer app
 
-The app-facing summary in `crates/davenda-app/src/migration.rs` keeps the relevant subset:
+The app-facing summary keeps the relevant subset:
 
 1. module
 2. auth package

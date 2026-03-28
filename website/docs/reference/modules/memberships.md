@@ -98,6 +98,13 @@ Concrete example:
 Memberships still owns entitlement and renewal state. The customer app owns how that state is
 explained to members.
 
+The practical sequence is:
+
+1. enable `commerce` and `memberships`
+2. sell membership products through commerce
+3. provide account templates that explain tier and entitlement state
+4. add linked checkout or webhook hooks if membership activation needs customer-specific policy
+
 ## Where To See It
 
 Shoppr uses memberships in:

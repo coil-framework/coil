@@ -80,7 +80,7 @@ pub fn plugin() -> GitlyBackend {
 
 pub fn repository() -> GitlyRepository {
     GitlyRepository {
-        owner: "octocorp".to_string(),
+        owner: "forgeflow".to_string(),
         name: "platform-ui".to_string(),
         visibility: "Public".to_string(),
         stars: 4872,
@@ -151,8 +151,8 @@ pub fn workflow_runs() -> Vec<GitlyWorkflowRun> {
 
 pub fn organization() -> GitlyOrganization {
     GitlyOrganization {
-        handle: "octocorp".to_string(),
-        name: "OctoCorp".to_string(),
+        handle: "forgeflow".to_string(),
+        name: "Forgeflow".to_string(),
         members: 42,
         repositories: 18,
         location: "London, UK".to_string(),
@@ -337,7 +337,7 @@ mod tests {
     fn repo_payload_exposes_github_style_summary_fields() {
         let payload = repo_api_payload();
 
-        assert_eq!(payload.get("owner").map(String::as_str), Some("octocorp"));
+        assert_eq!(payload.get("owner").map(String::as_str), Some("forgeflow"));
         assert_eq!(
             payload.get("name").map(String::as_str),
             Some("platform-ui")

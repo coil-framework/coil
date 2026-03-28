@@ -109,6 +109,13 @@ Concrete example:
 The media module still owns managed-asset identity and delivery. The customer template chooses how
 that media is presented in the product UI.
 
+The practical sequence is:
+
+1. enable `media`
+2. configure shared storage and asset publication
+3. reference managed media from CMS or commerce templates
+4. use the media widget and metadata slots for operator-facing enrichments instead of forking delivery logic
+
 ## Where To See It
 
 Shoppr uses media as part of the broader store workflow:

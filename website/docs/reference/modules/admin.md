@@ -95,6 +95,13 @@ Concrete example:
 The admin module still owns shell access, audit routes, and shared operator navigation. The
 customer app owns the dashboard content that appears inside that shell.
 
+The practical sequence is:
+
+1. enable `admin`
+2. provide `templates/admin/dashboard.html`
+3. add customer-owned summary widgets or dashboard fragments
+4. keep audit and operator access inside the shared admin shell rather than inventing a second one
+
 ## Where To See It
 
 - `apps/shoppr/templates/admin/dashboard.html`

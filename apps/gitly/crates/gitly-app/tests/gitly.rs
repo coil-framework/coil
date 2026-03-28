@@ -207,7 +207,7 @@ fn bootstrap_registers_linked_backend_extensions_and_mock_actions_job() {
             .http
             .routes
             .iter()
-            .any(|route| route.path == "/fr/octocorp/platform-ui")
+            .any(|route| route.path == "/fr/forgeflow/platform-ui")
     );
 }
 
@@ -340,7 +340,7 @@ fn server_serves_gitly_home_and_wasm_extended_api_surface() {
                 .respond(
                     Request::builder()
                         .method("GET")
-                        .uri("/octocorp/platform-ui/issues")
+                        .uri("/forgeflow/platform-ui/issues")
                         .header("host", "gitly.localhost")
                         .header("x-forwarded-proto", "https")
                         .body(Body::empty())
@@ -394,7 +394,7 @@ fn server_serves_gitly_home_and_wasm_extended_api_surface() {
         "{home_body}"
     );
     assert!(home_body.contains("data-route=\"home\""), "{home_body}");
-    assert!(home_body.contains("/octocorp/platform-ui"), "{home_body}");
+    assert!(home_body.contains("/forgeflow/platform-ui"), "{home_body}");
     assert!(
         localhost_body.contains("data-route=\"home\""),
         "{localhost_body}"

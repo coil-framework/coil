@@ -29,6 +29,16 @@ The output is a composed plan with owners such as:
 That is what makes Davenda migration planning useful: you see one composed contract, not a pile of
 unexplained SQL files.
 
+If you are a customer-app developer, pair that with the customer binary:
+
+```bash
+cd apps/shoppr
+cargo run -p shoppr -- migrate apply --dry-run
+```
+
+Use `platform migrate plan` to inspect the composed migration contract. Use `shoppr migrate apply
+--dry-run` to prove the app bootstrap can actually execute it.
+
 For customer-app lifecycle, use the customer binary:
 
 ```bash
@@ -59,6 +69,13 @@ cargo run -p davenda-cli -- release plan --config apps/shoppr/platform.dev.toml
 Use `release doctor` when you need a fast readiness diagnostic. Use `release plan` when you need
 the fuller composed release shape.
 
+A practical sequence is:
+
+1. `platform auth package validate`
+2. `platform migrate plan`
+3. `platform release doctor`
+4. `platform release plan`
+
 ## Import Commands
 
 The platform exposes:
@@ -74,6 +91,17 @@ Cutover supports several explicit modes:
 - `--switch`
 - `--observe`
 - `--rollback`
+
+Use them literally:
+
+- `--apply`
+  - execute the prepared cutover step
+- `--switch`
+  - move traffic or source-of-truth state to the imported surface
+- `--observe`
+  - inspect readiness and cutover evidence without switching
+- `--rollback`
+  - revert to the previous side if the prepared cutover is not acceptable
 
 Example:
 

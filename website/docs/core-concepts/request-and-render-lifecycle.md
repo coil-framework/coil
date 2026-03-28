@@ -162,7 +162,7 @@ for (route, template) in gitly_page_routes() {
 With route definitions like:
 
 ```rust
-("repo", "/octocorp/platform-ui", "gitly/repository")
+("repo", "/forgeflow/platform-ui", "gitly/repository")
 ```
 
 So the customer-owned part is explicit:

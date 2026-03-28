@@ -35,6 +35,13 @@ cargo run -p davenda-cli -- auth check \
 
 This checks the active auth package and runtime config, not just static schema files.
 
+Use it after `auth package validate` and `auth bindings inspect`, not before them. That sequence
+tells you:
+
+- whether the package is structurally valid
+- how the stable capability maps into the current package
+- whether a concrete subject/resource check passes
+
 ### `auth bindings inspect`
 
 Use it when you want to know how a stable capability maps into the current auth package:
@@ -45,6 +52,9 @@ cargo run -p davenda-cli -- auth bindings inspect \
   --capability cms.page.publish
 ```
 
+This is the command to reach for when a module says “I need `cms.page.publish`” and you want to see
+how that stable capability is represented inside the active auth package.
+
 ### `auth package validate`
 
 Use it before rollout or when changing auth files:
@@ -53,6 +63,13 @@ Use it before rollout or when changing auth files:
 cargo run -p davenda-cli -- auth package validate \
   --config apps/shoppr/platform.dev.toml
 ```
+
+Run this before:
+
+- release planning
+- cutover
+- changing auth schema files
+- switching auth packages in a customer app
 
 ## Module Commands
 
@@ -74,6 +91,9 @@ cargo run -p davenda-cli -- module list --config apps/shoppr/platform.dev.toml
 
 Use this to see which modules the composed runtime knows about.
 
+This is more useful than reading `app.toml` by hand because it shows the validated composed view
+after dependency and runtime checks.
+
 ### `module inspect`
 
 ```bash
@@ -81,6 +101,13 @@ cargo run -p davenda-cli -- module inspect cms --config apps/shoppr/platform.dev
 ```
 
 Use this when you need module-level detail before changing app composition.
+
+Typical questions this command answers:
+
+- what routes does this module add?
+- what capabilities does it require?
+- what dependencies does it declare?
+- what jobs or admin/operator surfaces come with it?
 
 ### `module enable` And `module disable`
 
@@ -101,6 +128,16 @@ cargo run -p davenda-cli -- module disable media \
 ```
 
 That is the safe operator posture for composition-changing commands.
+
+After any module change, use the customer binary as the next check:
+
+```bash
+cd apps/shoppr
+cargo run -p shoppr -- validate
+```
+
+That proves the app still composes with its customer-owned templates, extensions, and linked
+backend.
 
 ## Read Next
 

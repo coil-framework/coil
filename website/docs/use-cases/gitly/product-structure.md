@@ -59,7 +59,7 @@ for (route, template) in gitly_page_routes() {
 With entries such as:
 
 ```rust
-("repo", "/octocorp/platform-ui", "gitly/repository")
+("repo", "/forgeflow/platform-ui", "gitly/repository")
 ```
 
 That is the real template tie-in. The template is not discovered by filename convention alone. The

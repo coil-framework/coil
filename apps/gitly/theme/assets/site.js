@@ -18,7 +18,7 @@ const GITLY = (() => {
         repositorySummary: "Repository summary"
       },
       footer: "Gitly is a customer-root Davenda demo showing CMS, custom API surfaces, linked Rust hooks, and runtime-installed WASM.",
-      pageTitles: { home: "Gitly · Home", explore: "Gitly · Explore", repo: "octocorp/platform-ui", issues: "Issues · octocorp/platform-ui", pulls: "Pull requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner", search: "Search · Gitly" },
+      pageTitles: { home: "Gitly · Home", explore: "Gitly · Explore", repo: "forgeflow/platform-ui", issues: "Issues · forgeflow/platform-ui", pulls: "Pull requests · forgeflow/platform-ui", actions: "Actions · forgeflow/platform-ui", org: "Forgeflow", profile: "Alex Mariner", search: "Search · Gitly" },
       copy: {
         "home.eyebrow": "Customer-root GitHub-style demo",
         "home.title": "One Davenda app can look like a forge, not just a storefront.",
@@ -70,7 +70,7 @@ const GITLY = (() => {
         "repo.code": "Code", "repo.issues": "Issues", "repo.pulls": "Pull requests", "repo.actions": "Actions",
         "issues.title": "Open issues",
         "issues.summary": "Static issue cards keep the GitHub-shaped navigation loop intact while staying honest that this demo does not ship a full issue tracker.",
-        "issues.caption": "Open issues for octocorp/platform-ui",
+        "issues.caption": "Open issues for forgeflow/platform-ui",
         "issues.head.issue": "Issue",
         "issues.head.owner": "Owner",
         "issues.head.labels": "Labels",
@@ -83,7 +83,7 @@ const GITLY = (() => {
         "issues.status.ready": "Ready for review",
         "pulls.title": "Open pull requests",
         "pulls.summary": "Static pull requests mimic GitHub review flow while keeping the demo honest about what is and is not implemented.",
-        "pulls.caption": "Open pull requests for octocorp/platform-ui",
+        "pulls.caption": "Open pull requests for forgeflow/platform-ui",
         "pulls.head.pr": "Pull request", "pulls.head.author": "Author", "pulls.head.checks": "Checks", "pulls.head.status": "Status",
         "pulls.status.review": "Review required",
         "pulls.status.passed": "Checks passed",
@@ -109,7 +109,7 @@ const GITLY = (() => {
         "actions.meta.running": "Running",
         "actions.meta.queued": "Queued",
         "actions.meta.total": "Total workflows",
-        "org.title": "OctoCorp organization",
+        "org.title": "Forgeflow organization",
         "org.summary": "A fictional product engineering group showing reusable branding, developer workflows, and docs operations on Davenda.",
         "org.repositories": "Highlighted repositories",
         "org.people": "Core maintainers",
@@ -159,7 +159,7 @@ const GITLY = (() => {
         repositorySummary: "Résumé du dépôt"
       },
       footer: "Gitly est une démo Davenda en espace client montrant le CMS, des API sur mesure, des hooks Rust liés et du WASM installé à l'exécution.",
-      pageTitles: { home: "Gitly · Accueil", explore: "Gitly · Explorer", repo: "octocorp/platform-ui", issues: "Issues · octocorp/platform-ui", pulls: "Pull requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner", search: "Recherche · Gitly" },
+      pageTitles: { home: "Gitly · Accueil", explore: "Gitly · Explorer", repo: "forgeflow/platform-ui", issues: "Issues · forgeflow/platform-ui", pulls: "Pull requests · forgeflow/platform-ui", actions: "Actions · forgeflow/platform-ui", org: "Forgeflow", profile: "Alex Mariner", search: "Recherche · Gitly" },
       copy: {
         "home.eyebrow": "Démo GitHub en espace client",
         "home.title": "Une application Davenda peut ressembler à une forge, pas seulement à une boutique.",
@@ -211,7 +211,7 @@ const GITLY = (() => {
         "repo.code": "Code", "repo.issues": "Issues", "repo.pulls": "Pull requests", "repo.actions": "Actions",
         "issues.title": "Issues ouvertes",
         "issues.summary": "Des cartes d’issues statiques gardent la navigation de style GitHub complète tout en restant honnêtes: cette démo ne fournit pas un véritable gestionnaire d’issues.",
-        "issues.caption": "Issues ouvertes pour octocorp/platform-ui",
+        "issues.caption": "Issues ouvertes pour forgeflow/platform-ui",
         "issues.head.issue": "Issue",
         "issues.head.owner": "Responsable",
         "issues.head.labels": "Labels",
@@ -224,7 +224,7 @@ const GITLY = (() => {
         "issues.status.ready": "Prêt pour revue",
         "pulls.title": "Pull requests ouvertes",
         "pulls.summary": "Des pull requests statiques reproduisent le flux de revue GitHub tout en restant honnêtes sur ce qui est réellement implémenté.",
-        "pulls.caption": "Pull requests ouvertes pour octocorp/platform-ui",
+        "pulls.caption": "Pull requests ouvertes pour forgeflow/platform-ui",
         "pulls.head.pr": "Pull request", "pulls.head.author": "Auteur", "pulls.head.checks": "Checks", "pulls.head.status": "Statut",
         "pulls.status.review": "Revue requise",
         "pulls.status.passed": "Checks validés",
@@ -250,7 +250,7 @@ const GITLY = (() => {
         "actions.meta.running": "En cours",
         "actions.meta.queued": "En file",
         "actions.meta.total": "Workflows au total",
-        "org.title": "Organisation OctoCorp",
+        "org.title": "Organisation Forgeflow",
         "org.summary": "Un groupe fictif d’ingénierie produit montrant image de marque réutilisable, flux développeur et opérations de documentation sur Davenda.",
         "org.repositories": "Dépôts mis en avant",
         "org.people": "Mainteneurs principaux",
@@ -300,7 +300,7 @@ const GITLY = (() => {
         repositorySummary: "Repository-Zusammenfassung"
       },
       footer: "Gitly ist eine Davenda-Demo im Customer-Root-Workspace mit CMS, eigenen APIs, eingebundenen Rust-Hooks und zur Laufzeit installiertem WASM.",
-      pageTitles: { home: "Gitly · Start", explore: "Gitly · Entdecken", repo: "octocorp/platform-ui", issues: "Issues · octocorp/platform-ui", pulls: "Pull Requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner", search: "Suche · Gitly" },
+      pageTitles: { home: "Gitly · Start", explore: "Gitly · Entdecken", repo: "forgeflow/platform-ui", issues: "Issues · forgeflow/platform-ui", pulls: "Pull Requests · forgeflow/platform-ui", actions: "Actions · forgeflow/platform-ui", org: "Forgeflow", profile: "Alex Mariner", search: "Suche · Gitly" },
       copy: {
         "home.eyebrow": "GitHub-ähnliche Customer-Root-Demo",
         "home.title": "Eine Davenda-Anwendung kann wie eine Forge aussehen, nicht nur wie ein Store.",
@@ -352,7 +352,7 @@ const GITLY = (() => {
         "repo.code": "Code", "repo.issues": "Issues", "repo.pulls": "Pull Requests", "repo.actions": "Actions",
         "issues.title": "Offene Issues",
         "issues.summary": "Statische Issue-Karten halten die GitHub-ähnliche Navigation vollständig, ohne einen echten Issue-Tracker vorzutäuschen.",
-        "issues.caption": "Offene Issues für octocorp/platform-ui",
+        "issues.caption": "Offene Issues für forgeflow/platform-ui",
         "issues.head.issue": "Issue",
         "issues.head.owner": "Verantwortlich",
         "issues.head.labels": "Labels",
@@ -365,7 +365,7 @@ const GITLY = (() => {
         "issues.status.ready": "Bereit für Review",
         "pulls.title": "Offene Pull Requests",
         "pulls.summary": "Statische Pull Requests bilden den GitHub-Review-Fluss nach und bleiben dabei ehrlich über den tatsächlichen Implementierungsumfang.",
-        "pulls.caption": "Offene Pull Requests für octocorp/platform-ui",
+        "pulls.caption": "Offene Pull Requests für forgeflow/platform-ui",
         "pulls.head.pr": "Pull Request", "pulls.head.author": "Autor", "pulls.head.checks": "Checks", "pulls.head.status": "Status",
         "pulls.status.review": "Review erforderlich",
         "pulls.status.passed": "Checks bestanden",
@@ -391,7 +391,7 @@ const GITLY = (() => {
         "actions.meta.running": "Läuft",
         "actions.meta.queued": "In Warteschlange",
         "actions.meta.total": "Workflows gesamt",
-        "org.title": "OctoCorp-Organisation",
+        "org.title": "Forgeflow-Organisation",
         "org.summary": "Ein fiktives Produktteam, das wiederverwendbares Branding, Entwicklerabläufe und Dokumentationsbetrieb auf Davenda zeigt.",
         "org.repositories": "Hervorgehobene Repositorys",
         "org.people": "Kernmaintainer",
@@ -428,18 +428,18 @@ const GITLY = (() => {
   const routes = {
     home: "",
     explore: "/explore",
-    repo: "/octocorp/platform-ui",
-    issues: "/octocorp/platform-ui/issues",
-    pulls: "/octocorp/platform-ui/pulls",
-    actions: "/octocorp/platform-ui/actions",
-    org: "/orgs/octocorp",
+    repo: "/forgeflow/platform-ui",
+    issues: "/forgeflow/platform-ui/issues",
+    pulls: "/forgeflow/platform-ui/pulls",
+    actions: "/forgeflow/platform-ui/actions",
+    org: "/orgs/forgeflow",
     profile: "/alexmariner",
     search: "/search"
   };
 
   const searchIndex = [
-    { type: "repo", route: "repo", title: "octocorp/platform-ui", summaryKey: "search.result.repo", terms: ["platform", "repo", "ui", "rust", "davenda", "accessibility", "multilingual"] },
-    { type: "docs", route: "explore", title: "octocorp/docs-portal", summaryKey: "search.result.docs", terms: ["docs", "documentation", "cms", "markdown", "policy", "editorial"] },
+    { type: "repo", route: "repo", title: "forgeflow/platform-ui", summaryKey: "search.result.repo", terms: ["platform", "repo", "ui", "rust", "davenda", "accessibility", "multilingual"] },
+    { type: "docs", route: "explore", title: "forgeflow/docs-portal", summaryKey: "search.result.docs", terms: ["docs", "documentation", "cms", "markdown", "policy", "editorial"] },
     { type: "person", route: "profile", title: "alexmariner", summaryKey: "search.result.profile", terms: ["alex", "profile", "accessibility", "language", "workflow"] },
     { type: "actions", route: "actions", title: "github.actions.refresh", summaryKey: "search.result.actions", terms: ["actions", "scheduler", "wasm", "workflow", "automation"] }
   ];

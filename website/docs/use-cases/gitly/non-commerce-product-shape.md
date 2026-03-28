@@ -13,11 +13,11 @@ The customer app owns routes such as:
 
 - `/`
 - `/explore`
-- `/octocorp/platform-ui`
-- `/octocorp/platform-ui/issues`
-- `/octocorp/platform-ui/pulls`
-- `/octocorp/platform-ui/actions`
-- `/orgs/octocorp`
+- `/forgeflow/platform-ui`
+- `/forgeflow/platform-ui/issues`
+- `/forgeflow/platform-ui/pulls`
+- `/forgeflow/platform-ui/actions`
+- `/orgs/forgeflow`
 - `/alexmariner`
 - `/search`
 

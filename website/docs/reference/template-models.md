@@ -119,8 +119,8 @@ And the page-route table makes the template mapping explicit:
 let pages = [
     ("home", "", "gitly/home"),
     ("explore", "/explore", "gitly/explore"),
-    ("repo", "/octocorp/platform-ui", "gitly/repository"),
-    ("issues", "/octocorp/platform-ui/issues", "gitly/issues"),
+    ("repo", "/forgeflow/platform-ui", "gitly/repository"),
+    ("issues", "/forgeflow/platform-ui/issues", "gitly/issues"),
 ];
 ```
 

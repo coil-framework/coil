@@ -35,6 +35,25 @@ That is the whole distinction:
 - linked Rust is part of the app
 - WASM is an installed guest package
 
+## The Practical Choice
+
+If you are a customer developer, ask one question first:
+
+> Does this logic ship with my app and evolve with my product policy, or does it need to be a
+> separately installed bounded guest?
+
+Use linked Rust if the answer is:
+
+- “this is my product logic”
+- “this needs typed facades”
+- “this should change in the same release as my app”
+
+Use WASM if the answer is:
+
+- “this should be installable or removable without relinking the app”
+- “this should live behind explicit grants”
+- “this should stay inside a bounded slot or host API contract”
+
 ## What Linked Customer Rust Is
 
 Linked customer Rust is compiled into the customer workspace and shipped with the app binary.
@@ -67,9 +86,48 @@ That path is for:
 
 Linked Rust is registered by the customer composition root and compiled into the binary.
 
+Minimal flow:
+
+```rust
+// customer backend crate
+pub fn plugin() -> ShopprBackend {
+    ShopprBackend::default()
+}
+
+// customer binary
+davenda_all::builder()
+    .with_customer_plugin(shoppr_backend::plugin())
+    .run_from_env()
+```
+
 ### WASM
 
 WASM is declared in `app.toml`, described by `package.toml`, and installed into explicit extension points at runtime.
+
+Minimal flow:
+
+```toml
+[[extensions]]
+id = "shoppr-waitlist-tools"
+package_version = "0.1.0"
+artifact_sha256 = "..."
+customer_app_id = "shoppr"
+
+[[extensions.handlers]]
+id = "home.waitlist.banner"
+grants = []
+```
+
+plus:
+
+```toml
+[[handlers]]
+id = "home.waitlist.banner"
+export = "exports.home_waitlist_banner"
+point = "render-hook"
+target = "cms.page.render"
+grants = []
+```
 
 ## Instance Model And Lifecycle
 
@@ -133,9 +191,22 @@ surface.
 
 Package linked code as part of the customer workspace.
 
+That usually means:
+
+- one backend crate
+- one customer binary registration point
+- normal Cargo dependencies
+
 ### WASM
 
 Package runtime-installed behaviour with a package manifest, handlers, built artifact, and a pinned checksum in `app.toml`.
+
+That usually means:
+
+- one `extensions/<id>/package.toml`
+- one `.wasm` artifact
+- one `[[extensions]]` install block in `app.toml`
+- one or more approved handler grants
 
 ## When To Choose Which
 

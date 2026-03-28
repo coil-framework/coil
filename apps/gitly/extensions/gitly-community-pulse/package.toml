@@ -1,6 +1,6 @@
 publisher = "gitly-demo"
 artifact = "artifacts/gitly-community-pulse.wasm"
-artifact_sha256 = "ef2b0bc15aa0baf178df23d3671bf0a2914c618e394f985441e27a5fdd7c89d7"
+artifact_sha256 = "e105111967f74d0581d1d1f1097c4549fcfa858754ef8951f134f42ce9ca69c0"
 source_wat = "gitly-community-pulse.wat"
 
 [manifest]

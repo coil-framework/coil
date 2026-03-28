@@ -197,7 +197,7 @@ The goal is to close the biggest trust gaps first:
 
 ## P1: Demo And Public-Surface Integrity
 
-### 8. Remove all remaining `Octohub`/`OCTOHUB` names from Gitly
+### 8. Remove all remaining legacy Gitly names from Gitly
 
 - Priority: `P1`
 - Work types: `Code`, `Docs`, `Demo`
@@ -210,7 +210,7 @@ The goal is to close the biggest trust gaps first:
 - Desired outcome:
   Public surface is `Gitly` only.
 - Acceptance criteria:
-  - no public docs or default env names contain `Octohub`
+  - no public docs or default env names contain legacy Gitly branding
   - compatibility fallbacks, if retained, are documented as legacy-only
 
 ### 9. Fix Shoppr README/site walkthrough drift
@@ -386,7 +386,7 @@ The goal is to close the biggest trust gaps first:
 
 ### Phase 4
 
-- `P1-8` remove remaining Octohub names
+- `P1-8` remove remaining legacy Gitly names
 - `P1-9` fix Shoppr walkthrough drift
 - `P1-10` clarify Gitly multilingual role
 - `P1-11` real runtime job demo

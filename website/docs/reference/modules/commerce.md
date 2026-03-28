@@ -129,6 +129,13 @@ Concrete example:
 Commerce still owns cart, checkout, and order state. The customer app owns the product-detail page,
 copy, merchandising layout, and progressive enhancement around that workflow.
 
+The practical sequence is:
+
+1. enable `commerce`
+2. provide storefront templates under `templates/commerce/`
+3. add linked checkout hooks for customer-owned order policy
+4. add verified webhook hooks or payment-provider add-ons where needed
+
 ## Where To See It
 
 Shoppr is the canonical example:

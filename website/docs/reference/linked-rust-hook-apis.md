@@ -37,6 +37,45 @@ Use this page when you want to answer:
 - which facades hooks can call
 - where Shoppr and Gitly demonstrate the pattern
 
+## A Complete Plugin
+
+The smallest useful linked backend is not just a trait name. It is a plugin type plus explicit
+hook registration:
+
+```rust
+use davenda_customer_sdk::{
+    BackendError, CheckoutHooks, CustomerBackendPlugin, CustomerHookRegistry,
+    CustomerPluginDescriptor, VerifiedWebhookHooks,
+};
+use std::sync::Arc;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShopprBackend;
+
+impl CustomerBackendPlugin for ShopprBackend {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "shoppr-backend",
+            "Shoppr Linked Backend",
+            env!("CARGO_PKG_VERSION"),
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        let hooks = Arc::new(*self);
+        registry.register_checkout_hooks(hooks.clone())?;
+        registry.register_verified_webhook_hooks(hooks)?;
+        Ok(())
+    }
+}
+```
+
+That is the real contract:
+
+- the plugin chooses its stable identity
+- the plugin explicitly registers the hook families it supports
+- the runtime invokes only those registered hooks
+
 ## The Core Plugin Contract
 
 The top-level trait is `CustomerBackendPlugin`.
@@ -76,8 +115,16 @@ The registry currently supports four hook families:
 - `VerifiedWebhook`
 - `VerifiedWebhookAssets`
 
-Those hook kinds are exposed as `RegisteredHookKind` in
-`crates/davenda-customer-sdk/src/registry.rs`.
+Use them like this:
+
+- `Checkout`
+  - order review, loyalty, fraud, or customer-specific checkout policy
+- `CmsPagePublish`
+  - customer-owned editorial rules before publication
+- `VerifiedWebhook`
+  - post-verification webhook policy
+- `VerifiedWebhookAssets`
+  - post-verification webhook policy that also needs managed asset publication or inspection
 
 ## Checkout Hooks
 
@@ -106,6 +153,31 @@ Minimal mental model for checkout hooks:
 3. hook uses stable facades if needed
 4. hook returns a bounded decision
 
+The Shoppr wrapper around the real loyalty backend is small on purpose:
+
+```rust
+impl CheckoutHooks for ShopprBackend {
+    fn review_order(
+        &self,
+        ctx: &RequestContext,
+        order: &OrderDraft,
+        commerce: &dyn CommerceFacade,
+        auth: &dyn AuthFacade,
+        audit: &dyn AuditFacade,
+    ) -> Result<OrderReviewDecision, BackendError> {
+        self.inner.review_order(ctx, order, commerce, auth, audit)
+    }
+}
+```
+
+What a checkout hook can actually do:
+
+- read the order draft
+- inspect products through `CommerceFacade`
+- ask auth questions through `AuthFacade`
+- write audit entries through `AuditFacade`
+- return `allow`, `reject`, or an adjusted review result
+
 That is much safer than letting customer code reach directly into runtime request internals.
 
 ## CMS Publish Hooks
@@ -120,6 +192,47 @@ Gitly is the clearer example here:
 
 Gitly uses this hook to keep its README-style content honest by requiring accessibility guidance in
 published content.
+
+The real shape is:
+
+```rust
+impl CmsHooks for GitlyBackend {
+    fn validate_page_publish(
+        &self,
+        _ctx: &RequestContext,
+        draft: &CmsPageDraft,
+        _repositories: &dyn RepositoryFacade,
+        audit: &dyn AuditFacade,
+    ) -> Result<CmsPublishDecision, BackendError> {
+        if draft.slug.contains("readme")
+            && !draft.body_html.to_ascii_lowercase().contains("accessibility")
+        {
+            return Ok(CmsPublishDecision::reject(
+                "gitly.cms.readme.accessibility_required",
+                "README-style documentation pages must mention accessibility guidance before they can be published.",
+            ));
+        }
+
+        audit.record(
+            AuditEntry::new(
+                "gitly.cms.publish.validated",
+                "cms.page",
+                draft.page_id.clone(),
+                "allowed",
+            )
+        )?;
+
+        Ok(CmsPublishDecision::Allow)
+    }
+}
+```
+
+That is the intended pattern:
+
+- inspect the draft
+- apply a customer-owned rule
+- record audit evidence
+- return an explicit publish decision
 
 That is a good example of linked Rust doing first-party product policy, not generic platform work.
 
@@ -152,6 +265,32 @@ These hooks are where multiple facades come together:
 - managed assets
 
 That makes them the best example of "customer-owned logic through stable runtime contracts."
+
+The Shoppr registration point is:
+
+```rust
+impl VerifiedWebhookHooks for ShopprBackend {
+    fn handle_verified_webhook(
+        &self,
+        ctx: &RequestContext,
+        webhook: &VerifiedWebhook,
+        http: &dyn OutboundHttpFacade,
+        jobs: &dyn JobsFacade,
+        repositories: &dyn RepositoryFacade,
+        audit: &dyn AuditFacade,
+    ) -> Result<WebhookHandlingResult, BackendError> {
+        self.inner
+            .handle_verified_webhook(ctx, webhook, http, jobs, repositories, audit)
+    }
+}
+```
+
+Use verified webhook hooks when you need to:
+
+- call an approved upstream after a verified payment or provider event
+- enqueue follow-up background work
+- update repository-backed records
+- write audit evidence about the decision
 
 ## Available Facades
 
@@ -187,6 +326,47 @@ The exact facade methods vary by family, but the pattern stays the same:
 
 - customer code uses typed SDK services
 - the runtime decides how those services are actually implemented
+
+The most practical repository helpers already cover:
+
+- CMS pages
+- CMS navigation
+- CMS redirects
+- catalog products and collections
+- commerce order lookup by id or payment reference
+
+That means a customer backend can often stay entirely inside the SDK surface without dropping down
+into runtime internals.
+
+## How To Add A Linked Backend Crate
+
+The shortest real sequence is:
+
+1. create a customer crate such as `crates/shoppr-backend`
+2. implement `CustomerBackendPlugin`
+3. implement one or more hook traits on the same type
+4. register `plugin()` from the customer binary or app bootstrap
+
+Minimal entry point:
+
+```rust
+pub fn plugin() -> ShopprBackend {
+    ShopprBackend::default()
+}
+```
+
+Minimal binary composition:
+
+```rust
+fn main() -> anyhow::Result<()> {
+    davenda_all::builder()
+        .with_customer_plugin(shoppr_backend::plugin())
+        .run_from_env()
+}
+```
+
+That is the whole model. There is no extra sidecar HTTP API and no need to patch core Davenda
+crates.
 
 The extension traits in `RepositoryFacadeExt` are also worth reading because they show the current
 stable repository surfaces directly:
@@ -243,12 +423,6 @@ Use WASM when the logic is:
 
 ## Full Implementation
 
-Core SDK boundary:
-
-- `crates/davenda-customer-sdk/src/registry.rs`
-- `crates/davenda-customer-sdk/src/hooks.rs`
-- `crates/davenda-customer-sdk/src/facade.rs`
-
 Canonical Shoppr implementation:
 
 - `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
@@ -257,6 +431,9 @@ Canonical Shoppr implementation:
 - `apps/shoppr/crates/shoppr-bin/src/main.rs`
 
 Canonical Gitly implementation:
+
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
+- `apps/gitly/crates/gitly-app/src/lib.rs`
 
 - `apps/gitly/crates/gitly-backend/src/lib.rs`
 - `apps/gitly/crates/gitly-app/src/lib.rs`

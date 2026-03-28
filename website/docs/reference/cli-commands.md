@@ -14,6 +14,24 @@ Use this page when you want to answer:
 - which commands are safe to expose in docs and automation
 - why there is a customer binary at all
 
+## One Platform, Two Binaries
+
+A new Davenda developer should treat the split like this:
+
+- `platform`
+  - generic operator and infrastructure commands that work across customer apps
+- `shoppr` or `gitly`
+  - customer-app-shaped commands that know the current app’s templates, extensions, linked backend, and bootstrap
+
+The split exists because Davenda has two audiences:
+
+- platform operators and maintainers
+- customer developers building one concrete product
+
+If you are inside a customer app workspace, start with the customer binary first. Use `platform`
+when you need deeper operator workflows such as import, cutover, cache, TLS, jobs, or auth
+inspection.
+
 ## The Relationship Between The Two CLIs
 
 There are two binaries because they solve different problems.
@@ -66,6 +84,20 @@ The baseline command families are:
 - `assets publish`
 - `import run`
 - `import cutover`
+
+The fastest way to make the split real is to run one command from each layer:
+
+```bash
+# app-shaped
+cd apps/shoppr
+cargo run -p shoppr -- validate
+
+# platform-shaped
+cargo run -p davenda-cli -- jobs status --config apps/shoppr/platform.dev.toml
+```
+
+The first proves Shoppr can compose its own runtime. The second tells you what the platform job
+system is doing for that app.
 
 ## Auth Commands
 
@@ -229,6 +261,18 @@ Gitly commands:
 
 Use the customer binary when you want the actual app-shaped lifecycle a third-party developer
 should run.
+
+## The Practical Rule
+
+Run commands in this order when you are new to a customer app:
+
+1. `shoppr validate` or `gitly validate`
+2. `shoppr describe` or `gitly describe`
+3. `shoppr serve` or `gitly serve`
+4. only then reach for `platform ...` if you need deeper operator work
+
+That order matters because the customer binary proves the app can actually compose before you start
+running lower-level platform commands against it.
 
 ## Practical Split
 

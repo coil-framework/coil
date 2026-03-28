@@ -30,6 +30,45 @@ Use this page when you want to answer:
 - what the runtime already supports today
 - how to build a real package without reverse-engineering core crates
 
+## A Real End-To-End Host API Contract
+
+Every WASM host interaction has four separate contracts:
+
+1. the customer app exposes a slot
+2. the package declares a handler for that slot
+3. the package requests host grants
+4. the customer app approves those grants during installation
+
+That means the `.wasm` file alone is never enough.
+
+The smallest real pair looks like this:
+
+```toml
+[[handlers]]
+id = "community-pulse"
+export = "exports.community_pulse"
+point = "api"
+target = "/api/github/pulse"
+grants = []
+```
+
+and then:
+
+```toml
+[[extensions]]
+id = "gitly-community-pulse"
+package_version = "0.1.0"
+artifact_sha256 = "..."
+customer_app_id = "gitly"
+
+[[extensions.handlers]]
+id = "community-pulse"
+grants = []
+```
+
+The second block is the approval boundary. It is where the customer app decides that the package is
+actually installed and what grants it is allowed to keep.
+
 ## Start With A Full End-To-End Example
 
 Gitly’s API extension is a complete real example:
@@ -103,6 +142,121 @@ Current families include:
 If a package does not have the grant, the host should fail closed.
 
 That is the main point of this model: a WASM package is not a second backend. It is a guest asking the host for a bounded operation.
+
+## Grant Families In Practice
+
+The easiest way to understand the host API is to map each grant family to a real use case.
+
+### `DataRead { resource = ... }`
+
+Use this when the package needs read-only access to a named host-owned repository surface.
+
+Typical use:
+
+- read a repository summary
+- read a CMS page record
+- read a catalog item for a small UI fragment
+
+### `DataWrite { resource = ... }`
+
+Use this when the package needs to update a bounded repository-backed record through the host.
+
+Typical use:
+
+- write a computed status record
+- store a small host-owned extension result
+
+Do not treat this as arbitrary database ownership.
+
+### `AuthCheck`, `AuthList`, `AuthLookup`, `AuthTupleWrite`
+
+These let the package ask the host auth model questions.
+
+Typical use:
+
+- `AuthCheck`
+  - can the current actor perform this action?
+- `AuthLookup`
+  - which tuples currently apply?
+- `AuthTupleWrite`
+  - add or remove a bounded auth relationship through the host
+
+### `StorageRead` and `StorageWrite`
+
+These are scoped by storage class, not raw filesystem access.
+
+The important classes today are:
+
+- `public_upload`
+- `private_shared`
+- `local_only_sensitive`
+- `public_asset`
+
+Use them when the package needs the host to inspect or publish a bounded file.
+
+### `RenderFragment { slot = ... }`
+
+This is the classic render-hook grant.
+
+Use it for:
+
+- banners
+- badges
+- sidebar panels
+- contextual HTML fragments
+
+### `MetadataWrite { kind = ... }`
+
+This lets a package ask the host to store bounded metadata such as:
+
+- `json_ld`
+- `sitemap_entry`
+- `translation`
+- `seo_head`
+
+Use it when a package contributes SEO or translation-adjacent metadata, not when it is trying to
+own a whole persistence model.
+
+### `CacheHintWrite`
+
+This lets a package hint to the host how a response should be cached.
+
+It is a hint, not raw cache ownership.
+
+### `OutboundHttp { integration = ... }`
+
+Use this when a package needs to call one approved named integration.
+
+Example request:
+
+```toml
+grants = ["http.outbound:github_api"]
+```
+
+That does not mean “open the network”. It means “the host may allow calls through the configured
+`github_api` integration”.
+
+### `SecretRead { secret = ... }`
+
+Use this when the package needs one specific runtime-bound secret.
+
+Example request:
+
+```toml
+grants = ["secret.read:github_webhook_token"]
+```
+
+### `EnqueueJob { queue = ... }`
+
+Use this when the package needs to ask the host job system to enqueue follow-up work.
+
+Example request:
+
+```toml
+grants = ["job.enqueue:default"]
+```
+
+That gives the package bounded job submission. It does not give it scheduler ownership.
 
 ## What You Can Build Today
 
@@ -182,6 +336,18 @@ contracts and installed handlers.
 
 The important boundary is that packages do not start their own scheduler. They plug into a host
 job system the customer app already composed.
+
+## Lifecycle Expectations
+
+Write packages as if each invocation is isolated and host-governed.
+
+That means:
+
+- do not depend on process-global mutable state
+- do not assume one warm singleton stays alive forever
+- do not treat the package as if it owns the whole request lifecycle
+
+The stable contract is handler invocation plus grants, not a particular in-memory hosting detail.
 
 ## Render Hooks
 

@@ -103,6 +103,13 @@ Concrete example:
 Ops still owns the operator workflows and background jobs. The customer app owns the domain-specific
 guidance and summary panels that make those workflows usable.
 
+The practical sequence is:
+
+1. enable `admin` and `ops`
+2. expose the shared operator routes
+3. add customer dashboards or report widgets inside the admin shell
+4. connect customer-specific search, recovery, or reporting guidance without forking the base workflows
+
 ## Where To See It
 
 Shoppr enables `ops` in both `apps/shoppr/app.toml` and `apps/shoppr/platform.dev.toml` and uses

@@ -133,6 +133,13 @@ That is a real customer-app extension point in practice:
 - the customer app owns the rendered page shape
 - the customer app can add fragments or render-hook output without forking the module
 
+The practical sequence is:
+
+1. enable `cms`
+2. provide `templates/cms/*.html` and `templates/pages/*.html`
+3. optionally register a linked CMS publish hook
+4. optionally install a render hook against `cms.page.render`
+
 ## Where To See It
 
 Shoppr is the canonical example:

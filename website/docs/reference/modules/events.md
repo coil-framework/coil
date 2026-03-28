@@ -94,6 +94,13 @@ Concrete example:
 The events module still owns booking lifecycle, waitlist promotion, and reminders. The customer app
 owns the public event presentation and the surrounding product story.
 
+The practical sequence is:
+
+1. enable `events`
+2. provide public and admin event templates
+3. connect events to commerce or memberships if bookings need payment or entitlement logic
+4. use linked Rust or bounded render hooks for customer-specific booking policy and presentation
+
 ## Where To See It
 
 Shoppr is the main example because it enables `events` alongside commerce and memberships in

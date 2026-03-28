@@ -126,9 +126,6 @@ impl GitlyWorkspace {
         if let Ok(app_root) = std::env::var("GITLY_APP_ROOT") {
             return Self::at(app_root);
         }
-        if let Ok(app_root) = std::env::var("OCTOHUB_APP_ROOT") {
-            return Self::at(app_root);
-        }
         if let Some(app_root) = discover_workspace_root(std::env::current_dir().ok().as_deref()) {
             return Self::at(app_root);
         }
@@ -575,11 +572,11 @@ fn gitly_page_routes() -> Vec<(RouteDefinition, &'static str)> {
     let pages = [
         ("home", "", "gitly/home"),
         ("explore", "/explore", "gitly/explore"),
-        ("repo", "/octocorp/platform-ui", "gitly/repository"),
-        ("issues", "/octocorp/platform-ui/issues", "gitly/issues"),
-        ("pulls", "/octocorp/platform-ui/pulls", "gitly/pulls"),
-        ("actions", "/octocorp/platform-ui/actions", "gitly/actions"),
-        ("org", "/orgs/octocorp", "gitly/organization"),
+        ("repo", "/forgeflow/platform-ui", "gitly/repository"),
+        ("issues", "/forgeflow/platform-ui/issues", "gitly/issues"),
+        ("pulls", "/forgeflow/platform-ui/pulls", "gitly/pulls"),
+        ("actions", "/forgeflow/platform-ui/actions", "gitly/actions"),
+        ("org", "/orgs/forgeflow", "gitly/organization"),
         ("user", "/alexmariner", "gitly/profile"),
         ("search", "/search", "gitly/search"),
     ];

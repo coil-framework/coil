@@ -31,11 +31,11 @@ Then open:
 
 - `http://gitly.localhost:58080/`
 - `http://gitly.localhost:58080/explore`
-- `http://gitly.localhost:58080/octocorp/platform-ui`
-- `http://gitly.localhost:58080/octocorp/platform-ui/issues`
-- `http://gitly.localhost:58080/octocorp/platform-ui/pulls`
-- `http://gitly.localhost:58080/octocorp/platform-ui/actions`
-- `http://gitly.localhost:58080/orgs/octocorp`
+- `http://gitly.localhost:58080/forgeflow/platform-ui`
+- `http://gitly.localhost:58080/forgeflow/platform-ui/issues`
+- `http://gitly.localhost:58080/forgeflow/platform-ui/pulls`
+- `http://gitly.localhost:58080/forgeflow/platform-ui/actions`
+- `http://gitly.localhost:58080/orgs/forgeflow`
 - `http://gitly.localhost:58080/alexmariner`
 - `http://gitly.localhost:58080/fr`
 - `http://gitly.localhost:58080/de`

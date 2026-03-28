@@ -600,28 +600,31 @@ fn locale_switches_model(
     let route_name = execution.route.route_name.as_str();
     let params = &execution.route.params;
     let current_locale = execution.locale.as_str();
+    let route_localized = route_uses_localized_paths(plan, route_name);
 
     plan.config
         .supported_locales_for_site(site_id)
         .iter()
         .map(|locale| {
+            let href = if route_localized || locale == current_locale {
+                route_link(
+                    plan,
+                    site_id,
+                    route_name,
+                    params,
+                    Some(locale.as_str()),
+                    &locale_root_fallback_path(&plan.config, site_id, locale.as_str()),
+                )
+            } else {
+                locale_root_fallback_path(&plan.config, site_id, locale.as_str())
+            };
             RenderModel::new()
                 .with_value("id", RenderValue::text(locale.clone()))?
                 .with_value(
                     "label",
                     RenderValue::text(locale_display_label(locale.as_str())),
                 )?
-                .with_value(
-                    "href",
-                    RenderValue::text(route_link(
-                        plan,
-                        site_id,
-                        route_name,
-                        params,
-                        Some(locale.as_str()),
-                        &execution.path,
-                    )),
-                )?
+                .with_value("href", RenderValue::text(href))?
                 .with_bool("active", locale == current_locale)
         })
         .collect()
@@ -636,6 +639,7 @@ fn site_switches_model(
     let current_site_id = execution.site_id.as_deref();
     let current_locale = execution.locale.as_str();
     let scheme = execution.trace.transport_scheme.as_str();
+    let route_localized = route_uses_localized_paths(plan, route_name);
 
     plan.config
         .sites
@@ -654,17 +658,36 @@ fn site_switches_model(
                 site.canonical_host.as_str(),
                 execution.host.as_str(),
             );
-            let href = plan
-                .http
-                .path_for_site(
-                    &plan.config,
-                    Some(site.id.as_str()),
-                    route_name,
-                    params,
-                    Some(target_locale),
+            let href = if route_localized || current_site_id == Some(site.id.as_str()) {
+                plan.http
+                    .path_for_site(
+                        &plan.config,
+                        Some(site.id.as_str()),
+                        route_name,
+                        params,
+                        Some(target_locale),
+                    )
+                    .map(|path| format!("{scheme}://{target_host}{path}"))
+                    .unwrap_or_else(|_| {
+                        format!(
+                            "{scheme}://{target_host}{}",
+                            locale_root_fallback_path(
+                                &plan.config,
+                                Some(site.id.as_str()),
+                                target_locale,
+                            )
+                        )
+                    })
+            } else {
+                format!(
+                    "{scheme}://{target_host}{}",
+                    locale_root_fallback_path(
+                        &plan.config,
+                        Some(site.id.as_str()),
+                        target_locale,
+                    )
                 )
-                .map(|path| format!("{scheme}://{target_host}{path}"))
-                .unwrap_or_else(|_| format!("{scheme}://{target_host}{}", execution.path));
+            };
 
             RenderModel::new()
                 .with_value("id", RenderValue::text(site.id.clone()))?
@@ -676,6 +699,15 @@ fn site_switches_model(
         .collect()
 }
 
+fn route_uses_localized_paths(plan: &RuntimePlan, route_name: &str) -> bool {
+    plan.http
+        .routes
+        .iter()
+        .find(|route| route.name == route_name)
+        .map(|route| route.locale_policy == LocalePolicy::Localized)
+        .unwrap_or(false)
+}
+
 fn locale_display_label(locale: &str) -> &'static str {
     match locale {
         "en-GB" => "English",
@@ -683,6 +715,23 @@ fn locale_display_label(locale: &str) -> &'static str {
         "pl-PL" => "Polski",
         "de-DE" => "Deutsch",
         _ => "Locale",
+    }
+}
+
+fn locale_root_fallback_path(
+    config: &PlatformConfig,
+    site_id: Option<&str>,
+    locale: &str,
+) -> String {
+    let localized_routes = config.localized_routes_for_site(site_id);
+    if !localized_routes {
+        return "/".to_string();
+    }
+
+    if locale == config.default_locale_for_site(site_id) {
+        "/".to_string()
+    } else {
+        format!("/{}", locale.trim_matches('/'))
     }
 }
 

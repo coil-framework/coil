@@ -2,166 +2,184 @@
 title: Shoppr Overview
 ---
 
-Shoppr is the reference Davenda customer app for ecommerce. It is useful because it does not stop
-at a catalog grid or a checkout page. The app shows how one customer project owns the storefront,
-theme, routes, admin surfaces, linked Rust backend, and runtime-installed WASM without becoming a
-fork of the platform.
+Shoppr is the main Davenda commerce teaching app. It is useful because it shows the whole customer
+product boundary in one place:
 
-## Start With The Customer App Boundary
+- manifest and config
+- linked Rust backend
+- runtime-installed WASM
+- storefront templates
+- account and memberships
+- admin and operator pages
+- customer-owned lifecycle commands
 
-The app boundary lives in `apps/shoppr/` and is easiest to understand by reading these files in
-order:
+If you want to understand how Davenda is meant to feel in a real ecommerce app, start here.
+
+## What Shoppr Is
+
+The checked-in app lives under `apps/shoppr/`. Read these files first:
 
 1. `apps/shoppr/app.toml`
-   - declares the customer app identity
-   - installs official modules such as `cms`, `commerce`, `memberships`, `events`, `admin`, and
-     `ops`
-   - pins the active theme and installed WASM package
-   - declares the three Shoppr sites and their supported locales
 2. `apps/shoppr/platform.dev.toml`
-   - supplies the runtime settings for local HTTP, sessions, Redis, Postgres, object storage,
-     jobs, and asset publication
-   - shows that the customer app owns site config and localized-route policy in config as well as
-     in the manifest
 3. `apps/shoppr/crates/shoppr-app/src/lib.rs`
-   - is the customer composition root
-   - loads the manifest and config
-   - resolves official modules
-   - loads installed extensions
-   - injects the linked customer backend plugin
-   - builds the customer-root runtime plan
 4. `apps/shoppr/crates/shoppr-bin/src/main.rs`
-   - turns the customer app into an actual binary with `describe`, `validate`, `migrate`,
-     `assets`, `serve`, `up`, and linked-backend inspection commands
 
-That sequence is the main lesson: Shoppr is not just a template folder. It is a full customer app
-that owns its own lifecycle.
+That sequence answers four different questions:
 
-## What Shoppr Teaches About Ecommerce
+- what the product is
+- how the local runtime is configured
+- how the customer runtime plan is composed
+- how the customer binary owns validate, migrate, assets, and serve commands
 
-Shoppr is a good teaching app because it keeps the important ecommerce concerns close together:
+## What Shoppr Enables
+
+The app manifest enables a broad but realistic store stack:
+
+- `cms`
+- `media`
+- `commerce`
+- `commerce-payments-stripe`
+- `memberships`
+- `events`
+- `admin`
+- `ops`
+
+That list is not decorative. It tells you immediately what product batteries Shoppr is teaching:
+
+- editorial pages and redirects
+- managed assets
+- catalog and checkout
+- Stripe handoff and webhook reconciliation
+- recurring memberships
+- event flows
+- operator shell and ops surfaces
+
+## How The Workspace Is Structured
+
+Shoppr uses a customer-root workspace, not a single crate.
+
+Important folders:
+
+- `apps/shoppr/crates/shoppr-app`
+  - customer composition root
+  - loads manifest, config, auth package, official modules, and extensions
+- `apps/shoppr/crates/shoppr-bin`
+  - customer-owned CLI and server entrypoint
+- `apps/shoppr/crates/shoppr-backend`
+  - Davenda-facing linked plugin wrapper
+- `apps/shoppr/backend/shoppr-loyalty-backend`
+  - customer domain logic used by the linked plugin
+- `apps/shoppr/extensions`
+  - runtime-installed WASM packages
+- `apps/shoppr/templates`
+  - storefront, account, CMS, admin, and operator templates
+- `apps/shoppr/theme`
+  - CSS, JS, SVG, and tokens
+
+That structure is the first big lesson. Davenda customer apps are real products with their own
+workspace, not just a folder full of overrides.
+
+## What To Read In The App
+
+### Storefront and merchandising
+
+Read:
 
 - `apps/shoppr/templates/pages/home.html`
-  - the public home page is not just editorial copy; it routes the customer toward catalog,
-    collections, cart, account, admin, and dev tools
-  - it also exposes the multi-site story in the page itself
 - `apps/shoppr/templates/commerce/catalog.html`
-  - shows the main browse loop for the storefront
-  - collection-first browsing and product-detail handoff are explicit in the markup
+- `apps/shoppr/templates/commerce/collection-detail.html`
 - `apps/shoppr/templates/commerce/product-detail.html`
-  - shows product detail as the decision point before cart and checkout
-  - includes interactive gallery, accordion, and size-picker hooks layered on top of HTML-first
-    markup
-- `apps/shoppr/templates/commerce/cart.html`,
-  `apps/shoppr/templates/commerce/checkout.html`, and
-  `apps/shoppr/templates/commerce/checkout-confirmation.html`
-  - show the public commerce journey all the way into checkout and confirmation
-- `apps/shoppr/templates/account/` and `apps/shoppr/templates/memberships/`
-  - show how customer continuity continues after checkout
-- `apps/shoppr/templates/admin/`, `apps/shoppr/templates/cms/`, and
-  `apps/shoppr/templates/commerce/orders.html`
-  - show that a believable store needs operator surfaces alongside the public storefront
 
-Shoppr therefore teaches ecommerce through the app itself rather than through a separate tutorial
-domain model.
+These files show how the customer app owns the browse loop directly.
 
-## Sites, Locales, And Shared Ownership
+### Cart, checkout, and confirmation
 
-Shoppr is also the main use-case guide for Davenda's site model.
+Read:
 
-`apps/shoppr/app.toml` defines three sites:
+- `apps/shoppr/templates/commerce/cart.html`
+- `apps/shoppr/templates/commerce/checkout.html`
+- `apps/shoppr/templates/commerce/checkout-confirmation.html`
 
-- `shoppr-uk`
-- `shoppr-fr`
-- `shoppr-pl`
+These files show the public checkout path without pretending the runtime is a generic SPA shell.
 
-Each site declares:
+### Account, memberships, and order continuity
 
-- a canonical domain
-- additional domains
-- a default locale
-- the locales that remain valid on that site
+Read:
 
-`apps/shoppr/platform.dev.toml` repeats the same shape for runtime config. This is important
-because it shows the difference between:
+- `apps/shoppr/templates/pages/account.html`
+- `apps/shoppr/templates/account/dashboard.html`
+- `apps/shoppr/templates/account/orders.html`
+- `apps/shoppr/templates/memberships/account.html`
 
-- app manifest ownership
-  - what the customer app claims to be
-- runtime config ownership
-  - how the active deployment resolves those sites locally
+These files show what the customer sees after checkout and provider return.
 
-On the frontend, the multi-site story is not hidden:
+### Admin and operations
 
-- `apps/shoppr/templates/pages/home.html`
-  renders the three-market cards
-- `apps/shoppr/theme/assets/site.js`
-  renders the market and locale switcher panels based on the current host and pathname
+Read:
 
-The point is not just that Davenda can route multiple sites. The point is that the customer app
-owns the site policy directly.
+- `apps/shoppr/templates/admin/dashboard.html`
+- `apps/shoppr/templates/admin/audit.html`
+- `apps/shoppr/templates/commerce/orders.html`
+- `apps/shoppr/templates/commerce/order-detail.html`
+- `apps/shoppr/templates/commerce/catalog-admin.html`
+- `apps/shoppr/templates/cms/pages.html`
 
-## Theme And Frontend Ownership
+These files show what the store operator owns on day one.
 
-Shoppr's theme is customer-owned and checked in under:
+## Sites, Locales, And Theme Ownership
+
+Shoppr is also the canonical multi-site commerce demo.
+
+`apps/shoppr/app.toml` declares:
+
+- canonical and additional domains
+- app-level i18n settings
+- three sites: UK, France, and Poland
+- site-specific default locales and brand names
+
+`apps/shoppr/platform.dev.toml` mirrors those sites for runtime host resolution.
+
+The theme then makes those choices visible through:
 
 - `apps/shoppr/theme/assets/site.css`
 - `apps/shoppr/theme/assets/site.js`
 - `apps/shoppr/theme/tokens.toml`
 
-Those files show three useful patterns:
+That is the practical Davenda story: site policy, locale policy, and theme behavior all live in
+the customer app.
 
-- the customer app owns its visual system rather than inheriting a platform skin
-- the theme can stay HTML-first while adding richer behavior through a small JS layer
-- published assets still flow through Davenda's asset pipeline because templates use
-  `asset('theme/assets/...')`
+## Linked Rust And WASM In One Commerce App
 
-Read `apps/shoppr/theme/assets/site.js` when you want to see how the app layers interaction onto
-plain templates. It currently drives:
+Shoppr demonstrates both extension models clearly.
 
-- market and locale switcher panels
-- the home-page campaign carousel
-- PDP accordions
-- PDP size selection
-- PDP gallery thumbnails
-
-That file is especially useful if you want to understand how Davenda customer apps can stay
-server-rendered while still feeling like modern retail frontends.
-
-## Linked Rust And WASM In One Store
-
-Shoppr deliberately shows both customization paths.
-
-The first-party path is linked Rust:
+Linked Rust:
 
 - `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-  - registers the linked customer plugin
-  - exposes checkout and verified-webhook hooks
-  - points back to customer-owned backend docs
-- `apps/shoppr/backend/shoppr-loyalty-backend/`
-  - contains the shared domain logic that the linked plugin wraps
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
 
-The bounded runtime-installed path is WASM:
+WASM:
 
-- `apps/shoppr/extensions/README.md`
-  - explains why Shoppr keeps first-party logic out of WASM
 - `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-  - declares the installed package, its handler, and its target
 - `apps/shoppr/crates/shoppr-app/src/extensions.rs`
-  - loads the pinned package and compiles the checked-in WAT into a runtime artifact during
-    bootstrap
 
-Seeing both in one app matters. Shoppr teaches that:
+Use Shoppr when you want to understand where first-party logic stops being “config” and becomes
+linked code or a bounded extension.
 
-- linked Rust is the primary path for customer-owned commerce policy
-- WASM is the bounded path for replaceable runtime-installed behavior
+## Adapt This For Your Store
 
-## Where To Go Next
+If you are building a Davenda store, copy these ideas before copying markup:
 
-Use the other Shoppr guides for deeper slices:
+- keep the customer workspace explicit
+- let `app.toml` define the product contract
+- keep market and locale policy in manifest and config
+- own the full browse, account, and operator journey in one app
+- use linked Rust for first-party store policy
+- use WASM only for bounded runtime-installed behavior
 
-- `catalog-and-merchandising`
-  - storefront structure, custom pages, product routes, collections, sites, locales, and theme
-    files
-- `checkout-and-operations`
-  - checkout flow, linked backend hooks, WASM, admin pages, order operations, and ops-facing
-    runtime touchpoints
+## Read Next
+
+- [Storefront Structure](./storefront-structure.md)
+- [Catalog And Merchandising](./catalog-and-merchandising.md)
+- [Checkout And Operations](./checkout-and-operations.md)
+- [Linked Rust Backend](./linked-rust-backend.md)
+- [WASM Extensions](./wasm-extensions.md)

@@ -2,77 +2,139 @@
 title: Storefront Structure
 ---
 
-Shoppr is the main example of how Davenda expects a storefront to be assembled from customer-owned pages, module-provided data, and progressive enhancement layered on top of HTML.
+This guide uses Shoppr to show how Davenda expects a storefront to be structured in a real customer
+app.
 
-## The Core Storefront Pages
+The key idea is simple: the storefront is a set of customer-owned pages and templates that use
+module data, not one platform-owned catalog widget.
 
-The public browse loop is intentionally split across distinct templates:
+## Start With The Route Shape
 
-- `templates/pages/home.html`
-- `templates/commerce/catalog.html`
-- `templates/commerce/collection-detail.html`
-- `templates/commerce/product-detail.html`
-- `templates/commerce/cart.html`
+Shoppr's public browse loop is split across these templates:
 
-That split matters because it keeps the customer journey explicit:
+- `apps/shoppr/templates/pages/home.html`
+- `apps/shoppr/templates/commerce/catalog.html`
+- `apps/shoppr/templates/commerce/collection-detail.html`
+- `apps/shoppr/templates/commerce/product-detail.html`
+- `apps/shoppr/templates/commerce/cart.html`
 
-- home establishes editorial direction
-- catalog establishes broad browse
-- collection detail narrows the merchandising context
-- product detail is the decision point
-- cart preserves continuity toward checkout
+That split is deliberate.
 
-## Why The Home Page Matters
+- `home.html` owns the campaign-led landing page.
+- `catalog.html` is broad browse.
+- `collection-detail.html` narrows the customer into a merchandising context.
+- `product-detail.html` is the decision point.
+- `cart.html` keeps continuity into checkout.
 
-Shoppr’s home page is not just a marketing banner. It does four jobs:
+Davenda works best when the customer journey is explicit at this level.
 
-- introduces the current campaign and product emphasis
-- exposes the site and locale story visibly
-- links into the browse loop and developer-facing routes
-- reuses smaller fragments instead of duplicating catalog markup directly
+## Where The Routes Come From
 
-That is how Davenda expects a customer app to own the top-level product shell while still reusing fragmentized module data.
+The route contracts come from the commerce module manifest in
+`crates/davenda-commerce/src/module/platform/manifest.rs`.
 
-## Layouts And Navigation
+That manifest defines routes such as:
 
-The storefront shell is built from:
+- `/shop`
+- `/shop/collections`
+- `/shop/collections/{collection_slug}`
+- `/shop/products/{product_slug}`
+- `/cart`
 
-- `templates/layouts/base.html`
-- `templates/layouts/storefront.html`
-- `templates/navigation/primary.html`
-- `templates/components/hero.html`
+Shoppr then provides the customer-owned templates that make those routes feel like Shoppr instead
+of a generic store.
 
-These files matter because they show where global structure lives:
+## Layouts And Shared Shell
 
-- document shell
-- navigation
-- repeated hero or promotional structures
-- footer and developer-facing links
+Read these files together:
 
-The customer app keeps ownership of that shell instead of treating it as a module default.
+- `apps/shoppr/templates/layouts/base.html`
+- `apps/shoppr/templates/layouts/storefront.html`
+- `apps/shoppr/templates/navigation/primary.html`
+- `apps/shoppr/templates/components/hero.html`
 
-## Product Detail And Interactivity
+These files answer a practical question new teams often miss: where should repeated storefront
+structure live?
 
-The product-detail page is the best single place to study Davenda’s “interactivity layered on” model.
+In Shoppr:
 
-The HTML page still owns:
+- the document shell and assets live in layouts
+- primary navigation lives in its own fragment
+- repeated promotional structure lives in a reusable component
+- page templates stay focused on their route-specific job
 
-- gallery structure
-- size selection controls
-- quantity and add-to-cart forms
-- product facts
-- expandable details
+That keeps the page layer readable.
 
-Then `theme/assets/site.js` enhances those controls with:
+## Home Page Structure
 
-- gallery switching
-- accordion behavior
-- variant-like state for size selection
+`apps/shoppr/templates/pages/home.html` is worth studying because it combines several concerns that
+real stores need:
 
-This is the pattern to copy in a serious storefront: keep the page correct without the script, then make it faster and richer when the script is present.
+- campaign framing
+- links into catalog and collections
+- market and locale visibility
+- links to cart, account, admin, and CMS surfaces
+- reused catalog fragments instead of duplicated markup
 
-## What To Read Next
+If you are designing your own storefront, treat the home page as a product entry surface, not just
+a marketing hero.
+
+## Product Detail As The Critical Page
+
+`apps/shoppr/templates/commerce/product-detail.html` is the most important page in the demo.
+
+It keeps together:
+
+- breadcrumbs and collection context
+- media gallery markup
+- size and quantity controls
+- add-to-cart and buy-now actions
+- supporting product facts and details
+- related product browsing
+
+This is a good Davenda page to copy structurally because it stays HTML-first even when the theme
+adds richer behavior.
+
+## Progressive Enhancement Layer
+
+The interaction layer lives in:
+
+- `apps/shoppr/theme/assets/site.js`
+- `apps/shoppr/theme/assets/site.css`
+
+On the storefront, that layer currently owns:
+
+- home carousel behavior
+- market and locale switcher panels
+- PDP gallery thumbnails
+- PDP accordions
+- size selection state
+- visible focus styling and reduced-motion behavior
+
+That is the pattern to copy:
+
+- make the markup correct first
+- add JavaScript as a progressive layer
+- keep the route and form structure server-rendered
+
+## What To Copy Into Your Own App
+
+If you are building a Davenda storefront, copy this structure before you copy Shoppr's exact look:
+
+1. top-level page per customer decision stage
+2. layouts and fragments for repeated shell markup
+3. HTML-first forms for cart and checkout flow
+4. small theme JS for enrichment, not ownership of the product model
+
+## Common Mistakes
+
+- Putting all storefront logic into one oversized home or catalog page.
+- Treating the customer app as a template override layer instead of the real storefront owner.
+- Letting JavaScript own critical product behavior that the server-rendered page should still
+  express.
+
+## Read Next
 
 - [Catalog And Merchandising](./catalog-and-merchandising.md)
-- [Custom Pages And CMS](./custom-pages-and-cms.md)
+- [Sites, Locales, And Theme Variants](./sites-locales-and-theme-variants.md)
 - [Template Language Reference](../../reference/template-language.md)

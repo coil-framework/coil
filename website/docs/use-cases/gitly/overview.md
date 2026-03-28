@@ -2,126 +2,128 @@
 title: Gitly Overview
 ---
 
-Gitly is the main non-commerce teaching app in the repo. It proves that the same platform used for
-Shoppr can also power a GitHub-like product shell with repository pages, mock APIs, localization,
-theme switching, scheduled-task demos, and customer-owned extension points.
+Gitly is the main non-commerce teaching app in the repo. It proves that Davenda can power a
+developer-product shell, not just a store.
 
-## Why Gitly Matters
+Gitly is useful because it keeps the same customer-app model as Shoppr while changing the product
+shape completely.
 
-Gitly exists to answer a simple question:
+## What Gitly Is Showing
 
-Can Davenda still look coherent when the product is not a store?
+Gitly demonstrates all of these in one app:
 
-The answer in the checked-in app is yes, because the same customer-app boundary still owns:
+- customer-owned routes and templates
+- linked Rust data shaping
+- API-style endpoints
+- theme switching
+- localized UI copy
+- scheduled-task demos
+- runtime-installed WASM
+- customer-owned lifecycle commands
 
-- the app manifest
-- runtime config
-- templates
-- theme assets
-- linked Rust backend code
-- runtime-installed WASM packages
-- customer binary lifecycle commands
-
-## Start With The App Shape
+## Start With The App Contract
 
 Read these files first:
 
 1. `apps/gitly/app.toml`
-   - declares the app id, domains, locales, active theme, modules, and installed WASM packages
-   - pins the API extension and scheduled-job extension in the same way Shoppr pins its extension
 2. `apps/gitly/platform.dev.toml`
-   - supplies the local runtime config, including Redis, Postgres, object storage, jobs, SEO, and
-     localized routes
 3. `apps/gitly/crates/gitly-app/src/lib.rs`
-   - is the customer composition root
-   - defines the `gitly-showcase` module and its extension slots
-   - loads the linked Rust backend and runtime-installed extensions
-   - mounts GitHub-style routes and JSON endpoints
 4. `apps/gitly/crates/gitly-bin/src/main.rs`
-   - turns the app into a customer-owned binary with `describe`, `validate`, `assets`, `migrate`,
-     `serve`, `up`, and linked-backend inspection commands
 
-That four-file path is the clearest demonstration that Gitly is a real customer app, not a set of
-loose demo pages.
+That sequence tells you:
+
+- what Gitly claims to be
+- how the runtime is configured
+- how the customer composition root builds the product shell
+- how the customer binary owns validate, assets, migrate, serve, and up
+
+## What Gitly Enables
+
+Gitly's enabled module set is narrow on purpose:
+
+- `admin`
+- `cms`
+- `media`
+- `gitly-showcase`
+
+That is one of the best lessons in the repo. Davenda does not need commerce to be coherent.
+
+Gitly builds a non-commerce product by:
+
+- using a small official module set
+- adding customer-owned routes and templates
+- adding a customer-owned showcase module with extension slots
+
+## How The Workspace Is Structured
+
+Important folders:
+
+- `apps/gitly/crates/gitly-app`
+  - composition root and route registration
+- `apps/gitly/crates/gitly-backend`
+  - linked customer backend and API payload builders
+- `apps/gitly/crates/gitly-bin`
+  - customer binary lifecycle commands
+- `apps/gitly/extensions`
+  - runtime-installed API and scheduled-job packages
+- `apps/gitly/templates/gitly`
+  - product pages
+- `apps/gitly/theme`
+  - CSS, JS, and tokens
+
+That is the same customer-root shape as Shoppr, but the product vocabulary is completely
+different.
 
 ## The Product Surface
 
-Gitly's public surface lives in `apps/gitly/templates/gitly/`:
+The public Gitly templates live under `apps/gitly/templates/gitly/`:
 
 - `home.html`
-  - the landing page for the forge-style demo
-  - includes API-hydrated summary cards and the community pulse widget
+- `explore.html`
 - `repository.html`
-  - shows the main repository shell
 - `issues.html`
-  - keeps the issue-tracker shape honest and static
 - `pulls.html`
-  - shows pull-request review data in a product-specific layout
 - `actions.html`
-  - demonstrates the scheduled-job surface and mock scheduler heartbeat
 - `organization.html`
-  - shows a non-commerce organization page
 - `profile.html`
-  - shows a user profile page
 - `search.html`
-  - demonstrates an application-style search page rather than a storefront page
 
-The important lesson is that Davenda does not force the customer app into commerce-shaped routes.
-Gitly mounts a completely different route vocabulary and still uses the same customer-root model.
+These are the files to read when you want to see Davenda from a non-commerce lens.
 
-## Theme Switching And Localization
+## Linked Rust And WASM In Gitly
 
-Gitly's theme and frontend interaction layer are customer-owned:
-
-- `apps/gitly/theme/assets/site.css`
-  - defines the GitHub-like visual system
-  - uses `html[data-theme="dark"]` for dark-mode theming
-  - includes the focus and navigation styling that make the shell work as a product UI
-- `apps/gitly/theme/assets/site.js`
-  - owns the theme switcher
-  - owns the locale switching and translated copy tables
-  - hydrates API summary fields client-side
-  - simulates the scheduled-job heartbeat on the Actions page
-
-This is one of the most useful Gitly lessons: a customer app can own a strongly product-specific
-frontend personality without becoming a single-page application or abandoning server-rendered
-templates.
-
-## Linked Rust Backend And WASM
-
-Gitly also shows both extension paths clearly.
+Gitly also demonstrates both extension models clearly.
 
 Linked Rust:
 
 - `apps/gitly/crates/gitly-backend/src/lib.rs`
-  - defines repository, pull request, workflow, organization, and user data fixtures
-  - exposes GitHub-style API payload builders
-  - registers a CMS publish hook
-  - publishes a linked-plugin summary used by the CLI
 
-Runtime-installed WASM:
+WASM:
 
-- `apps/gitly/extensions/README.md`
-  - explains why Gitly uses WASM only for bounded runtime-installed behavior
 - `apps/gitly/extensions/gitly-community-pulse/package.toml`
-  - declares the API extension for `/api/github/pulse`
 - `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
-  - declares the scheduled-job extension for `github.actions.refresh`
 - `apps/gitly/crates/gitly-app/src/extensions.rs`
-  - loads and compiles those packages during bootstrap
 
-That split is the core architectural lesson:
+This matters because Gitly shows the same platform extension story without any commerce framing.
 
-- linked Rust for first-party customer logic
-- WASM for narrower runtime-installed behavior
+## Why Gitly Matters
 
-## What To Read Next
+Use Gitly when you want to show a skeptical teammate that Davenda is not “only for stores.”
 
-Use the companion Gitly guide for the detailed product walkthrough:
+Gitly demonstrates:
 
-- `non-commerce-product-shape`
-  - route structure
-  - API-style data presentation
-  - theme switching and localization
-  - scheduled tasks
-  - linked backend and WASM extension hooks
+- custom route vocabulary
+- app-style data presentation
+- localized product UI
+- a theme switcher
+- bounded background-work demos
+- API-style extension points
+
+without leaving the customer-root model.
+
+## Read Next
+
+- [Product Structure](./product-structure.md)
+- [Theming, Localization, And Accessibility](./theming-localization-and-accessibility.md)
+- [API And Background Work](./api-and-background-work.md)
+- [Non-Commerce Product Shape](./non-commerce-product-shape.md)

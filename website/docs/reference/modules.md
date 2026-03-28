@@ -2,136 +2,106 @@
 title: Official Modules
 ---
 
-Davenda’s official modules are reusable product batteries. They are not sample code and they are
-not the same thing as core.
+Davenda's official modules are reusable product batteries. They sit above core and below customer
+apps.
 
-## The Boundary
+Use this page as the entry point when you want to answer practical questions such as:
 
-Use this rule when deciding where logic belongs:
+- which module owns a workflow
+- which capabilities a module expects
+- which routes or operator surfaces it adds
+- which demo app already uses it
 
-- core owns runtime primitives and platform-wide contracts
-- official modules own reusable business capability
-- customer apps own product-specific composition and customization
+## What A Module Is
 
-If you blur those lines, upgrades and operational clarity become much harder.
+An official module packages one reusable business domain. In practice that usually means some
+combination of:
 
-## What Core Owns
-
-Core and core-adjacent crates own:
-
-- HTTP runtime and routing
-- request and job execution boundaries
-- config loading and validation
-- rendering and template execution
-- storage, cache, jobs, and TLS primitives
-- auth execution and capability evaluation
-- observability and operational control surfaces
-- the WASM host boundary
-
-Core should not contain product-specific commerce, CMS, or event workflows.
-
-## What Official Modules Own
-
-Official modules package reusable domain batteries that many customer apps can share.
-
-Current module families include:
-
-- CMS
-- commerce
-- memberships
-- events
-- admin
-- media
-- ops
-
-These modules contribute some combination of:
-
-- route surfaces
-- HTTP surfaces
-- queries and transactions
+- capability requirements
 - migrations
-- jobs
+- public and admin routes
+- jobs and event subscriptions
 - admin resources
-- auth capability requirements
+- search or reporting contributions
+- extension slots for customer apps
 
-## Module Families
+The clearest source of truth is always the module manifest in the relevant crate:
 
-### CMS
+- `crates/davenda-cms/src/module/platform/manifest.rs`
+- `crates/davenda-media/src/module/manifest.rs`
+- `crates/davenda-commerce/src/module/platform/manifest.rs`
+- `crates/davenda-memberships/src/module/manifest.rs`
+- `crates/davenda-events/src/module/platform/manifest.rs`
+- `crates/davenda-admin/src/module/manifest.rs`
+- `crates/davenda-ops/src/module/manifest.rs`
 
-Owns content editing, publishing, routing, page and navigation workflows, preview, and editorial
-constraints.
+## How Modules Are Installed
 
-### Commerce
+Davenda has two different decisions:
 
-Owns catalog, product and collection surfaces, cart, checkout, order state, payments integration
-contracts, and operator order workflows.
+1. The customer binary links module crates at compile time.
+2. The customer app manifest and platform config enable a subset of those linked modules at
+   runtime.
 
-### Memberships
+That is why Shoppr can link a broad stack in `apps/shoppr/Cargo.toml` and still decide the real
+product surface through `apps/shoppr/app.toml` and `apps/shoppr/platform.dev.toml`.
 
-Owns subscriptions, tiers, entitlements, renewals, cancellation, and account-facing membership
-state.
+## Quick Module Map
 
-### Events
+| Module | Owns | Good demo |
+| --- | --- | --- |
+| CMS | pages, navigation, redirects, preview, publish workflow | Shoppr |
+| Media | managed assets, media library, storage policy UI | Shoppr |
+| Commerce | catalog, cart, checkout, orders | Shoppr |
+| Commerce Payments Stripe | Stripe handoff and signed webhook reconciliation | Shoppr |
+| Memberships | tiers, subscriptions, account memberships | Shoppr |
+| Events | event catalog, bookings, reminders, check-in | Shoppr |
+| Admin | shared admin shell and audit entry surfaces | Shoppr, Gitly |
+| Ops | search, reports, recovery, bulk operations | Shoppr |
 
-Owns event catalog, bookings, capacity, waitlists, check-in, and event-linked customer journeys.
+## Module Guides
 
-### Admin
+- [CMS](./modules/cms.md)
+- [Media](./modules/media.md)
+- [Commerce](./modules/commerce.md)
+- [Commerce Payments Stripe](./modules/commerce-payments-stripe.md)
+- [Memberships](./modules/memberships.md)
+- [Events](./modules/events.md)
+- [Admin](./modules/admin.md)
+- [Ops](./modules/ops.md)
 
-Owns reusable back-office shell primitives, widgets, and operator-facing composition surfaces.
+## Choosing Between A Module And Customer Code
 
-### Media
+Use an official module when:
 
-Owns media-library domain behavior, revision/publication behavior, and media-specific policies
-above the storage primitive layer.
+- the behavior is reusable across more than one product
+- the platform should support it as a stable contract
+- it needs shared migrations, auth, jobs, and operator surfaces
 
-### Ops
+Keep the behavior in customer code when:
 
-Owns report, search, recovery, bulk-operation, and operator workload surfaces that are specific to
-business modules rather than generic runtime primitives.
+- it is product-specific policy
+- it only makes sense for one app
+- it is better expressed as linked Rust or a bounded extension hook
 
-## Installing Modules
+Shoppr and Gitly are good examples of that split:
 
-A customer app does not get everything automatically.
+- Shoppr uses official modules for CMS, commerce, memberships, events, admin, and ops, but keeps
+  loyalty rules in `apps/shoppr/crates/shoppr-backend/src/lib.rs`.
+- Gitly uses `admin`, `cms`, and `media`, then adds its own non-commerce product shell in
+  `apps/gitly/crates/gitly-app/src/lib.rs`.
 
-In practice:
+## Common Mistakes
 
-- the customer binary links the module crates it wants to make available
-- the app manifest decides which of those linked modules are actually installed for that product
-- runtime validation checks whether the configuration and auth package still match that module set
+- Treating modules as compile-time features only. Runtime enablement still matters.
+- Enabling a module in `app.toml` without linking it into the customer binary.
+- Treating a module as “just routes.” The migrations, jobs, and capabilities usually matter as
+  much as the pages.
+- Putting one customer's business rules into a new official module too early.
 
-That means there are two levels of module selection:
+## Read Next
 
-- compile-time availability
-- runtime installation
-
-## Why This Matters
-
-This separation makes it possible to:
-
-- build narrower customer binaries
-- keep specialized products from linking unnecessary batteries
-- preserve a stable operator and release model even when products vary
-
-## Module Selection Guidance
-
-Use a module when:
-
-- the capability is a reusable product battery
-- it has durable contracts other products can rely on
-- it belongs in the supported platform surface
-
-Do not create a new official module just because a customer app has some unique rules. Those rules
-usually belong in the customer app or a bounded extension surface.
-
-## Modules And Auth
-
-Modules are not only route bundles. They carry capability expectations.
-
-A serious deployment should expect:
-
-- module manifests to declare the capabilities they require
-- auth packages to satisfy those capabilities
-- validation to fail when the module/auth relationship is incoherent
-
-That is part of what keeps Davenda installable at enterprise scale instead of drifting into hidden
-cross-module assumptions.
+- [Composition And `davenda-all`](./composition.md)
+- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
+- [Shoppr Overview](../use-cases/shoppr/overview.md)
+- [Gitly Overview](../use-cases/gitly/overview.md)

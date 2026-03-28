@@ -2,53 +2,99 @@
 title: Sites, Locales, And Theme Variants
 ---
 
-Shoppr is the main demonstration of Davenda’s multi-site model because it shows one customer app serving multiple storefront sites with different regional emphasis while sharing one runtime and one codebase.
+Shoppr is the clearest current example of Davenda's site model in a commerce app.
 
-## The Three Sites
+It shows one customer app serving several related storefronts with shared code, shared modules,
+and controlled differences in host, locale, and branding.
 
-Shoppr currently declares three sites:
+## The Concrete Site Setup
+
+Read these two files side by side:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.dev.toml`
+
+Both define three sites:
 
 - `shoppr-uk`
 - `shoppr-fr`
 - `shoppr-pl`
 
-Those are configured in `app.toml` for the product contract and mirrored in `platform.dev.toml` for runtime host resolution.
+Each site declares:
 
-## Why Shoppr Uses Sites Instead Of Only Locales
+- canonical domain
+- additional domains or hosts
+- display and brand names
+- default locale
+- supported locales
 
-Shoppr uses sites because the differences are broader than translation alone:
+## Why Shoppr Uses Sites Instead Of Locale Alone
 
-- different hosts
-- different default locales
-- different branding emphasis
-- different catalog emphasis and availability
+Shoppr uses sites because the differences are broader than language:
 
-If Shoppr used locale alone, the product would lose a clear place to express those differences.
+- different canonical hosts
+- different brand framing
+- different default locale
+- potentially different assortment emphasis and campaign voice
 
-## Locale Within Each Site
+Locale alone would not be a good place to model all of that.
 
-Each site still supports multiple locales. That is the important nuance:
+## How Locale Still Matters Inside A Site
 
-- site chooses the public regional boundary
-- locale chooses the language/formatting layer within that boundary
+Even though Shoppr uses multiple sites, each site still supports multiple locales.
 
-This is the model you should copy for serious multi-region commerce.
+That gives the app two different levers:
 
-## Theme Variants
+- site for market boundary and host identity
+- locale for language and route localization inside that site
 
-The theme can also participate in the site model without cloning the whole app.
+This is the model to copy when you want one shared product with multiple regional surfaces.
 
-In practice, that means:
+## Where The Site Differences Become Visible
 
-- shared layouts and assets
-- site-aware branding values
-- site-aware hero copy and editorial framing
-- possibly different navigation emphasis or campaign treatment
+Shoppr makes the site model visible in several layers:
 
-The goal is one customer app with controlled variation, not three near-duplicate apps.
+- `apps/shoppr/templates/pages/home.html`
+  - market cards and site-aware framing
+- `apps/shoppr/theme/assets/site.js`
+  - market and locale switcher panels
+- `apps/shoppr/theme/assets/site.css`
+  - the visual layer for those controls
 
-## What To Read Next
+That matters because the site model is not just runtime plumbing. The customer-facing UI should
+make the current context obvious.
 
+## Theme Variants Without Three Separate Apps
+
+Shoppr does not create three different customer apps.
+
+Instead it uses one app with:
+
+- one shared template tree
+- one shared theme asset set
+- site-aware copy and branding
+- shared module surfaces
+
+That is the practical Davenda pattern. Variation should come from explicit site and locale policy,
+not from duplicating the whole app.
+
+## Adapt This For Your Store
+
+Add a new site when:
+
+- host or brand changes
+- market framing changes
+- the canonical public identity is different
+
+Add a locale when:
+
+- the product is still the same site
+- you mainly need language and route localization changes
+
+Shoppr is the concrete example to use when making that call.
+
+## Read Next
+
+- [Shoppr Overview](./overview.md)
 - [Sites, Locales, And Markets](../../core-concepts/sites-locales-and-markets.md)
 - [Internationalization Reference](../../reference/internationalization.md)
-- [Theme Structure Reference](../../reference/theme-structure.md)

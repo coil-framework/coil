@@ -2,33 +2,54 @@
 title: Checkout And Operations
 ---
 
-Shoppr is not only a storefront guide. It is also the main example of how Davenda expects a
-customer app to connect checkout, account continuity, admin surfaces, and operator workflows.
+This guide uses Shoppr to show how Davenda ties together checkout, account continuity, admin
+surfaces, and operator workflows in one customer app.
 
-## Checkout Through The Customer App
+## The Public Checkout Files
 
-The public checkout path is visible in the template tree:
+Read these templates in order:
 
-- `apps/shoppr/templates/commerce/cart.html`
-  - basket review and quantity updates
-- `apps/shoppr/templates/commerce/checkout.html`
-  - the checkout form and payment handoff page
-- `apps/shoppr/templates/commerce/checkout-confirmation.html`
-  - post-checkout confirmation
+1. `apps/shoppr/templates/commerce/cart.html`
+2. `apps/shoppr/templates/commerce/checkout.html`
+3. `apps/shoppr/templates/commerce/checkout-confirmation.html`
 
-These templates matter because they are not isolated widgets. They sit inside the same customer app
-that owns:
+That sequence shows the public flow from basket review into payment handoff and confirmation.
 
-- the browse loop
-- the account area
-- the admin order queue
-- the theme and frontend interaction layer
+## Where The Checkout Contract Comes From
 
-That is the main checkout lesson in Shoppr: the customer app owns the whole journey.
+The route contract comes from the commerce module manifest in
+`crates/davenda-commerce/src/module/platform/manifest.rs`.
 
-## Account And Membership Continuity
+That module contributes:
 
-After checkout, Shoppr continues the same story in:
+- `/cart`
+- `/checkout`
+- `/checkout/start`
+- `/checkout/complete`
+- `/checkout/confirmation`
+- `/webhooks/commerce/payment-provider`
+
+Shoppr then supplies the product-specific templates and customer hook behavior.
+
+## Stripe Handoff In Practice
+
+Shoppr enables the Stripe provider module in:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.dev.toml`
+
+And configures it in `platform.dev.toml` under:
+
+- `[modules."commerce-payments-stripe"]`
+
+This is a useful example because it shows the separation between:
+
+- base commerce checkout
+- provider-specific handoff and webhook config
+
+## Account Continuity After Checkout
+
+The post-checkout customer story continues in:
 
 - `apps/shoppr/templates/pages/account.html`
 - `apps/shoppr/templates/account/dashboard.html`
@@ -36,116 +57,85 @@ After checkout, Shoppr continues the same story in:
 - `apps/shoppr/templates/account/summary-panels.html`
 - `apps/shoppr/templates/memberships/account.html`
 
-Those files are useful because they show how the app keeps order and membership state visible
-without pretending the platform has become a generic dashboard generator. The templates explicitly
-explain:
+These files matter because they keep the app honest about what happens after provider return:
 
-- current browser-session continuity
-- latest order state
-- pending-payment messaging after provider return
-- membership activation as a post-checkout outcome
+- pending payment can still be pending
+- order history is part of the account flow
+- membership activation is a follow-on lifecycle, not just a marketing claim
 
-If you want to see how account surfaces relate back to commerce, these are the files to read.
+## Where First-Party Policy Lives
 
-## Linked Rust Backend For First-Party Store Logic
-
-Shoppr uses linked Rust for first-party customer behavior.
-
-The key files are:
+Shoppr's first-party store logic lives in linked Rust:
 
 - `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-  - exposes the linked plugin
-  - registers checkout and verified-webhook hooks
-  - publishes a stable linked-plugin summary
 - `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
-  - contains the customer-owned domain logic for order review, loyalty preview, and CRM routing
-- `apps/shoppr/crates/shoppr-bin/src/main.rs`
-  - exposes commands such as `linked-backend describe` and `linked-backend demo`
 
-The point of these files is not just that Shoppr has custom business logic. The point is that the
-customer app owns that logic through the customer-root workspace, not through an ad hoc sidecar or
-patch to platform code.
+That is where checkout review and verified-webhook behavior are owned.
 
-## Runtime-Installed WASM For Bounded Extensions
+If you are building your own store, this is the boundary to study for:
 
-Shoppr also demonstrates the bounded extension path.
+- customer-specific order review
+- loyalty rules
+- CRM routing
+- webhook follow-up
 
-Read:
+## Where Bounded Extensions Live
 
-- `apps/shoppr/extensions/README.md`
+Shoppr also keeps a bounded WASM path in:
+
 - `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-- `apps/shoppr/extensions/shoppr-waitlist-tools/README.md`
 - `apps/shoppr/crates/shoppr-app/src/extensions.rs`
 
-Together, these files show:
+That gives you one app that shows both extension models without confusing them.
 
-- the extension is pinned in `app.toml`
-- it is runtime-installed rather than linked into the customer binary
-- the customer app compiles the checked-in WAT source into the runtime artifact path during
-  bootstrap
-- the current demo uses a render-hook target rather than a full transactional ownership boundary
+## Operator And Support Surfaces
 
-That makes Shoppr a good guide to the difference between:
-
-- linked Rust for first-party store logic
-- WASM for bounded runtime-installed behavior
-
-## Admin And Support Surfaces
-
-The back-office path is visible in the checked-in templates:
+Day-one store operations are visible in:
 
 - `apps/shoppr/templates/admin/dashboard.html`
-  - the main operator control room
-- `apps/shoppr/templates/commerce/orders.html`
-  - store-wide order queue
-- `apps/shoppr/templates/commerce/order-detail.html`
-  - per-order support surface
-- `apps/shoppr/templates/commerce/catalog-admin.html`
-  - live catalog copy management
 - `apps/shoppr/templates/admin/audit.html`
-  - audit visibility
-- `apps/shoppr/templates/cms/pages.html`
-  - CMS page draft and publish workflow
+- `apps/shoppr/templates/commerce/orders.html`
+- `apps/shoppr/templates/commerce/order-detail.html`
+- `apps/shoppr/templates/commerce/catalog-admin.html`
 
-These are important because they prove Shoppr is teaching more than storefront pages. It teaches
-what a usable small-store operator surface looks like when it lives in the same customer app.
+These pages show the operator side of the same store:
 
-## Runtime And Operational Touchpoints
+- order queue and detail
+- refund and fulfillment flow
+- catalog copy and visibility management
+- audit and admin shell
 
-Shoppr's runtime and lifecycle ownership are visible in a few specific files:
+That is a strong Davenda lesson: the customer app owns the operator story too.
 
-- `apps/shoppr/platform.dev.toml`
-  - local database, Redis, object storage, jobs, observability, session, and Stripe config
+## Lifecycle And Runtime Touchpoints
+
+Shoppr's customer-owned lifecycle is visible in:
+
 - `apps/shoppr/crates/shoppr-app/src/lib.rs`
-  - loads the manifest and config, resolves official modules, loads extensions, injects linked
-    plugins, and builds the runtime plan
 - `apps/shoppr/crates/shoppr-bin/src/main.rs`
-  - exposes `describe`, `validate`, `migrate apply`, `assets publish`, `serve`, and `up`
-- `apps/shoppr/README.md`
-  - explains the first-run path and customer-owned lifecycle commands
+- `apps/shoppr/platform.dev.toml`
 
-This is where Shoppr becomes more than a theme demo. It shows that the customer project owns:
+That layer owns:
 
-- validation
-- migration application
-- asset publication
-- runtime startup
+- manifest and config loading
+- auth package loading
+- official module resolution
+- linked plugin registration
+- extension package loading
+- validate, migrate, assets, serve, and up commands
 
-## Suggested Reading Order
+## Adapt This For Your Store
 
-If your goal is to understand checkout plus operations through Shoppr, read these files in order:
+If you are using Shoppr as a starting point, keep these patterns:
 
-1. `apps/shoppr/templates/commerce/cart.html`
-2. `apps/shoppr/templates/commerce/checkout.html`
-3. `apps/shoppr/templates/commerce/checkout-confirmation.html`
-4. `apps/shoppr/templates/account/orders.html`
-5. `apps/shoppr/templates/memberships/account.html`
-6. `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-7. `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-8. `apps/shoppr/templates/commerce/orders.html`
-9. `apps/shoppr/templates/admin/dashboard.html`
-10. `apps/shoppr/platform.dev.toml`
-11. `apps/shoppr/crates/shoppr-bin/src/main.rs`
+- public cart and checkout flow in templates
+- provider config in a separate payment module block
+- post-checkout truthfulness in account templates
+- linked Rust for first-party policy
+- operator pages in the same customer app
 
-That order shows how Davenda expects one customer app to carry public commerce, customer
-continuity, bounded extensions, and operator workflows together.
+## Read Next
+
+- [Linked Rust Backend](./linked-rust-backend.md)
+- [WASM Extensions](./wasm-extensions.md)
+- [Commerce Module Reference](../../reference/modules/commerce.md)

@@ -2,125 +2,145 @@
 title: Composition And davenda-all
 ---
 
-Davenda supports two composition styles:
+Davenda gives you two composition styles:
 
-- a convenience battery through `davenda-all`
-- explicit selection of the exact subsystems and official modules a customer binary links
+- broad convenience through `davenda-all`
+- explicit crate-by-crate selection in your customer workspace
 
-Both are valid. They serve different stages of adoption.
+Both are valid. The right choice depends on how much control you need now.
 
-## What `davenda-all` Is
+## What This Page Helps You Decide
 
-`davenda-all` is the convenience distribution for teams that want the standard official stack
-available without selecting every crate individually.
+Use this page when you want to answer:
 
-Use it when:
-
-- you are learning the platform
-- you want the shortest path to a believable customer app
-- you expect to use most official batteries
-- you do not yet need to optimize the binary surface or dependency graph aggressively
-
-It is the easiest way to start a serious Davenda product quickly.
-
-## What `davenda-all` Is Not
-
-It is not:
-
-- a replacement for the customer app manifest
-- a signal that all modules are installed automatically
-- a reason to stop reasoning about what your product actually links and enables
-
-Even with `davenda-all`, the customer app manifest still decides what the runtime installs.
-
-## When To Compose Explicitly
-
-Prefer explicit composition when:
-
-- you are building a specialized product with a narrower domain surface
-- you want tighter control over the binary and transitive dependency set
-- you need to reason precisely about which operator workflows and module contracts should exist
-- you are building a long-lived platform product with stricter release-management requirements
-
-This is often the right choice once a team moves beyond initial adoption.
+- should my customer binary depend on `davenda-all`
+- when should I link only selected modules
+- how do compile-time linking and runtime enablement differ
+- what do Shoppr and Gitly actually do
 
 ## The Two Layers Of Composition
 
-Davenda composition happens at two different layers:
+There are always two decisions:
 
-### Binary Composition
+1. What your customer workspace links into the binary.
+2. What your manifest and config enable at runtime.
 
-The customer binary decides which official modules and customer-owned code are linked into the
-runtime at all.
+Those are not the same thing.
 
-### Runtime Installation
+Concrete example:
 
-The customer app manifest decides which of those available modules are installed for the specific
-product and environment.
+- `apps/shoppr/Cargo.toml` links a broad workspace with `davenda-all`.
+- `apps/shoppr/app.toml` and `apps/shoppr/platform.dev.toml` decide the actual installed modules.
 
-That means “linked” and “enabled” are not the same thing.
+## Fastest Path: `davenda-all`
 
-## Recommended Mental Model
+Use `davenda-all` when you want a believable product quickly.
 
-Think of `davenda-all` as:
+This is the pattern in both demo apps:
 
-- broad compile-time availability
+```toml title="apps/shoppr/crates/shoppr-app/Cargo.toml"
+[dependencies]
+davenda-all.workspace = true
+davenda-app.workspace = true
+davenda-auth.workspace = true
+davenda-runtime.workspace = true
+```
 
-Think of the customer app manifest as:
+Why teams start here:
 
-- runtime product definition
+- shortest learning path
+- broad official module availability
+- less crate-selection friction while the product shape is still moving
 
-Think of the customer binary as:
+## Narrower Path: Selective Linking
 
-- the deployable contract between those two layers
+Use explicit linking when:
 
-## Typical Paths
+- you already know the exact product surface
+- you want a smaller dependency graph
+- you want hard compile-time limits on which modules may be enabled
 
-### Fastest Path
+A selective customer app still needs:
 
-Use `davenda-all`, then:
+- `davenda-app`
+- `davenda-auth`
+- `davenda-runtime`
+- whichever official modules you genuinely intend to support
+- any customer-owned linked backend crates
 
-- start with a reference customer app
-- trim the manifest to the modules you actually want
-- add customer-owned templates, auth, and linked Rust logic
+## Runtime Enablement Still Matters
 
-This gives teams the fastest believable start.
+Even with `davenda-all`, modules are not installed automatically.
 
-### Controlled Product Path
+Shoppr still has to say this explicitly in `apps/shoppr/app.toml`:
 
-Link only the crates you intend to support, then:
+```toml
+[modules]
+enabled = ["cms", "media", "commerce", "commerce-payments-stripe", "memberships", "events", "admin", "ops"]
+```
 
-- keep the manifest narrow
-- validate the auth package against that module set
-- document the operator surface that follows from those modules
+Gitly does the same in `apps/gitly/app.toml`:
 
-This is better when product scope is already clear.
+```toml
+[modules]
+enabled = ["admin", "cms", "media", "gitly-showcase"]
+```
 
-## How To Choose
+That is why “linked” and “enabled” must stay separate in your mental model.
 
-Ask these questions:
+## Common Composition Patterns
 
-- are we still learning the platform or already narrowing a long-term product
-- do we expect to use most official modules or only a focused subset
-- is binary size or dependency control already important
-- do we want convenience now or precision now
+### Broad product app
 
-If the honest answer is “we need to move quickly and see the whole product shape,” start with
-`davenda-all`.
+Use a broad convenience stack when the product is still discovering its boundaries.
 
-If the honest answer is “we already know the system we want to ship,” compose explicitly.
+Shoppr is the example:
 
-## A Note On Examples
+- broad official stack
+- linked Rust backend
+- runtime-installed WASM
+- multiple sites and locales
 
-The checked-in customer apps in this repo are intentionally part of the teaching story:
+### Narrow non-commerce app
 
-- the reference ecommerce app shows the broader product shape
-- the non-commerce example shows the runtime is not tied only to storefronts
+Gitly shows the second pattern:
 
-Developers should be able to understand from those examples:
+- broad runtime battery still linked for convenience
+- only a narrow enabled module set
+- customer-owned routes doing most of the product work
 
-- what comes from core
-- what comes from official modules
-- what comes from customer-owned composition
+### Controlled platform app
 
-That clarity matters more than whether a project uses the convenience battery or the narrow path.
+This is the pattern to adopt later:
+
+- explicit module dependencies
+- explicit customer crates
+- manifest enablement limited to what the binary truly supports
+
+## Failure Mode To Avoid
+
+Do not enable a module in `app.toml` that the binary did not link.
+
+The customer-root runtime builder explicitly checks for this. That is part of what keeps customer
+apps honest and upgradeable.
+
+## Choosing Intentionally
+
+Choose `davenda-all` if:
+
+- you are learning Davenda
+- you want the fastest path to a real app
+- you expect to use many official modules
+
+Choose selective composition if:
+
+- you already know the product boundary
+- you want tighter release control
+- you want the binary to prove the supported module set
+
+## Read Next
+
+- [Official Modules](./modules.md)
+- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
+- [Shoppr Overview](../use-cases/shoppr/overview.md)
+- [Gitly Overview](../use-cases/gitly/overview.md)

@@ -4,15 +4,15 @@ Internationalization is a core service because locale affects far more than stri
 
 ## Locale Resolution Produces a Full Request Context
 
-At the start of a request, core resolves the active locale using customer-app policy. That policy can consider hostname, path prefix, stored preference, and request headers, but the result is a single locale context the rest of the stack can trust. The locale context should include at least language, region, timezone, and currency so rendering, pricing, date formatting, and metadata generation all speak the same language.
+At the start of a request, core resolves the active locale using customer-app and site policy. The runtime first resolves the site from the incoming host binding, then resolves locale using that site’s locale policy. That policy can consider hostname, path prefix, stored preference, and request headers, but the result is a single locale context the rest of the stack can trust. The locale context should include at least language, region, timezone, and currency so rendering, pricing, date formatting, and metadata generation all speak the same language.
 
 This is especially important in a platform that supports multiple customer apps, white-label sites, and region-aware experiences. Locale cannot be allowed to drift independently in templates, payment logic, and SEO helpers. One request, one resolved context.
 
 ## Routing and URLs Are Locale-Aware
 
-The router and URL generator must understand locale because localized applications need predictable addressability. Customer apps should be able to choose path-based, host-based, or mixed locale routing according to their product requirements, but once chosen, the framework should generate canonical URLs, alternate URLs, and internal links consistently. A locale-aware page should never rely on a hand-built string in a template.
+The router and URL generator must understand locale because localized applications need predictable addressability. Sites should be able to choose path-based, host-based, or mixed locale routing according to their product requirements, but once chosen, the framework should generate canonical URLs, alternate URLs, and internal links consistently. A locale-aware page should never rely on a hand-built string in a template.
 
-Localized slugs and content fallbacks belong to the same model. Official modules should support translated system UI and, where appropriate, localized fields or slugs. Customer apps define which locales they publish in, which fields can fall back, and when missing translations should block publication instead of silently borrowing another locale's content.
+Localized slugs and content fallbacks belong to the same model. Official modules should support translated system UI and, where appropriate, localized fields or slugs. Customer apps and their sites define which locales they publish in, which fields can fall back, and when missing translations should block publication instead of silently borrowing another locale's content.
 
 ## Translation and Formatting
 

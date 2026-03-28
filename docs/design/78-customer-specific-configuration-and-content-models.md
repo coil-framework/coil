@@ -10,6 +10,7 @@ Configuration and content models are the sanctioned place for customer variabili
 Customer-app configuration covers the things the platform expects to vary per implementation, including:
 
 - domains, hostname strategy, and TLS mode selection
+- sites, site-level host routing, and per-site brand overrides
 - locales, currencies, timezones, and region policy
 - storage policy defaults by path or folder
 - feature flags and rollout configuration
@@ -25,6 +26,7 @@ The content model defines the structured shapes that the customer app edits and 
 - pages and navigation structures
 - localized fields and slugs
 - branded landing-page blocks
+- site-specific landing pages and merchandising surfaces inside one customer app
 - event or membership content types
 - customer-specific resource fields layered onto official module data
 
@@ -38,6 +40,7 @@ Configuration and schemas are the right home when the variation is about:
 - page structure
 - locale-specific content
 - brand-level policy
+- site-level host and locale policy
 - routing or metadata defaults
 
 If the variation changes business logic, data ownership, transaction flow, or integration behavior, it probably belongs in a module or extension instead.
@@ -49,3 +52,5 @@ Customer-app configuration and content-model changes should be versioned and mig
 ## Interaction With Auth and Storage
 
 Content models often introduce resources that need capability bindings, SEO output, caching rules, and storage defaults. Those cross-cutting concerns still resolve through core services. The customer app may define the schema and policy, but the execution remains within the platform's auth, cache, and storage model.
+
+For multi-site customer apps, site configuration is still configuration, not customer content. “The DE site uses `de-DE` on `shop-de.example.com` and exposes a narrower catalog” is configuration. “The DE site homepage hero copy for a spring campaign” is content.

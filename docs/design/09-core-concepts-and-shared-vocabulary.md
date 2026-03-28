@@ -12,7 +12,19 @@ An official module is a first-party native package built on top of core. Modules
 
 ## Customer App
 
-A customer app is the deployable application for one customer. It selects official modules, contributes templates and theme assets, binds capabilities, chooses locale and storage policy, and provides customer-specific configuration and extensions. The platform is primarily shared framework plus separate customer apps, not one giant shared tenant application.
+A customer app is the deployable application for one customer. It selects official modules, contributes templates and theme assets, binds capabilities, chooses deployment-wide policy such as auth and storage, and provides customer-specific configuration and extensions. A customer app may expose one or more public sites. The platform is primarily shared framework plus separate customer apps, not one giant shared tenant application.
+
+## Site
+
+A site is the public delivery unit inside a customer app. It owns host bindings, canonical-host policy, and locale-routing policy for incoming requests and generated URLs. A customer app may have one site or multiple sites that share the same runtime and installed module set.
+
+## Brand
+
+A brand is an optional identity and presentation dimension that may be attached to a site. It is not the primary routing primitive. Routing resolves site first, then any brand-aware behavior flows from that site context.
+
+## Market
+
+A market is a possible future commerce-oriented segmentation concept for catalog visibility, pricing, currency, tax, or fulfillment rules. It is not the first-class multi-site primitive. The platform introduces site before market so host and locale behavior have one concrete, implementable home.
 
 ## Capability
 

@@ -9,7 +9,7 @@ A customer app is the unit of product assembly on top of the platform. It is not
 
 At minimum, a customer app owns:
 
-- application configuration, including domains, locales, storage policy, and feature flags
+- application configuration, including one or more site definitions, storage policy, and feature flags
 - the set of installed official modules
 - frontend theme, templates, fragments, and design-token choices
 - content-model definitions and customer-specific schemas
@@ -18,6 +18,8 @@ At minimum, a customer app owns:
 - customer-specific WASM extensions and integration settings
 
 This is where product variability belongs. Core and official modules provide the reusable machinery; the customer app binds it into a deployable product.
+
+In the initial multi-site model, a customer app remains the deployment and composition root, while each site inside that app owns public host bindings, canonical-host policy, and locale policy. That keeps module installation and deployment batteries app-scoped while making routing and SEO policy site-scoped.
 
 ## What a Customer App Does Not Own
 

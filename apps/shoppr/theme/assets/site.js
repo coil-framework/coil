@@ -1,15 +1,3 @@
-const SHOPPR_SITES = [
-  { id: "shoppr-uk", label: "United Kingdom", host: "uk.127.0.0.1.nip.io:8080" },
-  { id: "shoppr-fr", label: "France", host: "fr.127.0.0.1.nip.io:8080" },
-  { id: "shoppr-pl", label: "Poland", host: "pl.127.0.0.1.nip.io:8080" },
-];
-
-const SHOPPR_LOCALES = [
-  { id: "en-GB", label: "English" },
-  { id: "fr-FR", label: "Francais" },
-  { id: "pl-PL", label: "Polski" },
-];
-
 const PRODUCT_GALLERY_IMAGES = {
   "harbor-cap": [
     ["https://unsplash.com/photos/a-rack-of-shirts-and-pants-hanging-on-a-clothes-rack-1pT3rOWL_hI/download?force=true&w=1200&q=80", "Shop floor rail"],
@@ -37,55 +25,6 @@ const PRODUCT_GALLERY_IMAGES = {
     ["https://unsplash.com/photos/modern-retail-store-interior-with-display-shelves-and-products-lkDZJL5psKU/download?force=true&w=1200&q=80", "Display detail"],
   ],
 };
-
-function currentLocale() {
-  const segment = window.location.pathname.split("/").filter(Boolean)[0];
-  return SHOPPR_LOCALES.find((locale) => locale.id === segment)?.id || "en-GB";
-}
-
-function replaceLocale(pathname, locale) {
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts.length && SHOPPR_LOCALES.some((entry) => entry.id === parts[0])) {
-    parts[0] = locale;
-  } else {
-    parts.unshift(locale);
-  }
-  return `/${parts.join("/")}`;
-}
-
-function renderSwitcherPanels() {
-  const marketPanel = document.getElementById("market-panel");
-  const localePanel = document.getElementById("locale-panel");
-  if (!marketPanel || !localePanel) {
-    return;
-  }
-
-  const locale = currentLocale();
-  const currentHost = window.location.host;
-  const currentPath = window.location.pathname;
-
-  marketPanel.innerHTML = [
-    '<p class="switcher-panel__eyebrow">Market</p>',
-    "<ul>",
-    ...SHOPPR_SITES.map((site) => {
-      const href = `${window.location.protocol}//${site.host}${replaceLocale(currentPath, locale)}`;
-      const active = currentHost === site.host ? ' class="is-active"' : "";
-      return `<li${active}><a href="${href}">${site.label}</a></li>`;
-    }),
-    "</ul>",
-  ].join("");
-
-  localePanel.innerHTML = [
-    '<p class="switcher-panel__eyebrow">Language</p>',
-    "<ul>",
-    ...SHOPPR_LOCALES.map((item) => {
-      const href = `${window.location.protocol}//${window.location.host}${replaceLocale(currentPath, item.id)}`;
-      const active = locale === item.id ? ' class="is-active"' : "";
-      return `<li${active}><a href="${href}">${item.label}</a></li>`;
-    }),
-    "</ul>",
-  ].join("");
-}
 
 function setupPanelToggles() {
   document.querySelectorAll("[data-panel-toggle]").forEach((button) => {
@@ -207,7 +146,6 @@ function setupGallery() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  renderSwitcherPanels();
   setupPanelToggles();
   setupCarousel();
   setupAccordions();

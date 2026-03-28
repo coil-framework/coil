@@ -40,8 +40,24 @@
         <nav dv:replace="~{navigation/primary}"></nav>
       </div>
       <div class="site-header__panels">
-        <div class="switcher-panel" id="market-panel" hidden="hidden"></div>
-        <div class="switcher-panel" id="locale-panel" hidden="hidden"></div>
+        <div class="switcher-panel" id="market-panel" hidden="hidden">
+          <p class="switcher-panel__eyebrow">Market</p>
+          <ul>
+            <li dv:each="item : ${links.siteSwitches}">
+              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">Shoppr UK</a>
+              <span dv:if="${item.active}">Current</span>
+            </li>
+          </ul>
+        </div>
+        <div class="switcher-panel" id="locale-panel" hidden="hidden">
+          <p class="switcher-panel__eyebrow">Language</p>
+          <ul>
+            <li dv:each="item : ${links.localeSwitches}">
+              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">English</a>
+              <span dv:if="${item.active}">Current</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </header>
     <main dv:slot="content">

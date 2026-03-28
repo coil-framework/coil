@@ -397,6 +397,128 @@ fn render_model_and_seo_use_site_aware_links_and_canonical_host() {
     assert!(document.contains("https://shop.example.com/en-GB/shop"));
 }
 
+#[test]
+fn render_model_exposes_locale_switches_without_fabricating_localized_paths() {
+    let config = config_with_sites();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "shop.example.com", "/cart").unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let model = plan
+        .render_model_for_execution(&execution, "commerce/cart", None)
+        .unwrap();
+    let namespace = TemplateNamespace::new("customer-app").unwrap();
+    let template = TemplateSourceParser::new()
+        .parse_layout(
+            namespace.clone(),
+            TemplateName::new("locale-switches").unwrap(),
+            r##"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <a
+      class="locale-switch"
+      href="#"
+      dv:each="item : ${links.localeSwitches}"
+      dv:attr="href=${item.href},data-active=${item.active}"
+      dv:text="${item.label}"
+    >
+      Locale
+    </a>
+  </body>
+</html>"##,
+        )
+        .unwrap();
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+    let html = TemplateRuntime::new(registry)
+        .render_document(
+            &[namespace],
+            DocumentRenderRequest::new(
+                TemplateSelector::new(TemplateName::new("locale-switches").unwrap()),
+                model,
+            ),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains(r#"class="locale-switch" href="/cart" data-active="true">English"#), "{html}");
+    assert!(html.contains(r#"class="locale-switch" href="/cart" data-active="false">Français"#), "{html}");
+}
+
+#[test]
+fn render_model_exposes_site_switches_with_route_aware_absolute_urls() {
+    let config = config_with_sites();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CommerceModule::new())
+        .build()
+        .unwrap();
+
+    let execution = plan
+        .execute_request(
+            RequestInput::new(HttpMethod::Get, "shop.example.com:8080", "/fr-FR/shop").unwrap(),
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+    let model = plan
+        .render_model_for_execution(&execution, "commerce/catalog", None)
+        .unwrap();
+    let namespace = TemplateNamespace::new("customer-app").unwrap();
+    let template = TemplateSourceParser::new()
+        .parse_layout(
+            namespace.clone(),
+            TemplateName::new("site-switches").unwrap(),
+            r##"<!doctype html>
+<html xmlns:dv="https://davenda.dev">
+  <body>
+    <a
+      class="site-switch"
+      href="#"
+      dv:each="item : ${links.siteSwitches}"
+      dv:attr="href=${item.href},data-active=${item.active}"
+      dv:text="${item.label}"
+    >
+      Site
+    </a>
+  </body>
+</html>"##,
+        )
+        .unwrap();
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+    let html = TemplateRuntime::new(registry)
+        .render_document(
+            &[namespace],
+            DocumentRenderRequest::new(
+                TemplateSelector::new(TemplateName::new("site-switches").unwrap()),
+                model,
+            ),
+        )
+        .unwrap()
+        .html;
+
+    assert!(
+        html.contains(
+            r#"class="site-switch" href="https://shop.example.com:8080/fr-FR/shop" data-active="true">Shoppr"#
+        ),
+        "{html}"
+    );
+    assert!(
+        html.contains(
+            r#"class="site-switch" href="https://tickets.example.com:8080/en-GB/shop" data-active="false">Harbor Tickets"#
+        ),
+        "{html}"
+    );
+}
+
 fn installed_admin_widget_extension() -> InstalledExtension {
     InstalledExtension::install(
         ExtensionManifest::new(

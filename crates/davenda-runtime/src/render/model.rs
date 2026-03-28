@@ -560,6 +560,8 @@ fn links_model(
                 "/checkout",
             )),
         )?
+        .with_list("localeSwitches", locale_switches_model(plan, execution)?)?
+        .with_list("siteSwitches", site_switches_model(plan, execution)?)?
         .with_value("account", RenderValue::text("/account"))?
         .with_value("orders", RenderValue::text("/account/orders"))?
         .with_value("memberships", RenderValue::text("/account/memberships"))?
@@ -583,6 +585,122 @@ fn route_link(
     plan.http
         .path_for_site(&plan.config, site_id, route_name, params, locale)
         .unwrap_or_else(|_| fallback.to_string())
+}
+
+fn locale_switches_model(
+    plan: &RuntimePlan,
+    execution: &RequestExecution,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let site_id = execution.site_id.as_deref();
+    let route_name = execution.route.route_name.as_str();
+    let params = &execution.route.params;
+    let current_locale = execution.locale.as_str();
+
+    plan.config
+        .supported_locales_for_site(site_id)
+        .iter()
+        .map(|locale| {
+            RenderModel::new()
+                .with_value("id", RenderValue::text(locale.clone()))?
+                .with_value(
+                    "label",
+                    RenderValue::text(locale_display_label(locale.as_str())),
+                )?
+                .with_value(
+                    "href",
+                    RenderValue::text(route_link(
+                        plan,
+                        site_id,
+                        route_name,
+                        params,
+                        Some(locale.as_str()),
+                        &execution.path,
+                    )),
+                )?
+                .with_bool("active", locale == current_locale)
+        })
+        .collect()
+}
+
+fn site_switches_model(
+    plan: &RuntimePlan,
+    execution: &RequestExecution,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let route_name = execution.route.route_name.as_str();
+    let params = &execution.route.params;
+    let current_site_id = execution.site_id.as_deref();
+    let current_locale = execution.locale.as_str();
+    let scheme = execution.trace.transport_scheme.as_str();
+
+    plan.config
+        .sites
+        .iter()
+        .map(|site| {
+            let target_locale = if site
+                .supported_locales
+                .iter()
+                .any(|candidate| candidate == current_locale)
+            {
+                current_locale
+            } else {
+                site.default_locale.as_str()
+            };
+            let target_host = host_with_request_port(
+                site.canonical_host.as_str(),
+                execution.host.as_str(),
+            );
+            let href = plan
+                .http
+                .path_for_site(
+                    &plan.config,
+                    Some(site.id.as_str()),
+                    route_name,
+                    params,
+                    Some(target_locale),
+                )
+                .map(|path| format!("{scheme}://{target_host}{path}"))
+                .unwrap_or_else(|_| format!("{scheme}://{target_host}{}", execution.path));
+
+            RenderModel::new()
+                .with_value("id", RenderValue::text(site.id.clone()))?
+                .with_value("label", RenderValue::text(site.display_name.clone()))?
+                .with_value("href", RenderValue::text(href))?
+                .with_value("locale", RenderValue::text(target_locale.to_string()))?
+                .with_bool("active", current_site_id == Some(site.id.as_str()))
+        })
+        .collect()
+}
+
+fn locale_display_label(locale: &str) -> &'static str {
+    match locale {
+        "en-GB" => "English",
+        "fr-FR" => "Français",
+        "pl-PL" => "Polski",
+        "de-DE" => "Deutsch",
+        _ => "Locale",
+    }
+}
+
+fn host_with_request_port(canonical_host: &str, request_host: &str) -> String {
+    if canonical_host.contains(':') {
+        return canonical_host.to_string();
+    }
+
+    let port = match request_host.rsplit_once(':') {
+        Some((candidate, port))
+            if !candidate.is_empty()
+                && !candidate.contains(':')
+                && port.chars().all(|ch| ch.is_ascii_digit()) =>
+        {
+            Some(port)
+        }
+        _ => None,
+    };
+
+    match port {
+        Some(port) => format!("{canonical_host}:{port}"),
+        None => canonical_host.to_string(),
+    }
 }
 
 fn page_model_for_route(

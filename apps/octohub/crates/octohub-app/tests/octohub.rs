@@ -136,6 +136,7 @@ fn manifest_declares_octohub_showcase_module_and_multilingual_support() {
             .collect::<Vec<_>>(),
         vec!["en-GB", "fr-FR", "de-DE"]
     );
+    assert!(manifest.localized_routes);
     assert!(
         manifest
             .modules
@@ -205,7 +206,8 @@ fn server_serves_octohub_home_and_wasm_extended_api_surface() {
         .build()
         .unwrap();
 
-    let (home_body, api_body, fr_body, de_body) = runtime.block_on(async move {
+    let (home_body, localhost_body, api_body, fr_body, de_body, issues_body, search_body) =
+        runtime.block_on(async move {
         let workspace = OctohubWorkspace::at(&temp_root.path).unwrap();
         let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
         let resolver = EnvironmentSecretResolver::default();
@@ -231,6 +233,26 @@ fn server_serves_octohub_home_and_wasm_extended_api_surface() {
             .unwrap();
         let home_body = String::from_utf8(
             to_bytes(home_response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+
+        let localhost_response: axum::http::Response<Body> = server
+            .respond(
+                Request::builder()
+                    .method("GET")
+                    .uri("/")
+                    .header("host", "octohub.127.0.0.1.nip.io:58080")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let localhost_body = String::from_utf8(
+            to_bytes(localhost_response.into_body(), usize::MAX)
                 .await
                 .unwrap()
                 .to_vec(),
@@ -297,9 +319,57 @@ fn server_serves_octohub_home_and_wasm_extended_api_surface() {
         )
         .unwrap();
 
+        let issues_response: axum::http::Response<Body> = server
+            .respond(
+                Request::builder()
+                    .method("GET")
+                    .uri("/octocorp/platform-ui/issues")
+                    .header("host", "octohub.127.0.0.1.nip.io")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let issues_body = String::from_utf8(
+            to_bytes(issues_response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+
+        let search_response: axum::http::Response<Body> = server
+            .respond(
+                Request::builder()
+                    .method("GET")
+                    .uri("/search?q=platform")
+                    .header("host", "octohub.127.0.0.1.nip.io")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let search_body = String::from_utf8(
+            to_bytes(search_response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+
         std::mem::forget(server);
         std::mem::forget(bootstrap);
-        (home_body, api_body, fr_body, de_body)
+        (
+            home_body,
+            localhost_body,
+            api_body,
+            fr_body,
+            de_body,
+            issues_body,
+            search_body,
+        )
     });
 
     assert!(
@@ -308,10 +378,15 @@ fn server_serves_octohub_home_and_wasm_extended_api_surface() {
     );
     assert!(home_body.contains("data-route=\"home\""), "{home_body}");
     assert!(home_body.contains("/octocorp/platform-ui"), "{home_body}");
+    assert!(localhost_body.contains("data-route=\"home\""), "{localhost_body}");
     assert!(api_body.contains("\"status\":\"active\""), "{api_body}");
     assert!(api_body.contains("\"extension\":\"ok\""), "{api_body}");
     assert!(fr_body.contains("data-route=\"home\""), "{fr_body}");
     assert!(fr_body.contains("href=\"/fr\""), "{fr_body}");
     assert!(de_body.contains("data-route=\"home\""), "{de_body}");
     assert!(de_body.contains("href=\"/de\""), "{de_body}");
+    assert!(issues_body.contains("data-route=\"issues\""), "{issues_body}");
+    assert!(issues_body.contains("#402 Add keyboard shortcuts"), "{issues_body}");
+    assert!(search_body.contains("data-route=\"search\""), "{search_body}");
+    assert!(search_body.contains("data-search-results=\"results\""), "{search_body}");
 }

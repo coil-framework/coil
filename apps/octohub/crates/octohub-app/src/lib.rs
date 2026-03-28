@@ -573,10 +573,12 @@ fn octohub_page_routes() -> Vec<(RouteDefinition, &'static str)> {
         ("home", "", "octohub/home"),
         ("explore", "/explore", "octohub/explore"),
         ("repo", "/octocorp/platform-ui", "octohub/repository"),
+        ("issues", "/octocorp/platform-ui/issues", "octohub/issues"),
         ("pulls", "/octocorp/platform-ui/pulls", "octohub/pulls"),
         ("actions", "/octocorp/platform-ui/actions", "octohub/actions"),
         ("org", "/orgs/octocorp", "octohub/organization"),
         ("user", "/alexmariner", "octohub/profile"),
+        ("search", "/search", "octohub/search"),
     ];
     let mut routes = Vec::new();
     for (code, prefix) in [("en", ""), ("fr", "/fr"), ("de", "/de")] {

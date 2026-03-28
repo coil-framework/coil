@@ -238,6 +238,14 @@ pub fn workflow_api_payload() -> BTreeMap<String, String> {
         ("queued".to_string(), queued.to_string()),
         ("primary_workflow".to_string(), runs[0].workflow.clone()),
         ("primary_cadence".to_string(), runs[0].cadence.clone()),
+        (
+            "scheduler_contract".to_string(),
+            "github.actions.refresh".to_string(),
+        ),
+        (
+            "scheduler_extension".to_string(),
+            "octohub-actions-scheduler".to_string(),
+        ),
     ])
 }
 

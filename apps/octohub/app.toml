@@ -9,7 +9,7 @@ additional = ["octohub.127.0.0.1.nip.io", "www.example.com"]
 [i18n]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "de-DE"]
-localized_routes = false
+localized_routes = true
 
 [[sites]]
 id = "default"
@@ -19,6 +19,7 @@ canonical_domain = "octohub.example.com"
 additional_domains = ["octohub.127.0.0.1.nip.io", "www.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "de-DE"]
+localized_routes = true
 
 [theme]
 active = "octohub"

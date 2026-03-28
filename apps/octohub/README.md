@@ -29,15 +29,16 @@ published host ports before running Compose.
 
 Then open:
 
-- `http://localhost:8080/`
-- `http://localhost:8080/explore`
-- `http://localhost:8080/octocorp/platform-ui`
-- `http://localhost:8080/octocorp/platform-ui/pulls`
-- `http://localhost:8080/octocorp/platform-ui/actions`
-- `http://localhost:8080/orgs/octocorp`
-- `http://localhost:8080/alexmariner`
-- `http://localhost:8080/fr`
-- `http://localhost:8080/de`
+- `http://octohub.127.0.0.1.nip.io:58080/`
+- `http://octohub.127.0.0.1.nip.io:58080/explore`
+- `http://octohub.127.0.0.1.nip.io:58080/octocorp/platform-ui`
+- `http://octohub.127.0.0.1.nip.io:58080/octocorp/platform-ui/issues`
+- `http://octohub.127.0.0.1.nip.io:58080/octocorp/platform-ui/pulls`
+- `http://octohub.127.0.0.1.nip.io:58080/octocorp/platform-ui/actions`
+- `http://octohub.127.0.0.1.nip.io:58080/orgs/octocorp`
+- `http://octohub.127.0.0.1.nip.io:58080/alexmariner`
+- `http://octohub.127.0.0.1.nip.io:58080/fr`
+- `http://octohub.127.0.0.1.nip.io:58080/de`
 
 What you should see:
 
@@ -134,6 +135,17 @@ OctoHub exposes GitHub-style demo endpoints:
 
 The first five are mounted by the customer app in Rust. The last one is fulfilled through the WASM
 extension boundary.
+
+## Local Host And Asset Notes
+
+The default local stack publishes:
+
+- the app on `localhost:58080`
+- MinIO asset delivery on `localhost:9002`
+- the MinIO console on `localhost:9003`
+
+Theme assets are published through the configured CDN base URL, so in local development you should
+expect hashed CSS and JS asset URLs under `http://localhost:9002/octohub/...`.
 
 ## Running Without Docker
 

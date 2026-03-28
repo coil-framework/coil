@@ -11,13 +11,14 @@ const OCTOHUB = (() => {
         dark: "Dark",
         system: "System",
         search: "Search",
+        searchSubmit: "Search",
         skip: "Skip to content",
         primaryNavigation: "Primary navigation",
         repositoryNavigation: "Repository navigation",
         repositorySummary: "Repository summary"
       },
       footer: "OctoHub is a customer-root Davenda demo showing CMS, custom API surfaces, linked Rust hooks, and runtime-installed WASM.",
-      pageTitles: { home: "OctoHub · Home", explore: "OctoHub · Explore", repo: "octocorp/platform-ui", pulls: "Pull requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner" },
+      pageTitles: { home: "OctoHub · Home", explore: "OctoHub · Explore", repo: "octocorp/platform-ui", issues: "Issues · octocorp/platform-ui", pulls: "Pull requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner", search: "Search · OctoHub" },
       copy: {
         "home.eyebrow": "Customer-root GitHub-style demo",
         "home.title": "One Davenda app can look like a forge, not just a storefront.",
@@ -67,6 +68,19 @@ const OCTOHUB = (() => {
         "repo.meta.language": "Language",
         "repo.meta.license": "License",
         "repo.code": "Code", "repo.issues": "Issues", "repo.pulls": "Pull requests", "repo.actions": "Actions",
+        "issues.title": "Open issues",
+        "issues.summary": "Static issue cards keep the GitHub-shaped navigation loop intact while staying honest that this demo does not ship a full issue tracker.",
+        "issues.caption": "Open issues for octocorp/platform-ui",
+        "issues.head.issue": "Issue",
+        "issues.head.owner": "Owner",
+        "issues.head.labels": "Labels",
+        "issues.head.status": "Status",
+        "issues.label.a11y": "accessibility",
+        "issues.label.i18n": "localization",
+        "issues.label.design": "design-system",
+        "issues.status.triage": "Needs triage",
+        "issues.status.inProgress": "In progress",
+        "issues.status.ready": "Ready for review",
         "pulls.title": "Open pull requests",
         "pulls.summary": "Static pull requests mimic GitHub review flow while keeping the demo honest about what is and is not implemented.",
         "pulls.caption": "Open pull requests for octocorp/platform-ui",
@@ -80,6 +94,14 @@ const OCTOHUB = (() => {
         "actions.scheduleBody": "The `github.actions.refresh` surface is declared by the OctoHub customer module and can be fulfilled by a runtime-installed scheduled-job extension.",
         "actions.extension": "WASM runtime story",
         "actions.extensionBody": "OctoHub ships both a custom API extension and a mock scheduled-job extension to show how third-party behavior stays bounded at runtime.",
+        "actions.mockTitle": "Mock scheduler heartbeat",
+        "actions.mockBody": "This browser-side loop simulates a scheduled refresh so the Actions demo shows visible cadence instead of static counters only.",
+        "actions.mockContract": "Contract",
+        "actions.mockExtension": "Extension",
+        "actions.mockRuns": "Simulated runs",
+        "actions.mockLastRun": "Last simulated run",
+        "actions.mockJustNow": "just now",
+        "actions.mockMinutes": "{count} minute(s) ago",
         "actions.job2": "Localization smoke",
         "actions.job2Cadence": "Every hour",
         "actions.job3": "WASM extension contract",
@@ -100,7 +122,23 @@ const OCTOHUB = (() => {
         "profile.pinned": "Pinned repositories",
         "profile.activity1": "Published navigation accessibility guidance for repository shells",
         "profile.activity2": "Reviewed the French and German language switcher rollout",
-        "profile.activity3": "Validated the bounded WASM API extension contract"
+        "profile.activity3": "Validated the bounded WASM API extension contract",
+        "search.title": "Search results",
+        "search.summary": "The search surface is static-but-usable: it filters the checked-in demo repositories, docs, users, and Actions pages by the current query.",
+        "search.queryLabel": "Query",
+        "search.empty": "No demo results matched this query.",
+        "search.type.repo": "Repository",
+        "search.type.docs": "Documentation",
+        "search.type.person": "Person",
+        "search.type.actions": "Actions",
+        "search.result.repo": "Accessible multilingual UI primitives and customer-app examples for Davenda.",
+        "search.result.docs": "Versioned docs and editorial policy examples running in the same customer-root workspace.",
+        "search.result.profile": "Staff Engineer focused on accessibility, multilingual delivery, and workflow tooling.",
+        "search.result.actions": "Mock scheduled tasks and bounded WASM extensions simulate GitHub Actions cadence.",
+        "api.visibility.public": "Public",
+        "api.status.active": "active",
+        "api.workflow.primary": "UI regression",
+        "api.workflow.primaryCadence": "Every 30 minutes"
       }
     },
     "fr-FR": {
@@ -114,13 +152,14 @@ const OCTOHUB = (() => {
         dark: "Sombre",
         system: "Système",
         search: "Rechercher",
+        searchSubmit: "Rechercher",
         skip: "Aller au contenu",
         primaryNavigation: "Navigation principale",
         repositoryNavigation: "Navigation du dépôt",
         repositorySummary: "Résumé du dépôt"
       },
       footer: "OctoHub est une démo Davenda en espace client montrant le CMS, des API sur mesure, des hooks Rust liés et du WASM installé à l'exécution.",
-      pageTitles: { home: "OctoHub · Accueil", explore: "OctoHub · Explorer", repo: "octocorp/platform-ui", pulls: "Pull requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner" },
+      pageTitles: { home: "OctoHub · Accueil", explore: "OctoHub · Explorer", repo: "octocorp/platform-ui", issues: "Issues · octocorp/platform-ui", pulls: "Pull requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner", search: "Recherche · OctoHub" },
       copy: {
         "home.eyebrow": "Démo GitHub en espace client",
         "home.title": "Une application Davenda peut ressembler à une forge, pas seulement à une boutique.",
@@ -170,6 +209,19 @@ const OCTOHUB = (() => {
         "repo.meta.language": "Langage",
         "repo.meta.license": "Licence",
         "repo.code": "Code", "repo.issues": "Issues", "repo.pulls": "Pull requests", "repo.actions": "Actions",
+        "issues.title": "Issues ouvertes",
+        "issues.summary": "Des cartes d’issues statiques gardent la navigation de style GitHub complète tout en restant honnêtes: cette démo ne fournit pas un véritable gestionnaire d’issues.",
+        "issues.caption": "Issues ouvertes pour octocorp/platform-ui",
+        "issues.head.issue": "Issue",
+        "issues.head.owner": "Responsable",
+        "issues.head.labels": "Labels",
+        "issues.head.status": "Statut",
+        "issues.label.a11y": "accessibilité",
+        "issues.label.i18n": "localisation",
+        "issues.label.design": "design-system",
+        "issues.status.triage": "À trier",
+        "issues.status.inProgress": "En cours",
+        "issues.status.ready": "Prêt pour revue",
         "pulls.title": "Pull requests ouvertes",
         "pulls.summary": "Des pull requests statiques reproduisent le flux de revue GitHub tout en restant honnêtes sur ce qui est réellement implémenté.",
         "pulls.caption": "Pull requests ouvertes pour octocorp/platform-ui",
@@ -183,6 +235,14 @@ const OCTOHUB = (() => {
         "actions.scheduleBody": "La surface `github.actions.refresh` est déclarée par le module client OctoHub et peut être remplie par une extension WASM planifiée.",
         "actions.extension": "Chemin WASM à l’exécution",
         "actions.extensionBody": "OctoHub fournit une extension API personnalisée et une extension de tâche planifiée pour montrer comment le comportement tiers reste borné à l’exécution.",
+        "actions.mockTitle": "Battement du planificateur simulé",
+        "actions.mockBody": "Cette boucle côté navigateur simule une exécution planifiée afin que la démo Actions montre une cadence visible plutôt que de simples compteurs statiques.",
+        "actions.mockContract": "Contrat",
+        "actions.mockExtension": "Extension",
+        "actions.mockRuns": "Exécutions simulées",
+        "actions.mockLastRun": "Dernière exécution simulée",
+        "actions.mockJustNow": "à l’instant",
+        "actions.mockMinutes": "il y a {count} minute(s)",
         "actions.job2": "Vérification de localisation",
         "actions.job2Cadence": "Chaque heure",
         "actions.job3": "Contrat d’extension WASM",
@@ -203,7 +263,23 @@ const OCTOHUB = (() => {
         "profile.pinned": "Dépôts épinglés",
         "profile.activity1": "Publication des directives d’accessibilité de navigation pour les interfaces de dépôt",
         "profile.activity2": "Revue du déploiement du sélecteur de langue français et allemand",
-        "profile.activity3": "Validation du contrat d’extension API WASM bornée"
+        "profile.activity3": "Validation du contrat d’extension API WASM bornée",
+        "search.title": "Résultats de recherche",
+        "search.summary": "La recherche reste statique mais utilisable: elle filtre les dépôts, la documentation, les profils et les surfaces Actions inclus dans la démo.",
+        "search.queryLabel": "Requête",
+        "search.empty": "Aucun résultat de démonstration ne correspond à cette requête.",
+        "search.type.repo": "Dépôt",
+        "search.type.docs": "Documentation",
+        "search.type.person": "Profil",
+        "search.type.actions": "Actions",
+        "search.result.repo": "Primitives UI accessibles et multilingues ainsi qu’exemples d’applications clientes pour Davenda.",
+        "search.result.docs": "Documentation versionnée et exemples de politique éditoriale dans le même espace client.",
+        "search.result.profile": "Staff Engineer axé sur l’accessibilité, la livraison multilingue et l’outillage de workflows.",
+        "search.result.actions": "Des tâches planifiées simulées et des extensions WASM bornées reproduisent la cadence d’Actions.",
+        "api.visibility.public": "Public",
+        "api.status.active": "actif",
+        "api.workflow.primary": "Régression UI",
+        "api.workflow.primaryCadence": "Toutes les 30 minutes"
       }
     },
     "de-DE": {
@@ -217,13 +293,14 @@ const OCTOHUB = (() => {
         dark: "Dunkel",
         system: "System",
         search: "Suchen",
+        searchSubmit: "Suchen",
         skip: "Zum Inhalt springen",
         primaryNavigation: "Hauptnavigation",
         repositoryNavigation: "Repository-Navigation",
         repositorySummary: "Repository-Zusammenfassung"
       },
       footer: "OctoHub ist eine Davenda-Demo im Customer-Root-Workspace mit CMS, eigenen APIs, eingebundenen Rust-Hooks und zur Laufzeit installiertem WASM.",
-      pageTitles: { home: "OctoHub · Start", explore: "OctoHub · Entdecken", repo: "octocorp/platform-ui", pulls: "Pull Requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner" },
+      pageTitles: { home: "OctoHub · Start", explore: "OctoHub · Entdecken", repo: "octocorp/platform-ui", issues: "Issues · octocorp/platform-ui", pulls: "Pull Requests · octocorp/platform-ui", actions: "Actions · octocorp/platform-ui", org: "OctoCorp", profile: "Alex Mariner", search: "Suche · OctoHub" },
       copy: {
         "home.eyebrow": "GitHub-ähnliche Customer-Root-Demo",
         "home.title": "Eine Davenda-Anwendung kann wie eine Forge aussehen, nicht nur wie ein Store.",
@@ -273,6 +350,19 @@ const OCTOHUB = (() => {
         "repo.meta.language": "Sprache",
         "repo.meta.license": "Lizenz",
         "repo.code": "Code", "repo.issues": "Issues", "repo.pulls": "Pull Requests", "repo.actions": "Actions",
+        "issues.title": "Offene Issues",
+        "issues.summary": "Statische Issue-Karten halten die GitHub-ähnliche Navigation vollständig, ohne einen echten Issue-Tracker vorzutäuschen.",
+        "issues.caption": "Offene Issues für octocorp/platform-ui",
+        "issues.head.issue": "Issue",
+        "issues.head.owner": "Verantwortlich",
+        "issues.head.labels": "Labels",
+        "issues.head.status": "Status",
+        "issues.label.a11y": "Barrierefreiheit",
+        "issues.label.i18n": "Lokalisierung",
+        "issues.label.design": "Design-System",
+        "issues.status.triage": "Braucht Triage",
+        "issues.status.inProgress": "In Arbeit",
+        "issues.status.ready": "Bereit für Review",
         "pulls.title": "Offene Pull Requests",
         "pulls.summary": "Statische Pull Requests bilden den GitHub-Review-Fluss nach und bleiben dabei ehrlich über den tatsächlichen Implementierungsumfang.",
         "pulls.caption": "Offene Pull Requests für octocorp/platform-ui",
@@ -286,6 +376,14 @@ const OCTOHUB = (() => {
         "actions.scheduleBody": "Die Fläche `github.actions.refresh` wird vom OctoHub-Kundenmodul deklariert und kann von einer installierten Scheduled-Job-Erweiterung bedient werden.",
         "actions.extension": "WASM zur Laufzeit",
         "actions.extensionBody": "OctoHub liefert sowohl eine eigene API-Erweiterung als auch eine geplante Job-Erweiterung, um begrenztes Drittanbieter-Verhalten zur Laufzeit zu zeigen.",
+        "actions.mockTitle": "Simulierter Scheduler-Takt",
+        "actions.mockBody": "Diese Schleife im Browser simuliert einen geplanten Refresh, damit die Actions-Demo sichtbare Taktung statt nur statischer Zähler zeigt.",
+        "actions.mockContract": "Vertrag",
+        "actions.mockExtension": "Erweiterung",
+        "actions.mockRuns": "Simulierte Läufe",
+        "actions.mockLastRun": "Letzter simulierter Lauf",
+        "actions.mockJustNow": "gerade eben",
+        "actions.mockMinutes": "vor {count} Minute(n)",
         "actions.job2": "Lokalisierungs-Smoketest",
         "actions.job2Cadence": "Jede Stunde",
         "actions.job3": "WASM-Erweiterungsvertrag",
@@ -306,7 +404,23 @@ const OCTOHUB = (() => {
         "profile.pinned": "Angeheftete Repositorys",
         "profile.activity1": "Navigationsrichtlinien für barrierefreie Repository-Oberflächen veröffentlicht",
         "profile.activity2": "Einführung des französischen und deutschen Sprachumschalters überprüft",
-        "profile.activity3": "Vertrag der begrenzten WASM-API-Erweiterung validiert"
+        "profile.activity3": "Vertrag der begrenzten WASM-API-Erweiterung validiert",
+        "search.title": "Suchergebnisse",
+        "search.summary": "Die Suche bleibt statisch, ist aber benutzbar: Sie filtert die eingecheckten Repository-, Doku-, Profil- und Actions-Demooberflächen nach der aktuellen Anfrage.",
+        "search.queryLabel": "Suchbegriff",
+        "search.empty": "Keine Demo-Ergebnisse passen zu dieser Anfrage.",
+        "search.type.repo": "Repository",
+        "search.type.docs": "Dokumentation",
+        "search.type.person": "Profil",
+        "search.type.actions": "Actions",
+        "search.result.repo": "Zugängliche mehrsprachige UI-Bausteine und Customer-App-Beispiele für Davenda.",
+        "search.result.docs": "Versionierte Dokumentation und redaktionelle Richtlinien im selben Customer-Root-Workspace.",
+        "search.result.profile": "Staff Engineer mit Fokus auf Barrierefreiheit, Mehrsprachigkeit und Workflow-Werkzeuge.",
+        "search.result.actions": "Simulierte geplante Aufgaben und begrenzte WASM-Erweiterungen bilden die Actions-Taktung nach.",
+        "api.visibility.public": "Öffentlich",
+        "api.status.active": "aktiv",
+        "api.workflow.primary": "UI-Regression",
+        "api.workflow.primaryCadence": "Alle 30 Minuten"
       }
     }
   };
@@ -315,11 +429,20 @@ const OCTOHUB = (() => {
     home: "",
     explore: "/explore",
     repo: "/octocorp/platform-ui",
+    issues: "/octocorp/platform-ui/issues",
     pulls: "/octocorp/platform-ui/pulls",
     actions: "/octocorp/platform-ui/actions",
     org: "/orgs/octocorp",
-    profile: "/alexmariner"
+    profile: "/alexmariner",
+    search: "/search"
   };
+
+  const searchIndex = [
+    { type: "repo", route: "repo", title: "octocorp/platform-ui", summaryKey: "search.result.repo", terms: ["platform", "repo", "ui", "rust", "davenda", "accessibility", "multilingual"] },
+    { type: "docs", route: "explore", title: "octocorp/docs-portal", summaryKey: "search.result.docs", terms: ["docs", "documentation", "cms", "markdown", "policy", "editorial"] },
+    { type: "person", route: "profile", title: "alexmariner", summaryKey: "search.result.profile", terms: ["alex", "profile", "accessibility", "language", "workflow"] },
+    { type: "actions", route: "actions", title: "github.actions.refresh", summaryKey: "search.result.actions", terms: ["actions", "scheduler", "wasm", "workflow", "automation"] }
+  ];
 
   const localePrefixes = { "en-GB": "", "fr-FR": "/fr", "de-DE": "/de" };
 
@@ -339,6 +462,7 @@ const OCTOHUB = (() => {
   }
 
   function applyLinks(locale) {
+    const currentQuery = currentRoute() === "search" ? window.location.search : "";
     document.querySelectorAll("[data-route-link]").forEach((link) => {
       const routeKey = link.getAttribute("data-route-link");
       const href = localizePath(routeKey, locale);
@@ -352,7 +476,7 @@ const OCTOHUB = (() => {
 
     document.querySelectorAll("[data-language-link]").forEach((link) => {
       const target = link.getAttribute("data-language-link");
-      link.setAttribute("href", localizePath(currentRoute(), target));
+      link.setAttribute("href", `${localizePath(currentRoute(), target)}${currentQuery}`);
       link.setAttribute("lang", target);
       link.setAttribute("hreflang", target);
       if (target === locale) {
@@ -360,6 +484,15 @@ const OCTOHUB = (() => {
       } else {
         link.removeAttribute("aria-current");
       }
+    });
+  }
+
+  function applySearchForms(locale) {
+    const query = new URLSearchParams(window.location.search).get("q") || "";
+    document.querySelectorAll("[data-search-form]").forEach((form) => {
+      form.setAttribute("action", localizePath("search", locale));
+      const input = form.querySelector("[data-search]");
+      if (input) input.value = query;
     });
   }
 
@@ -392,6 +525,19 @@ const OCTOHUB = (() => {
     document.title = messages.pageTitles[currentRoute()] || "OctoHub";
   }
 
+  function localizeApiValue(locale, key, field, value) {
+    const messages = translations[locale] || translations["en-GB"];
+    const copy = messages.copy;
+    const normalized = `${key}.${field}`;
+    const map = {
+      "repo.visibility": copy["api.visibility.public"],
+      "pulse.status": copy["api.status.active"],
+      "workflows.primary_workflow": copy["api.workflow.primary"],
+      "workflows.primary_cadence": copy["api.workflow.primaryCadence"]
+    };
+    return map[normalized] || value;
+  }
+
   function applyTheme(theme) {
     const resolved = theme === "system"
       ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
@@ -403,7 +549,7 @@ const OCTOHUB = (() => {
     localStorage.setItem("octohub-theme", theme);
   }
 
-  async function hydrateApi() {
+  async function hydrateApi(locale) {
     const targets = [
       ["/api/github/repository", "repo"],
       ["/api/github/pulls", "pulls"],
@@ -417,7 +563,7 @@ const OCTOHUB = (() => {
         const payload = await response.json();
         Object.entries(payload).forEach(([field, value]) => {
           document.querySelectorAll(`[data-api="${key}.${field}"]`).forEach((node) => {
-            node.textContent = value;
+            node.textContent = localizeApiValue(locale, key, field, value);
           });
         });
       } catch (_) {
@@ -429,16 +575,80 @@ const OCTOHUB = (() => {
     }
   }
 
+  function renderSearchResults(locale) {
+    if (currentRoute() !== "search") return;
+    const messages = translations[locale] || translations["en-GB"];
+    const query = (new URLSearchParams(window.location.search).get("q") || "").trim().toLowerCase();
+    const results = document.querySelector("[data-search-results]");
+    const empty = document.querySelector("[data-search-empty]");
+    const queryLabel = document.querySelector("[data-search-query]");
+    if (!results || !empty || !queryLabel) return;
+    queryLabel.textContent = query || "platform";
+
+    const matches = searchIndex.filter((entry) => {
+      if (!query) return true;
+      return [entry.title, ...entry.terms].some((term) => term.toLowerCase().includes(query));
+    });
+
+    results.innerHTML = matches
+      .map((entry) => {
+        const href = localizePath(entry.route, locale);
+        const type = messages.copy[`search.type.${entry.type}`] || entry.type;
+        const summary = messages.copy[entry.summaryKey] || entry.summaryKey;
+        return `<article class="summary-card search-result"><div class="meta-label">${type}</div><h2><a href="${href}">${entry.title}</a></h2><p>${summary}</p></article>`;
+      })
+      .join("");
+
+    empty.hidden = matches.length !== 0;
+  }
+
+  function formatMockHeartbeat(locale, timestamp) {
+    const messages = translations[locale] || translations["en-GB"];
+    const elapsedMinutes = Math.floor((Date.now() - timestamp) / 60000);
+    if (elapsedMinutes <= 0) return messages.copy["actions.mockJustNow"];
+    return messages.copy["actions.mockMinutes"].replace("{count}", String(elapsedMinutes));
+  }
+
+  function simulateActionsHeartbeat(locale) {
+    if (currentRoute() !== "actions") return;
+    const countNode = document.querySelector("[data-actions-heartbeat-count]");
+    const timeNode = document.querySelector("[data-actions-heartbeat-time]");
+    if (!countNode || !timeNode) return;
+
+    const key = "octohub-actions-heartbeat";
+    const stored = JSON.parse(localStorage.getItem(key) || "{\"count\":0,\"timestamp\":0}");
+
+    const sync = (count, timestamp) => {
+      countNode.textContent = String(count);
+      timeNode.textContent = formatMockHeartbeat(locale, timestamp);
+    };
+
+    const nextState = {
+      count: Math.max(stored.count, 0) + 1,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(key, JSON.stringify(nextState));
+    sync(nextState.count, nextState.timestamp);
+
+    window.setInterval(() => {
+      const current = JSON.parse(localStorage.getItem(key) || JSON.stringify(nextState));
+      sync(current.count, current.timestamp);
+    }, 15000);
+  }
+
   function boot() {
     const locale = currentLocale();
     applyCopy(locale);
     applyLinks(locale);
+    applySearchForms(locale);
     const storedTheme = localStorage.getItem("octohub-theme") || "system";
     applyTheme(storedTheme);
     document.querySelectorAll("[data-theme-option]").forEach((button) => {
       button.addEventListener("click", () => applyTheme(button.getAttribute("data-theme-option")));
     });
-    hydrateApi();
+    renderSearchResults(locale);
+    simulateActionsHeartbeat(locale);
+    hydrateApi(locale);
   }
 
   return { boot };

@@ -152,7 +152,7 @@ input {
 
 .topnav a[aria-current="page"],
 .toolbar button[aria-pressed="true"],
-.language-switcher a[aria-current="true"],
+.language-switcher a[aria-current="page"],
 .theme-switcher button[aria-pressed="true"] {
   border-color: var(--border-default);
   background: var(--bg-default);
@@ -167,6 +167,12 @@ input {
   min-width: 12rem;
 }
 
+.search-form {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
 .search input {
   width: 100%;
   min-height: 2.5rem;
@@ -175,6 +181,10 @@ input {
   border-radius: 0.5rem;
   background: var(--bg-default);
   color: var(--fg-default);
+}
+
+.search-form button {
+  white-space: nowrap;
 }
 
 .shell {
@@ -446,6 +456,16 @@ input {
 
 .flash-card[hidden] {
   display: none;
+}
+
+.search-results {
+  display: grid;
+  gap: 1rem;
+}
+
+.search-result h2 {
+  margin: 0.65rem 0 0.4rem;
+  font-size: 1.1rem;
 }
 
 .footer {

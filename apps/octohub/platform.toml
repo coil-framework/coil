@@ -58,7 +58,7 @@ l2 = "redis"
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "de-DE"]
 fallback_locale = "en-GB"
-localized_routes = false
+localized_routes = true
 
 [seo]
 canonical_host = "octohub.example.com"
@@ -72,6 +72,7 @@ canonical_host = "octohub.example.com"
 hosts = ["octohub.127.0.0.1.nip.io", "www.example.com"]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "de-DE"]
+localized_routes = true
 
 [auth]
 package = "octohub-auth"

@@ -2,7 +2,7 @@
 title: Theme Asset Delivery
 ---
 
-Davenda theme assets are published artifacts with a manifest-backed delivery plan, not raw files
+Coil theme assets are published artifacts with a manifest-backed delivery plan, not raw files
 that templates reference directly forever.
 
 ## Start With The Template Call Site
@@ -10,8 +10,8 @@ that templates reference directly forever.
 A normal template should look like this:
 
 ```html
-<link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
-<script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+<link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+<script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
 ```
 
 Annotated:
@@ -31,7 +31,7 @@ Asset delivery needs to satisfy all of these at once:
 - local and production templates should not diverge
 - the runtime should know which published URL belongs to which logical asset
 
-That is why Davenda uses:
+That is why Coil uses:
 
 - asset roots in the app manifest
 - publication plans
@@ -47,7 +47,7 @@ Customer apps opt assets into publication with `[theme].asset_roots`:
 asset_roots = ["theme/assets"]
 ```
 
-That tells Davenda where the logical asset tree begins.
+That tells Coil where the logical asset tree begins.
 
 ## How The Delivery Flow Works
 
@@ -77,7 +77,7 @@ That is why template code stays small and stable while the published URL can cha
 
 ## What Delivery Targets Exist?
 
-Davenda’s asset model includes these target shapes:
+Coil’s asset model includes these target shapes:
 
 - `Cdn`
 - `SignedObject`
@@ -112,7 +112,7 @@ render-time resolved URL:
 The template still only says:
 
 ```html
-dv:href="asset('theme/assets/site.css')"
+coil:href="asset('theme/assets/site.css')"
 ```
 
 ## What Config Is Involved?
@@ -152,10 +152,10 @@ Concrete supporting files:
 - `apps/shoppr/platform.dev.toml`
 - `apps/gitly/app.toml`
 - `apps/gitly/platform.dev.toml`
-- `crates/davenda-assets/src/release.rs`
-- `crates/davenda-assets/src/delivery.rs`
-- `crates/davenda-runtime/src/storage/host.rs`
-- `crates/davenda-runtime/src/render/model.rs`
+- `crates/coil-assets/src/release.rs`
+- `crates/coil-assets/src/delivery.rs`
+- `crates/coil-runtime/src/storage/host.rs`
+- `crates/coil-runtime/src/render/model.rs`
 
 ## What Should I Read Next?
 

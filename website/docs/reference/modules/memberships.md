@@ -7,7 +7,7 @@ memberships surface.
 
 Primary implementation files:
 
-- `crates/davenda-memberships/src/module/manifest.rs`
+- `crates/coil-memberships/src/module/manifest.rs`
 - `apps/shoppr/templates/memberships/account.html`
 
 ## Why It Exists
@@ -17,7 +17,7 @@ entitlements, renewal jobs, and account visibility.
 
 ## What It Provides
 
-From `crates/davenda-memberships/src/module/manifest.rs`, memberships adds:
+From `crates/coil-memberships/src/module/manifest.rs`, memberships adds:
 
 - migrations for member accounts, tiers, subscriptions, and entitlements
 - account routes `/account` and `/account/memberships`
@@ -88,10 +88,10 @@ Customer apps typically extend the module by:
 Concrete example:
 
 ```html title="templates/memberships/account.html"
-<section xmlns:dv="https://davenda.dev">
+<section xmlns:coil="https://coil.rs">
   <h2>Your membership</h2>
-  <p dv:text="${membership.tierName}">Founders</p>
-  <p dv:text="${membership.stateLabel}">Active</p>
+  <p coil:text="${membership.tierName}">Founders</p>
+  <p coil:text="${membership.stateLabel}">Active</p>
 </section>
 ```
 

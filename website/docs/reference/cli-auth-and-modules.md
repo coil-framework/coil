@@ -11,14 +11,14 @@ Use these commands when you need to inspect the platform boundary itself, not ju
 The platform exposes:
 
 ```text
-platform auth check
-platform auth bindings inspect
-platform auth test-model
-platform auth list
-platform auth lookup
-platform auth explain
-platform auth package validate
-platform auth package inspect
+coil auth check
+coil auth bindings inspect
+coil auth test-model
+coil auth list
+coil auth lookup
+coil auth explain
+coil auth package validate
+coil auth package inspect
 ```
 
 ### `auth check`
@@ -26,7 +26,7 @@ platform auth package inspect
 Use it to answer one practical question:
 
 ```bash
-cargo run -p davenda-cli -- auth check \
+cargo run -p coil-cli -- auth check \
   --config apps/shoppr/platform.dev.toml \
   --subject user:alice \
   --capability cms.page.publish \
@@ -47,7 +47,7 @@ tells you:
 Use it when you want to know how a stable capability maps into the current auth package:
 
 ```bash
-cargo run -p davenda-cli -- auth bindings inspect \
+cargo run -p coil-cli -- auth bindings inspect \
   --config apps/shoppr/platform.dev.toml \
   --capability cms.page.publish
 ```
@@ -60,7 +60,7 @@ how that stable capability is represented inside the active auth package.
 Use it before rollout or when changing auth files:
 
 ```bash
-cargo run -p davenda-cli -- auth package validate \
+cargo run -p coil-cli -- auth package validate \
   --config apps/shoppr/platform.dev.toml
 ```
 
@@ -76,17 +76,17 @@ Run this before:
 The platform exposes:
 
 ```text
-platform module list
-platform module inspect <module>
-platform module install <module>
-platform module enable <module>
-platform module disable <module>
+coil module list
+coil module inspect <module>
+coil module install <module>
+coil module enable <module>
+coil module disable <module>
 ```
 
 ### `module list`
 
 ```bash
-cargo run -p davenda-cli -- module list --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- module list --config apps/shoppr/platform.dev.toml
 ```
 
 Use this to see which modules the composed runtime knows about.
@@ -97,7 +97,7 @@ after dependency and runtime checks.
 ### `module inspect`
 
 ```bash
-cargo run -p davenda-cli -- module inspect cms --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- module inspect cms --config apps/shoppr/platform.dev.toml
 ```
 
 Use this when you need module-level detail before changing app composition.
@@ -114,7 +114,7 @@ Typical questions this command answers:
 These commands intentionally support dry-run and confirmation:
 
 ```bash
-cargo run -p davenda-cli -- module enable media \
+cargo run -p coil-cli -- module enable media \
   --config apps/shoppr/platform.dev.toml \
   --dry-run
 ```
@@ -122,7 +122,7 @@ cargo run -p davenda-cli -- module enable media \
 and:
 
 ```bash
-cargo run -p davenda-cli -- module disable media \
+cargo run -p coil-cli -- module disable media \
   --config apps/shoppr/platform.dev.toml \
   --dry-run
 ```

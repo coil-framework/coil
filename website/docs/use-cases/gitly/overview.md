@@ -2,18 +2,18 @@
 title: Gitly Overview
 ---
 
-Gitly is a supporting example for a broader point: Davenda is a customer-app platform, not a
+Gitly is a supporting example for a broader point: Coil is a customer-app platform, not a
 storefront-only framework.
 
 Use this page when you want to answer:
 
-- what a non-commerce Davenda app looks like
+- what a non-commerce Coil app looks like
 - which platform patterns survive when you remove catalog and checkout concerns
 - how to read the Gitly demo without treating it as the only valid app shape
 
 ## The Core Pattern
 
-Davenda customer apps keep the same structure regardless of product type:
+Coil customer apps keep the same structure regardless of product type:
 
 - `app.toml` declares the customer product contract
 - platform config wires runtime services and secrets
@@ -97,7 +97,7 @@ These show:
 - one-site non-commerce routing
 - locales and localised routes
 - a narrow module set
-- jobs, storage, cache, and asset config that look like any other Davenda app
+- jobs, storage, cache, and asset config that look like any other Coil app
 
 ### Composition root
 
@@ -126,7 +126,7 @@ Read:
 - `apps/gitly/templates/gitly/profile.html`
 - `apps/gitly/templates/gitly/search.html`
 
-These are supporting evidence that Davenda’s HTML-first model works for dense product shells too.
+These are supporting evidence that Coil’s HTML-first model works for dense product shells too.
 
 ### Linked Rust and WASM
 

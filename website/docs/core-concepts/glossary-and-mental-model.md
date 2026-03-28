@@ -2,13 +2,13 @@
 title: Glossary And Mental Model
 ---
 
-Davenda becomes much easier to reason about once the main nouns stop competing with each other.
+Coil becomes much easier to reason about once the main nouns stop competing with each other.
 
 This page gives you the minimum shared vocabulary for the rest of the documentation.
 
 ## What It Is
 
-Davenda is a product-oriented Rust web framework built around a few explicit layers:
+Coil is a product-oriented Rust web framework built around a few explicit layers:
 
 - core runtime primitives
 - official modules
@@ -16,7 +16,7 @@ Davenda is a product-oriented Rust web framework built around a few explicit lay
 - linked customer Rust
 - bounded third-party extensions
 
-Those layers are deliberate. Davenda is trying to avoid the common failure mode where everything can call everything else and the architecture collapses into one large implicit application.
+Those layers are deliberate. Coil is trying to avoid the common failure mode where everything can call everything else and the architecture collapses into one large implicit application.
 
 ## Why This Model Exists
 
@@ -29,13 +29,13 @@ For example:
 - sometimes it means the runtime manifest
 - sometimes it means a frontend bundle
 
-Davenda tries to be stricter than that. Once you understand the vocabulary, the decisions around composition, auth, rendering, and extension boundaries make much more sense.
+Coil tries to be stricter than that. Once you understand the vocabulary, the decisions around composition, auth, rendering, and extension boundaries make much more sense.
 
 ## Where To Use This Page
 
 Use this page as a launch point, not just a definitions list.
 
-- Read it once straight through if Davenda still feels "all nouns, no shape."
+- Read it once straight through if Coil still feels "all nouns, no shape."
 - Come back to it while reading the other concept pages whenever a term starts to blur.
 - Use the implementation links below to connect abstract terms to real files, docs sections, and example apps.
 
@@ -173,7 +173,7 @@ Customer-owned Rust is part of the application. It should not be mentally groupe
 
 ### Treating locale or site as theme-level concerns
 
-In Davenda they are runtime concepts, not just presentation details.
+In Coil they are runtime concepts, not just presentation details.
 
 ## What To Read Next
 

@@ -12,14 +12,14 @@ idle_timeout_secs = 3600
 absolute_timeout_secs = 86400
 
 [http.session_cookie]
-name = "davenda_session"
+name = "coil_session"
 path = "/"
 same_site = "lax"
 secure = true
 http_only = true
 
 [http.flash_cookie]
-name = "davenda_flash"
+name = "coil_flash"
 path = "/"
 same_site = "lax"
 secure = true
@@ -38,7 +38,7 @@ provider = "cloudflare-dns"
 [database]
 url = { kind = "env", var = "DATABASE_URL" }
 schema = "public"
-migrations_table = "_davenda_migrations"
+migrations_table = "_coil_migrations"
 min_connections = 4
 max_connections = 32
 statement_timeout_secs = 30
@@ -48,7 +48,7 @@ default_class = "public_upload"
 deployment = "distributed"
 object_store = "s3"
 object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
-local_root = "/var/lib/davenda/shoppr"
+local_root = "/var/lib/coil/shoppr"
 
 [cache]
 l1 = "moka"

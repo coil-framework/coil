@@ -2,7 +2,7 @@
 title: Migration Files And Ownership
 ---
 
-Davenda migrations are intentionally split by owner. That is what keeps module upgrades, auth
+Coil migrations are intentionally split by owner. That is what keeps module upgrades, auth
 validation, and customer-app changes from collapsing into one undocumented SQL pile.
 
 Use this page when you want to answer:
@@ -18,7 +18,7 @@ If your linked backend or customer app needs extra tables, projections, or backf
 today is:
 
 - yes, customer-owned migration work is first-class in the composed plan
-- no, Davenda does not yet auto-run arbitrary customer SQL files for you
+- no, Coil does not yet auto-run arbitrary customer SQL files for you
 
 That is why migration ownership is explicit in the docs. The platform records and surfaces the
 contract; the customer app still owns the concrete rollout step for purely customer-managed schema
@@ -70,7 +70,7 @@ The platform CLI gives you the composed migration plan across modules and auth.
 Real command:
 
 ```bash
-cargo run -p davenda-cli -- migrate plan --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- migrate plan --config apps/shoppr/platform.dev.toml
 ```
 
 Real output includes rows like:
@@ -184,12 +184,12 @@ Use this sequence when your linked backend needs new schema or projection work:
 
 1. add a `[[customer_migrations]]` entry to `app.toml`
 2. describe the change clearly in `description`
-3. run `platform migrate plan` to inspect the composed owner/order view
+3. run `coil migrate plan` to inspect the composed owner/order view
 4. run `shoppr validate` or `gitly validate`
 5. execute the actual customer-owned SQL or data step in your deployment workflow
 6. re-run `release doctor` and `release plan`
 
-That is the current Davenda workflow. The important thing is to be explicit about ownership rather
+That is the current Coil workflow. The important thing is to be explicit about ownership rather
 than pretending the platform already has a hidden arbitrary-SQL runner.
 
 ## Gitly Example
@@ -250,5 +250,5 @@ A customer app should commit:
 
 - [CLI Commands](./cli-commands.md)
 - [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
-- [Composition And davenda-all](./composition.md)
+- [Composition And coil](./composition.md)
 - [Shoppr Checkout And Operations](../use-cases/shoppr/checkout-and-operations.md)

@@ -1,0 +1,40 @@
+[package]
+name = "coil-cli"
+version = "0.1.0"
+edition = "2024"
+default-run = "coil"
+
+[dependencies]
+async-trait = "0.1"
+axum = "0.8"
+coil-admin = { path = "../coil-admin" }
+coil-assets = { path = "../coil-assets" }
+coil-auth = { path = "../coil-auth" }
+coil-app = { path = "../coil-app" }
+coil-cache = { path = "../coil-cache" }
+coil-core = { path = "../coil-core" }
+coil-cms = { path = "../coil-cms" }
+coil-commerce = { path = "../coil-commerce" }
+coil-config = { path = "../coil-config" }
+coil-data = { path = "../coil-data" }
+coil-events = { path = "../coil-events" }
+coil-import = { path = "../coil-import" }
+coil-jobs = { path = "../coil-jobs" }
+coil-media = { path = "../coil-media" }
+coil-memberships = { path = "../coil-memberships" }
+coil-ops = { path = "../coil-ops" }
+coil-report = { path = "../coil-report" }
+coil-runtime = { path = "../coil-runtime" }
+coil-storage = { path = "../coil-storage" }
+coil-tls = { path = "../coil-tls" }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1", features = ["net", "rt", "rt-multi-thread"] }
+toml = "0.8"
+zanzibar = { workspace = true }
+
+[[bin]]
+name = "coil"
+path = "src/main.rs"

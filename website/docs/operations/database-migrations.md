@@ -2,17 +2,17 @@
 title: Database Migrations
 ---
 
-Davenda treats migrations as an operator-visible lifecycle step, not as a side effect of startup.
+Coil treats migrations as an operator-visible lifecycle step, not as a side effect of startup.
 
 ## What Is This?
 
-This page explains how to plan, apply, and reason about schema changes in Davenda.
+This page explains how to plan, apply, and reason about schema changes in Coil.
 
 ## Why Does This Matter?
 
 Schema changes are one of the fastest ways to turn a healthy release into a broken rollout.
 
-Davenda intentionally separates:
+Coil intentionally separates:
 
 - linked runtime composition
 - executable migration application
@@ -34,9 +34,9 @@ The checked-in customer binaries already surface both.
 Generic platform flow:
 
 ```bash
-platform migrate plan --config apps/shoppr/platform.toml
-platform migrate apply --config apps/shoppr/platform.toml --dry-run
-platform migrate apply --config apps/shoppr/platform.toml --yes
+coil migrate plan --config apps/shoppr/platform.toml
+coil migrate apply --config apps/shoppr/platform.toml --dry-run
+coil migrate apply --config apps/shoppr/platform.toml --yes
 ```
 
 Customer binary flow in the checked-in apps:

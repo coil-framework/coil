@@ -26,7 +26,7 @@ cms = "CMS"
 title = "Shoppr"
 
 [home.utility]
-summary = "Shoppr mirrors the pace and polish of a modern fashion flagship while still exposing Davenda's modular surface."
+summary = "Shoppr mirrors the pace and polish of a modern fashion flagship while still exposing Coil's modular surface."
 
 [home.hero]
 title = "Quiet luxury, fast routes, and the full storefront loop in one starter."
@@ -92,7 +92,7 @@ admin = "Open admin"
 
 [home.footer]
 brand = "Shoppr"
-summary = "Fashion-led Davenda starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries."
+summary = "Fashion-led Coil starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries."
 explore = "Explore"
 inspect = "Inspect"
 platform = "Platform"

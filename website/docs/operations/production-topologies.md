@@ -2,12 +2,12 @@
 title: Production Topologies
 ---
 
-Davenda supports multiple deployment shapes, but they should all preserve the same operator
+Coil supports multiple deployment shapes, but they should all preserve the same operator
 contract.
 
 ## What Is This?
 
-This page explains the practical production topologies a Davenda app can use.
+This page explains the practical production topologies a Coil app can use.
 
 ## Why Does Topology Matter?
 
@@ -34,7 +34,7 @@ Use it when:
 - you do not need a separate process boundary for customer logic
 - you want the simplest deploy and rollback story
 
-This is the default Davenda mental model.
+This is the default Coil mental model.
 
 ## Topology 2: Containerized Customer Runtime
 
@@ -71,7 +71,7 @@ You need to reason about:
 
 ## Multi-Site Topology
 
-For multi-site products, the Davenda model is:
+For multi-site products, the Coil model is:
 
 - one customer app
 - one deployment surface
@@ -121,7 +121,7 @@ Background work is part of the production system, not an implementation detail.
 
 ### Rebuilding multi-site as cloned apps
 
-Davenda's site model exists to avoid that drift.
+Coil's site model exists to avoid that drift.
 
 ## What To Read Next
 

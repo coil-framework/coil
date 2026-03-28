@@ -2,7 +2,7 @@
 title: Theme Structure
 ---
 
-Davenda themes are customer-owned UI packages made of templates, published assets, and a small
+Coil themes are customer-owned UI packages made of templates, published assets, and a small
 amount of manifest configuration.
 
 The easiest way to understand the structure is to start with a real shape, then map each part back
@@ -38,9 +38,9 @@ What each part is doing:
 - `theme/tokens.toml`
   - optional customer convention for semantic design tokens
 - `app.toml`
-  - tells Davenda which template namespaces and asset roots belong to the active theme
+  - tells Coil which template namespaces and asset roots belong to the active theme
 
-The key point is that Davenda does not treat the theme as “just CSS.” The theme is the customer
+The key point is that Coil does not treat the theme as “just CSS.” The theme is the customer
 app’s presentation boundary.
 
 ## The Manifest Contract
@@ -61,7 +61,7 @@ Annotated:
 - `template_namespaces`
   - ordered namespace precedence for template lookup
 - `asset_roots`
-  - relative directories that Davenda publishes as theme assets
+  - relative directories that Coil publishes as theme assets
 
 ## Field Reference
 
@@ -111,7 +111,7 @@ The practical rule is simple:
 
 Use it for:
 
-- telling Davenda which folders should be published and exposed through `asset(...)`
+- telling Coil which folders should be published and exposed through `asset(...)`
 
 For most apps, `["theme/assets"]` is enough.
 
@@ -138,11 +138,11 @@ already broken down.
 
 ## Dark, Light, And System Mode
 
-Davenda does not provide a framework-global dark-mode switch.
+Coil does not provide a framework-global dark-mode switch.
 
 The current framework contract is narrower:
 
-- Davenda publishes templates and assets
+- Coil publishes templates and assets
 - the customer app decides how theme mode works
 - the result still has to remain accessible
 
@@ -184,10 +184,10 @@ That is usually better than cloning the entire theme per site.
 A good multi-site template looks like this:
 
 ```html
-<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
+<html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}">
   <body>
-    <a class="brand" dv:attr="href=${links.home}">
-      <span dv:text="${site.brandName}">Brand</span>
+    <a class="brand" coil:attr="href=${links.home}">
+      <span coil:text="${site.brandName}">Brand</span>
     </a>
   </body>
 </html>
@@ -227,8 +227,8 @@ Concrete supporting files:
 - `apps/gitly/app.toml`
 - `apps/gitly/theme/assets/site.css`
 - `apps/gitly/theme/assets/site.js`
-- `crates/davenda-app/src/types/theme.rs`
-- `crates/davenda-app/src/manifest/document.rs`
+- `crates/coil-app/src/types/theme.rs`
+- `crates/coil-app/src/manifest/document.rs`
 
 ## What Should I Read Next?
 

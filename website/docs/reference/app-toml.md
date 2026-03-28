@@ -19,7 +19,7 @@ It is not the place for infrastructure secrets, runtime connection strings, or d
 
 ## Why This File Exists
 
-Davenda separates product composition from runtime operations.
+Coil separates product composition from runtime operations.
 
 - `app.toml` answers "what kind of app is this?"
 - `platform.toml` answers "how does this app run here?"
@@ -353,7 +353,7 @@ asset_roots = ["theme/assets"]
 ### Guidance
 
 - Keep `template_namespaces` in explicit lookup order
-- `asset_roots` should only list roots that you want Davenda to publish
+- `asset_roots` should only list roots that you want Coil to publish
 - theme structure and template lookup are documented in [Theme structure](theme-structure.md)
 
 ## `[auth]`
@@ -414,7 +414,7 @@ This is the composition boundary for first-party batteries. Installing a module 
 
 Common patterns:
 
-- start with `davenda-all` plus a broad enabled set while evaluating Davenda
+- start with `coil` plus a broad enabled set while evaluating Coil
 - narrow the dependency graph later if you need tighter composition control
 - keep `[modules]` aligned with what the customer binary actually links
 

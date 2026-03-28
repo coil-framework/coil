@@ -1,22 +1,22 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Collection'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Collection'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${page.title}">Collection</title>
+    <title coil:text="${page.title}">Collection</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
-    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
   <body class="shoppr-shell">
     <header class="site-header">
@@ -29,59 +29,59 @@
         </div>
       </div>
       <div class="site-header__main">
-        <a href="/" class="brand" dv:attr="href=${links.home}">
+        <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
         </a>
-        <nav dv:replace="~{navigation/primary}"></nav>
+        <nav coil:replace="~{navigation/primary}"></nav>
       </div>
       <div class="site-header__panels">
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Market</p>
           <ul>
-            <li dv:each="item : ${links.siteSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">Shoppr UK</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.siteSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Language</p>
           <ul>
-            <li dv:each="item : ${links.localeSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">English</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.localeSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
       </div>
     </header>
     <main class="site-main collections-page">
-      <section class="collections-page__intro" dv:if="${hasCollection}">
+      <section class="collections-page__intro" coil:if="${hasCollection}">
         <p class="collections-page__eyebrow">Campaign edit</p>
         <p>
-          <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+          <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
           <span>/</span>
-          <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+          <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
             Collections
           </a>
         </p>
-        <h1 dv:text="${collection.title}">Featured</h1>
-        <p dv:text="${collection.summary}">
+        <h1 coil:text="${collection.title}">Featured</h1>
+        <p coil:text="${collection.summary}">
           A tighter edit that moves the customer from campaign context into product detail and cart
           without bouncing through unrelated categories.
         </p>
         <div class="checkout-actions">
-          <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+          <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
             All edits
           </a>
-          <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+          <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
             Review cart
           </a>
         </div>
       </section>
 
-      <section class="catalog-assurance" dv:if="${hasCollection}">
+      <section class="catalog-assurance" coil:if="${hasCollection}">
         <article>
           <h2>Browse the products in this edit.</h2>
           <p>
@@ -91,7 +91,7 @@
         </article>
       </section>
 
-      <section class="catalog-assurance" dv:unless="${hasCollection}">
+      <section class="catalog-assurance" coil:unless="${hasCollection}">
         <article>
           <h1>This collection is not currently available.</h1>
           <p>
@@ -99,41 +99,41 @@
             collections index or the full catalog to continue shopping.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
               All collections
             </a>
-            <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+            <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
               Full catalog
             </a>
           </div>
         </article>
       </section>
 
-      <section class="product-grid" dv:if="${hasCollection}">
-        <ul class="product-grid__list" dv:if="${hasProductCards}">
-          <li class="product-grid__item" dv:each="product : ${collection.products}">
+      <section class="product-grid" coil:if="${hasCollection}">
+        <ul class="product-grid__list" coil:if="${hasProductCards}">
+          <li class="product-grid__item" coil:each="product : ${collection.products}">
             <article class="product-card">
-              <a class="product-card__media" href="/shop/products/harbor-cap" dv:href="${product.url}">
+              <a class="product-card__media" href="/shop/products/harbor-cap" coil:href="${product.url}">
                 <img
                   src="/theme/assets/logo.svg"
-                  dv:src="${product.imageUrl}"
+                  coil:src="${product.imageUrl}"
                   alt="Featured product"
-                  dv:attr="alt=${product.imageAlt}"
+                  coil:attr="alt=${product.imageAlt}"
                 />
               </a>
               <div class="product-card__body">
-                <p class="product-card__eyebrow" dv:text="${collection.title}">Featured</p>
+                <p class="product-card__eyebrow" coil:text="${collection.title}">Featured</p>
                 <h2>
-                  <a href="/shop/products/harbor-cap" dv:href="${product.url}" dv:text="${product.name}">
+                  <a href="/shop/products/harbor-cap" coil:href="${product.url}" coil:text="${product.name}">
                     Harbor Cap
                   </a>
                 </h2>
-                <p class="product-card__summary" dv:text="${product.summary}">
+                <p class="product-card__summary" coil:text="${product.summary}">
                   A product detail route with price, quantity, and the cart handoff on one screen.
                 </p>
                 <div class="product-card__meta">
-                  <span class="product-card__price" dv:text="${product.price}">GBP 29</span>
-                  <a class="button" href="/shop/products/harbor-cap" dv:href="${product.url}">
+                  <span class="product-card__price" coil:text="${product.price}">GBP 29</span>
+                  <a class="button" href="/shop/products/harbor-cap" coil:href="${product.url}">
                     View look
                   </a>
                   <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
@@ -141,7 +141,7 @@
                       type="hidden"
                       name="product_slug"
                       value="harbor-cap"
-                      dv:attr="value=${product.slug}"
+                      coil:attr="value=${product.slug}"
                     />
                     <input type="hidden" name="quantity" value="1" />
                     <button class="button button--secondary" type="submit">Add to cart</button>
@@ -151,7 +151,7 @@
             </article>
           </li>
         </ul>
-        <div class="product-grid__fallback" dv:unless="${hasProductCards}">
+        <div class="product-grid__fallback" coil:unless="${hasProductCards}">
           <article class="product-card">
             <div class="product-card__body">
               <h2>No products are available in this collection yet.</h2>
@@ -160,10 +160,10 @@
                 products again.
               </p>
               <div class="checkout-actions">
-                <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+                <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
                   All collections
                 </a>
-                <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+                <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
                   Full catalog
                 </a>
               </div>
@@ -172,7 +172,7 @@
         </div>
       </section>
 
-      <div dv:replace="~{commerce/storefront-journey :: journey}" dv:if="${hasCollection}"></div>
+      <div coil:replace="~{commerce/storefront-journey :: journey}" coil:if="${hasCollection}"></div>
     </main>
     <footer class="site-footer">
       <div>

@@ -2,7 +2,7 @@
 title: Auth
 ---
 
-Auth in Davenda is the contract between:
+Auth in Coil is the contract between:
 
 - the core relationship engine
 - the app-selected auth package
@@ -41,9 +41,9 @@ That means:
 - the package binds a stable capability to that rule
 - modules ask for `catalog.featured.edit`, not for `merchandiser` directly
 
-That is the whole Davenda auth model in miniature.
+That is the whole Coil auth model in miniature.
 
-Davenda auth has four layers:
+Coil auth has four layers:
 
 - the Zanzibar-style core engine
 - the auth package

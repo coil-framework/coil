@@ -1,0 +1,25 @@
+[package]
+name = "coil-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+coil-a11y = { path = "../coil-a11y" }
+coil-auth = { path = "../coil-auth" }
+coil-cache = { path = "../coil-cache" }
+coil-config = { path = "../coil-config" }
+coil-data = { path = "../coil-data" }
+coil-i18n = { path = "../coil-i18n" }
+coil-jobs = { path = "../coil-jobs" }
+coil-observability = { path = "../coil-observability" }
+coil-seo = { path = "../coil-seo" }
+coil-template = { path = "../coil-template" }
+coil-tls = { path = "../coil-tls" }
+coil-wasm = { path = "../coil-wasm" }
+hmac = "0.12"
+rand = "0.8"
+sha2 = "0.10"
+thiserror = "1.0"
+toml = "0.8"

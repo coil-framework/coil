@@ -1,6 +1,6 @@
-# Contributing To Davenda
+# Contributing To Coil
 
-Davenda is built for product teams shipping serious web applications in Rust. Contributions are welcome, but they need to move the platform forward in a disciplined way.
+Coil is built for product teams shipping serious web applications in Rust. Contributions are welcome, but they need to move the platform forward in a disciplined way.
 
 ## Before You Open A PR
 
@@ -14,7 +14,7 @@ Davenda is built for product teams shipping serious web applications in Rust. Co
 - fixes that close a real product gap
 - performance or reliability improvements with verification
 - documentation that removes ambiguity for adopters
-- improvements to the demo apps that make Davenda easier to understand
+- improvements to the demo apps that make Coil easier to understand
 - changes that strengthen the boundary between core, official modules, customer apps, and WASM extensions
 
 ## Changes That Need More Care
@@ -72,7 +72,7 @@ npm run build
 
 ## Review Standard
 
-Davenda is not trying to accept every possible approach. Reviews will prioritize:
+Coil is not trying to accept every possible approach. Reviews will prioritize:
 
 - architectural coherence
 - security and operational safety
@@ -86,4 +86,4 @@ Be direct, technical, and respectful. Strong disagreement is fine. Vague drive-b
 
 ## Licensing
 
-By contributing to Davenda, you agree that your contributions are licensed under the repository license.
+By contributing to Coil, you agree that your contributions are licensed under the repository license.

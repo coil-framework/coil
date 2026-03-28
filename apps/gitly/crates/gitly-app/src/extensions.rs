@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
-use davenda_app::CustomerExtension;
-use davenda_wasm::{
+use coil_app::CustomerExtension;
+use coil_wasm::{
     ApiExtensionPoint, ContractVersion, ExtensionArtifactSource, ExtensionConfigSchema,
     ExtensionInstallation, ExtensionManifest, ExtensionPackage, ExtensionPoint, HandlerId,
     HandlerInstallation, HandlerManifest, HostGrantSet, ResourceLimits, ScheduledJobExtensionPoint,
@@ -15,8 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn augment_manifest_with_extensions(
     manifest_path: &Path,
-    mut manifest: davenda_app::CustomerAppManifest,
-) -> Result<davenda_app::CustomerAppManifest> {
+    mut manifest: coil_app::CustomerAppManifest,
+) -> Result<coil_app::CustomerAppManifest> {
     for extension in load_declared_extensions(manifest_path)? {
         manifest = manifest.with_extension(extension);
     }
@@ -185,9 +185,9 @@ fn load_extension_package(
     let point_kind = handlers
         .first()
         .map(|handler| handler.point.kind())
-        .unwrap_or(davenda_wasm::ExtensionPointKind::Api);
+        .unwrap_or(coil_wasm::ExtensionPointKind::Api);
     let manifest = ExtensionManifest::new(
-        davenda_wasm::ExtensionId::new(document.manifest.id)
+        coil_wasm::ExtensionId::new(document.manifest.id)
             .context("invalid Gitly extension package id")?,
         document.manifest.display_name,
         parse_contract_version(&document.manifest.version)?,
@@ -286,23 +286,23 @@ fn compile_api_artifact(wat_template: &str, export: &str) -> Result<Vec<u8>> {
     let packed_len = (typed_output_bytes.len() as u64) << 32;
     let wat_module = wat_template
         .replace(
-            "__DAVENDA_TYPED_OUTPUT__",
+            "__COIL_TYPED_OUTPUT__",
             &wat_string_literal(&typed_output_bytes),
         )
-        .replace("__DAVENDA_TYPED_OUTPUT_PACKED__", &packed_len.to_string())
-        .replace("__DAVENDA_HANDLER_EXPORT__", export);
+        .replace("__COIL_TYPED_OUTPUT_PACKED__", &packed_len.to_string())
+        .replace("__COIL_HANDLER_EXPORT__", export);
     wat::parse_str(&wat_module).context("failed to compile Gitly API WAT")
 }
 
 fn compile_scheduled_job_artifact(wat_template: &str, export: &str) -> Result<Vec<u8>> {
-    let wat_module = wat_template.replace("__DAVENDA_HANDLER_EXPORT__", export);
+    let wat_module = wat_template.replace("__COIL_HANDLER_EXPORT__", export);
     wat::parse_str(&wat_module).context("failed to compile Gitly scheduled job WAT")
 }
 
 fn parse_extension_point(point: &str, target: &str) -> Result<ExtensionPoint> {
     match point.to_ascii_lowercase().as_str() {
         "api" => Ok(ExtensionPoint::Api(
-            ApiExtensionPoint::new(target, [davenda_wasm::HttpMethod::Get])
+            ApiExtensionPoint::new(target, [coil_wasm::HttpMethod::Get])
                 .context("invalid Gitly API extension target")?,
         )),
         "scheduled-job" | "scheduled_job" => Ok(ExtensionPoint::ScheduledJob(

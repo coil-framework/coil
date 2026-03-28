@@ -1,35 +1,35 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Audit Log'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Audit Log'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Audit Log</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${pageTitle}">Audit Log</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{admin/nav}"></nav>
+      <nav coil:replace="~{admin/nav}"></nav>
     </header>
     <main class="site-main admin-page">
       <section class="admin-page__intro">
         <p class="admin-page__eyebrow">Operator audit</p>
-        <h1 dv:text="${page.title}">Audit Log</h1>
-        <p dv:text="${page.summary}">
+        <h1 coil:text="${page.title}">Audit Log</h1>
+        <p coil:text="${page.summary}">
           Audit trail and operator action history.
         </p>
-        <p dv:if="${operator.hasPrincipal}">
-          Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
+        <p coil:if="${operator.hasPrincipal}">
+          Signed in as <strong coil:text="${operator.displayName}">Current Operator</strong>.
         </p>
-        <p dv:if="${operator.hasPrincipal}">
-          Principal id <code dv:text="${operator.principalId}">operator-live-1</code>.
+        <p coil:if="${operator.hasPrincipal}">
+          Principal id <code coil:text="${operator.principalId}">operator-live-1</code>.
         </p>
-        <p dv:if="${operator.hasSession}">
+        <p coil:if="${operator.hasSession}">
           The current browser session is active, so you can cross-check nearby operator surfaces
           without re-authenticating.
         </p>
@@ -38,13 +38,13 @@
           changed what and when without leaving the checked-in back office.
         </p>
         <p>
-          Backend <code dv:text="${auditBackend}">local-sqlite</code> at
-          <code dv:text="${auditLocation}">/var/lib/davenda/shared-state</code> with
-          <strong dv:text="${auditEntryCount}">0</strong> recorded entries.
+          Backend <code coil:text="${auditBackend}">local-sqlite</code> at
+          <code coil:text="${auditLocation}">/var/lib/coil/shared-state</code> with
+          <strong coil:text="${auditEntryCount}">0</strong> recorded entries.
         </p>
       </section>
 
-      <section class="admin-panel" dv:if="${hasAuditEntries}">
+      <section class="admin-panel" coil:if="${hasAuditEntries}">
         <p class="admin-panel__eyebrow">Audit entries</p>
         <table class="admin-table">
           <thead>
@@ -59,40 +59,40 @@
             </tr>
           </thead>
           <tbody>
-            <tr dv:each="entry : ${auditEntries}">
-              <td dv:text="${entry.when}">1764223200</td>
-              <td dv:text="${entry.actor}">operator-live-1</td>
-              <td dv:text="${entry.action}">Issue refund</td>
-              <td dv:text="${entry.capability}">order.refund.issue</td>
-              <td dv:text="${entry.outcome}">Succeeded</td>
-              <td dv:text="${entry.resource}">order:ORD-10042</td>
+            <tr coil:each="entry : ${auditEntries}">
+              <td coil:text="${entry.when}">1764223200</td>
+              <td coil:text="${entry.actor}">operator-live-1</td>
+              <td coil:text="${entry.action}">Issue refund</td>
+              <td coil:text="${entry.capability}">order.refund.issue</td>
+              <td coil:text="${entry.outcome}">Succeeded</td>
+              <td coil:text="${entry.resource}">order:ORD-10042</td>
               <td>
-                <span dv:if="${entry.hasDetail}" dv:text="${entry.detail}">Operator detail</span>
-                <span dv:unless="${entry.hasDetail}">No additional detail</span>
+                <span coil:if="${entry.hasDetail}" coil:text="${entry.detail}">Operator detail</span>
+                <span coil:unless="${entry.hasDetail}">No additional detail</span>
               </td>
             </tr>
           </tbody>
         </table>
       </section>
 
-      <section class="admin-panel" dv:unless="${hasAuditEntries}">
+      <section class="admin-panel" coil:unless="${hasAuditEntries}">
         <p class="admin-panel__eyebrow">Status</p>
         <h2>No privileged admin actions captured yet</h2>
-        <p dv:text="${auditEmptyText}">
+        <p coil:text="${auditEmptyText}">
           No privileged admin actions have been captured yet.
         </p>
         <div class="admin-card-grid">
           <article class="admin-card">
             <h3>Capture a support action</h3>
             <p>Use the orders surface to review live order state or process a refund so the audit history proves who handled the action.</p>
-            <a class="button" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+            <a class="button" href="/admin/orders" coil:attr="href=${links.adminOrders}">
               Open orders
             </a>
           </article>
           <article class="admin-card">
             <h3>Capture a content action</h3>
             <p>Use pages, navigation, and redirects to save a draft, publish a page, or update route protection and then confirm the audit row appears here.</p>
-            <a class="button" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            <a class="button" href="/admin/pages" coil:attr="href=${links.adminPages}">
               Open pages
             </a>
           </article>
@@ -102,16 +102,16 @@
               Use catalog admin to change live product or collection copy and verify the same actor,
               capability, and resource show up in the audit trail.
             </p>
-            <a class="button" href="/admin/catalog/products" dv:attr="href=${links.adminCatalog}">
+            <a class="button" href="/admin/catalog/products" coil:attr="href=${links.adminCatalog}">
               Open catalog
             </a>
           </article>
         </div>
         <div class="admin-page__actions">
-          <a class="button button--secondary" href="/admin" dv:attr="href=${links.adminDashboard}">
+          <a class="button button--secondary" href="/admin" coil:attr="href=${links.adminDashboard}">
             Back to dashboard
           </a>
-          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
+          <a class="button button--secondary" href="/admin/navigation" coil:attr="href=${links.adminNavigation}">
             Review navigation
           </a>
         </div>

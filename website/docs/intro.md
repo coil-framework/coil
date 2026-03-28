@@ -2,7 +2,7 @@
 title: Introduction
 ---
 
-Davenda is a Rust web framework for teams that want the framework, the product shape, and the deployment model to line up.
+Coil is a Rust web framework for teams that want the framework, the product shape, and the deployment model to line up.
 
 It is not a generic bag of middleware. It starts from the assumption that most real products need a coherent answer to the same questions:
 
@@ -11,11 +11,11 @@ It is not a generic bag of middleware. It starts from the assumption that most r
 - how product-specific code differs from reusable batteries
 - how multi-site, locale, auth, and operational concerns are carried through the whole runtime
 
-That makes Davenda a better fit for Rust web developers who want to build a product, not just wire an HTTP stack.
+That makes Coil a better fit for Rust web developers who want to build a product, not just wire an HTTP stack.
 
-## What Davenda Is
+## What Coil Is
 
-Davenda gives you:
+Coil gives you:
 
 - a customer-root workspace model, where the customer binary owns composition
 - HTML-first rendering with progressive enhancement
@@ -23,11 +23,11 @@ Davenda gives you:
 - a stable linked Rust path for customer-owned backend logic
 - a bounded WASM path for third-party or lower-trust extensions
 
-In practice, that means a Davenda application usually looks like a product codebase with a clear runtime model, not a thin shell around a collection of unrelated libraries.
+In practice, that means a Coil application usually looks like a product codebase with a clear runtime model, not a thin shell around a collection of unrelated libraries.
 
-## What Davenda Is Not
+## What Coil Is Not
 
-Davenda is probably the wrong choice if you want:
+Coil is probably the wrong choice if you want:
 
 - a minimal unopinionated HTTP toolkit
 - a framework where routing, rendering, and product structure are entirely ad hoc
@@ -36,14 +36,14 @@ Davenda is probably the wrong choice if you want:
 
 ## How To Read These Docs
 
-If you are evaluating Davenda for the first time:
+If you are evaluating Coil for the first time:
 
 1. Start with the [Quickstart](getting-started/quickstart.md).
 2. Read the [Core Concepts overview](core-concepts/index.md).
 3. Follow the concept pages in order if you want the full mental model.
 4. Use Shoppr and Gitly as concrete reference applications while reading.
 
-If you are already comfortable with Rust web stacks and want the shortest path to understanding Davenda's architecture:
+If you are already comfortable with Rust web stacks and want the shortest path to understanding Coil's architecture:
 
 1. Read [Glossary and mental model](core-concepts/glossary-and-mental-model.md).
 2. Read [Customer-root workspace](core-concepts/customer-root-workspace.md).

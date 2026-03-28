@@ -1,6 +1,6 @@
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
-use davenda_runtime::EnvironmentSecretResolver;
+use coil_runtime::EnvironmentSecretResolver;
 use shoppr_app::ShopprWorkspace;
 use std::ffi::OsString;
 use std::fs;

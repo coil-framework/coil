@@ -1,14 +1,14 @@
 # Shoppr
 
-Shoppr is the reference Davenda customer app in this repository.
+Shoppr is the reference Coil customer app in this repository.
 
-It is not the platform itself. It is an example deployable product built on top of Davenda:
+It is not the platform itself. It is an example deployable product built on top of Coil:
 
 - it selects official modules
 - it provides the customer app manifest and platform config
 - it owns the storefront templates and theme assets
 - it carries customer-specific auth bindings
-- it is the fastest way to see what a real Davenda app looks like
+- it is the fastest way to see what a real Coil app looks like
 
 If you are new to the repo, start here.
 
@@ -67,7 +67,7 @@ journey without requiring a pre-seeded database user or live Stripe credentials:
 
 Shoppr is meant to show the boundary described in `docs/design`:
 
-- Davenda core provides the runtime, routing, storage, cache, auth execution, jobs, TLS, and asset publication
+- Coil core provides the runtime, routing, storage, cache, auth execution, jobs, TLS, and asset publication
 - official modules provide reusable product batteries like CMS, commerce, memberships, events, admin, and ops
 - Shoppr provides composition, branding, templates, app policy, and customer-specific behaviour
 
@@ -79,9 +79,9 @@ Shoppr now has its own nested Cargo workspace in this folder.
 
 That is the chapter 96 shape in repo form:
 
-- Davenda is modeled here as normal upstream `0.1.0` dependencies
+- Coil is modeled here as normal upstream `0.1.0` dependencies
 - Shoppr owns a binary crate that links the official modules it needs
-- Shoppr owns a linked backend crate that registers customer-specific behaviour through public Davenda APIs
+- Shoppr owns a linked backend crate that registers customer-specific behaviour through public Coil APIs
 - the checked-in backend library remains customer-owned code, but the store consumes it through the linked plugin path rather than a separate service boundary
 
 The optional sidecar adapter still exists for integrations that genuinely need a separate
@@ -89,17 +89,17 @@ HTTP/process boundary, but it is not the primary Shoppr customization model.
 
 The committed workspace is intentionally free of `patch.crates-io` overlays and other repo-local
 dependency rewrites. Shoppr is checked in as a normal customer project that can resolve
-Davenda from an upstream registry or pinned git source.
+Coil from an upstream registry or pinned git source.
 
 The Docker story now follows the same split:
 
 - `docker compose up --build` uses `apps/shoppr` as the Docker build context and expects
-  Davenda crates plus the Shoppr customer binary to resolve like normal upstream dependencies
+  Coil crates plus the Shoppr customer binary to resolve like normal upstream dependencies
 - `docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build` is the explicit
   repo-maintainer override when you are building Shoppr against this monorepo before those
   upstream packages are published
 
-If you are iterating on Shoppr from inside the Davenda repository before those upstream crates
+If you are iterating on Shoppr from inside the Coil repository before those upstream crates
 are published, keep that override local and uncommitted. The supported maintainer path is:
 
 ```bash
@@ -107,7 +107,7 @@ are published, keep that override local and uncommitted. The supported maintaine
 ```
 
 That writes `apps/shoppr/.cargo/config.toml` with repo-local path patches. The file is
-ignored by git and exists only so this checked-in example can build against the current Davenda
+ignored by git and exists only so this checked-in example can build against the current Coil
 workspace without polluting the committed customer manifest.
 
 From `apps/shoppr`:
@@ -184,7 +184,7 @@ docker compose up --build
 
 That is the honest customer-project path. It builds Shoppr from this folder only.
 
-If you are a Davenda maintainer building Shoppr from inside this repository before upstream
+If you are a Coil maintainer building Shoppr from inside this repository before upstream
 crate publication, use the explicit repo override:
 
 ```bash
@@ -236,7 +236,7 @@ cargo run -p shoppr -- up
 The committed Cargo workspace stays upstream-clean. The default checked-in `docker compose up`
 path now uses only the Shoppr folder as its Docker build context. The separate
 `docker-compose.repo.yml` override is the only in-repo maintainer convenience path, and it is
-explicit about using the Davenda monorepo plus local Cargo patching before the `davenda-*` crates
+explicit about using the Coil monorepo plus local Cargo patching before the `coil-*` crates
 are published upstream.
 
 If startup stalls or restarts, check:
@@ -342,15 +342,15 @@ If you want to use the nested Shoppr workspace directly instead of Docker Compos
 cd apps/shoppr
 ./scripts/prepare-local-dev.sh
 cargo run -p shoppr -- describe
-DATABASE_URL=postgres://davenda:devpass@127.0.0.1:5438/davenda_harbor_shop \
+DATABASE_URL=postgres://coil:devpass@127.0.0.1:5438/coil_shoppr \
 REDIS_URL=redis://127.0.0.1:6379 \
 OBJECT_STORE_URL='endpoint_url="http://127.0.0.1:9000"
 bucket="shoppr"
 region="us-east-1"
 access_key_id="minio"
 secret_access_key="minio123"' \
-DAVENDA_COOKIE_SECRET=01234567012345670123456701234567 \
-DAVENDA_CSRF_SECRET=76543210765432107654321076543210 \
+COIL_COOKIE_SECRET=01234567012345670123456701234567 \
+COIL_CSRF_SECRET=76543210765432107654321076543210 \
 cargo run -p shoppr -- up --config platform.dev.toml
 ```
 
@@ -364,13 +364,13 @@ The linked customer backend currently surfaces in three honest places:
 
 Shoppr does not serve theme files by raw filename in the intended path.
 
-During bootstrap, Davenda publishes `theme/assets/*` through the asset pipeline and resolves them through the generated asset manifest. That is why template references use the asset helper instead of hard-coding deployment filenames.
+During bootstrap, Coil publishes `theme/assets/*` through the asset pipeline and resolves them through the generated asset manifest. That is why template references use the asset helper instead of hard-coding deployment filenames.
 
 For third-party developers, the important rule is simple:
 
 - put stable source assets in `theme/assets/`
 - reference them from templates through the template asset helper
-- let Davenda publish and fingerprint them
+- let Coil publish and fingerprint them
 
 ## Adding A Customer Extension
 
@@ -398,7 +398,7 @@ Shoppr now includes a concrete bounded example under:
 
 - `extensions/shoppr-waitlist-tools/`
 
-That example is installed in the checked-in Harbor app through the normal runtime extension path.
+That example is installed in the checked-in Shoppr app through the normal runtime extension path.
 It exists to demonstrate chapter 80 coexistence honestly: Shoppr still keeps its first-party
 checkout and webhook rules in linked Rust, while also running one bounded runtime-installed WASM
 extension from the app manifest.
@@ -407,7 +407,7 @@ It shows:
 
 - a real installed extension entry in `app.toml`
 - a real package descriptor in `extensions/shoppr-waitlist-tools/package.toml`
-- a checked-in WAT source that Harbor compiles into the runtime-loaded `.wasm` artifact
+- a checked-in WAT source that Shoppr compiles into the runtime-loaded `.wasm` artifact
 - a bounded public render hook that executes on the checked-in CMS home page
 - explicit separation from the linked Rust backend path in chapter 96
 
@@ -461,7 +461,7 @@ This example is intentionally small but real:
 - `src/lib.rs` is the primary chapter 96 example
 - it exposes `shoppr_backend::plugin()` plus Shoppr-specific hook logic
 - it shows how customer-owned rules stay in a linked Rust crate instead of starting in WASM or a separate service
-- the checked-in Harbor binary composes and registers that plugin directly during startup
+- the checked-in Shoppr binary composes and registers that plugin directly during startup
 
 Read these files first if you want to add customer-owned Rust logic:
 
@@ -471,7 +471,7 @@ Read these files first if you want to add customer-owned Rust logic:
 - `crates/shoppr-bin/src/main.rs`
 
 The example is meant to be copied and reshaped by third-party developers building a customer-owned
-store on Davenda without editing platform core.
+store on Coil without editing platform core.
 
 If you want the shortest “how do I add my own Rust rule?” path:
 

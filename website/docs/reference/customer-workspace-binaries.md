@@ -2,7 +2,7 @@
 title: Customer Workspace Binaries
 ---
 
-Davenda customer apps ship their own CLI binary on purpose.
+Coil customer apps ship their own CLI binary on purpose.
 
 That is not duplication. It is the public lifecycle boundary for the customer app.
 
@@ -24,7 +24,7 @@ without learning the whole monorepo first.
 
 There are two binaries:
 
-- the platform CLI binary, built from the `davenda-cli` crate, exposed here as `platform`
+- the platform CLI binary, built from the `coil-cli` crate, exposed here as `coil`
 - the customer workspace binary, such as `shoppr` or `gitly`
 
 They are related, but they are not the same thing.

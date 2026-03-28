@@ -3,11 +3,11 @@ title: Internationalisation, Localisation, And Content
 ---
 
 This page explains how locale, localised routes, translated UI, and customer content actually fit
-together in Davenda.
+together in Coil.
 
 ## What Is This?
 
-Davenda treats internationalisation as a combination of:
+Coil treats internationalisation as a combination of:
 
 - request-time locale resolution
 - site-aware locale policy
@@ -41,7 +41,7 @@ Use this model whenever you:
 
 ## How Locale Resolution Works
 
-Davenda resolves:
+Coil resolves:
 
 1. site from host
 2. locale inside that site’s allowed locale set
@@ -51,7 +51,7 @@ That means route matching, render values, and SEO all agree about what the user 
 
 The runtime code for that lives in:
 
-- `crates/davenda-runtime/src/http/routing/model.rs`
+- `crates/coil-runtime/src/http/routing/model.rs`
 
 ## Translation Dictionaries Versus Localised Content
 
@@ -85,15 +85,15 @@ This should come from managed content or render-model values, not from a fronten
 
 Current honest state:
 
-- Davenda core already ships server-side locale primitives, locale contexts, fallback chains,
+- Coil core already ships server-side locale primitives, locale contexts, fallback chains,
   locale-aware URL routing, translation catalogs, and a translation runtime
-- Davenda does not yet ship a first-class customer-facing translation file convention plus a
+- Coil does not yet ship a first-class customer-facing translation file convention plus a
   template-native translation helper
 - Gitly demonstrates a customer-owned theme-side dictionary in `apps/gitly/theme/assets/site.js`
 - Shoppr demonstrates server-rendered locale-aware values, site-aware rendering, and now
   server-shaped route-aware market and locale switch targets
 
-So if you ask “can Davenda support server-rendered i18n?”, the answer is yes.
+So if you ask “can Coil support server-rendered i18n?”, the answer is yes.
 
 If you ask “does the current public demo show a full customer translation catalog loaded into
 templates on the server?”, the honest answer is no, not yet.
@@ -127,8 +127,8 @@ Examples from `apps/gitly/theme/assets/site.js`:
 ### Server-rendered value
 
 ```html
-<h1 dv:text="${page.title}">Fallback</h1>
-<p dv:text="${account.stateSummary}">Fallback summary</p>
+<h1 coil:text="${page.title}">Fallback</h1>
+<p coil:text="${account.stateSummary}">Fallback summary</p>
 ```
 
 This is the right pattern for first-render, transactional, and SEO-relevant copy.
@@ -136,12 +136,12 @@ This is the right pattern for first-render, transactional, and SEO-relevant copy
 ### Customer-owned translation-key convention
 
 ```html
-<h1 data-i18n="home.title">One Davenda app can look like a forge.</h1>
+<h1 data-i18n="home.title">One Coil app can look like a forge.</h1>
 <button type="button" data-i18n-control="dark">Dark</button>
 ```
 
 This is the checked-in Gitly pattern for theme and demo UI strings. It is not the only possible
-Davenda i18n model, and it should not be mistaken for the full platform contract.
+Coil i18n model, and it should not be mistaken for the full platform contract.
 
 ## Fallback Examples
 

@@ -1,0 +1,5713 @@
+use super::auth::authorize_live_request;
+use super::*;
+use axum::body::{Body, to_bytes};
+use axum::extract::{ConnectInfo, State};
+use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
+use axum::response::IntoResponse;
+use coil_assets::{
+    AssetId, ContentFingerprint, FingerprintAlgorithm, ManagedAssetRevision, RevisionId,
+};
+use coil_config::StorageClass;
+use coil_customer_sdk::{
+    AssetWriteReceipt, AssetWriteRequest, AssetsFacade, AuditEntry, AuditFacade, AuthCheckRequest,
+    AuthCheckResult, AuthExplainRequest, AuthExplanation, AuthFacade, BackendError,
+    BackendErrorKind, CmsPageDraft, CmsPublishDecision, CommerceFacade, CommerceProduct,
+    CustomerAppContext as SdkCustomerAppContext, Headers, JobReceipt, JobsFacade, ManagedAsset,
+    MoneyAmount, OrderDraft, OrderLineDraft, OrderReviewDecision, OutboundHttpFacade,
+    OutboundHttpRequest, OutboundHttpResponse, PrincipalContext as SdkPrincipalContext,
+    RepositoryFacade, RepositoryQuery, RepositoryRecord, RepositoryRecordSet, RepositoryWrite,
+    RepositoryWriteReceipt, RequestContext as SdkRequestContext, TraceContext as SdkTraceContext,
+    VerifiedWebhook, WebhookHandlingResult,
+};
+use coil_jobs::JobInstant;
+use coil_storage::StoragePlanRequest;
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::future::Future;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use url::form_urlencoded;
+
+const STOREFRONT_ORDER_HISTORY_JSON_PATH: &str = "/account/orders.json";
+const STOREFRONT_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
+    (
+        "/cart/items",
+        "x-coil-storefront-csrf-commerce-add-to-cart",
+    ),
+    ("/cart", "x-coil-storefront-csrf-commerce-cart-update"),
+    (
+        "/checkout/start",
+        "x-coil-storefront-csrf-commerce-checkout-start",
+    ),
+    (
+        "/checkout/complete",
+        "x-coil-storefront-csrf-commerce-checkout-complete",
+    ),
+    (
+        "/admin/catalog/products",
+        "x-coil-storefront-csrf-commerce-catalog-admin-update",
+    ),
+    (
+        "/admin/orders/refund",
+        "x-coil-storefront-csrf-commerce-order-refund",
+    ),
+    (
+        "/admin/orders/fulfill",
+        "x-coil-storefront-csrf-commerce-order-fulfill",
+    ),
+];
+const CMS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
+    (
+        "/admin/pages/draft",
+        "x-coil-cms-csrf-cms-pages-save-draft",
+    ),
+    (
+        "/admin/pages/publish",
+        "x-coil-cms-csrf-cms-pages-publish",
+    ),
+    (
+        "/admin/pages/unpublish",
+        "x-coil-cms-csrf-cms-pages-unpublish",
+    ),
+    (
+        "/admin/navigation/save",
+        "x-coil-cms-csrf-cms-navigation-save",
+    ),
+    (
+        "/admin/redirects/save",
+        "x-coil-cms-csrf-cms-redirects-save",
+    ),
+];
+const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
+    "commerce.cart",
+    "commerce.add-to-cart",
+    "commerce.cart-update",
+    "commerce.checkout",
+    "commerce.checkout-start",
+    "commerce.checkout-complete",
+    "commerce.checkout-confirmation",
+    "commerce.catalog-admin-update",
+    "commerce.account-session-end",
+    "commerce.order-refund",
+    "commerce.order-fulfill",
+];
+const CMS_ADMIN_NATIVE_MUTATION_ROUTES: &[&str] = &[
+    "cms.pages.save-draft",
+    "cms.pages.publish",
+    "cms.pages.unpublish",
+    "cms.navigation.save",
+    "cms.redirects.save",
+];
+const STOREFRONT_CSRF_ACTIONS: &[&str] = &[
+    "commerce.add-to-cart",
+    "commerce.cart-update",
+    "commerce.checkout-start",
+    "commerce.checkout-complete",
+    "commerce.catalog-admin-update",
+    "commerce.account-session-end",
+    "commerce.order-refund",
+    "commerce.order-fulfill",
+];
+const CMS_ADMIN_CSRF_ACTIONS: &[(&str, &str)] = &[
+    (
+        "cms.pages.save-draft",
+        "x-coil-cms-csrf-cms-pages-save-draft",
+    ),
+    ("cms.pages.publish", "x-coil-cms-csrf-cms-pages-publish"),
+    (
+        "cms.pages.unpublish",
+        "x-coil-cms-csrf-cms-pages-unpublish",
+    ),
+    (
+        "cms.navigation.save",
+        "x-coil-cms-csrf-cms-navigation-save",
+    ),
+    (
+        "cms.redirects.save",
+        "x-coil-cms-csrf-cms-redirects-save",
+    ),
+];
+const STRIPE_WEBHOOK_MAX_AGE_SECS: u64 = 300;
+
+type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VerifiedIngressWebhook {
+    webhook: VerifiedWebhook,
+    payment_reference: Option<String>,
+    delivery_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PersistedCustomerManagedAssetRecord {
+    logical_path: String,
+    storage_class: String,
+    revision_id: String,
+    content_type: String,
+    byte_length: u64,
+    fingerprint_algorithm: String,
+    fingerprint_digest: String,
+    published_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CatalogAdminMutationInput {
+    Product(crate::storefront::StorefrontCatalogProductUpdate),
+    Collection(crate::storefront::StorefrontCatalogCollectionUpdate),
+}
+
+#[derive(Debug, Deserialize)]
+struct StripeCheckoutSessionResponse {
+    id: String,
+    url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StripeCheckoutSessionLookupResponse {
+    id: String,
+    status: Option<String>,
+    payment_status: Option<String>,
+    client_reference_id: Option<String>,
+    metadata: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostedCheckoutSession {
+    pub(crate) id: String,
+    pub(crate) url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostedCheckoutSessionStatus {
+    pub(crate) id: String,
+    pub(crate) status: Option<String>,
+    pub(crate) payment_status: Option<String>,
+    pub(crate) payment_reference: Option<String>,
+}
+
+pub(crate) trait HostedCheckoutClient: Send + Sync {
+    fn create_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        request_body: &str,
+        idempotency_key: &str,
+    ) -> Result<HostedCheckoutSession, String>;
+
+    fn fetch_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        session_id: &str,
+    ) -> Result<HostedCheckoutSessionStatus, String>;
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct LiveStripeHostedCheckoutClient;
+
+impl HostedCheckoutClient for LiveStripeHostedCheckoutClient {
+    fn create_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        request_body: &str,
+        idempotency_key: &str,
+    ) -> Result<HostedCheckoutSession, String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout_read(std::time::Duration::from_secs(10))
+            .build();
+        let request = agent
+            .post("https://api.stripe.com/v1/checkout/sessions")
+            .set("authorization", &format!("Bearer {api_key}"))
+            .set("content-type", "application/x-www-form-urlencoded")
+            .set("idempotency-key", idempotency_key);
+        match request.send_string(request_body) {
+            Ok(response) => {
+                let body = response
+                    .into_string()
+                    .map_err(|error| format!("failed to read Stripe Checkout response: {error}"))?;
+                let session = serde_json::from_str::<StripeCheckoutSessionResponse>(&body)
+                    .map_err(|error| {
+                        format!("failed to decode Stripe Checkout response: {error}")
+                    })?;
+                Ok(HostedCheckoutSession {
+                    id: session.id,
+                    url: session.url,
+                })
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                Err(format!(
+                    "Stripe Checkout session creation failed with HTTP {code}: {body}"
+                ))
+            }
+            Err(ureq::Error::Transport(error)) => {
+                Err(format!("Stripe Checkout handoff request failed: {error}"))
+            }
+        }
+    }
+
+    fn fetch_stripe_checkout_session(
+        &self,
+        api_key: &str,
+        session_id: &str,
+    ) -> Result<HostedCheckoutSessionStatus, String> {
+        let encoded_session_id =
+            url::form_urlencoded::byte_serialize(session_id.as_bytes()).collect::<String>();
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout_read(std::time::Duration::from_secs(10))
+            .build();
+        let request = agent
+            .get(&format!(
+                "https://api.stripe.com/v1/checkout/sessions/{encoded_session_id}"
+            ))
+            .set("authorization", &format!("Bearer {api_key}"));
+        match request.call() {
+            Ok(response) => {
+                let body = response.into_string().map_err(|error| {
+                    format!("failed to read Stripe Checkout lookup response: {error}")
+                })?;
+                let session = serde_json::from_str::<StripeCheckoutSessionLookupResponse>(&body)
+                    .map_err(|error| {
+                        format!("failed to decode Stripe Checkout lookup response: {error}")
+                    })?;
+                Ok(HostedCheckoutSessionStatus {
+                    id: session.id,
+                    status: session.status,
+                    payment_status: session.payment_status,
+                    payment_reference: session.client_reference_id.or_else(|| {
+                        session
+                            .metadata
+                            .and_then(|metadata| metadata.get("payment_reference").cloned())
+                    }),
+                })
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                Err(format!(
+                    "Stripe Checkout session lookup failed with HTTP {code}: {body}"
+                ))
+            }
+            Err(ureq::Error::Transport(error)) => {
+                Err(format!("Stripe Checkout lookup request failed: {error}"))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveHttpRequest {
+    pub method: HttpMethod,
+    pub host: String,
+    pub path: String,
+    pub headers: Headers,
+    pub query_params: RequestFieldMap,
+    pub form_fields: RequestFieldMap,
+    pub content_type: Option<String>,
+    pub raw_body: Vec<u8>,
+    pub scheme: String,
+    pub forwarded_proto: Option<String>,
+    pub request_id: Option<String>,
+    pub session_cookie: Option<String>,
+    pub flash_cookie: Option<String>,
+    pub csrf_token: Option<String>,
+    pub maintenance_bypass_token: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ParsedRequestBody {
+    content_type: Option<String>,
+    raw_body: Vec<u8>,
+    form_fields: RequestFieldMap,
+}
+
+impl LiveHttpRequest {
+    pub fn from_request(
+        request: &Request<Body>,
+        browser: &BrowserSecurityServices,
+        server: &coil_config::ServerConfig,
+        remote_addr: Option<SocketAddr>,
+    ) -> Result<Self, RuntimeServerError> {
+        let headers = request.headers();
+        let host = header_value(headers, HOST)?.ok_or(RuntimeServerError::MissingHost)?;
+        let trusted_forwarded_headers = server.trusts_forwarded_headers(remote_addr.as_ref());
+        let forwarded_proto = if trusted_forwarded_headers {
+            header_value(headers, "x-forwarded-proto")?
+        } else {
+            None
+        };
+        let scheme = forwarded_proto
+            .clone()
+            .unwrap_or_else(|| "http".to_string());
+        let request_id = header_value(headers, "x-request-id")?;
+        let cookies = parse_cookie_header(headers)?;
+
+        Ok(Self {
+            method: map_http_method(request.method())?,
+            host,
+            path: request.uri().path().to_string(),
+            headers: normalized_request_headers(headers)?,
+            query_params: parse_request_fields(
+                request.uri().query().unwrap_or_default().as_bytes(),
+            ),
+            form_fields: RequestFieldMap::new(),
+            content_type: None,
+            raw_body: Vec::new(),
+            scheme,
+            forwarded_proto,
+            request_id,
+            session_cookie: cookies.get(&browser.sessions.session_cookie.name).cloned(),
+            flash_cookie: cookies.get(&browser.sessions.flash_cookie.name).cloned(),
+            csrf_token: header_value(headers, browser.csrf.header_name.as_str())?,
+            maintenance_bypass_token: header_value(headers, "x-coil-maintenance-bypass")?,
+        })
+    }
+
+    pub fn into_request_input(self) -> Result<RequestInput, RuntimeServerError> {
+        let mut request = RequestInput::new(self.method, self.host, self.path)?
+            .with_headers(self.headers)
+            .with_query_params(self.query_params)
+            .with_form_fields(self.form_fields)
+            .with_raw_body(self.raw_body)
+            .with_scheme(self.scheme);
+
+        if let Some(content_type) = self.content_type {
+            request = request.with_content_type(content_type);
+        }
+        if let Some(proto) = self.forwarded_proto {
+            request = request.with_forwarded_proto(proto);
+        }
+        if let Some(request_id) = self.request_id {
+            request = request.with_request_id(request_id);
+        }
+        if let Some(session_cookie) = self.session_cookie {
+            request = request.with_session_cookie(session_cookie);
+        }
+        if let Some(flash_cookie) = self.flash_cookie {
+            request = request.with_flash_cookie(flash_cookie);
+        }
+        if let Some(csrf_token) = self.csrf_token {
+            request = request.with_csrf_token(csrf_token);
+        }
+        if let Some(bypass) = self.maintenance_bypass_token {
+            request = request.with_maintenance_bypass_token(bypass);
+        }
+
+        Ok(request)
+    }
+}
+
+pub(crate) async fn serve_runtime_request(
+    State(state): State<Arc<RuntimeServerState>>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+    request: Request<Body>,
+) -> Response<Body> {
+    match execute_live_request(&state, request, Some(remote_addr)).await {
+        Ok(response) => response,
+        Err(error) => error_response(error),
+    }
+}
+
+pub(super) async fn execute_live_request(
+    state: &RuntimeServerState,
+    request: Request<Body>,
+    remote_addr: Option<SocketAddr>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let telemetry = &state.plan.observability.telemetry;
+    let started_at = Instant::now();
+    let request_method = request.method().as_str().to_string();
+    let request_path = request.uri().path().to_string();
+    let request_host = request
+        .headers()
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let request_id = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("http:{}:{}", request_method, request_path));
+    let _ = telemetry.adjust_gauge("coil.http.requests.in_flight", 1);
+    let result = execute_live_request_inner(state, request, remote_addr).await;
+    let elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let _ = telemetry.adjust_gauge("coil.http.requests.in_flight", -1);
+    let _ = telemetry.increment_counter("coil.http.requests.total", 1);
+    let _ = telemetry.record_histogram("coil.http.request.latency_ms", elapsed_ms);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (outcome, status) = match &result {
+        Ok(response) => ("ok".to_string(), response.status().as_u16().to_string()),
+        Err(error) => (
+            live_request_error_outcome(error),
+            live_request_error_status(error).as_u16().to_string(),
+        ),
+    };
+    let _ = telemetry.record_trace(
+        coil_observability::TraceRecord::new(request_id, "http.request", outcome, now)
+            .with_field("method", request_method)
+            .with_field("host", request_host)
+            .with_field("path", request_path)
+            .with_field("status", status)
+            .with_field("duration_ms", elapsed_ms.to_string()),
+    );
+    result
+}
+
+async fn execute_live_request_inner(
+    state: &RuntimeServerState,
+    request: Request<Body>,
+    remote_addr: Option<SocketAddr>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let raw_request =
+        enforce_request_body_limit(request, state.plan.config.server.max_body_bytes).await?;
+    let mut live_request = LiveHttpRequest::from_request(
+        &raw_request,
+        &state.plan.browser,
+        &state.plan.config.server,
+        remote_addr,
+    )?;
+    let parsed_body = parse_request_body(live_request.method, raw_request).await?;
+    live_request.content_type = parsed_body.content_type;
+    live_request.raw_body = parsed_body.raw_body;
+    live_request.form_fields = parsed_body.form_fields;
+    let mut request = live_request.into_request_input()?;
+    if request.method == HttpMethod::Get
+        && state
+            .plan
+            .http
+            .resolve_match(
+                &state.plan.config,
+                request.method,
+                &request.host,
+                &request.path,
+            )
+            .is_none()
+    {
+        if let Some(response) = cms_admin_redirect_response(state, &request.path)? {
+            return Ok(response);
+        }
+    }
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let mut native_response_cookies = Vec::new();
+    let mut execution = if request.session_cookie.is_some() || request.flash_cookie.is_some() {
+        let resolved = {
+            let mut browser = state
+                .browser
+                .lock()
+                .expect("runtime browser mutex poisoned");
+            browser
+                .resolve_request(&request, &state.cookie_secret, now)
+                .map_err(RequestExecutionError::from_browser_error)?
+        };
+
+        request.session_id = resolved.session.session_id.clone();
+        request.session_cookie = None;
+        request.flash_cookie = None;
+
+        if request.principal_id.is_none() {
+            request.principal_id = resolved.principal_id.clone();
+        }
+
+        native_response_cookies.extend(resolved.response_cookies.clone());
+        prepare_native_storefront_request(state, &mut request, now, &mut native_response_cookies)?;
+        if request.path == STOREFRONT_ORDER_HISTORY_JSON_PATH && request.method == HttpMethod::Get {
+            return storefront_order_history_response(state, &request, native_response_cookies);
+        }
+        authorize_live_request(state, &mut request).await?;
+        let resolved_session = SessionContext {
+            session_id: request.session_id.clone(),
+            resolved_from_cookie: resolved.session.resolved_from_cookie,
+        };
+
+        let mut execution =
+            state
+                .plan
+                .execute_request(request, &state.cookie_secret, &state.csrf_secret)?;
+        execution.session = resolved_session;
+        if execution.principal.principal_id.is_none() {
+            execution.principal.principal_id = resolved.principal_id;
+        }
+        execution.flash_messages = resolved.flash_messages;
+        execution.response_cookies = native_response_cookies.clone();
+        execution
+    } else {
+        prepare_native_storefront_request(state, &mut request, now, &mut native_response_cookies)?;
+        if request.path == STOREFRONT_ORDER_HISTORY_JSON_PATH && request.method == HttpMethod::Get {
+            return storefront_order_history_response(state, &request, native_response_cookies);
+        }
+        authorize_live_request(state, &mut request).await?;
+        let mut execution =
+            state
+                .plan
+                .execute_request(request, &state.cookie_secret, &state.csrf_secret)?;
+        execution.response_cookies = native_response_cookies;
+        execution
+    };
+
+    let mut storefront_mutation_cookies = Vec::new();
+    if let Some(location) =
+        apply_native_cms_admin_mutations(state, &execution, now, &mut storefront_mutation_cookies)?
+    {
+        execution
+            .response_cookies
+            .extend(storefront_mutation_cookies);
+        return Ok(storefront_redirect_response(
+            &location,
+            &execution.response_cookies,
+        ));
+    }
+    if let Some(location) =
+        apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)
+            .await?
+    {
+        execution
+            .response_cookies
+            .extend(storefront_mutation_cookies);
+        return Ok(storefront_redirect_response(
+            &location,
+            &execution.response_cookies,
+        ));
+    }
+    execution
+        .response_cookies
+        .extend(storefront_mutation_cookies);
+    let route_name = execution.route.route_name.clone();
+    let method = execution.method;
+    let session_id = execution.session.session_id.clone();
+    let principal_id = execution.principal.principal_id.clone();
+    let provider_result = execution_query_field(&execution, "provider_result").map(str::to_string);
+    let payment_reference =
+        execution_query_field(&execution, "payment_reference").map(str::to_string);
+    let checkout_session_id =
+        execution_query_field(&execution, "checkout_session_id").map(str::to_string);
+    if let Some(location) = redirect_failed_checkout_confirmation(
+        state,
+        route_name.as_str(),
+        method,
+        session_id.as_deref(),
+        principal_id.as_deref(),
+        provider_result.as_deref(),
+        payment_reference.as_deref(),
+        checkout_session_id.as_deref(),
+        now,
+        &mut execution.response_cookies,
+    )? {
+        return Ok(storefront_redirect_response(
+            &location,
+            &execution.response_cookies,
+        ));
+    }
+    let augmentation = storefront_response_augmentation(state, &execution)?;
+    let response = execution_response(&state.plan, &state.wasm_host, execution)?;
+    apply_storefront_response_augmentation(response, augmentation).await
+}
+
+fn execution_response(
+    plan: &RuntimePlan,
+    wasm_host: &WasmHost,
+    execution: RequestExecution,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let receipts = LiveExecutionReceipts::collect(plan, wasm_host, &execution)?;
+    Ok(receipts.compose_response(plan, &execution)?.into_response())
+}
+
+pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
+    match error {
+        RuntimeServerError::Storefront(
+            StorefrontStateError::UnknownSku { .. }
+            | StorefrontStateError::InvalidQuantity
+            | StorefrontStateError::MissingPaymentMethod
+            | StorefrontStateError::MissingCheckoutEmail
+            | StorefrontStateError::InvalidPaymentLast4
+            | StorefrontStateError::MissingPaymentIntent
+            | StorefrontStateError::PaymentIntentMismatch { .. }
+            | StorefrontStateError::CheckoutNotReady { .. }
+            | StorefrontStateError::EmptyCart { .. }
+            | StorefrontStateError::UnknownPaymentReference { .. }
+            | StorefrontStateError::UnknownPaymentWebhookEvent { .. }
+            | StorefrontStateError::UnexpectedPaymentWebhookProvider { .. }
+            | StorefrontStateError::MissingPaymentWebhookDeliveryId
+            | StorefrontStateError::InvalidPaymentWebhookSignature,
+        ) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        RuntimeServerError::Storefront(StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            ..
+        }) => (StatusCode::CONFLICT, error.to_string()).into_response(),
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret) => {
+            (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
+            (StatusCode::NOT_FOUND, "not found").into_response()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::SessionRequired { .. }) => {
+            (StatusCode::UNAUTHORIZED, "session required").into_response()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::CapabilityRequired { .. }) => {
+            (StatusCode::FORBIDDEN, "capability required").into_response()
+        }
+        RuntimeServerError::Execution(
+            RequestExecutionError::MissingCsrfToken { .. }
+            | RequestExecutionError::MissingSessionForCsrf { .. }
+            | RequestExecutionError::InvalidCsrfToken { .. },
+        ) => (StatusCode::FORBIDDEN, "csrf rejected").into_response(),
+        RuntimeServerError::Execution(RequestExecutionError::MaintenanceMode { .. }) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "maintenance mode").into_response()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::FeatureFlagDisabled { .. }) => {
+            (StatusCode::NOT_FOUND, "feature disabled").into_response()
+        }
+        RuntimeServerError::RequestBodyTooLarge { .. } => {
+            (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response()
+        }
+        RuntimeServerError::CustomerHookRejected { .. } => {
+            (StatusCode::CONFLICT, error.to_string()).into_response()
+        }
+        RuntimeServerError::CustomerHookFailed { .. } => {
+            (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response()
+        }
+        RuntimeServerError::MissingHost | RuntimeServerError::InvalidHeaderValue { .. } => {
+            (StatusCode::BAD_REQUEST, error.to_string()).into_response()
+        }
+        RuntimeServerError::Execution(_) => {
+            (StatusCode::BAD_REQUEST, error.to_string()).into_response()
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+fn live_request_error_status(error: &RuntimeServerError) -> StatusCode {
+    match error {
+        RuntimeServerError::Storefront(
+            StorefrontStateError::UnknownSku { .. }
+            | StorefrontStateError::InvalidQuantity
+            | StorefrontStateError::MissingPaymentMethod
+            | StorefrontStateError::MissingCheckoutEmail
+            | StorefrontStateError::InvalidPaymentLast4
+            | StorefrontStateError::MissingPaymentIntent
+            | StorefrontStateError::PaymentIntentMismatch { .. }
+            | StorefrontStateError::CheckoutNotReady { .. }
+            | StorefrontStateError::EmptyCart { .. }
+            | StorefrontStateError::UnknownPaymentReference { .. }
+            | StorefrontStateError::UnknownPaymentWebhookEvent { .. }
+            | StorefrontStateError::UnexpectedPaymentWebhookProvider { .. }
+            | StorefrontStateError::MissingPaymentWebhookDeliveryId
+            | StorefrontStateError::InvalidPaymentWebhookSignature,
+        ) => StatusCode::BAD_REQUEST,
+        RuntimeServerError::Storefront(StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            ..
+        }) => StatusCode::CONFLICT,
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
+            StatusCode::NOT_FOUND
+        }
+        RuntimeServerError::Execution(RequestExecutionError::SessionRequired { .. }) => {
+            StatusCode::UNAUTHORIZED
+        }
+        RuntimeServerError::Execution(RequestExecutionError::CapabilityRequired { .. }) => {
+            StatusCode::FORBIDDEN
+        }
+        RuntimeServerError::Execution(
+            RequestExecutionError::MissingCsrfToken { .. }
+            | RequestExecutionError::MissingSessionForCsrf { .. }
+            | RequestExecutionError::InvalidCsrfToken { .. },
+        ) => StatusCode::FORBIDDEN,
+        RuntimeServerError::Execution(RequestExecutionError::MaintenanceMode { .. }) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        RuntimeServerError::Execution(RequestExecutionError::FeatureFlagDisabled { .. }) => {
+            StatusCode::NOT_FOUND
+        }
+        RuntimeServerError::RequestBodyTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
+        RuntimeServerError::CustomerHookRejected { .. } => StatusCode::CONFLICT,
+        RuntimeServerError::CustomerHookFailed { .. } => StatusCode::SERVICE_UNAVAILABLE,
+        RuntimeServerError::MissingHost | RuntimeServerError::InvalidHeaderValue { .. } => {
+            StatusCode::BAD_REQUEST
+        }
+        RuntimeServerError::Execution(_) => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn live_request_error_outcome(error: &RuntimeServerError) -> String {
+    match error {
+        RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
+            "route_not_found".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::SessionRequired { .. }) => {
+            "session_required".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::CapabilityRequired { .. }) => {
+            "capability_required".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::MaintenanceMode { .. }) => {
+            "maintenance_mode".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::FeatureFlagDisabled { .. }) => {
+            "feature_flag_disabled".to_string()
+        }
+        RuntimeServerError::Storefront(StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            ..
+        }) => "storefront_conflict".to_string(),
+        RuntimeServerError::Storefront(_) => "storefront_error".to_string(),
+        RuntimeServerError::CustomerHookRejected { .. } => "customer_hook_rejected".to_string(),
+        RuntimeServerError::CustomerHookFailed { .. } => "customer_hook_failed".to_string(),
+        RuntimeServerError::RequestBodyTooLarge { .. } => "request_body_too_large".to_string(),
+        RuntimeServerError::Execution(_) => "request_error".to_string(),
+        RuntimeServerError::Authorization { .. } => "authorization_error".to_string(),
+        RuntimeServerError::Configuration { .. } => "configuration_error".to_string(),
+        RuntimeServerError::MissingHost => "missing_host".to_string(),
+        RuntimeServerError::InvalidHeaderValue { .. } => "invalid_header".to_string(),
+        _ => "internal_error".to_string(),
+    }
+}
+
+fn map_http_method(method: &Method) -> Result<HttpMethod, RuntimeServerError> {
+    match *method {
+        Method::GET => Ok(HttpMethod::Get),
+        Method::HEAD => Ok(HttpMethod::Head),
+        Method::POST => Ok(HttpMethod::Post),
+        Method::PUT => Ok(HttpMethod::Put),
+        Method::PATCH => Ok(HttpMethod::Patch),
+        Method::DELETE => Ok(HttpMethod::Delete),
+        _ => Err(RuntimeServerError::UnsupportedMethod {
+            method: method.to_string(),
+        }),
+    }
+}
+
+fn parse_cookie_header(
+    headers: &HeaderMap,
+) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+    let Some(raw) = headers.get(COOKIE) else {
+        return Ok(BTreeMap::new());
+    };
+    let raw = raw
+        .to_str()
+        .map_err(|_| RuntimeServerError::InvalidHeaderValue { header: "cookie" })?;
+    let mut cookies = BTreeMap::new();
+    for segment in raw.split(';') {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((name, value)) = trimmed.split_once('=') {
+            cookies.insert(name.trim().to_string(), value.trim().to_string());
+        }
+    }
+    Ok(cookies)
+}
+
+fn header_value(
+    headers: &HeaderMap,
+    name: impl AsRef<str>,
+) -> Result<Option<String>, RuntimeServerError> {
+    let name = name.as_ref();
+    let Some(value) = headers.get(name) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        value
+            .to_str()
+            .map_err(|_| RuntimeServerError::InvalidHeaderValue {
+                header: Box::leak(name.to_string().into_boxed_str()),
+            })?
+            .to_string(),
+    ))
+}
+
+fn normalized_request_headers(headers: &HeaderMap) -> Result<Headers, RuntimeServerError> {
+    let mut normalized = Headers::new();
+    for (name, value) in headers {
+        normalized.insert(
+            name.as_str().to_ascii_lowercase(),
+            value
+                .to_str()
+                .map_err(|_| RuntimeServerError::InvalidHeaderValue {
+                    header: Box::leak(name.as_str().to_string().into_boxed_str()),
+                })?
+                .to_string(),
+        );
+    }
+    Ok(normalized)
+}
+
+async fn parse_request_body(
+    request_method: HttpMethod,
+    request: Request<Body>,
+) -> Result<ParsedRequestBody, RuntimeServerError> {
+    if !matches!(
+        request_method,
+        HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch | HttpMethod::Delete
+    ) {
+        return Ok(ParsedRequestBody::default());
+    }
+
+    let content_type = request
+        .headers()
+        .get(CONTENT_TYPE)
+        .map(|value| {
+            value
+                .to_str()
+                .map_err(|_| RuntimeServerError::InvalidHeaderValue {
+                    header: "content-type",
+                })
+                .map(str::to_string)
+        })
+        .transpose()?;
+    let is_form = content_type
+        .as_deref()
+        .and_then(|value| value.split(';').next().map(str::trim))
+        .is_some_and(|mime| mime.eq_ignore_ascii_case("application/x-www-form-urlencoded"));
+
+    let (_, body) = request.into_parts();
+    let bytes = to_bytes(body, usize::MAX)
+        .await
+        .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit: usize::MAX })?;
+    let form_fields = if is_form {
+        parse_request_fields(&bytes)
+    } else {
+        RequestFieldMap::new()
+    };
+    Ok(ParsedRequestBody {
+        content_type,
+        raw_body: bytes.to_vec(),
+        form_fields,
+    })
+}
+
+fn parse_request_fields(bytes: &[u8]) -> RequestFieldMap {
+    let mut fields = RequestFieldMap::new();
+    for (name, value) in form_urlencoded::parse(bytes) {
+        push_request_field(&mut fields, name.into_owned(), value.into_owned());
+    }
+    fields
+}
+
+fn prepare_native_storefront_request(
+    state: &RuntimeServerState,
+    request: &mut RequestInput,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<(), RuntimeServerError> {
+    let Some(matched) = state.plan.http.resolve_match(
+        &state.plan.config,
+        request.method,
+        &request.host,
+        &request.path,
+    ) else {
+        return Ok(());
+    };
+
+    let route_name = matched.resolved.route_name.as_str();
+    let is_storefront_page = request.method == HttpMethod::Get
+        && matched.route.module.as_deref() == Some("commerce")
+        && matched.route.area != RouteArea::Admin
+        && matched.route.area != RouteArea::Api
+        && matched.route.area != RouteArea::Fragment;
+    let is_account_page =
+        request.method == HttpMethod::Get && matched.route.area == RouteArea::Account;
+    let is_native_capability_route = STOREFRONT_NATIVE_CAPABILITY_ROUTES.contains(&route_name);
+    let is_native_mutation_route = matches!(
+        route_name,
+        "commerce.add-to-cart"
+            | "commerce.cart-update"
+            | "commerce.checkout-start"
+            | "commerce.checkout-complete"
+    );
+    if !is_storefront_page && !is_account_page && !is_native_mutation_route {
+        return Ok(());
+    }
+
+    ensure_storefront_session(state, request, now, response_cookies)?;
+    if is_native_capability_route {
+        request
+            .granted_capabilities
+            .insert(coil_auth::Capability::CheckoutSessionCreate);
+    }
+    Ok(())
+}
+
+fn ensure_storefront_session(
+    state: &RuntimeServerState,
+    request: &mut RequestInput,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<String, RuntimeServerError> {
+    if let Some(session_id) = request.session_id.clone() {
+        return Ok(session_id);
+    }
+
+    let issued = {
+        let mut browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        browser
+            .issue_session(SessionIssueRequest::new(), &state.cookie_secret, now)
+            .map_err(RequestExecutionError::from_browser_error)?
+    };
+    request.session_id = Some(issued.record.session_id.clone());
+    response_cookies.push(issued.set_cookie_header);
+    Ok(issued.record.session_id)
+}
+
+fn push_storefront_flash(
+    state: &RuntimeServerState,
+    response_cookies: &mut Vec<String>,
+    level: FlashLevel,
+    text: impl Into<String>,
+) -> Result<(), RuntimeServerError> {
+    let message =
+        FlashMessage::new(level, text.into()).map_err(RequestExecutionError::from_browser_error)?;
+    let cookie = {
+        let browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        browser
+            .issue_flash_cookie(&state.cookie_secret, &[message])
+            .map_err(RequestExecutionError::from_browser_error)?
+    };
+    response_cookies.push(cookie);
+    Ok(())
+}
+
+fn push_storefront_form_state(
+    state: &RuntimeServerState,
+    response_cookies: &mut Vec<String>,
+    form_state: &StorefrontFormState,
+) -> Result<(), RuntimeServerError> {
+    let message = FlashMessage::new(FlashLevel::Error, form_state.encode()?)
+        .map_err(RequestExecutionError::from_browser_error)?;
+    let cookie = {
+        let browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        browser
+            .issue_flash_cookie(&state.cookie_secret, &[message])
+            .map_err(RequestExecutionError::from_browser_error)?
+    };
+    response_cookies.push(cookie);
+    Ok(())
+}
+
+fn storefront_redirect_response(location: &str, response_cookies: &[String]) -> Response<Body> {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = StatusCode::SEE_OTHER;
+    response.headers_mut().insert(
+        HeaderName::from_static("location"),
+        HeaderValue::from_str(location).expect("redirect location is a valid header value"),
+    );
+    for cookie in response_cookies {
+        if let Ok(value) = HeaderValue::from_str(cookie) {
+            response
+                .headers_mut()
+                .append(HeaderName::from_static("set-cookie"), value);
+        }
+    }
+    response
+}
+
+fn cms_admin_redirect_response(
+    state: &RuntimeServerState,
+    path: &str,
+) -> Result<Option<Response<Body>>, RuntimeServerError> {
+    if path.starts_with("/admin") {
+        return Ok(None);
+    }
+    let workspace = CmsAdminWorkspace::load(&state.plan).map_err(|reason| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to load CMS admin workspace: {reason}"),
+        }
+    })?;
+    let Some(redirect) = workspace.redirect_for_path(path) else {
+        return Ok(None);
+    };
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = if redirect.permanent {
+        StatusCode::PERMANENT_REDIRECT
+    } else {
+        StatusCode::TEMPORARY_REDIRECT
+    };
+    response.headers_mut().insert(
+        HeaderName::from_static("location"),
+        HeaderValue::from_str(&redirect.to).expect("redirect target is a valid header value"),
+    );
+    Ok(Some(response))
+}
+
+fn revoke_storefront_session(
+    state: &RuntimeServerState,
+    session_id: &str,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<(), RuntimeServerError> {
+    let clear_cookie = {
+        let mut browser = state
+            .browser
+            .lock()
+            .expect("runtime browser mutex poisoned");
+        match browser.revoke_session(session_id, now) {
+            Ok(()) => {}
+            Err(
+                RuntimeBrowserError::UnknownSession { .. }
+                | RuntimeBrowserError::ExpiredSession { .. }
+                | RuntimeBrowserError::RevokedSession { .. },
+            ) => {}
+            Err(error) => return Err(RequestExecutionError::from_browser_error(error).into()),
+        }
+        browser.clear_session_cookie_header()
+    };
+    response_cookies.push(clear_cookie);
+    Ok(())
+}
+
+fn parse_quantity_field(value: Option<&str>) -> Option<u32> {
+    value.and_then(|raw| raw.trim().parse::<u32>().ok())
+}
+
+fn storefront_quantity_from_execution(execution: &RequestExecution) -> u32 {
+    parse_quantity_field(execution_form_field(execution, "quantity")).unwrap_or(1)
+}
+
+fn storefront_form_field_value(execution: &RequestExecution, name: &str) -> String {
+    execution_form_field(execution, name)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn storefront_catalog_product_for_execution<'a>(
+    state: &'a RuntimeServerState,
+    execution: &RequestExecution,
+    sku: &str,
+) -> Option<&'a StorefrontProductDefinition> {
+    state
+        .plan
+        .storefront_catalog
+        .product_by_sku_or_handle_for_site(execution.site_id.as_deref(), sku)
+}
+
+fn storefront_checkout_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.checkout", summary.into());
+    for field in [
+        "checkout_email",
+        "delivery_name",
+        "delivery_note",
+        "payment_method",
+        "payment_last4",
+        "checkout_intent",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    if execution_form_field(execution, "terms_accepted").is_some() {
+        state = state.with_field_value("terms_accepted", "yes");
+    }
+    state
+}
+
+#[derive(Debug)]
+struct RuntimeCheckoutCommerceFacade<'a> {
+    plan: &'a RuntimePlan,
+    catalog: &'a StorefrontCatalog,
+    site_id: Option<&'a str>,
+    principal_id: Option<&'a str>,
+    recorded_at_unix_seconds: u64,
+}
+
+impl CommerceFacade for RuntimeCheckoutCommerceFacade<'_> {
+    fn product(&self, sku: &str) -> Result<Option<CommerceProduct>, BackendError> {
+        Ok(self
+            .catalog
+            .product_by_sku_or_handle_for_site(self.site_id, sku)
+            .map(|product| CommerceProduct {
+                sku: product.sku.clone(),
+                handle: product.handle.clone(),
+                title: product.title.clone(),
+                current_price: MoneyAmount::new(product.currency.clone(), product.price_minor),
+                collection_handle: Some(product.collection_handle.clone()),
+                metadata: BTreeMap::new(),
+            }))
+    }
+
+    fn add_order_note(&self, order_id: &str, note: &str) -> Result<(), BackendError> {
+        record_customer_order_note(
+            self.plan,
+            self.principal_id.unwrap_or("anonymous"),
+            self.recorded_at_unix_seconds,
+            order_id,
+            note,
+        )
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeCheckoutAuthFacade<'a> {
+    state: &'a RuntimeServerState,
+    execution: &'a RequestExecution,
+}
+
+impl AuthFacade for RuntimeCheckoutAuthFacade<'_> {
+    fn check_capability(
+        &self,
+        request: &AuthCheckRequest,
+    ) -> Result<AuthCheckResult, BackendError> {
+        let capability = parse_customer_capability(&request.capability)?;
+        let object = parse_customer_auth_entity(&request.object)?;
+        let Some(subject) = customer_hook_auth_subject(&self.execution.principal) else {
+            return Ok(AuthCheckResult {
+                allowed: false,
+                explanation: Some(
+                    "anonymous requests do not have an authenticated auth subject".to_string(),
+                ),
+            });
+        };
+        let authorizer = Arc::clone(&self.state.route_authorizer);
+        let allowed = run_customer_hook_future(async move {
+            authorizer
+                .check_capability(&subject, capability, &object)
+                .await
+        })
+        .map_err(customer_hook_auth_backend_error)?;
+
+        Ok(AuthCheckResult {
+            allowed,
+            explanation: (!allowed).then(|| {
+                format!(
+                    "live auth denied `{}` for `{}`",
+                    capability.as_str(),
+                    request.object
+                )
+            }),
+        })
+    }
+
+    fn explain_denial(
+        &self,
+        request: &AuthExplainRequest,
+    ) -> Result<AuthExplanation, BackendError> {
+        let capability = parse_customer_capability(&request.capability)?;
+        let object = parse_customer_auth_entity(&request.object)?;
+        let Some(explainer) = self.state.auth_explainer.clone() else {
+            return Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "auth.explain.unavailable",
+                "Runtime auth explanations are disabled for this installation.",
+            ));
+        };
+        let Some(subject) = customer_hook_auth_subject(&self.execution.principal) else {
+            return Ok(AuthExplanation {
+                summary: format!("deny `{}` on `{}`", capability.as_str(), request.object),
+                traces: vec![
+                    "anonymous requests do not have an authenticated auth subject".to_string(),
+                ],
+            });
+        };
+        let explain_request = coil_auth::LiveAuthExplainRequest {
+            subject,
+            capability,
+            object,
+            options: coil_auth::ExplainOptions::default(),
+        };
+        let explanation = run_customer_hook_future(async move {
+            explainer.explain_capability(&explain_request).await
+        })
+        .map_err(customer_hook_auth_backend_error)?;
+
+        Ok(AuthExplanation {
+            summary: format!(
+                "{} `{}` on `{}`",
+                if explanation.decision.is_allowed() {
+                    "allow"
+                } else {
+                    "deny"
+                },
+                explanation.capability.as_str(),
+                explanation.object
+            ),
+            traces: vec![format!("{:?}", explanation.trace)],
+        })
+    }
+}
+
+fn cms_page_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.pages.index", summary.into());
+    for field in [
+        "page_id",
+        "page_title",
+        "page_slug",
+        "page_summary",
+        "page_body_html",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    state
+}
+
+fn order_refund_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.order-detail", summary.into());
+    for field in ["order_id", "reason"] {
+        state = state.with_field_value(field, storefront_form_field_value(execution, field));
+    }
+    state
+}
+
+fn record_operator_audit(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    action: &str,
+    resource_kind: &str,
+    resource_id: &str,
+    outcome: &str,
+    detail: &str,
+) -> Result<(), RuntimeServerError> {
+    let capability = match execution.route.auth {
+        RouteAuthGate::Capability(capability) => capability.to_string(),
+        RouteAuthGate::Session => "session".to_string(),
+        RouteAuthGate::Public => "public".to_string(),
+    };
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer
+        .append_pair("action", action)
+        .append_pair("route", execution.route.route_name.as_str())
+        .append_pair("capability", capability.as_str())
+        .append_pair("outcome", outcome);
+    if !resource_kind.trim().is_empty() {
+        serializer.append_pair("resource_kind", resource_kind);
+    }
+    if !resource_id.trim().is_empty() {
+        serializer.append_pair("resource_id", resource_id);
+    }
+    if !detail.trim().is_empty() {
+        serializer.append_pair("detail", detail);
+    }
+    let kind = serializer.finish();
+    match state
+        .wasm_host
+        .record_operator_audit(
+            kind.clone(),
+            execution.customer_app.as_str(),
+            Some(execution.trace.request_id.as_str()),
+            execution.principal.principal_id.as_deref(),
+        )
+    {
+        Ok(()) => Ok(()),
+        Err(_metadata_reason) => record_admin_audit_entry(
+            &state.plan,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
+            execution
+                .principal
+                .principal_id
+                .clone()
+                .unwrap_or_else(|| "anonymous".to_string()),
+            kind,
+        )
+        .map_err(|fallback_reason| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to persist operator audit entry for `{action}` using the local fallback: {fallback_reason}"
+            ),
+        }),
+    }
+}
+
+fn cms_navigation_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.navigation.index", summary.into());
+    for (name, values) in &execution.form_fields {
+        if (name.starts_with("nav_label_")
+            || name.starts_with("nav_href_")
+            || name == "new_nav_label"
+            || name == "new_nav_href")
+            && !values.is_empty()
+        {
+            state = state.with_field_value(name.clone(), values[0].clone());
+        }
+    }
+    state
+}
+
+fn cms_redirect_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.redirects.index", summary.into());
+    for (name, values) in &execution.form_fields {
+        if (name.starts_with("redirect_from_")
+            || name.starts_with("redirect_to_")
+            || name.starts_with("redirect_permanent_")
+            || name == "new_redirect_from"
+            || name == "new_redirect_to"
+            || name == "new_redirect_permanent")
+            && !values.is_empty()
+        {
+            state = state.with_field_value(name.clone(), values[0].clone());
+        }
+    }
+    if execution.form_fields.contains_key("new_redirect_permanent") {
+        state = state.with_field_value("new_redirect_permanent", "yes");
+    }
+    state
+}
+
+fn storefront_cart_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.cart", summary.into());
+    for (name, values) in &execution.form_fields {
+        if name.starts_with("quantity_") {
+            if let Some(value) = values.first() {
+                state = state.with_field_value(name.clone(), value.clone());
+            }
+        }
+    }
+    state
+}
+
+fn runtime_customer_request_context(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> SdkRequestContext {
+    let environment = match state.plan.config.app.environment {
+        coil_config::Environment::Development => "development",
+        coil_config::Environment::Staging => "staging",
+        coil_config::Environment::Production => "production",
+    };
+    let mut customer_app =
+        SdkCustomerAppContext::new(execution.customer_app.clone(), environment.to_owned());
+    if let Some(site_id) = execution.site_id.as_deref() {
+        customer_app = customer_app.with_site_id(site_id.to_string());
+    }
+    if !execution.locale.trim().is_empty() {
+        customer_app = customer_app.with_locale(execution.locale.clone());
+    }
+    let principal = match (
+        execution.principal.principal_id.as_deref(),
+        execution.principal.principal_kind,
+    ) {
+        (Some(principal_id), RequestPrincipalKind::ServiceAccount) => {
+            SdkPrincipalContext::service_account(principal_id.to_string())
+        }
+        (Some(principal_id), _) => SdkPrincipalContext::user(principal_id.to_string()),
+        (None, _) => SdkPrincipalContext::anonymous(),
+    };
+    let trace = SdkTraceContext::new(execution.trace.request_id.clone())
+        .with_request_id(execution.trace.request_id.clone());
+    SdkRequestContext::new(customer_app, principal, trace)
+}
+
+#[derive(Debug)]
+struct RuntimeRequestAuditFacade<'a> {
+    plan: &'a RuntimePlan,
+    principal_id: Option<&'a str>,
+    recorded_at_unix_seconds: u64,
+}
+
+impl AuditFacade for RuntimeRequestAuditFacade<'_> {
+    fn record(&self, entry: AuditEntry) -> Result<(), BackendError> {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer
+            .append_pair("action", entry.action.as_str())
+            .append_pair("resource_kind", entry.resource_kind.as_str())
+            .append_pair("resource_id", entry.resource_id.as_str())
+            .append_pair("outcome", entry.outcome.as_str());
+        if let Some(detail) = entry.detail.as_deref() {
+            serializer.append_pair("detail", detail);
+        }
+        for (key, value) in &entry.metadata {
+            serializer.append_pair(&format!("meta.{key}"), value);
+        }
+
+        record_admin_audit_entry(
+            self.plan,
+            self.recorded_at_unix_seconds.min(i64::MAX as u64) as i64,
+            self.principal_id.unwrap_or("anonymous"),
+            serializer.finish(),
+        )
+        .map_err(|reason| {
+            BackendError::new(
+                BackendErrorKind::Internal,
+                "audit.record.failed",
+                "Failed to persist the customer hook audit entry.",
+            )
+            .with_detail(reason)
+        })
+    }
+}
+
+fn record_customer_order_note(
+    plan: &RuntimePlan,
+    principal_id: &str,
+    recorded_at_unix_seconds: u64,
+    order_id: &str,
+    note: &str,
+) -> Result<(), BackendError> {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer
+        .append_pair("action", "customer-plugin.order-note")
+        .append_pair("resource_kind", "order")
+        .append_pair("resource_id", order_id)
+        .append_pair("outcome", "recorded")
+        .append_pair("detail", note);
+    record_admin_audit_entry(
+        plan,
+        recorded_at_unix_seconds.min(i64::MAX as u64) as i64,
+        principal_id,
+        serializer.finish(),
+    )
+    .map_err(|reason| {
+        BackendError::new(
+            BackendErrorKind::Internal,
+            "commerce.order_note.failed",
+            "Failed to persist the linked customer order note.",
+        )
+        .with_detail(reason)
+    })
+}
+
+#[derive(Debug)]
+struct RuntimeCustomerRepositoryFacade<'a> {
+    storefront: &'a StorefrontStateStore,
+    workspace: Option<Arc<Mutex<CmsAdminWorkspace>>>,
+    recorded_at_unix_seconds: u64,
+    _marker: std::marker::PhantomData<&'a ()>,
+}
+
+impl RepositoryFacade for RuntimeCustomerRepositoryFacade<'_> {
+    fn read(&self, query: &RepositoryQuery) -> Result<RepositoryRecordSet, BackendError> {
+        let records = match query.repository.as_str() {
+            "cms.pages" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Runtime customer hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
+                .pages
+                .iter()
+                .filter(|page| {
+                    query.key.as_deref().map_or(true, |key| {
+                        page.id == key
+                            || page.draft.slug == key
+                            || page.live.as_ref().is_some_and(|live| live.slug == key)
+                    })
+                })
+                .map(|page| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("title".to_string(), page.draft.title.clone());
+                    fields.insert("slug".to_string(), page.draft.slug.clone());
+                    fields.insert("summary".to_string(), page.draft.summary.clone());
+                    fields.insert("body_html".to_string(), page.draft.body_html.clone());
+                    fields.insert("status".to_string(), page.status_label().to_string());
+                    if let Some(live_path) = page.live_path() {
+                        fields.insert("live_path".to_string(), live_path);
+                    }
+                    RepositoryRecord {
+                        id: page.id.clone(),
+                        fields,
+                    }
+                })
+                .collect(),
+            "cms.navigation" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Runtime customer hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
+                .navigation
+                .iter()
+                .enumerate()
+                .filter(|(index, item)| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| key == index.to_string() || key == item.href)
+                })
+                .map(|(index, item)| RepositoryRecord {
+                    id: index.to_string(),
+                    fields: BTreeMap::from([
+                        ("label".to_string(), item.label.clone()),
+                        ("href".to_string(), item.href.clone()),
+                    ]),
+                })
+                .collect(),
+            "cms.redirects" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Runtime customer hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
+                .redirects
+                .iter()
+                .enumerate()
+                .filter(|(index, redirect)| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| key == index.to_string() || key == redirect.from)
+                })
+                .map(|(index, redirect)| RepositoryRecord {
+                    id: index.to_string(),
+                    fields: BTreeMap::from([
+                        ("from".to_string(), redirect.from.clone()),
+                        ("to".to_string(), redirect.to.clone()),
+                        ("permanent".to_string(), redirect.permanent.to_string()),
+                    ]),
+                })
+                .collect(),
+            "commerce.catalog.products" => self
+                .storefront
+                .catalog()
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.read.failed",
+                        "Runtime could not load the effective storefront catalog products.",
+                    )
+                    .with_detail(error.to_string())
+                })?
+                .products
+                .iter()
+                .filter(|product| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| product.handle == key || product.sku == key)
+                        && query
+                            .filters
+                            .get("collection_handle")
+                            .map_or(true, |handle| product.collection_handle == *handle)
+                })
+                .map(|product| RepositoryRecord {
+                    id: product.handle.clone(),
+                    fields: BTreeMap::from([
+                        ("handle".to_string(), product.handle.clone()),
+                        ("sku".to_string(), product.sku.clone()),
+                        ("title".to_string(), product.title.clone()),
+                        ("summary".to_string(), product.summary.clone()),
+                        ("price_minor".to_string(), product.price_minor.to_string()),
+                        ("currency".to_string(), product.currency.clone()),
+                        (
+                            "collection_handle".to_string(),
+                            product.collection_handle.clone(),
+                        ),
+                        ("is_visible".to_string(), product.is_visible.to_string()),
+                        ("product_kind".to_string(), product.product_kind.clone()),
+                        (
+                            "entitlement_key".to_string(),
+                            product.entitlement_key.clone().unwrap_or_default(),
+                        ),
+                    ]),
+                })
+                .collect(),
+            "commerce.catalog.collections" => self
+                .storefront
+                .catalog()
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.read.failed",
+                        "Runtime could not load the effective storefront catalog collections.",
+                    )
+                    .with_detail(error.to_string())
+                })?
+                .collections
+                .iter()
+                .filter(|collection| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| collection.handle == key)
+                })
+                .map(|collection| RepositoryRecord {
+                    id: collection.handle.clone(),
+                    fields: BTreeMap::from([
+                        ("handle".to_string(), collection.handle.clone()),
+                        ("title".to_string(), collection.title.clone()),
+                        ("label".to_string(), collection.label.clone()),
+                        ("summary".to_string(), collection.summary.clone()),
+                        ("is_visible".to_string(), collection.is_visible.to_string()),
+                    ]),
+                })
+                .collect(),
+            "commerce.orders" => {
+                let order = if let Some(key) = query.key.as_deref() {
+                    self.storefront.admin_order(key).map_err(|error| {
+                        BackendError::new(
+                            BackendErrorKind::Unavailable,
+                            "repository.read.failed",
+                            "Runtime could not load the requested commerce order.",
+                        )
+                        .with_detail(error.to_string())
+                    })?
+                } else if let Some(payment_reference) = query.filters.get("payment_reference") {
+                    self.storefront
+                        .order_by_payment_reference(payment_reference)
+                        .map_err(|error| {
+                            BackendError::new(
+                                BackendErrorKind::Unavailable,
+                                "repository.read.failed",
+                                "Runtime could not load the requested commerce order.",
+                            )
+                            .with_detail(error.to_string())
+                        })?
+                } else {
+                    None
+                };
+                order
+                    .into_iter()
+                    .map(|order| RepositoryRecord {
+                        id: order.order_id.clone(),
+                        fields: BTreeMap::from([
+                            ("status".to_string(), order.status),
+                            ("payment_status".to_string(), order.payment.status),
+                            (
+                                "payment_reference".to_string(),
+                                order.payment.reference.unwrap_or_default(),
+                            ),
+                            (
+                                "payment_method".to_string(),
+                                order.payment.method.unwrap_or_default(),
+                            ),
+                            (
+                                "checkout_email".to_string(),
+                                order.payment.checkout_email.unwrap_or_default(),
+                            ),
+                            (
+                                "principal_id".to_string(),
+                                order.principal_id.unwrap_or_default(),
+                            ),
+                            ("currency".to_string(), order.currency),
+                            ("total_minor".to_string(), order.total_minor.to_string()),
+                            ("line_count".to_string(), order.line_count.to_string()),
+                        ]),
+                    })
+                    .collect()
+            }
+            _ => {
+                return Err(BackendError::new(
+                    BackendErrorKind::Unsupported,
+                    "repository.read.unsupported",
+                    format!(
+                        "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, `cms.redirects`, `commerce.catalog.products`, `commerce.catalog.collections`, and `commerce.orders` reads; `{}` is not available.",
+                        query.repository
+                    ),
+                ));
+            }
+        };
+
+        Ok(RepositoryRecordSet {
+            repository: query.repository.clone(),
+            records,
+        })
+    }
+
+    fn write(&self, change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
+        match change.repository.as_str() {
+            "cms.pages" => {
+                let mut workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::Unsupported,
+                            "repository.write.unsupported",
+                            "Runtime customer hooks did not expose a CMS workspace for this request.",
+                        )
+                    })?
+                    .lock()
+                    .map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::Internal,
+                            "repository.workspace.lock_failed",
+                            "Runtime could not acquire the CMS workspace lock.",
+                        )
+                    })?;
+                let existing = workspace
+                    .selected_page(Some(change.record_id.as_str()))
+                    .cloned()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer CMS hook tried to write unknown page `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                let input = CmsAdminPageInput {
+                    page_id: Some(change.record_id.clone()),
+                    title: change
+                        .fields
+                        .get("title")
+                        .cloned()
+                        .unwrap_or(existing.draft.title),
+                    slug: change
+                        .fields
+                        .get("slug")
+                        .cloned()
+                        .unwrap_or(existing.draft.slug),
+                    summary: change
+                        .fields
+                        .get("summary")
+                        .cloned()
+                        .unwrap_or(existing.draft.summary),
+                    body_html: change
+                        .fields
+                        .get("body_html")
+                        .cloned()
+                        .unwrap_or(existing.draft.body_html),
+                };
+                let page_id = workspace
+                    .save_page_draft(input, self.recorded_at_unix_seconds)
+                    .map_err(|reason| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.invalid_page",
+                            "Customer CMS hook submitted an invalid page draft update.",
+                        )
+                        .with_detail(reason)
+                    })?;
+
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id: page_id,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            "cms.navigation" => {
+                let mut workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::Unsupported,
+                            "repository.write.unsupported",
+                            "Runtime customer hooks did not expose a CMS workspace for this request.",
+                        )
+                    })?
+                    .lock()
+                    .map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::Internal,
+                            "repository.workspace.lock_failed",
+                            "Runtime could not acquire the CMS workspace lock.",
+                        )
+                    })?;
+                let mut items = workspace.navigation.clone();
+                let record_id = if change.record_id == "append" || change.record_id == "new" {
+                    let item = CmsAdminNavigationItem {
+                        label: change.fields.get("label").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_navigation",
+                                "Customer CMS hook must provide a label when appending navigation.",
+                            )
+                        })?,
+                        href: change.fields.get("href").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_navigation",
+                                "Customer CMS hook must provide an href when appending navigation.",
+                            )
+                        })?,
+                    };
+                    items.push(item);
+                    (items.len() - 1).to_string()
+                } else {
+                    let index = change.record_id.parse::<usize>().map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.invalid_navigation_record",
+                            format!(
+                                "Customer CMS hook must target a numeric navigation record id or `append`; `{}` is not valid.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    let existing = items.get_mut(index).ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer CMS hook tried to write unknown navigation item `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    if let Some(label) = change.fields.get("label") {
+                        existing.label = label.clone();
+                    }
+                    if let Some(href) = change.fields.get("href") {
+                        existing.href = href.clone();
+                    }
+                    change.record_id.clone()
+                };
+                workspace.save_navigation(items).map_err(|reason| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "repository.write.invalid_navigation",
+                        "Customer CMS hook submitted an invalid navigation update.",
+                    )
+                    .with_detail(reason)
+                })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            "cms.redirects" => {
+                let mut workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::Unsupported,
+                            "repository.write.unsupported",
+                            "Runtime customer hooks did not expose a CMS workspace for this request.",
+                        )
+                    })?
+                    .lock()
+                    .map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::Internal,
+                            "repository.workspace.lock_failed",
+                            "Runtime could not acquire the CMS workspace lock.",
+                        )
+                    })?;
+                let mut redirects = workspace.redirects.clone();
+                let record_id = if change.record_id == "append" || change.record_id == "new" {
+                    let redirect = CmsAdminRedirect {
+                        from: change.fields.get("from").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_redirect",
+                                "Customer CMS hook must provide a `from` path when appending a redirect.",
+                            )
+                        })?,
+                        to: change.fields.get("to").cloned().ok_or_else(|| {
+                            BackendError::new(
+                                BackendErrorKind::InvalidInput,
+                                "repository.write.invalid_redirect",
+                                "Customer CMS hook must provide a `to` path when appending a redirect.",
+                            )
+                        })?,
+                        permanent: change
+                            .fields
+                            .get("permanent")
+                            .map(|value| {
+                                matches!(
+                                    value.trim().to_ascii_lowercase().as_str(),
+                                    "1" | "true" | "yes" | "on"
+                                )
+                            })
+                            .unwrap_or(false),
+                    };
+                    redirects.push(redirect);
+                    (redirects.len() - 1).to_string()
+                } else {
+                    let index = change.record_id.parse::<usize>().map_err(|_| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.invalid_redirect_record",
+                            format!(
+                                "Customer CMS hook must target a numeric redirect record id or `append`; `{}` is not valid.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    let existing = redirects.get_mut(index).ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer CMS hook tried to write unknown redirect `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                    if let Some(from) = change.fields.get("from") {
+                        existing.from = from.clone();
+                    }
+                    if let Some(to) = change.fields.get("to") {
+                        existing.to = to.clone();
+                    }
+                    if let Some(permanent) = change.fields.get("permanent") {
+                        existing.permanent = matches!(
+                            permanent.trim().to_ascii_lowercase().as_str(),
+                            "1" | "true" | "yes" | "on"
+                        );
+                    }
+                    change.record_id.clone()
+                };
+                workspace.save_redirects(redirects).map_err(|reason| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "repository.write.invalid_redirect",
+                        "Customer CMS hook submitted an invalid redirect update.",
+                    )
+                    .with_detail(reason)
+                })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            "commerce.catalog.products" => {
+                let catalog = self.storefront.catalog().map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.write.failed",
+                        "Runtime could not load the effective storefront catalog product.",
+                    )
+                    .with_detail(error.to_string())
+                })?;
+                let existing = catalog
+                    .product_by_sku_or_handle(change.record_id.as_str())
+                    .cloned()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer hook tried to write unknown catalog product `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                let update = crate::storefront::StorefrontCatalogProductUpdate {
+                    handle: existing.handle.clone(),
+                    title: change
+                        .fields
+                        .get("title")
+                        .cloned()
+                        .unwrap_or(existing.title.clone()),
+                    summary: change
+                        .fields
+                        .get("summary")
+                        .cloned()
+                        .unwrap_or(existing.summary.clone()),
+                    price_minor: repository_i64_field(
+                        &change,
+                        "price_minor",
+                        existing.price_minor,
+                    )?,
+                    collection_handle: change
+                        .fields
+                        .get("collection_handle")
+                        .cloned()
+                        .unwrap_or(existing.collection_handle.clone()),
+                    is_visible: repository_bool_field(&change, "is_visible", existing.is_visible)?,
+                };
+                self.storefront
+                    .update_catalog_product(&update, self.recorded_at_unix_seconds)
+                    .map_err(|error| {
+                        BackendError::new(
+                            BackendErrorKind::Unavailable,
+                            "repository.write.failed",
+                            "Runtime could not persist the storefront catalog product override.",
+                        )
+                        .with_detail(error.to_string())
+                    })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id: update.handle,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            "commerce.catalog.collections" => {
+                let catalog = self.storefront.catalog().map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Unavailable,
+                        "repository.write.failed",
+                        "Runtime could not load the effective storefront catalog collection.",
+                    )
+                    .with_detail(error.to_string())
+                })?;
+                let existing = catalog
+                    .collection(change.record_id.as_str())
+                    .cloned()
+                    .ok_or_else(|| {
+                        BackendError::new(
+                            BackendErrorKind::InvalidInput,
+                            "repository.write.unknown_record",
+                            format!(
+                                "Customer hook tried to write unknown catalog collection `{}`.",
+                                change.record_id
+                            ),
+                        )
+                    })?;
+                let update = crate::storefront::StorefrontCatalogCollectionUpdate {
+                    handle: existing.handle.clone(),
+                    title: change
+                        .fields
+                        .get("title")
+                        .cloned()
+                        .unwrap_or(existing.title.clone()),
+                    label: change
+                        .fields
+                        .get("label")
+                        .cloned()
+                        .unwrap_or(existing.label.clone()),
+                    summary: change
+                        .fields
+                        .get("summary")
+                        .cloned()
+                        .unwrap_or(existing.summary.clone()),
+                    is_visible: repository_bool_field(&change, "is_visible", existing.is_visible)?,
+                };
+                self.storefront
+                    .update_catalog_collection(&update, self.recorded_at_unix_seconds)
+                    .map_err(|error| {
+                        BackendError::new(
+                            BackendErrorKind::Unavailable,
+                            "repository.write.failed",
+                            "Runtime could not persist the storefront catalog collection override.",
+                        )
+                        .with_detail(error.to_string())
+                    })?;
+                Ok(RepositoryWriteReceipt {
+                    repository: change.repository,
+                    record_id: update.handle,
+                    version: Some(self.recorded_at_unix_seconds.to_string()),
+                })
+            }
+            _ => Err(BackendError::new(
+                BackendErrorKind::Unsupported,
+                "repository.write.unsupported",
+                format!(
+                    "Runtime customer hooks only expose `cms.pages`, `cms.navigation`, `cms.redirects`, `commerce.catalog.products`, and `commerce.catalog.collections` writes; `{}` is not available.",
+                    change.repository
+                ),
+            )),
+        }
+    }
+}
+
+fn repository_i64_field(
+    change: &RepositoryWrite,
+    field: &str,
+    default: i64,
+) -> Result<i64, BackendError> {
+    match change.fields.get(field) {
+        Some(value) => value.parse::<i64>().map_err(|_| {
+            BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "repository.write.invalid_integer",
+                format!(
+                    "Customer hook field `{field}` for repository `{}` must be a valid integer.",
+                    change.repository
+                ),
+            )
+        }),
+        None => Ok(default),
+    }
+}
+
+fn repository_bool_field(
+    change: &RepositoryWrite,
+    field: &str,
+    default: bool,
+) -> Result<bool, BackendError> {
+    match change.fields.get(field) {
+        Some(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "repository.write.invalid_bool",
+                format!(
+                    "Customer hook field `{field}` for repository `{}` must be a valid boolean.",
+                    change.repository
+                ),
+            )),
+        },
+        None => Ok(default),
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeCustomerJobsFacade<'a> {
+    plan: &'a RuntimePlan,
+    trace_id: &'a str,
+    now: BrowserInstant,
+}
+
+impl JobsFacade for RuntimeCustomerJobsFacade<'_> {
+    fn enqueue(
+        &self,
+        request: coil_customer_sdk::JobRequest,
+    ) -> Result<JobReceipt, BackendError> {
+        let mut host = self
+            .plan
+            .jobs_host(format!("customer-hooks-{}", self.trace_id))
+            .map_err(|error| {
+                BackendError::new(
+                    BackendErrorKind::Unavailable,
+                    "jobs.host.unavailable",
+                    "Runtime jobs coordination is unavailable for the customer webhook hook.",
+                )
+                .with_detail(error.to_string())
+            })?;
+        let Some(definition) = host
+            .registered_jobs
+            .iter()
+            .find(|definition| definition.contract.name == request.job_name)
+            .cloned()
+        else {
+            return Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "jobs.name.unknown",
+                format!(
+                    "Customer webhook requested unknown runtime job `{}`.",
+                    request.job_name
+                ),
+            ));
+        };
+        if definition.queue.as_str() != request.queue {
+            return Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "jobs.queue.mismatch",
+                format!(
+                    "Customer webhook requested queue `{}` for `{}`, but the registered runtime job uses `{}`.",
+                    request.queue, request.job_name, definition.queue
+                ),
+            ));
+        }
+
+        let mut dispatch =
+            JobDispatchRequest::new(request.job_name.clone(), request.payload_description)
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "jobs.dispatch.invalid",
+                        "Customer webhook requested an invalid runtime job dispatch.",
+                    )
+                    .with_detail(error.to_string())
+                })?;
+        if let Some(idempotency_key) = request.idempotency_key {
+            dispatch = dispatch
+                .with_idempotency_key(idempotency_key)
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::InvalidInput,
+                        "jobs.idempotency.invalid",
+                        "Customer webhook requested an invalid idempotency key.",
+                    )
+                    .with_detail(error.to_string())
+                })?;
+        }
+        let enqueued = host
+            .enqueue_job(
+                dispatch,
+                JobInstant::from_unix_seconds(self.now.as_unix_seconds()),
+            )
+            .map_err(|error| {
+                BackendError::new(
+                    BackendErrorKind::Unavailable,
+                    "jobs.enqueue.failed",
+                    "Runtime could not enqueue the customer webhook follow-up job.",
+                )
+                .with_detail(error.to_string())
+            })?;
+
+        Ok(JobReceipt {
+            queue: definition.queue.to_string(),
+            job_id: enqueued.to_string(),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeCustomerOutboundHttpFacade<'a> {
+    wasm_host: &'a WasmHost,
+}
+
+impl OutboundHttpFacade for RuntimeCustomerOutboundHttpFacade<'_> {
+    fn send(&self, request: OutboundHttpRequest) -> Result<OutboundHttpResponse, BackendError> {
+        self.wasm_host
+            .send_outbound_http(&request)
+            .map_err(|reason| {
+                BackendError::new(
+                    BackendErrorKind::Unavailable,
+                    "http.send.failed",
+                    format!(
+                        "Runtime could not execute approved outbound HTTP integration `{}`.",
+                        request.integration
+                    ),
+                )
+                .with_detail(reason)
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeCustomerAssetsFacade {
+    storage: StorageHost,
+    wasm_host: WasmHost,
+    recorded_at_unix_seconds: i64,
+}
+
+impl AssetsFacade for RuntimeCustomerAssetsFacade {
+    fn publish(&self, request: AssetWriteRequest) -> Result<AssetWriteReceipt, BackendError> {
+        let storage_class = parse_customer_storage_class(request.storage_class.as_str())?;
+        let content_type = request
+            .content_type
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let revision = plan_customer_hook_asset_revision(
+            &self.storage,
+            &request.logical_path,
+            storage_class,
+            &content_type,
+            &request.bytes,
+        )?;
+        let receipt = self
+            .storage
+            .execute_write_with_content_type(
+                revision.storage_plan(),
+                &request.bytes,
+                Some(&content_type),
+            )
+            .map_err(customer_hook_storage_backend_error)?;
+        let mut asset = coil_assets::ManagedAsset::new(
+            customer_hook_asset_id(&request.logical_path)?,
+            request.logical_path.clone(),
+            revision,
+        )
+        .map_err(customer_hook_asset_model_error)?;
+        asset.publish_current();
+        let persisted = persisted_customer_managed_asset_record(&asset)?;
+        let record_json = serde_json::to_string(&persisted).map_err(|error| {
+            customer_hook_asset_internal_error_with_detail(
+                "failed to serialize the managed asset record",
+                error.to_string(),
+            )
+        })?;
+        self.wasm_host
+            .upsert_customer_managed_asset(
+                request.logical_path.as_str(),
+                &record_json,
+                self.recorded_at_unix_seconds,
+            )
+            .map_err(|reason| {
+                customer_hook_asset_internal_error_with_detail(
+                    "failed to persist the managed asset record",
+                    reason,
+                )
+            })?;
+        Ok(AssetWriteReceipt {
+            logical_path: request.logical_path,
+            storage_path: receipt.path.display().to_string(),
+            bytes_written: receipt.bytes_written,
+        })
+    }
+
+    fn inspect(&self, logical_path: &str) -> Result<Option<ManagedAsset>, BackendError> {
+        let Some(record_json) = self
+            .wasm_host
+            .customer_managed_asset(logical_path)
+            .map_err(|reason| {
+                customer_hook_asset_internal_error_with_detail(
+                    "failed to inspect the persisted managed asset record",
+                    reason,
+                )
+            })?
+        else {
+            return Ok(None);
+        };
+        let record = serde_json::from_str::<PersistedCustomerManagedAssetRecord>(&record_json)
+            .map_err(|error| {
+                customer_hook_asset_internal_error_with_detail(
+                    "failed to decode the persisted managed asset record",
+                    error.to_string(),
+                )
+            })?;
+        let asset = runtime_asset_from_persisted_customer_managed_asset(&self.storage, &record)?;
+        sdk_managed_asset_from_runtime_asset(&self.storage, &asset).map(Some)
+    }
+}
+
+fn checkout_order_draft(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    session_id: &str,
+    principal_id: Option<&str>,
+    payment: &StorefrontPaymentInput,
+) -> Result<OrderDraft, RuntimeServerError> {
+    let snapshot = state.storefront.snapshot(session_id, principal_id)?;
+    let lines = snapshot
+        .cart
+        .lines
+        .iter()
+        .map(|line| {
+            let collection_handle = state
+                .plan
+                .storefront_catalog
+                .product_by_sku_or_handle_for_site(execution.site_id.as_deref(), &line.sku)
+                .map(|product| product.collection_handle.clone());
+            OrderLineDraft {
+                sku: line.sku.clone(),
+                title: line.title.clone(),
+                quantity: line.quantity,
+                unit_price: MoneyAmount::new(line.currency.clone(), line.unit_price_minor),
+                product_kind: line.product_kind.clone(),
+                collection_handle,
+                entitlement_key: line.entitlement_key.clone(),
+                metadata: line.metadata.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let metadata = storefront_checkout_order_metadata(
+        state,
+        execution,
+        &snapshot,
+        session_id,
+        principal_id,
+        payment,
+    );
+    Ok(OrderDraft {
+        order_id: format!("draft:{}", payment.intent_reference),
+        currency_code: snapshot.cart.currency.clone(),
+        subtotal: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
+        total: MoneyAmount::new(snapshot.cart.currency.clone(), snapshot.cart.subtotal_minor),
+        lines,
+        metadata,
+    })
+}
+
+fn storefront_checkout_order_metadata(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    snapshot: &StorefrontStateSnapshot,
+    session_id: &str,
+    principal_id: Option<&str>,
+    payment: &StorefrontPaymentInput,
+) -> BTreeMap<String, String> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("session_id".to_string(), session_id.to_string());
+    metadata.insert(
+        "payment_method".to_string(),
+        payment.method.trim().to_ascii_lowercase(),
+    );
+    metadata.insert(
+        "checkout_email".to_string(),
+        payment.checkout_email.trim().to_string(),
+    );
+    if let Some(principal_id) = principal_id {
+        metadata.insert("order_principal_id".to_string(), principal_id.to_string());
+    }
+    if let Some(shipping_country) = execution_form_field(execution, "shipping_country")
+        .or_else(|| execution_form_field(execution, "country"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.insert(
+            "shipping_country".to_string(),
+            shipping_country.to_ascii_uppercase(),
+        );
+    }
+    if let Some(expedited_requested) = execution_form_field(execution, "expedited_requested")
+        .or_else(|| execution_form_field(execution, "expedited"))
+        .or_else(|| execution_form_field(execution, "priority_shipping"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.insert(
+            "expedited_requested".to_string(),
+            normalize_checkout_flag(expedited_requested).to_string(),
+        );
+    }
+    metadata.insert(
+        "membership_tier".to_string(),
+        storefront_membership_tier(state, execution, snapshot)
+            .unwrap_or("guest")
+            .to_string(),
+    );
+    metadata
+}
+
+fn storefront_membership_tier<'a>(
+    state: &'a RuntimeServerState,
+    execution: &'a RequestExecution,
+    snapshot: &'a StorefrontStateSnapshot,
+) -> Option<&'static str> {
+    snapshot.cart.lines.iter().find_map(|line| {
+        let product = state
+            .plan
+            .storefront_catalog
+            .product_by_sku_or_handle_for_site(execution.site_id.as_deref(), &line.sku)?;
+        match product.entitlement_key.as_deref() {
+            Some("membership.gold") => Some("gold"),
+            Some(entitlement) if entitlement.starts_with("membership.") => Some("standard"),
+            _ => None,
+        }
+    })
+}
+
+fn normalize_checkout_flag(value: &str) -> &'static str {
+    if matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "y" | "on"
+    ) {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+fn customer_checkout_error_summary(error: &BackendError) -> Cow<'static, str> {
+    match error.kind() {
+        BackendErrorKind::InvalidInput
+        | BackendErrorKind::Forbidden
+        | BackendErrorKind::Conflict
+        | BackendErrorKind::Unauthorized => Cow::Owned(error.message().to_string()),
+        BackendErrorKind::Unsupported => Cow::Borrowed(
+            "Checkout could not continue because a required customer backend feature is not available in this runtime yet.",
+        ),
+        BackendErrorKind::Unavailable | BackendErrorKind::Timeout | BackendErrorKind::Internal => {
+            Cow::Borrowed("Checkout is temporarily unavailable. Review the basket and try again.")
+        }
+    }
+}
+
+fn customer_cms_publish_error_summary(error: &BackendError) -> Cow<'static, str> {
+    match error.kind() {
+        BackendErrorKind::InvalidInput
+        | BackendErrorKind::Forbidden
+        | BackendErrorKind::Conflict
+        | BackendErrorKind::Unauthorized => Cow::Owned(error.message().to_string()),
+        BackendErrorKind::Unsupported => Cow::Borrowed(
+            "Publishing could not continue because a required customer backend feature is not available in this runtime yet.",
+        ),
+        BackendErrorKind::Unavailable | BackendErrorKind::Timeout | BackendErrorKind::Internal => {
+            Cow::Borrowed("Publishing is temporarily unavailable. Review the page and try again.")
+        }
+    }
+}
+
+fn customer_hook_request_headers(execution: &RequestExecution) -> Headers {
+    let mut headers = execution.headers.clone();
+    headers.insert(
+        "x-coil-customer-app".to_string(),
+        execution.customer_app.clone(),
+    );
+    headers.insert(
+        "x-coil-request-id".to_string(),
+        execution.trace.request_id.clone(),
+    );
+    headers.insert(
+        "x-coil-route".to_string(),
+        execution.route.route_name.clone(),
+    );
+    headers
+}
+
+fn cms_page_draft_from_workspace(page: &CmsAdminPage, locale: &str) -> CmsPageDraft {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("status".to_string(), page.status_label().to_string());
+    metadata.insert(
+        "published_once".to_string(),
+        if page.published_once { "true" } else { "false" }.to_string(),
+    );
+    if let Some(live_path) = page.live_path() {
+        metadata.insert("live_path".to_string(), live_path);
+    }
+    CmsPageDraft {
+        page_id: page.id.clone(),
+        slug: page.draft.slug.clone(),
+        title: page.draft.title.clone(),
+        summary: page.draft.summary.clone(),
+        body_html: page.draft.body_html.clone(),
+        locale: (!locale.trim().is_empty()).then(|| locale.to_string()),
+        metadata,
+    }
+}
+
+fn validate_cms_publish_with_customer_hooks(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    workspace: &mut CmsAdminWorkspace,
+    page_id: &str,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if state.plan.customer_hooks.cms.is_empty() {
+        return Ok(None);
+    }
+
+    let page = workspace.selected_page(Some(page_id)).ok_or_else(|| {
+        RuntimeServerError::Configuration {
+            reason: format!("CMS page `{page_id}` was not found during publish validation"),
+        }
+    })?;
+    let context = runtime_customer_request_context(state, execution);
+    let draft = cms_page_draft_from_workspace(page, execution.locale.as_str());
+    let workspace_shadow = Arc::new(Mutex::new(workspace.clone()));
+    let repositories = RuntimeCustomerRepositoryFacade {
+        storefront: &state.storefront,
+        workspace: Some(Arc::clone(&workspace_shadow)),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+        _marker: std::marker::PhantomData,
+    };
+    let audit = RuntimeRequestAuditFacade {
+        plan: &state.plan,
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+    };
+
+    for hook in &state.plan.customer_hooks.cms {
+        match hook.validate_page_publish(&context, &draft, &repositories, &audit) {
+            Ok(CmsPublishDecision::Allow) => {}
+            Ok(CmsPublishDecision::Reject { message, .. }) => {
+                let form_state = cms_page_form_state_from_execution(execution, message);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+            Err(error) => {
+                let form_state = cms_page_form_state_from_execution(
+                    execution,
+                    customer_cms_publish_error_summary(&error),
+                );
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+        }
+    }
+
+    *workspace = workspace_shadow
+        .lock()
+        .map_err(|_| RuntimeServerError::Configuration {
+            reason: "failed to recover the mutated CMS workspace after customer hooks".to_string(),
+        })?
+        .clone();
+
+    Ok(None)
+}
+
+fn execute_verified_webhook_customer_hooks(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    webhook: &VerifiedWebhook,
+    now: BrowserInstant,
+) -> Result<(), RuntimeServerError> {
+    if state.plan.customer_hooks.verified_webhooks.is_empty()
+        && state.plan.customer_hooks.verified_webhook_assets.is_empty()
+    {
+        return Ok(());
+    }
+
+    let context = runtime_customer_request_context(state, execution);
+    let http = RuntimeCustomerOutboundHttpFacade {
+        wasm_host: &state.wasm_host,
+    };
+    let jobs = RuntimeCustomerJobsFacade {
+        plan: &state.plan,
+        trace_id: execution.trace.request_id.as_str(),
+        now,
+    };
+    let repositories = RuntimeCustomerRepositoryFacade {
+        storefront: &state.storefront,
+        workspace: None,
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+        _marker: std::marker::PhantomData,
+    };
+    let assets = RuntimeCustomerAssetsFacade {
+        storage: state.plan.storage_host_with_object_store(
+            state
+                .backends
+                .object_store
+                .as_ref()
+                .and_then(|backend| backend.object_store_client_config()),
+        ),
+        wasm_host: state.wasm_host.clone(),
+        recorded_at_unix_seconds: now.as_unix_seconds() as i64,
+    };
+    let audit = RuntimeRequestAuditFacade {
+        plan: &state.plan,
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+    };
+
+    for hook in &state.plan.customer_hooks.verified_webhooks {
+        match hook.handle_verified_webhook(&context, webhook, &http, &jobs, &repositories, &audit) {
+            Ok(WebhookHandlingResult::Accepted { detail }) => {
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "accepted",
+                        )
+                        .with_detail(detail.unwrap_or_else(|| {
+                            "customer hook accepted verified webhook".to_string()
+                        })),
+                    )
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
+            }
+            Ok(WebhookHandlingResult::Rejected { code, message }) => {
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "rejected",
+                        )
+                        .with_detail(format!("{code}: {message}")),
+                    )
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
+                return Err(RuntimeServerError::CustomerHookRejected {
+                    surface: "verified-webhook",
+                    code,
+                    message,
+                });
+            }
+            Err(error) => {
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "failed",
+                        )
+                        .with_detail(error.to_string()),
+                    )
+                    .map_err(|audit_error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: audit_error.to_string(),
+                    })?;
+                return Err(RuntimeServerError::CustomerHookFailed {
+                    surface: "verified-webhook",
+                    reason: error.to_string(),
+                });
+            }
+        }
+    }
+
+    for hook in &state.plan.customer_hooks.verified_webhook_assets {
+        match hook.handle_verified_webhook(
+            &context,
+            webhook,
+            &http,
+            &jobs,
+            &repositories,
+            &audit,
+            &assets,
+        ) {
+            Ok(WebhookHandlingResult::Accepted { detail }) => {
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook.assets",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "accepted",
+                        )
+                        .with_detail(detail.unwrap_or_else(|| {
+                            "customer asset-aware hook accepted verified webhook".to_string()
+                        })),
+                    )
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
+            }
+            Ok(WebhookHandlingResult::Rejected { code, message }) => {
+                audit
+                    .record(
+                        AuditEntry::new(
+                            "customer-plugin.verified-webhook.assets",
+                            "webhook",
+                            format!("{}:{}", webhook.source, webhook.event),
+                            "rejected",
+                        )
+                        .with_detail(format!("{code}: {message}")),
+                    )
+                    .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                        surface: "verified-webhook",
+                        reason: error.to_string(),
+                    })?;
+                return Err(RuntimeServerError::CustomerHookRejected {
+                    surface: "verified-webhook",
+                    code,
+                    message,
+                });
+            }
+            Err(error) => {
+                return Err(RuntimeServerError::CustomerHookFailed {
+                    surface: "verified-webhook",
+                    reason: error.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn review_checkout_with_customer_hooks(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    session_id: &str,
+    payment: &StorefrontPaymentInput,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if state.plan.customer_hooks.checkout.is_empty() {
+        return Ok(None);
+    }
+
+    let context = runtime_customer_request_context(state, execution);
+    let order = checkout_order_draft(
+        state,
+        execution,
+        session_id,
+        execution.principal.principal_id.as_deref(),
+        payment,
+    )?;
+    let commerce = RuntimeCheckoutCommerceFacade {
+        plan: &state.plan,
+        catalog: &state.plan.storefront_catalog,
+        site_id: execution.site_id.as_deref(),
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+    };
+    let auth = RuntimeCheckoutAuthFacade { state, execution };
+    let audit = RuntimeRequestAuditFacade {
+        plan: &state.plan,
+        principal_id: execution.principal.principal_id.as_deref(),
+        recorded_at_unix_seconds: now.as_unix_seconds(),
+    };
+    let mut adjustment_messages = Vec::new();
+
+    for hook in &state.plan.customer_hooks.checkout {
+        match hook.review_order(&context, &order, &commerce, &auth, &audit) {
+            Ok(OrderReviewDecision::Approved) => {}
+            Ok(OrderReviewDecision::Adjusted(adjustment)) => {
+                adjustment_messages.push(adjustment.reason);
+            }
+            Ok(OrderReviewDecision::Rejected(rejection)) => {
+                let form_state =
+                    storefront_checkout_form_state_from_execution(execution, rejection.message);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/checkout".to_string()));
+            }
+            Err(error) => {
+                let form_state = storefront_checkout_form_state_from_execution(
+                    execution,
+                    customer_checkout_error_summary(&error),
+                );
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/checkout".to_string()));
+            }
+        }
+    }
+
+    for message in adjustment_messages {
+        push_storefront_flash(state, response_cookies, FlashLevel::Info, message)?;
+    }
+
+    Ok(None)
+}
+
+fn catalog_admin_product_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.catalog-admin", summary.into());
+    for field in [
+        "catalog_entity",
+        "product_handle",
+        "product_title",
+        "product_summary",
+        "product_price",
+        "product_collection_handle",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    if storefront_form_field_value(execution, "product_visible") == "yes" {
+        state = state.with_field_value("product_visible", "yes");
+    }
+    state
+}
+
+fn catalog_admin_collection_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("commerce.catalog-admin", summary.into());
+    for field in [
+        "catalog_entity",
+        "collection_handle",
+        "collection_title",
+        "collection_label",
+        "collection_summary",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    if storefront_form_field_value(execution, "collection_visible") == "yes" {
+        state = state.with_field_value("collection_visible", "yes");
+    }
+    state
+}
+
+fn parse_decimal_price_minor(value: &str) -> Option<i64> {
+    let trimmed = value.trim().trim_start_matches('£');
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
+    }
+    let mut parts = trimmed.split('.');
+    let pounds = parts.next()?;
+    let pence = parts.next().unwrap_or("00");
+    if parts.next().is_some()
+        || pounds.is_empty()
+        || !pounds.chars().all(|ch| ch.is_ascii_digit())
+        || !pence.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return None;
+    }
+    let pence = match pence.len() {
+        0 => "00".to_string(),
+        1 => format!("{pence}0"),
+        2 => pence.to_string(),
+        _ => return None,
+    };
+    let pounds = pounds.parse::<i64>().ok()?;
+    let pence = pence.parse::<i64>().ok()?;
+    let minor = pounds.checked_mul(100)?.checked_add(pence)?;
+    (minor > 0).then_some(minor)
+}
+
+fn validated_catalog_admin_update_from_execution(
+    execution: &RequestExecution,
+) -> Result<CatalogAdminMutationInput, StorefrontFormState> {
+    match execution_form_field(execution, "catalog_entity").unwrap_or_default() {
+        "product" => {
+            let mut form_state = catalog_admin_product_form_state_from_execution(
+                execution,
+                "Fix the highlighted product fields and save again.",
+            );
+            let handle = storefront_form_field_value(execution, "product_handle");
+            let title = storefront_form_field_value(execution, "product_title");
+            let summary = storefront_form_field_value(execution, "product_summary");
+            let price = storefront_form_field_value(execution, "product_price");
+            let collection_handle =
+                storefront_form_field_value(execution, "product_collection_handle");
+            let is_visible = storefront_form_field_value(execution, "product_visible") == "yes";
+            let mut has_errors = false;
+            if handle.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error(
+                    "product_handle",
+                    "Refresh the page and try again before saving this product.",
+                );
+            }
+            if title.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error("product_title", "Enter a product title.");
+            }
+            if summary.trim().is_empty() {
+                has_errors = true;
+                form_state =
+                    form_state.with_field_error("product_summary", "Enter a product summary.");
+            }
+            if collection_handle.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error(
+                    "product_collection_handle",
+                    "Choose a collection for this product.",
+                );
+            }
+            let price_minor = match parse_decimal_price_minor(&price) {
+                Some(price_minor) => price_minor,
+                None => {
+                    has_errors = true;
+                    form_state = form_state.with_field_error(
+                        "product_price",
+                        "Enter a positive GBP price such as 29.00.",
+                    );
+                    0
+                }
+            };
+            if has_errors {
+                return Err(form_state);
+            }
+            Ok(CatalogAdminMutationInput::Product(
+                crate::storefront::StorefrontCatalogProductUpdate {
+                    handle,
+                    title,
+                    summary,
+                    price_minor,
+                    collection_handle,
+                    is_visible,
+                },
+            ))
+        }
+        "collection" => {
+            let mut form_state = catalog_admin_collection_form_state_from_execution(
+                execution,
+                "Fix the highlighted collection fields and save again.",
+            );
+            let handle = storefront_form_field_value(execution, "collection_handle");
+            let title = storefront_form_field_value(execution, "collection_title");
+            let label = storefront_form_field_value(execution, "collection_label");
+            let summary = storefront_form_field_value(execution, "collection_summary");
+            let is_visible = storefront_form_field_value(execution, "collection_visible") == "yes";
+            let mut has_errors = false;
+            if handle.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state.with_field_error(
+                    "collection_handle",
+                    "Refresh the page and try again before saving this collection.",
+                );
+            }
+            if title.trim().is_empty() {
+                has_errors = true;
+                form_state =
+                    form_state.with_field_error("collection_title", "Enter a collection title.");
+            }
+            if label.trim().is_empty() {
+                has_errors = true;
+                form_state =
+                    form_state.with_field_error("collection_label", "Enter a merchandising label.");
+            }
+            if summary.trim().is_empty() {
+                has_errors = true;
+                form_state = form_state
+                    .with_field_error("collection_summary", "Enter a collection summary.");
+            }
+            if has_errors {
+                return Err(form_state);
+            }
+            Ok(CatalogAdminMutationInput::Collection(
+                crate::storefront::StorefrontCatalogCollectionUpdate {
+                    handle,
+                    title,
+                    label,
+                    summary,
+                    is_visible,
+                },
+            ))
+        }
+        _ => Err(StorefrontFormState::new(
+            "commerce.catalog-admin",
+            "Refresh the catalog admin page and try the save action again.",
+        )),
+    }
+}
+
+fn validated_cart_quantities_from_execution(
+    execution: &RequestExecution,
+) -> Result<BTreeMap<String, u32>, StorefrontFormState> {
+    let mut quantities = BTreeMap::new();
+    let mut form_state = storefront_cart_form_state_from_execution(
+        execution,
+        "Fix the highlighted cart quantities and try again.",
+    );
+    let mut has_errors = false;
+    for (name, values) in &execution.form_fields {
+        let Some(product_slug) = name.strip_prefix("quantity_") else {
+            continue;
+        };
+        let raw = values.first().cloned().unwrap_or_default();
+        match raw.trim().parse::<u32>() {
+            Ok(quantity) => {
+                quantities.insert(product_slug.to_string(), quantity);
+            }
+            Err(_) => {
+                has_errors = true;
+                form_state = form_state
+                    .with_field_error(name.clone(), "Enter a whole-number quantity for this line.");
+            }
+        }
+    }
+    if has_errors {
+        Err(form_state)
+    } else {
+        Ok(quantities)
+    }
+}
+
+fn validated_storefront_payment_input_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<StorefrontPaymentInput, StorefrontFormState> {
+    let hosted_checkout = configured_commerce_payment_provider(&state.plan.config)
+        .map(|provider| provider.uses_hosted_checkout())
+        .unwrap_or(false);
+    let checkout_email = execution_form_field(execution, "checkout_email")
+        .or_else(|| execution_form_field(execution, "checkoutEmail"))
+        .or_else(|| execution_form_field(execution, "email"))
+        .or_else(|| execution_form_field(execution, "billing_email"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let last4 = execution_form_field(execution, "payment_last4")
+        .or_else(|| execution_form_field(execution, "paymentLast4"))
+        .or_else(|| execution_form_field(execution, "card_last4"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let method = execution_form_field(execution, "payment_method")
+        .or_else(|| execution_form_field(execution, "paymentMethod"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| (!last4.is_empty()).then(|| "card".to_string()))
+        .unwrap_or_default();
+    let mut form_state = storefront_checkout_form_state_from_execution(
+        execution,
+        "There is a problem with your checkout details.",
+    );
+    let mut has_errors = false;
+    if checkout_email.is_empty() {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "checkout_email",
+            "Enter the email address for order confirmation.",
+        );
+    }
+    if method.is_empty() && !hosted_checkout {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "payment_method",
+            "Choose or confirm a payment method before placing the order.",
+        );
+    }
+    if method == "card"
+        && !hosted_checkout
+        && (last4.len() != 4 || !last4.chars().all(|character| character.is_ascii_digit()))
+    {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "payment_last4",
+            "Enter the final 4 digits for the payment card.",
+        );
+    }
+    if execution_form_field(execution, "checkout_intent")
+        .or_else(|| execution_form_field(execution, "payment_intent"))
+        .or_else(|| execution_form_field(execution, "payment_reference"))
+        .or_else(|| execution_form_field(execution, "paymentReference"))
+        .is_none()
+    {
+        has_errors = true;
+        form_state = form_state
+            .with_summary("Refresh checkout before placing the order.")
+            .with_field_error(
+                "checkout_intent",
+                "Refresh checkout and try again before placing the order.",
+            );
+    }
+    if execution_form_field(execution, "terms_accepted").is_none() {
+        has_errors = true;
+        form_state = form_state.with_field_error(
+            "terms_accepted",
+            "Review the basket and confirm the final total before placing the order.",
+        );
+    }
+    if has_errors {
+        return Err(form_state);
+    }
+    let intent_reference = execution_form_field(execution, "checkout_intent")
+        .or_else(|| execution_form_field(execution, "payment_intent"))
+        .or_else(|| execution_form_field(execution, "payment_reference"))
+        .or_else(|| execution_form_field(execution, "paymentReference"))
+        .unwrap_or_default();
+    let method = if method.is_empty() && hosted_checkout {
+        "card".to_string()
+    } else {
+        method
+    };
+    let payment = if hosted_checkout && last4.is_empty() {
+        StorefrontPaymentInput::hosted(method, checkout_email, intent_reference)
+    } else {
+        StorefrontPaymentInput::new(
+            method,
+            checkout_email,
+            (!last4.is_empty()).then_some(last4),
+            intent_reference,
+        )
+    };
+    payment.map_err(|error| {
+        let mut form_state = storefront_checkout_form_state_from_execution(
+            execution,
+            "There is a problem with your checkout details.",
+        );
+        let (field, message) = match error {
+            StorefrontStateError::MissingPaymentMethod => (
+                "payment_method",
+                "Choose or confirm a payment method before placing the order.",
+            ),
+            StorefrontStateError::MissingCheckoutEmail => (
+                "checkout_email",
+                "Enter the email address for order confirmation.",
+            ),
+            StorefrontStateError::InvalidPaymentLast4 => (
+                "payment_last4",
+                "Enter the final 4 digits for the payment card.",
+            ),
+            StorefrontStateError::MissingPaymentIntent => (
+                "checkout_intent",
+                "Refresh checkout and try again before placing the order.",
+            ),
+            _ => (
+                "checkout_email",
+                "Update the checkout details and try again.",
+            ),
+        };
+        form_state = form_state.with_field_error(field, message);
+        form_state
+    })
+}
+
+fn verified_webhook_headers(execution: &RequestExecution, source: &str, event: &str) -> Headers {
+    let mut headers = customer_hook_request_headers(execution);
+    headers.insert(
+        "x-coil-verified-webhook-source".to_string(),
+        source.to_string(),
+    );
+    headers.insert(
+        "x-coil-verified-webhook-event".to_string(),
+        event.to_string(),
+    );
+    if let Some(delivery_id) = execution
+        .headers
+        .get("stripe-signature")
+        .filter(|_| source == "stripe")
+        .and_then(|_| stripe_event_delivery_id_from_request_body(execution).ok())
+    {
+        headers.insert(
+            "x-coil-verified-webhook-delivery-id".to_string(),
+            delivery_id,
+        );
+    }
+    if let Some(content_type) = execution.content_type.clone() {
+        headers.insert("content-type".to_string(), content_type);
+    }
+    headers
+}
+
+fn verified_webhook_payload(execution: &RequestExecution) -> Result<Vec<u8>, RuntimeServerError> {
+    if !execution.raw_body.is_empty() {
+        return Ok(execution.raw_body.clone());
+    }
+    serde_json::to_vec(&execution.form_fields).map_err(|error| RuntimeServerError::Configuration {
+        reason: format!("failed to encode verified webhook payload for customer hooks: {error}"),
+    })
+}
+
+fn validated_verified_payment_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<VerifiedIngressWebhook, RuntimeServerError> {
+    if configured_commerce_payment_provider(&state.plan.config)
+        .as_ref()
+        .is_some_and(|provider| provider.code == "stripe")
+        && execution.headers.contains_key("stripe-signature")
+    {
+        return validated_stripe_payment_webhook_from_execution(state, execution);
+    }
+    validated_generic_verified_payment_webhook_from_execution(state, execution)
+}
+
+fn validated_generic_verified_payment_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<VerifiedIngressWebhook, RuntimeServerError> {
+    let provider = execution_form_field(execution, "provider")
+        .unwrap_or("generic")
+        .trim()
+        .to_ascii_lowercase();
+    if let Some(configured_provider) = configured_commerce_payment_provider(&state.plan.config) {
+        if provider != configured_provider.code {
+            return Err(RuntimeServerError::Storefront(
+                StorefrontStateError::UnexpectedPaymentWebhookProvider {
+                    expected: configured_provider.code,
+                    received: provider,
+                },
+            ));
+        }
+    }
+    let event = execution_form_field(execution, "event")
+        .or_else(|| execution_form_field(execution, "payment_event"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentWebhookEvent {
+                event: "<missing>".to_string(),
+            })
+        })?;
+    let payment_reference = execution_form_field(execution, "payment_reference")
+        .or_else(|| execution_form_field(execution, "paymentReference"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentReference {
+                payment_reference: "<missing>".to_string(),
+            })
+        })?;
+    let signature = execution_form_field(execution, "signature")
+        .or_else(|| execution_form_field(execution, "webhook_signature"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ))?;
+    let secret = state
+        .payment_webhook_secret
+        .as_deref()
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::MissingPaymentWebhookSecret,
+        ))?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| {
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret)
+    })?;
+    mac.update(provider.as_bytes());
+    mac.update(b":");
+    mac.update(event.as_bytes());
+    mac.update(b":");
+    mac.update(payment_reference.as_bytes());
+    let provided_signature = decode_hex_signature(signature).ok_or(
+        RuntimeServerError::Storefront(StorefrontStateError::InvalidPaymentWebhookSignature),
+    )?;
+    if mac.verify_slice(&provided_signature).is_err() {
+        return Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ));
+    }
+    let payload = verified_webhook_payload(execution)?;
+    let delivery_id =
+        generic_verified_webhook_delivery_id(&provider, &event, &payment_reference, &payload);
+    let mut headers = verified_webhook_headers(execution, &provider, &event);
+    headers.insert(
+        "x-coil-verified-webhook-delivery-id".to_string(),
+        delivery_id.clone(),
+    );
+    Ok(VerifiedIngressWebhook {
+        webhook: VerifiedWebhook {
+            source: provider.clone(),
+            event: event.clone(),
+            headers,
+            content_type: execution.content_type.clone(),
+            payload,
+        },
+        payment_reference: Some(payment_reference),
+        delivery_id: Some(delivery_id),
+    })
+}
+
+fn validated_stripe_payment_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<VerifiedIngressWebhook, RuntimeServerError> {
+    let secret = state
+        .payment_webhook_secret
+        .as_deref()
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::MissingPaymentWebhookSecret,
+        ))?;
+    let signature = execution
+        .headers
+        .get("stripe-signature")
+        .map(String::as_str)
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ))?;
+    let payload = verified_webhook_payload(execution)?;
+    verify_stripe_webhook_signature(secret, signature, &payload)?;
+    let event = serde_json::from_slice::<serde_json::Value>(&payload).map_err(|error| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to decode Stripe webhook payload: {error}"),
+        }
+    })?;
+    let event_name = event
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentWebhookEvent {
+                event: "<missing>".to_string(),
+            })
+        })?
+        .to_string();
+    let delivery_id = stripe_event_delivery_id_from_event(&event)?;
+    let payment_reference = stripe_payment_reference_from_event(&event)?;
+    let mut headers = verified_webhook_headers(execution, "stripe", &event_name);
+    headers.insert(
+        "x-coil-verified-webhook-delivery-id".to_string(),
+        delivery_id.clone(),
+    );
+    Ok(VerifiedIngressWebhook {
+        webhook: VerifiedWebhook {
+            source: "stripe".to_string(),
+            event: event_name.clone(),
+            headers,
+            content_type: execution.content_type.clone(),
+            payload,
+        },
+        payment_reference: Some(payment_reference),
+        delivery_id: Some(delivery_id),
+    })
+}
+
+fn verify_stripe_webhook_signature(
+    secret: &str,
+    signature_header: &str,
+    payload: &[u8],
+) -> Result<(), RuntimeServerError> {
+    let mut timestamp = None;
+    let mut signatures = Vec::new();
+    for segment in signature_header.split(',') {
+        let Some((name, value)) = segment.trim().split_once('=') else {
+            continue;
+        };
+        match name.trim() {
+            "t" => timestamp = Some(value.trim().to_string()),
+            "v1" => signatures.push(value.trim().to_string()),
+            _ => {}
+        }
+    }
+    let timestamp = timestamp.ok_or(RuntimeServerError::Storefront(
+        StorefrontStateError::InvalidPaymentWebhookSignature,
+    ))?;
+    let timestamp = timestamp.parse::<u64>().map_err(|_| {
+        RuntimeServerError::Storefront(StorefrontStateError::InvalidPaymentWebhookSignature)
+    })?;
+    if signatures.is_empty() {
+        return Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ));
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now.abs_diff(timestamp) > STRIPE_WEBHOOK_MAX_AGE_SECS {
+        return Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ));
+    }
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| {
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret)
+    })?;
+    mac.update(timestamp.to_string().as_bytes());
+    mac.update(b".");
+    mac.update(payload);
+    let expected = mac.finalize().into_bytes();
+    let matches = signatures.iter().any(|candidate| {
+        decode_hex_signature(candidate)
+            .map(|provided| provided == expected.as_slice())
+            .unwrap_or(false)
+    });
+    if matches {
+        Ok(())
+    } else {
+        Err(RuntimeServerError::Storefront(
+            StorefrontStateError::InvalidPaymentWebhookSignature,
+        ))
+    }
+}
+
+fn generic_verified_webhook_delivery_id(
+    provider: &str,
+    event: &str,
+    payment_reference: &str,
+    payload: &[u8],
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(provider.as_bytes());
+    hasher.update(b":");
+    hasher.update(event.as_bytes());
+    hasher.update(b":");
+    hasher.update(payment_reference.as_bytes());
+    hasher.update(b":");
+    hasher.update(payload);
+    format!("{:x}", hasher.finalize())
+}
+
+fn stripe_payment_reference_from_event(
+    event: &serde_json::Value,
+) -> Result<String, RuntimeServerError> {
+    let object = event
+        .get("data")
+        .and_then(|value| value.get("object"))
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentReference {
+                payment_reference: "<missing>".to_string(),
+            })
+        })?;
+    let metadata = object
+        .get("metadata")
+        .and_then(serde_json::Value::as_object);
+    let payment_reference = metadata
+        .and_then(|metadata| {
+            [
+                "payment_reference",
+                "paymentReference",
+                "checkout_intent",
+                "checkoutIntent",
+            ]
+            .iter()
+            .find_map(|key| metadata.get(*key).and_then(serde_json::Value::as_str))
+        })
+        .or_else(|| {
+            object
+                .get("client_reference_id")
+                .and_then(serde_json::Value::as_str)
+        })
+        .or_else(|| {
+            object
+                .get("payment_intent")
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownPaymentReference {
+                payment_reference: "<missing>".to_string(),
+            })
+        })?;
+    Ok(payment_reference)
+}
+
+fn stripe_event_delivery_id_from_request_body(
+    execution: &RequestExecution,
+) -> Result<String, RuntimeServerError> {
+    let payload = verified_webhook_payload(execution)?;
+    let event = serde_json::from_slice::<serde_json::Value>(&payload).map_err(|error| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to decode Stripe webhook payload: {error}"),
+        }
+    })?;
+    stripe_event_delivery_id_from_event(&event)
+}
+
+fn stripe_event_delivery_id_from_event(
+    event: &serde_json::Value,
+) -> Result<String, RuntimeServerError> {
+    event
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or(RuntimeServerError::Storefront(
+            StorefrontStateError::MissingPaymentWebhookDeliveryId,
+        ))
+}
+
+fn verified_webhook_from_execution(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<Option<VerifiedIngressWebhook>, RuntimeServerError> {
+    match execution.route.route_name.as_str() {
+        "commerce.payment-provider-webhook" => validated_verified_payment_webhook_from_execution(
+            state, execution,
+        )
+        .and_then(|verified| {
+            guard_verified_webhook_replay(state, execution, &verified)?;
+            Ok(Some(verified))
+        }),
+        _ => Ok(None),
+    }
+}
+
+fn guard_verified_webhook_replay(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    verified: &VerifiedIngressWebhook,
+) -> Result<(), RuntimeServerError> {
+    let Some(delivery_id) = verified.delivery_id.as_deref() else {
+        return Ok(());
+    };
+    let recorded_at_unix_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let claimed = if should_fallback_to_local_verified_webhook_replay_store(state) {
+        claim_local_verified_webhook_delivery(
+            state,
+            execution,
+            verified.webhook.source.as_str(),
+            delivery_id,
+            recorded_at_unix_seconds,
+        )?
+    } else {
+        state
+            .wasm_host
+            .claim_verified_webhook_delivery(
+                execution.customer_app.as_str(),
+                execution.route.route_name.as_str(),
+                verified.webhook.source.as_str(),
+                delivery_id,
+                execution.trace.request_id.as_str(),
+                recorded_at_unix_seconds,
+            )
+            .map_err(|reason| RuntimeServerError::Configuration {
+                reason: format!("failed to persist verified webhook replay receipt: {reason}"),
+            })?
+    };
+    if claimed {
+        return Ok(());
+    }
+    record_verified_webhook_request_observation(
+        state,
+        execution,
+        &verified.webhook,
+        crate::wasm::WebhookObservationStatus::ReplayRejected,
+        Some(format!(
+            "verified webhook delivery `{delivery_id}` has already been processed"
+        )),
+    );
+    Err(RuntimeServerError::Storefront(
+        StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            delivery_id: delivery_id.to_string(),
+        },
+    ))
+}
+
+fn should_fallback_to_local_verified_webhook_replay_store(state: &RuntimeServerState) -> bool {
+    matches!(
+        state.plan.metadata_audit_backend_selection(),
+        crate::plan::MetadataAuditBackendSelection::SharedPostgres { .. }
+    ) && std::env::var_os("DATABASE_URL").is_none()
+}
+
+fn claim_local_verified_webhook_delivery(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    source: &str,
+    delivery_id: &str,
+    recorded_at_unix_seconds: i64,
+) -> Result<bool, RuntimeServerError> {
+    let path = state
+        .plan
+        .shared_state_root()
+        .join("server")
+        .join("verified-webhook-deliveries.sqlite3");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to create verified webhook replay directory `{}`: {error}",
+                parent.display()
+            ),
+        })?;
+    }
+    let connection =
+        rusqlite::Connection::open(&path).map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to open local verified webhook replay store `{}`: {error}",
+                path.display()
+            ),
+        })?;
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = FULL;
+            CREATE TABLE IF NOT EXISTS verified_webhook_deliveries (
+                app_id TEXT NOT NULL,
+                route_name TEXT NOT NULL,
+                source TEXT NOT NULL,
+                delivery_id TEXT NOT NULL,
+                first_seen_request_id TEXT NOT NULL,
+                first_seen_at_unix_seconds INTEGER NOT NULL,
+                PRIMARY KEY (app_id, source, delivery_id)
+            );
+            "#,
+        )
+        .map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to initialize local verified webhook replay store `{}`: {error}",
+                path.display()
+            ),
+        })?;
+    let inserted = connection
+        .execute(
+            r#"
+            INSERT OR IGNORE INTO verified_webhook_deliveries (
+                app_id,
+                route_name,
+                source,
+                delivery_id,
+                first_seen_request_id,
+                first_seen_at_unix_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            rusqlite::params![
+                execution.customer_app.as_str(),
+                execution.route.route_name.as_str(),
+                source,
+                delivery_id,
+                execution.trace.request_id.as_str(),
+                recorded_at_unix_seconds,
+            ],
+        )
+        .map_err(|error| RuntimeServerError::Configuration {
+            reason: format!(
+                "failed to persist local verified webhook replay receipt `{}`: {error}",
+                path.display()
+            ),
+        })?;
+    Ok(inserted > 0)
+}
+
+fn record_verified_webhook_request_observation(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    webhook: &VerifiedWebhook,
+    status: crate::wasm::WebhookObservationStatus,
+    detail: Option<String>,
+) {
+    let principal_kind = match execution.principal.principal_kind {
+        RequestPrincipalKind::Anonymous => "anonymous",
+        RequestPrincipalKind::User => "user",
+        RequestPrincipalKind::ServiceAccount => "service_account",
+    };
+    let _ = state.wasm_host.record_webhook_request_observation(
+        execution.customer_app.as_str(),
+        webhook.source.as_str(),
+        webhook.event.as_str(),
+        status,
+        execution.trace.request_id.as_str(),
+        principal_kind,
+        execution.principal.principal_id.as_deref(),
+        detail,
+    );
+}
+
+fn storefront_payment_input_from_execution(
+    execution: &RequestExecution,
+) -> Result<StorefrontPaymentInput, RuntimeServerError> {
+    let intent_reference = execution_form_field(execution, "checkout_intent")
+        .or_else(|| execution_form_field(execution, "payment_intent"))
+        .or_else(|| execution_form_field(execution, "payment_reference"))
+        .or_else(|| execution_form_field(execution, "paymentReference"));
+    let last4 = execution_form_field(execution, "payment_last4")
+        .or_else(|| execution_form_field(execution, "paymentLast4"))
+        .or_else(|| execution_form_field(execution, "card_last4"))
+        .map(str::to_string);
+    let method = execution_form_field(execution, "payment_method")
+        .or_else(|| execution_form_field(execution, "paymentMethod"))
+        .map(str::to_string)
+        .or_else(|| last4.as_ref().map(|_| "card".to_string()));
+    let checkout_email = execution_form_field(execution, "checkout_email")
+        .or_else(|| execution_form_field(execution, "checkoutEmail"))
+        .or_else(|| execution_form_field(execution, "email"))
+        .or_else(|| execution_form_field(execution, "billing_email"));
+    StorefrontPaymentInput::new(
+        method.unwrap_or_default(),
+        checkout_email.unwrap_or_default(),
+        last4,
+        intent_reference.unwrap_or_default(),
+    )
+    .map_err(RuntimeServerError::Storefront)
+}
+
+fn apply_native_cms_admin_mutations(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if !CMS_ADMIN_NATIVE_MUTATION_ROUTES.contains(&execution.route.route_name.as_str()) {
+        return Ok(None);
+    }
+
+    let mut workspace = CmsAdminWorkspace::load(&state.plan).map_err(|reason| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to load CMS admin workspace: {reason}"),
+        }
+    })?;
+
+    match execution.route.route_name.as_str() {
+        "cms.pages.save-draft" => {
+            let page_input = CmsAdminPageInput {
+                page_id: execution_form_field(execution, "page_id").map(str::to_string),
+                title: storefront_form_field_value(execution, "page_title"),
+                slug: storefront_form_field_value(execution, "page_slug"),
+                summary: storefront_form_field_value(execution, "page_summary"),
+                body_html: storefront_form_field_value(execution, "page_body_html"),
+            };
+            let page_id = match workspace.save_page_draft(page_input, now.as_unix_seconds()) {
+                Ok(page_id) => page_id,
+                Err(reason) => {
+                    let mut form_state =
+                        cms_page_form_state_from_execution(execution, reason.clone());
+                    for field in ["page_title", "page_slug", "page_summary", "page_body_html"] {
+                        form_state = form_state.with_field_error(field, reason.clone());
+                    }
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/pages".to_string()));
+                }
+            };
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS page draft: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.save-draft",
+                "page",
+                page_id.as_str(),
+                "succeeded",
+                &format!(
+                    "Saved draft `{}` at slug `{}`.",
+                    storefront_form_field_value(execution, "page_title"),
+                    storefront_form_field_value(execution, "page_slug"),
+                ),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Draft saved. Preview and publish when ready.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.pages.publish" => {
+            let page_id = if execution_form_field(execution, "page_title").is_some() {
+                let page_input = CmsAdminPageInput {
+                    page_id: execution_form_field(execution, "page_id").map(str::to_string),
+                    title: storefront_form_field_value(execution, "page_title"),
+                    slug: storefront_form_field_value(execution, "page_slug"),
+                    summary: storefront_form_field_value(execution, "page_summary"),
+                    body_html: storefront_form_field_value(execution, "page_body_html"),
+                };
+                match workspace.save_page_draft(page_input, now.as_unix_seconds()) {
+                    Ok(page_id) => page_id,
+                    Err(reason) => {
+                        let mut form_state =
+                            cms_page_form_state_from_execution(execution, reason.clone());
+                        for field in ["page_title", "page_slug", "page_summary", "page_body_html"] {
+                            form_state = form_state.with_field_error(field, reason.clone());
+                        }
+                        push_storefront_form_state(state, response_cookies, &form_state)?;
+                        return Ok(Some("/admin/pages".to_string()));
+                    }
+                }
+            } else {
+                execution_form_field(execution, "page_id")
+                    .map(str::to_string)
+                    .ok_or_else(|| RuntimeServerError::Configuration {
+                        reason: "missing page_id for publish".to_string(),
+                    })?
+            };
+            if let Some(location) = validate_cms_publish_with_customer_hooks(
+                state,
+                execution,
+                &mut workspace,
+                &page_id,
+                now,
+                response_cookies,
+            )? {
+                return Ok(Some(location));
+            }
+            workspace
+                .publish_page(&page_id, now.as_unix_seconds())
+                .map_err(|reason| RuntimeServerError::Configuration { reason })?;
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS publication: {reason}"),
+                })?;
+            let live_path = workspace
+                .selected_page(Some(&page_id))
+                .and_then(|page| page.live_path())
+                .unwrap_or_else(|| "/pages/{slug}".to_string());
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.publish",
+                "page",
+                page_id.as_str(),
+                "succeeded",
+                &format!("Published live route `{live_path}`."),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Page published to the live /pages/{slug} surface.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.pages.unpublish" => {
+            let page_id = execution_form_field(execution, "page_id").ok_or_else(|| {
+                RuntimeServerError::Configuration {
+                    reason: "missing page_id for unpublish".to_string(),
+                }
+            })?;
+            workspace
+                .unpublish_page(page_id, now.as_unix_seconds())
+                .map_err(|reason| RuntimeServerError::Configuration { reason })?;
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS unpublish: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.unpublish",
+                "page",
+                page_id,
+                "succeeded",
+                "Removed the page from its live route while preserving the draft.",
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Info,
+                "Page removed from the live route but kept as a draft.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.navigation.save" => {
+            let items = match navigation_items_from_fields(&execution.form_fields) {
+                Ok(items) => items,
+                Err(reason) => {
+                    let form_state =
+                        cms_navigation_form_state_from_execution(execution, reason.clone())
+                            .with_field_error("new_nav_label", reason);
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/navigation".to_string()));
+                }
+            };
+            if let Err(reason) = workspace.save_navigation(items) {
+                let form_state =
+                    cms_navigation_form_state_from_execution(execution, reason.clone())
+                        .with_field_error("new_nav_label", reason);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/admin/navigation".to_string()));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS navigation: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.navigation.save",
+                "navigation",
+                "primary-navigation",
+                "succeeded",
+                &format!(
+                    "Saved {} primary navigation items.",
+                    workspace.navigation.len()
+                ),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Primary navigation updated for the live storefront shell.",
+            )?;
+            return Ok(Some("/admin/navigation".to_string()));
+        }
+        "cms.redirects.save" => {
+            let redirects = match redirects_from_fields(&execution.form_fields) {
+                Ok(redirects) => redirects,
+                Err(reason) => {
+                    let form_state =
+                        cms_redirect_form_state_from_execution(execution, reason.clone())
+                            .with_field_error("new_redirect_from", reason);
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/redirects".to_string()));
+                }
+            };
+            if let Err(reason) = workspace.save_redirects(redirects) {
+                let form_state = cms_redirect_form_state_from_execution(execution, reason.clone())
+                    .with_field_error("new_redirect_from", reason);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/admin/redirects".to_string()));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS redirects: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.redirects.save",
+                "redirects",
+                "live-redirect-rules",
+                "succeeded",
+                &format!("Saved {} redirect rules.", workspace.redirects.len()),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Redirect rules saved for unmatched live requests.",
+            )?;
+            return Ok(Some("/admin/redirects".to_string()));
+        }
+        _ => {}
+    }
+
+    Ok(None)
+}
+
+fn normalized_payment_webhook_event<'a>(source: &str, event: &'a str) -> Cow<'a, str> {
+    match (source, event) {
+        ("stripe", "checkout.session.completed") => Cow::Borrowed("payment.captured"),
+        ("stripe", "payment_intent.succeeded") => Cow::Borrowed("payment.captured"),
+        ("stripe", "payment_intent.amount_capturable_updated") => {
+            Cow::Borrowed("payment.authorized")
+        }
+        ("stripe", "checkout.session.expired") => Cow::Borrowed("payment.failed"),
+        ("stripe", "payment_intent.payment_failed") => Cow::Borrowed("payment.failed"),
+        _ => Cow::Borrowed(event),
+    }
+}
+
+async fn apply_native_storefront_mutations(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if let Some(verified) = verified_webhook_from_execution(state, execution)? {
+        if let Err(error) =
+            execute_verified_webhook_customer_hooks(state, execution, &verified.webhook, now)
+        {
+            record_verified_webhook_request_observation(
+                state,
+                execution,
+                &verified.webhook,
+                crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                Some(error.to_string()),
+            );
+            return Err(error);
+        }
+        if execution.route.route_name.as_str() != "commerce.payment-provider-webhook" {
+            return Ok(None);
+        }
+        let payment_reference = verified.payment_reference.as_deref().ok_or_else(|| {
+            RuntimeServerError::Configuration {
+                reason: format!(
+                    "verified webhook route `{}` did not provide a required payment reference",
+                    execution.route.route_name
+                ),
+            }
+        })?;
+        let receipt = match state.storefront.apply_payment_webhook(
+            payment_reference,
+            normalized_payment_webhook_event(
+                verified.webhook.source.as_str(),
+                verified.webhook.event.as_str(),
+            )
+            .as_ref(),
+            now.as_unix_seconds(),
+        ) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                record_verified_webhook_request_observation(
+                    state,
+                    execution,
+                    &verified.webhook,
+                    crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                    Some(error.to_string()),
+                );
+                return Err(RuntimeServerError::Storefront(error));
+            }
+        };
+        if receipt.needs_paid_event_dispatch {
+            if let Err(error) = dispatch_paid_order_event(state, &receipt.order, now) {
+                record_verified_webhook_request_observation(
+                    state,
+                    execution,
+                    &verified.webhook,
+                    crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                    Some(error.to_string()),
+                );
+                return Err(error);
+            }
+            if let Err(error) = state
+                .storefront
+                .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())
+            {
+                record_verified_webhook_request_observation(
+                    state,
+                    execution,
+                    &verified.webhook,
+                    crate::wasm::WebhookObservationStatus::ExecutionFailed,
+                    Some(error.to_string()),
+                );
+                return Err(RuntimeServerError::Storefront(error));
+            }
+        }
+        record_verified_webhook_request_observation(
+            state,
+            execution,
+            &verified.webhook,
+            crate::wasm::WebhookObservationStatus::Accepted,
+            None,
+        );
+        return Ok(None);
+    }
+
+    let Some(session_id) = execution.session.session_id.as_deref() else {
+        return Ok(None);
+    };
+    match execution.route.route_name.as_str() {
+        "commerce.add-to-cart" => {
+            let quantity = storefront_quantity_from_execution(execution);
+            let sku = storefront_sku_from_execution(execution)?;
+            if storefront_catalog_product_for_execution(state, execution, sku.as_ref()).is_none() {
+                let form_state = StorefrontFormState::new(
+                    "commerce.cart",
+                    "That product is not available on this site right now.",
+                );
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/cart".to_string()));
+            }
+            let snapshot = state.storefront.add_to_cart(
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                sku.as_ref(),
+                quantity,
+                now.as_unix_seconds(),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                format!("Added {} to the cart ({})", sku, snapshot.cart.item_count),
+            )?;
+        }
+        "commerce.cart-update" => {
+            let quantities = match validated_cart_quantities_from_execution(execution) {
+                Ok(quantities) => quantities,
+                Err(form_state) => {
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/cart".to_string()));
+                }
+            };
+            let mut snapshot = state
+                .storefront
+                .snapshot(session_id, execution.principal.principal_id.as_deref())?;
+            for (sku, quantity) in quantities {
+                snapshot = state.storefront.update_cart(
+                    session_id,
+                    execution.principal.principal_id.as_deref(),
+                    &sku,
+                    quantity,
+                    now.as_unix_seconds(),
+                )?;
+            }
+            let message = if snapshot.cart.lines.is_empty() {
+                "Your cart is now empty.".to_string()
+            } else {
+                format!("Updated cart with {} line(s).", snapshot.cart.item_count)
+            };
+            push_storefront_flash(state, response_cookies, FlashLevel::Info, message)?;
+        }
+        "commerce.checkout-start" => {
+            if let Ok(sku) = storefront_sku_from_execution(execution) {
+                let quantity = storefront_quantity_from_execution(execution);
+                if storefront_catalog_product_for_execution(state, execution, sku.as_ref())
+                    .is_none()
+                {
+                    let form_state = StorefrontFormState::new(
+                        "commerce.cart",
+                        "That product is not available on this site right now.",
+                    );
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/cart".to_string()));
+                }
+                let _ = state.storefront.add_to_cart(
+                    session_id,
+                    execution.principal.principal_id.as_deref(),
+                    sku.as_ref(),
+                    quantity,
+                    now.as_unix_seconds(),
+                )?;
+            }
+            match state.storefront.checkout_start(
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                now.as_unix_seconds(),
+            ) {
+                Ok(_) => {}
+                Err(StorefrontStateError::EmptyCart { .. }) => {
+                    let form_state = StorefrontFormState::new(
+                        "commerce.cart",
+                        "Add at least one item to the cart before starting checkout.",
+                    );
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/cart".to_string()));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
+        }
+        "commerce.checkout-complete" => {
+            let payment = match validated_storefront_payment_input_from_execution(state, execution)
+            {
+                Ok(payment) => payment,
+                Err(form_state) => {
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/checkout".to_string()));
+                }
+            };
+            if let Some(location) = review_checkout_with_customer_hooks(
+                state,
+                execution,
+                session_id,
+                &payment,
+                now,
+                response_cookies,
+            )? {
+                return Ok(Some(location));
+            }
+            let checkout_metadata = storefront_checkout_order_metadata(
+                state,
+                execution,
+                &state
+                    .storefront
+                    .snapshot(session_id, execution.principal.principal_id.as_deref())?,
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                &payment,
+            );
+            let snapshot = match state.storefront.checkout_complete_with_metadata(
+                session_id,
+                execution.principal.principal_id.as_deref(),
+                &payment,
+                &checkout_metadata,
+                now.as_unix_seconds(),
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(
+                    error @ (StorefrontStateError::CheckoutNotReady { .. }
+                    | StorefrontStateError::EmptyCart { .. }
+                    | StorefrontStateError::MissingPaymentIntent
+                    | StorefrontStateError::PaymentIntentMismatch { .. }),
+                ) => {
+                    let summary = match &error {
+                        StorefrontStateError::CheckoutNotReady { .. } => {
+                            "Refresh checkout and review the basket before placing the order."
+                        }
+                        StorefrontStateError::EmptyCart { .. } => {
+                            "Add at least one item to the cart before placing the order."
+                        }
+                        StorefrontStateError::MissingPaymentIntent => {
+                            "Refresh checkout before placing the order."
+                        }
+                        StorefrontStateError::PaymentIntentMismatch { .. } => {
+                            "Refresh checkout before placing the order."
+                        }
+                        _ => "There is a problem with your checkout details.",
+                    };
+                    let mut form_state =
+                        storefront_checkout_form_state_from_execution(execution, summary);
+                    if matches!(
+                        error,
+                        StorefrontStateError::MissingPaymentIntent
+                            | StorefrontStateError::PaymentIntentMismatch { .. }
+                    ) {
+                        form_state = form_state.with_field_error(
+                            "checkout_intent",
+                            "Refresh checkout and try again before placing the order.",
+                        );
+                    }
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/checkout".to_string()));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            };
+            if let Some(location) = finalize_storefront_checkout_completion(
+                state,
+                execution,
+                &snapshot,
+                now,
+                response_cookies,
+            )
+            .await?
+            {
+                return Ok(Some(location));
+            }
+        }
+        "commerce.catalog-admin-update" => {
+            let update = match validated_catalog_admin_update_from_execution(execution) {
+                Ok(update) => update,
+                Err(form_state) => {
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/catalog/products".to_string()));
+                }
+            };
+            let update_result = match &update {
+                CatalogAdminMutationInput::Product(update) => state
+                    .storefront
+                    .update_catalog_product(update, now.as_unix_seconds()),
+                CatalogAdminMutationInput::Collection(update) => state
+                    .storefront
+                    .update_catalog_collection(update, now.as_unix_seconds()),
+            };
+            match update_result {
+                Ok(_) => {
+                    let message = match &update {
+                        CatalogAdminMutationInput::Product(update) => {
+                            format!("Saved product changes for {}.", update.title)
+                        }
+                        CatalogAdminMutationInput::Collection(update) => {
+                            format!("Saved collection changes for {}.", update.title)
+                        }
+                    };
+                    match &update {
+                        CatalogAdminMutationInput::Product(update) => {
+                            record_operator_audit(
+                                state,
+                                execution,
+                                "commerce.catalog-admin-update.product",
+                                "product",
+                                update.handle.as_str(),
+                                "succeeded",
+                                &format!(
+                                    "Updated product `{}` at price_minor {} and marked it {}.",
+                                    update.title,
+                                    update.price_minor,
+                                    if update.is_visible {
+                                        "visible"
+                                    } else {
+                                        "hidden"
+                                    }
+                                ),
+                            )?;
+                        }
+                        CatalogAdminMutationInput::Collection(update) => {
+                            record_operator_audit(
+                                state,
+                                execution,
+                                "commerce.catalog-admin-update.collection",
+                                "collection",
+                                update.handle.as_str(),
+                                "succeeded",
+                                &format!(
+                                    "Updated collection `{}` and marked it {}.",
+                                    update.title,
+                                    if update.is_visible {
+                                        "visible"
+                                    } else {
+                                        "hidden"
+                                    }
+                                ),
+                            )?;
+                        }
+                    }
+                    push_storefront_flash(state, response_cookies, FlashLevel::Success, message)?;
+                    return Ok(Some("/admin/catalog/products".to_string()));
+                }
+                Err(
+                    error @ (StorefrontStateError::MissingCatalogProduct { .. }
+                    | StorefrontStateError::MissingCatalogCollection { .. }),
+                ) => {
+                    let mut form_state = match &update {
+                        CatalogAdminMutationInput::Product(_) => {
+                            catalog_admin_product_form_state_from_execution(
+                                execution,
+                                "Refresh the catalog admin page and try again.",
+                            )
+                        }
+                        CatalogAdminMutationInput::Collection(_) => {
+                            catalog_admin_collection_form_state_from_execution(
+                                execution,
+                                "Refresh the catalog admin page and try again.",
+                            )
+                        }
+                    };
+                    form_state = form_state.with_summary(error.to_string());
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some("/admin/catalog/products".to_string()));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
+        }
+        "commerce.order-refund" => {
+            let order_id = storefront_form_field_value(execution, "order_id");
+            let reason = storefront_form_field_value(execution, "reason");
+            let redirect_location = if order_id.trim().is_empty() {
+                "/admin/orders".to_string()
+            } else {
+                format!("/admin/orders/{}", order_id.trim())
+            };
+            match state.storefront.refund_order(
+                order_id.trim(),
+                reason.as_str(),
+                now.as_unix_seconds(),
+            ) {
+                Ok(order) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "commerce.order-refund",
+                        "order",
+                        order.order_id.as_str(),
+                        "succeeded",
+                        &format!(
+                            "Refunded {} with reason `{}`.",
+                            order.refunded_total, reason
+                        ),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Success,
+                        format!(
+                            "Refunded {} for order {}.",
+                            order.refunded_total, order.order_id
+                        ),
+                    )?;
+                    return Ok(Some(format!("/admin/orders/{}", order.order_id)));
+                }
+                Err(StorefrontStateError::MissingRefundReason) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "commerce.order-refund",
+                        "order",
+                        order_id.trim(),
+                        "rejected",
+                        "Refund reason was required but not provided.",
+                    )?;
+                    let form_state = order_refund_form_state_from_execution(
+                        execution,
+                        "Review the refund request and add a reason before trying again.",
+                    )
+                    .with_field_error("reason", "refund reason is required");
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error @ StorefrontStateError::RefundNotAllowed { .. }) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "commerce.order-refund",
+                        "order",
+                        order_id.trim(),
+                        "rejected",
+                        &error.to_string(),
+                    )?;
+                    let form_state = order_refund_form_state_from_execution(
+                        execution,
+                        "This order cannot be refunded from the checked-in admin workflow right now.",
+                    )
+                    .with_field_error("reason", error.to_string());
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error @ StorefrontStateError::UnknownOrder { .. }) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "commerce.order-refund",
+                        "order",
+                        order_id.trim(),
+                        "rejected",
+                        &error.to_string(),
+                    )?;
+                    if order_id.trim().is_empty() {
+                        push_storefront_flash(
+                            state,
+                            response_cookies,
+                            FlashLevel::Error,
+                            error.to_string(),
+                        )?;
+                    } else {
+                        let form_state = order_refund_form_state_from_execution(
+                            execution,
+                            "Refresh the order queue and reopen the detail view before retrying this refund.",
+                        )
+                        .with_field_error("order_id", error.to_string());
+                        push_storefront_form_state(state, response_cookies, &form_state)?;
+                    }
+                    return Ok(Some(redirect_location));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
+        }
+        "commerce.order-fulfill" => {
+            let order_id = storefront_form_field_value(execution, "order_id");
+            let redirect_location = if order_id.trim().is_empty() {
+                "/admin/orders".to_string()
+            } else {
+                format!("/admin/orders/{}", order_id.trim())
+            };
+            match state
+                .storefront
+                .fulfill_order(order_id.trim(), now.as_unix_seconds())
+            {
+                Ok(order) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "commerce.order-fulfill",
+                        "order",
+                        order.order_id.as_str(),
+                        "succeeded",
+                        &format!("Marked {} as fulfilled.", order.order_id),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Success,
+                        format!("Marked order {} as fulfilled.", order.order_id),
+                    )?;
+                    return Ok(Some(format!("/admin/orders/{}", order.order_id)));
+                }
+                Err(StorefrontStateError::FulfillmentNotAllowed { order_id, status }) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "commerce.order-fulfill",
+                        "order",
+                        order_id.as_str(),
+                        "rejected",
+                        &format!("Order cannot be fulfilled while it is `{status}`."),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Error,
+                        format!(
+                            "Order {} cannot be marked fulfilled while it is {}.",
+                            order_id, status
+                        ),
+                    )?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error @ StorefrontStateError::UnknownOrder { .. }) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "commerce.order-fulfill",
+                        "order",
+                        order_id.trim(),
+                        "rejected",
+                        &error.to_string(),
+                    )?;
+                    if order_id.trim().is_empty() {
+                        push_storefront_flash(
+                            state,
+                            response_cookies,
+                            FlashLevel::Error,
+                            error.to_string(),
+                        )?;
+                    } else {
+                        let form_state = StorefrontFormState::new(
+                            "commerce.orders",
+                            "Refresh the order queue and reopen the detail view before retrying this fulfillment.",
+                        );
+                        push_storefront_form_state(state, response_cookies, &form_state)?;
+                    }
+                    return Ok(Some(redirect_location));
+                }
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
+        }
+        "commerce.account-session-end" => {
+            revoke_storefront_session(state, session_id, now, response_cookies)?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Account session ended. Start again from this browser when you are ready.",
+            )?;
+            return Ok(Some("/account".to_string()));
+        }
+        _ => {}
+    }
+    Ok(None)
+}
+
+async fn finalize_storefront_checkout_completion(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    snapshot: &StorefrontStateSnapshot,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    let Some(order) = snapshot.latest_order.as_ref() else {
+        push_storefront_flash(
+            state,
+            response_cookies,
+            FlashLevel::Error,
+            "Checkout could not complete because the cart is empty.",
+        )?;
+        return Ok(None);
+    };
+
+    let Some(provider) = configured_commerce_payment_provider(&state.plan.config) else {
+        push_storefront_flash(
+            state,
+            response_cookies,
+            FlashLevel::Success,
+            format!(
+                "Order {} was received. Payment is still awaiting provider confirmation.",
+                order.order_id
+            ),
+        )?;
+        return Ok(None);
+    };
+
+    if provider.code == "stripe" && provider.uses_hosted_checkout() {
+        match launch_stripe_checkout_handoff(state, execution, order).await {
+            Ok(handoff_url) => return Ok(Some(handoff_url)),
+            Err(_) => {
+                return restore_checkout_after_provider_handoff_failure(
+                    state,
+                    order,
+                    now,
+                    response_cookies,
+                    "Stripe checkout could not start. Your basket has been restored so you can review it and try again.",
+                )
+                .map(Some);
+            }
+        }
+    }
+
+    push_storefront_flash(
+        state,
+        response_cookies,
+        FlashLevel::Success,
+        provider.pending_confirmation_summary(&order.order_id),
+    )?;
+    Ok(None)
+}
+
+async fn launch_stripe_checkout_handoff(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    order: &StorefrontOrderSnapshot,
+) -> Result<String, String> {
+    let payment_reference = order
+        .payment
+        .reference
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("order {} is missing a payment reference", order.order_id))?;
+    if state.uses_development_hosted_checkout_stub() {
+        return Ok(provider_checkout_return_url(
+            execution,
+            payment_reference,
+            "return",
+        ));
+    }
+    let api_key = state
+        .payment_provider_api_key
+        .as_deref()
+        .ok_or_else(|| "stripe hosted checkout api key is not configured".to_string())?
+        .to_string();
+    let request_body = stripe_checkout_session_request_body(execution, order)?;
+    let idempotency_key = format!("coil-order-{}", order.order_id);
+    let checkout_client = Arc::clone(&state.hosted_checkout_client);
+    let response = tokio::task::spawn_blocking(move || {
+        checkout_client.create_stripe_checkout_session(&api_key, &request_body, &idempotency_key)
+    })
+    .await
+    .map_err(|error| format!("failed to join Stripe Checkout handoff task: {error}"))??;
+
+    if response.id.trim().is_empty() || response.url.trim().is_empty() {
+        return Err("Stripe Checkout response was missing the hosted session URL".to_string());
+    }
+    Ok(response.url)
+}
+
+fn stripe_checkout_session_request_body(
+    execution: &RequestExecution,
+    order: &StorefrontOrderSnapshot,
+) -> Result<String, String> {
+    let payment_reference = order
+        .payment
+        .reference
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("order {} is missing a payment reference", order.order_id))?;
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("mode", "payment");
+    serializer.append_pair("success_url", &stripe_checkout_success_url(execution));
+    serializer.append_pair(
+        "cancel_url",
+        &provider_checkout_cancel_url(execution, payment_reference),
+    );
+    serializer.append_pair("client_reference_id", payment_reference);
+    if let Some(email) = order.payment.checkout_email.as_deref() {
+        let trimmed = email.trim();
+        if !trimmed.is_empty() {
+            serializer.append_pair("customer_email", trimmed);
+        }
+    }
+    serializer.append_pair("payment_intent_data[metadata][order_id]", &order.order_id);
+    serializer.append_pair(
+        "payment_intent_data[metadata][payment_reference]",
+        payment_reference,
+    );
+    serializer.append_pair("metadata[order_id]", &order.order_id);
+    serializer.append_pair("metadata[payment_reference]", payment_reference);
+
+    for (index, line) in order.lines.iter().enumerate() {
+        if line.quantity == 0 {
+            return Err(format!(
+                "order {} contains a zero-quantity line for {}",
+                order.order_id, line.sku
+            ));
+        }
+        if line.unit_price_minor <= 0 {
+            return Err(format!(
+                "order {} contains a non-positive unit amount for {}",
+                order.order_id, line.sku
+            ));
+        }
+
+        let prefix = format!("line_items[{index}]");
+        serializer.append_pair(
+            &format!("{prefix}[price_data][currency]"),
+            &line.currency.to_ascii_lowercase(),
+        );
+        serializer.append_pair(
+            &format!("{prefix}[price_data][unit_amount]"),
+            &line.unit_price_minor.to_string(),
+        );
+        serializer.append_pair(
+            &format!("{prefix}[price_data][product_data][name]"),
+            stripe_line_item_name(line).as_str(),
+        );
+        serializer.append_pair(&format!("{prefix}[quantity]"), &line.quantity.to_string());
+    }
+
+    Ok(serializer.finish())
+}
+
+fn stripe_line_item_name(line: &StorefrontOrderLine) -> String {
+    let variant = line.variant_title.trim();
+    if variant.is_empty() || variant.eq_ignore_ascii_case("standard") {
+        return line.title.clone();
+    }
+    format!("{} ({variant})", line.title)
+}
+
+fn checkout_confirmation_base_url(execution: &RequestExecution) -> String {
+    format!(
+        "{}://{}/checkout/confirmation",
+        execution.trace.transport_scheme, execution.host
+    )
+}
+
+fn stripe_checkout_success_url(execution: &RequestExecution) -> String {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("checkout_session_id", "{CHECKOUT_SESSION_ID}");
+    format!(
+        "{}?{}",
+        checkout_confirmation_base_url(execution),
+        serializer.finish()
+    )
+}
+
+fn provider_checkout_return_url(
+    execution: &RequestExecution,
+    payment_reference: &str,
+    provider_result: &str,
+) -> String {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("provider_result", provider_result);
+    serializer.append_pair("payment_reference", payment_reference);
+    format!(
+        "{}?{}",
+        checkout_confirmation_base_url(execution),
+        serializer.finish()
+    )
+}
+
+fn provider_checkout_cancel_url(execution: &RequestExecution, payment_reference: &str) -> String {
+    provider_checkout_return_url(execution, payment_reference, "cancel")
+}
+
+fn reconcile_hosted_checkout_confirmation(
+    state: &RuntimeServerState,
+    checkout_session_id: &str,
+    now: BrowserInstant,
+) -> Result<(), RuntimeServerError> {
+    if state.uses_development_hosted_checkout_stub() {
+        return Ok(());
+    }
+    let Some(provider) = configured_commerce_payment_provider(&state.plan.config) else {
+        return Ok(());
+    };
+    if provider.code != "stripe" || !provider.uses_hosted_checkout() {
+        return Ok(());
+    }
+    let Some(api_key) = state.payment_provider_api_key.as_deref() else {
+        return Ok(());
+    };
+    let session = match state
+        .hosted_checkout_client
+        .fetch_stripe_checkout_session(api_key, checkout_session_id)
+    {
+        Ok(session) => session,
+        Err(_) => return Ok(()),
+    };
+    let Some(payment_reference) = session.payment_reference.as_deref() else {
+        return Ok(());
+    };
+    let event = match (session.status.as_deref(), session.payment_status.as_deref()) {
+        (Some("complete"), Some("paid" | "no_payment_required")) => Some("payment.captured"),
+        (Some("expired"), _) => Some("payment.failed"),
+        _ => None,
+    };
+    let Some(event) = event else {
+        return Ok(());
+    };
+    let receipt =
+        state
+            .storefront
+            .apply_payment_webhook(payment_reference, event, now.as_unix_seconds())?;
+    if receipt.needs_paid_event_dispatch {
+        dispatch_paid_order_event(state, &receipt.order, now)?;
+        state
+            .storefront
+            .mark_order_paid_event_dispatched(&receipt.order.order_id, now.as_unix_seconds())?;
+    }
+    Ok(())
+}
+
+fn restore_checkout_after_provider_handoff_failure(
+    state: &RuntimeServerState,
+    order: &StorefrontOrderSnapshot,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+    message: &str,
+) -> Result<String, RuntimeServerError> {
+    if let Some(payment_reference) = order.payment.reference.as_deref() {
+        let _ = state.storefront.apply_payment_webhook(
+            payment_reference,
+            "payment.failed",
+            now.as_unix_seconds(),
+        )?;
+    }
+    push_storefront_flash(state, response_cookies, FlashLevel::Error, message)?;
+    Ok("/cart".to_string())
+}
+
+fn redirect_failed_checkout_confirmation(
+    state: &RuntimeServerState,
+    route_name: &str,
+    method: HttpMethod,
+    session_id: Option<&str>,
+    principal_id: Option<&str>,
+    provider_result: Option<&str>,
+    payment_reference: Option<&str>,
+    checkout_session_id: Option<&str>,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if route_name != "commerce.checkout-confirmation" || method != HttpMethod::Get {
+        return Ok(None);
+    }
+    if let Some(checkout_session_id) = checkout_session_id {
+        reconcile_hosted_checkout_confirmation(state, checkout_session_id, now)?;
+    }
+    if provider_result == Some("return")
+        && state.uses_development_hosted_checkout_stub()
+        && let Some(payment_reference) = payment_reference
+    {
+        let receipt = state.storefront.apply_payment_webhook(
+            payment_reference,
+            "payment.succeeded",
+            now.as_unix_seconds(),
+        )?;
+        dispatch_paid_order_event(state, &receipt.order, now)?;
+        push_storefront_flash(
+            state,
+            response_cookies,
+            FlashLevel::Success,
+            format!(
+                "Local checkout completed for order {} using the built-in development payment stub.",
+                receipt.order.order_id
+            ),
+        )?;
+        return Ok(None);
+    }
+    if provider_result == Some("cancel") {
+        if let Some(payment_reference) = payment_reference {
+            match state.storefront.apply_payment_webhook(
+                payment_reference,
+                "payment.failed",
+                now.as_unix_seconds(),
+            ) {
+                Ok(receipt) => {
+                    if receipt.order.payment.status == "failed" {
+                        push_storefront_flash(
+                            state,
+                            response_cookies,
+                            FlashLevel::Error,
+                            "Stripe checkout was cancelled. Your basket has been restored so you can review it and start checkout again.",
+                        )?;
+                        return Ok(Some("/cart".to_string()));
+                    }
+                }
+                Err(StorefrontStateError::UnknownPaymentReference { .. }) => {}
+                Err(error) => return Err(RuntimeServerError::Storefront(error)),
+            }
+        }
+    }
+    let Some(session_id) = session_id else {
+        return Ok(None);
+    };
+    let snapshot = state.storefront.snapshot(session_id, principal_id)?;
+    let Some(order) = snapshot.latest_order.as_ref() else {
+        return Ok(None);
+    };
+    if order.payment.status != "failed" {
+        return Ok(None);
+    }
+    push_storefront_flash(
+        state,
+        response_cookies,
+        FlashLevel::Error,
+        format!(
+            "Payment for order {} failed. Your basket has been restored so you can review it and start checkout again.",
+            order.order_id
+        ),
+    )?;
+    Ok(Some("/cart".to_string()))
+}
+
+fn dispatch_paid_order_event(
+    state: &RuntimeServerState,
+    order: &StorefrontOrderSnapshot,
+    now: BrowserInstant,
+) -> Result<(), RuntimeServerError> {
+    let mut jobs = state.plan.jobs_host("runtime-http")?;
+    let payment_reference = order
+        .payment
+        .reference
+        .as_deref()
+        .unwrap_or(order.order_id.as_str());
+    let _ = jobs.emit_domain_event(
+        DomainEventDispatchRequest::new(
+            "commerce.order.paid",
+            "order",
+            order.order_id.clone(),
+            format!("payment provider confirmed {payment_reference}"),
+        )?,
+        JobInstant::from_unix_seconds(now.as_unix_seconds()),
+    )?;
+    Ok(())
+}
+
+fn execution_form_field<'a>(execution: &'a RequestExecution, name: &str) -> Option<&'a str> {
+    execution
+        .form_fields
+        .get(name)
+        .and_then(|values| values.first().map(String::as_str))
+}
+
+fn execution_query_field<'a>(execution: &'a RequestExecution, name: &str) -> Option<&'a str> {
+    execution
+        .query_params
+        .get(name)
+        .and_then(|values| values.first().map(String::as_str))
+}
+
+fn run_customer_hook_future<T>(
+    future: impl Future<Output = Result<T, RuntimeServerError>> + Send + 'static,
+) -> Result<T, RuntimeServerError>
+where
+    T: Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle)
+            if matches!(
+                handle.runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            ) =>
+        {
+            tokio::task::block_in_place(|| handle.block_on(future))
+        }
+        Ok(_) => std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                    surface: "auth",
+                    reason: format!("failed to build runtime bridge for customer hooks: {error}"),
+                })?
+                .block_on(future)
+        })
+        .join()
+        .map_err(|_| RuntimeServerError::CustomerHookFailed {
+            surface: "auth",
+            reason: "customer hook runtime bridge thread panicked".to_string(),
+        })?,
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| RuntimeServerError::CustomerHookFailed {
+                surface: "auth",
+                reason: format!("failed to build runtime bridge for customer hooks: {error}"),
+            })?
+            .block_on(future),
+    }
+}
+
+fn customer_hook_auth_backend_error(error: RuntimeServerError) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Unavailable,
+        "auth.live_check.failed",
+        "Runtime could not complete the linked customer auth check.",
+    )
+    .with_detail(error.to_string())
+}
+
+fn customer_hook_asset_internal_error(message: &'static str) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Unavailable,
+        "storage.asset.state_unavailable",
+        message,
+    )
+}
+
+fn customer_hook_asset_internal_error_with_detail(
+    message: &'static str,
+    detail: impl Into<String>,
+) -> BackendError {
+    customer_hook_asset_internal_error(message).with_detail(detail.into())
+}
+
+fn customer_hook_asset_model_error(error: coil_assets::AssetModelError) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::InvalidInput,
+        "storage.asset.invalid",
+        "Customer webhook requested an invalid managed asset write.",
+    )
+    .with_detail(error.to_string())
+}
+
+fn customer_hook_storage_backend_error(error: crate::storage::RuntimeStorageError) -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Unavailable,
+        "storage.asset.failed",
+        "Runtime could not complete the linked customer asset operation.",
+    )
+    .with_detail(error.to_string())
+}
+
+fn customer_hook_asset_id(logical_path: &str) -> Result<AssetId, BackendError> {
+    AssetId::new(format!("customer-hook:{logical_path}")).map_err(customer_hook_asset_model_error)
+}
+
+fn customer_hook_asset_revision_id(
+    logical_path: &str,
+    bytes: &[u8],
+) -> Result<RevisionId, BackendError> {
+    let mut hasher = Sha256::new();
+    hasher.update(logical_path.as_bytes());
+    hasher.update([0]);
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    RevisionId::new(format!(
+        "customer-hook:{}",
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ))
+    .map_err(customer_hook_asset_model_error)
+}
+
+fn customer_hook_asset_fingerprint(bytes: &[u8]) -> Result<ContentFingerprint, BackendError> {
+    let digest = Sha256::digest(bytes);
+    ContentFingerprint::new(
+        FingerprintAlgorithm::Sha256,
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    )
+    .map_err(customer_hook_asset_model_error)
+}
+
+fn customer_hook_storage_plan(
+    storage: &StorageHost,
+    logical_path: &str,
+    storage_class: StorageClass,
+) -> Result<coil_storage::StoragePlan, crate::storage::RuntimeStorageError> {
+    let request = StoragePlanRequest::new(logical_path).with_storage_class(storage_class);
+    match storage_class {
+        StorageClass::LocalOnlySensitive => storage.plan_single_node_escape_hatch_write(request),
+        StorageClass::PublicAsset | StorageClass::PublicUpload | StorageClass::PrivateShared => {
+            storage.plan_write(request)
+        }
+    }
+}
+
+fn plan_customer_hook_asset_revision(
+    storage: &StorageHost,
+    logical_path: &str,
+    storage_class: StorageClass,
+    content_type: &str,
+    bytes: &[u8],
+) -> Result<ManagedAssetRevision, BackendError> {
+    let revision_id = customer_hook_asset_revision_id(logical_path, bytes)?;
+    let fingerprint = customer_hook_asset_fingerprint(bytes)?;
+    let plan = customer_hook_storage_plan(storage, logical_path, storage_class)
+        .map_err(customer_hook_storage_backend_error)?;
+    ManagedAssetRevision::new(
+        revision_id,
+        plan,
+        content_type,
+        bytes.len() as u64,
+        fingerprint,
+    )
+    .map_err(customer_hook_asset_model_error)
+}
+
+fn sdk_managed_asset_from_runtime_asset(
+    storage: &StorageHost,
+    asset: &coil_assets::ManagedAsset,
+) -> Result<ManagedAsset, BackendError> {
+    let public_url = if asset.publication().is_published() {
+        match storage
+            .plan_public_asset_delivery(asset)
+            .map_err(customer_hook_storage_backend_error)?
+            .target()
+        {
+            coil_assets::AssetDeliveryTarget::Cdn { public_url, .. } => Some(public_url.clone()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    Ok(ManagedAsset {
+        logical_path: asset.current_revision().storage_plan().logical_path.clone(),
+        storage_class: customer_storage_class_name(
+            asset.current_revision().storage_plan().storage_class,
+        )
+        .to_string(),
+        public_url,
+    })
+}
+
+fn persisted_customer_managed_asset_record(
+    asset: &coil_assets::ManagedAsset,
+) -> Result<PersistedCustomerManagedAssetRecord, BackendError> {
+    Ok(PersistedCustomerManagedAssetRecord {
+        logical_path: asset.current_revision().storage_plan().logical_path.clone(),
+        storage_class: customer_storage_class_name(
+            asset.current_revision().storage_plan().storage_class,
+        )
+        .to_string(),
+        revision_id: asset.current_revision().id().as_str().to_string(),
+        content_type: asset.current_revision().content_type().to_string(),
+        byte_length: asset.current_revision().byte_length(),
+        fingerprint_algorithm: asset
+            .current_revision()
+            .fingerprint()
+            .algorithm()
+            .to_string(),
+        fingerprint_digest: asset.current_revision().fingerprint().digest().to_string(),
+        published_current: asset.publication().is_published(),
+    })
+}
+
+fn runtime_asset_from_persisted_customer_managed_asset(
+    storage: &StorageHost,
+    record: &PersistedCustomerManagedAssetRecord,
+) -> Result<coil_assets::ManagedAsset, BackendError> {
+    let storage_class = parse_customer_storage_class(record.storage_class.as_str())?;
+    let revision = ManagedAssetRevision::new(
+        RevisionId::new(record.revision_id.clone()).map_err(customer_hook_asset_model_error)?,
+        customer_hook_storage_plan(storage, &record.logical_path, storage_class)
+            .map_err(customer_hook_storage_backend_error)?,
+        record.content_type.clone(),
+        record.byte_length,
+        ContentFingerprint::new(
+            parse_customer_hook_fingerprint_algorithm(record.fingerprint_algorithm.as_str())?,
+            record.fingerprint_digest.clone(),
+        )
+        .map_err(customer_hook_asset_model_error)?,
+    )
+    .map_err(customer_hook_asset_model_error)?;
+    let mut asset = coil_assets::ManagedAsset::new(
+        customer_hook_asset_id(&record.logical_path)?,
+        record.logical_path.clone(),
+        revision,
+    )
+    .map_err(customer_hook_asset_model_error)?;
+    if record.published_current {
+        asset.publish_current();
+    }
+    Ok(asset)
+}
+
+fn parse_customer_hook_fingerprint_algorithm(
+    value: &str,
+) -> Result<FingerprintAlgorithm, BackendError> {
+    match value {
+        "sha256" => Ok(FingerprintAlgorithm::Sha256),
+        "sha384" => Ok(FingerprintAlgorithm::Sha384),
+        "sha512" => Ok(FingerprintAlgorithm::Sha512),
+        other => Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "storage.asset.invalid_fingerprint_algorithm",
+            "Persisted customer managed asset record declares an unsupported fingerprint algorithm.",
+        )
+        .with_detail(format!("unsupported fingerprint algorithm `{other}`"))),
+    }
+}
+
+fn parse_customer_storage_class(value: &str) -> Result<StorageClass, BackendError> {
+    match value {
+        "public_asset" => Ok(StorageClass::PublicAsset),
+        "public_upload" => Ok(StorageClass::PublicUpload),
+        "private_shared" => Ok(StorageClass::PrivateShared),
+        "local_only_sensitive" => Ok(StorageClass::LocalOnlySensitive),
+        other => Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "storage.class.invalid",
+            format!("Unknown storage class `{other}`."),
+        )),
+    }
+}
+
+fn customer_storage_class_name(storage_class: StorageClass) -> &'static str {
+    match storage_class {
+        StorageClass::PublicAsset => "public_asset",
+        StorageClass::PublicUpload => "public_upload",
+        StorageClass::PrivateShared => "private_shared",
+        StorageClass::LocalOnlySensitive => "local_only_sensitive",
+    }
+}
+
+fn parse_customer_capability(value: &str) -> Result<coil_auth::Capability, BackendError> {
+    coil_auth::Capability::from_str(value).ok_or_else(|| {
+        BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.capability.invalid",
+            format!("Unknown capability `{value}`."),
+        )
+    })
+}
+
+fn parse_customer_auth_entity(value: &str) -> Result<coil_auth::Entity, BackendError> {
+    let Some((namespace, id)) = value.split_once(':') else {
+        return Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Invalid auth object `{value}`."),
+        ));
+    };
+    if id.trim().is_empty() {
+        return Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Invalid auth object `{value}`."),
+        ));
+    }
+    match namespace {
+        "tenant" => Ok(coil_auth::Entity::tenant(id)),
+        "site" => Ok(coil_auth::Entity::site(id)),
+        "brand" => Ok(coil_auth::Entity::brand(id)),
+        "storefront" => Ok(coil_auth::Entity::storefront(id)),
+        "user" => Ok(coil_auth::Entity::user(id)),
+        "group" => Ok(coil_auth::Entity::group(id)),
+        "team" => Ok(coil_auth::Entity::team(id)),
+        "service_account" => Ok(coil_auth::Entity::service_account(id)),
+        "page" => Ok(coil_auth::Entity::page(id)),
+        "navigation" => Ok(coil_auth::Entity::navigation(id)),
+        "product" => Ok(coil_auth::Entity::product(id)),
+        "collection" => Ok(coil_auth::Entity::collection(id)),
+        "order" => Ok(coil_auth::Entity::order(id)),
+        "subscription" => Ok(coil_auth::Entity::subscription(id)),
+        "membership_tier" => Ok(coil_auth::Entity::membership_tier(id)),
+        "event" => Ok(coil_auth::Entity::event(id)),
+        "event_slot" => Ok(coil_auth::Entity::event_slot(id)),
+        "booking" => Ok(coil_auth::Entity::booking(id)),
+        "media" => Ok(coil_auth::Entity::media(id)),
+        "media_library" => Ok(coil_auth::Entity::media_library(id)),
+        "asset" => Ok(coil_auth::Entity::asset(id)),
+        "asset_folder" => Ok(coil_auth::Entity::asset_folder(id)),
+        "theme_asset_bundle" => Ok(coil_auth::Entity::theme_asset_bundle(id)),
+        "admin_module" => Ok(coil_auth::Entity::admin_module(id)),
+        _ => Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "auth.object.invalid",
+            format!("Unknown auth object namespace `{namespace}`."),
+        )),
+    }
+}
+
+fn customer_hook_auth_subject(
+    principal: &PrincipalContext,
+) -> Option<coil_auth::DefaultSubject> {
+    match (principal.principal_id.as_deref(), principal.principal_kind) {
+        (Some(principal_id), RequestPrincipalKind::ServiceAccount) => {
+            Some(coil_auth::DefaultSubject::entity(
+                coil_auth::Entity::service_account(principal_id.to_string()),
+            ))
+        }
+        (Some(principal_id), _) => Some(coil_auth::DefaultSubject::entity(
+            coil_auth::Entity::user(principal_id.to_string()),
+        )),
+        (None, _) => None,
+    }
+}
+
+fn decode_hex_signature(signature: &str) -> Option<Vec<u8>> {
+    if !signature.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(signature.len() / 2);
+    let mut chars = signature.as_bytes().chunks_exact(2);
+    for chunk in &mut chars {
+        let high = decode_hex_nibble(chunk[0])?;
+        let low = decode_hex_nibble(chunk[1])?;
+        bytes.push((high << 4) | low);
+    }
+    Some(bytes)
+}
+
+fn decode_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn storefront_sku_from_execution(
+    execution: &RequestExecution,
+) -> Result<Cow<'_, str>, RuntimeServerError> {
+    execution_form_field(execution, "sku")
+        .or_else(|| execution_form_field(execution, "product_slug"))
+        .or_else(|| execution_form_field(execution, "line_id"))
+        .map(Cow::Borrowed)
+        .ok_or_else(|| {
+            RuntimeServerError::Storefront(StorefrontStateError::UnknownSku {
+                sku: "<missing>".to_string(),
+            })
+        })
+}
+
+fn cart_quantities_from_execution(execution: &RequestExecution) -> BTreeMap<String, u32> {
+    let mut quantities = BTreeMap::new();
+    if let Ok(sku) = storefront_sku_from_execution(execution) {
+        quantities.insert(
+            sku.into_owned(),
+            parse_quantity_field(execution_form_field(execution, "quantity")).unwrap_or(1),
+        );
+    }
+    for (name, values) in &execution.form_fields {
+        let Some(product_slug) = name.strip_prefix("quantity_") else {
+            continue;
+        };
+        let Some(quantity) = values
+            .first()
+            .and_then(|value| parse_quantity_field(Some(value.as_str())))
+        else {
+            continue;
+        };
+        quantities.insert(product_slug.to_string(), quantity);
+    }
+    quantities
+}
+
+fn storefront_response_augmentation(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+) -> Result<Option<StorefrontResponseAugmentation>, RuntimeServerError> {
+    let should_render_storefront = should_render_storefront_state(execution);
+    let should_render_cms_admin_forms = should_render_cms_admin_forms(execution);
+    if !should_render_storefront && !should_render_cms_admin_forms {
+        return Ok(None);
+    }
+    let Some(session_id) = execution.session.session_id.as_deref() else {
+        return Ok(None);
+    };
+    let mut augmentation = if should_render_storefront {
+        let snapshot = state
+            .storefront
+            .snapshot(session_id, execution.principal.principal_id.as_deref())?;
+        let tokens = issue_storefront_csrf_tokens(state, session_id)?;
+        state.storefront.build_response_augmentation(
+            execution.route.route_name.as_str(),
+            &snapshot,
+            tokens,
+        )?
+    } else {
+        StorefrontResponseAugmentation {
+            html_fragment: None,
+            headers: BTreeMap::new(),
+        }
+    };
+    if should_render_cms_admin_forms {
+        augmentation
+            .headers
+            .extend(issue_cms_admin_csrf_tokens(state, session_id)?);
+    }
+    Ok(Some(augmentation))
+}
+
+fn should_render_storefront_state(execution: &RequestExecution) -> bool {
+    matches!(execution.response, HandlerResponse::Page(_))
+        && (execution.route.route_name.starts_with("commerce.")
+            || execution.route_area == RouteArea::Account)
+}
+
+fn should_render_cms_admin_forms(execution: &RequestExecution) -> bool {
+    matches!(execution.response, HandlerResponse::Page(_))
+        && matches!(
+            execution.route.route_name.as_str(),
+            "cms.pages.index" | "cms.navigation.index" | "cms.redirects.index"
+        )
+}
+
+fn issue_storefront_csrf_tokens(
+    state: &RuntimeServerState,
+    session_id: &str,
+) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+    let browser = state
+        .browser
+        .lock()
+        .expect("runtime browser mutex poisoned");
+    let mut tokens = BTreeMap::new();
+    for action in STOREFRONT_CSRF_ACTIONS {
+        let token = browser
+            .issue_csrf_token(&state.csrf_secret, session_id, action)
+            .map_err(RequestExecutionError::from_browser_error)?;
+        tokens.insert((*action).to_string(), token);
+    }
+    Ok(tokens)
+}
+
+fn issue_cms_admin_csrf_tokens(
+    state: &RuntimeServerState,
+    session_id: &str,
+) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+    let browser = state
+        .browser
+        .lock()
+        .expect("runtime browser mutex poisoned");
+    let mut tokens = BTreeMap::new();
+    for (action, header) in CMS_ADMIN_CSRF_ACTIONS {
+        let token = browser
+            .issue_csrf_token(&state.csrf_secret, session_id, action)
+            .map_err(RequestExecutionError::from_browser_error)?;
+        tokens.insert((*header).to_string(), token);
+    }
+    Ok(tokens)
+}
+
+fn storefront_order_history_response(
+    state: &RuntimeServerState,
+    request: &RequestInput,
+    response_cookies: Vec<String>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let Some(session_id) = request.session_id.as_deref() else {
+        return Err(RuntimeServerError::Execution(
+            RequestExecutionError::SessionRequired {
+                route: "account.orders".to_string(),
+            },
+        ));
+    };
+    let history =
+        state
+            .storefront
+            .order_history(session_id, request.principal_id.as_deref(), 50)?;
+    let body = serde_json::to_string(&history).map_err(|error| {
+        RuntimeServerError::Storefront(StorefrontStateError::Serialization {
+            reason: error.to_string(),
+        })
+    })?;
+    let mut response = Response::new(Body::from(body));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("application/json"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-coil-storefront-order-count"),
+        HeaderValue::from_str(&history.orders.len().to_string())
+            .expect("order count is a valid header value"),
+    );
+    if let Some(order) = history.orders.first() {
+        response.headers_mut().insert(
+            HeaderName::from_static("x-coil-storefront-latest-order"),
+            HeaderValue::from_str(order.order_id.as_str())
+                .expect("order id is a valid header value"),
+        );
+    }
+    for cookie in response_cookies {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response
+                .headers_mut()
+                .append(HeaderName::from_static("set-cookie"), value);
+        }
+    }
+    Ok(response)
+}
+
+async fn apply_storefront_response_augmentation(
+    mut response: Response<Body>,
+    augmentation: Option<StorefrontResponseAugmentation>,
+) -> Result<Response<Body>, RuntimeServerError> {
+    let Some(augmentation) = augmentation else {
+        return Ok(response);
+    };
+    let form_tokens = storefront_form_tokens_from_headers(&augmentation.headers);
+    for (name, value) in augmentation.headers {
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(&value),
+        ) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+    let Some(markup) = augmentation.html_fragment else {
+        return Ok(response);
+    };
+    let is_html = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/html"));
+    if !is_html {
+        return Ok(response);
+    }
+    let (parts, body) = response.into_parts();
+    let bytes = to_bytes(body, usize::MAX)
+        .await
+        .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit: usize::MAX })?;
+    let html = String::from_utf8(bytes.to_vec()).map_err(|error| {
+        RuntimeServerError::Storefront(StorefrontStateError::Serialization {
+            reason: error.to_string(),
+        })
+    })?;
+    let html = inject_storefront_form_csrf_inputs(html, form_tokens.as_slice());
+    Ok(Response::from_parts(
+        parts,
+        Body::from(inject_storefront_markup(html, markup.as_str())),
+    ))
+}
+
+fn inject_storefront_markup(document_html: String, markup: &str) -> String {
+    if markup.is_empty() {
+        return document_html;
+    }
+    if let Some(index) = document_html.find("</body>") {
+        let mut html = document_html;
+        html.insert_str(index, markup);
+        return html;
+    }
+    format!("{document_html}{markup}")
+}
+
+fn storefront_form_tokens_from_headers(
+    headers: &BTreeMap<String, String>,
+) -> Vec<(&'static str, String)> {
+    STOREFRONT_FORM_CSRF_HEADERS
+        .iter()
+        .chain(CMS_ADMIN_FORM_CSRF_HEADERS.iter())
+        .filter_map(|(path, header)| headers.get(*header).map(|token| (*path, token.clone())))
+        .collect()
+}
+
+fn inject_storefront_form_csrf_inputs(
+    mut document_html: String,
+    form_tokens: &[(&'static str, String)],
+) -> String {
+    for (action_path, token) in form_tokens {
+        document_html = inject_hidden_csrf_input(document_html, action_path, token.as_str());
+    }
+    document_html
+}
+
+fn inject_hidden_csrf_input(mut document_html: String, action_path: &str, token: &str) -> String {
+    let action_attr = format!("action=\"{action_path}\"");
+    let hidden_input = format!(r#"<input type="hidden" name="_csrf" value="{token}" />"#);
+    let mut search_from = 0;
+
+    while let Some(relative) = document_html[search_from..].find(&action_attr) {
+        let action_index = search_from + relative;
+        let Some(form_start) = document_html[..action_index].rfind("<form") else {
+            search_from = action_index + action_attr.len();
+            continue;
+        };
+        let Some(open_end_relative) = document_html[action_index..].find('>') else {
+            break;
+        };
+        let open_end = action_index + open_end_relative;
+        let Some(close_relative) = document_html[open_end..].find("</form>") else {
+            break;
+        };
+        let close_index = open_end + close_relative;
+        if document_html[open_end..close_index].contains("name=\"_csrf\"") {
+            search_from = close_index + "</form>".len();
+            continue;
+        }
+        document_html.insert_str(open_end + 1, hidden_input.as_str());
+        search_from = open_end + 1 + hidden_input.len();
+        if search_from < form_start {
+            search_from = form_start;
+        }
+    }
+
+    document_html
+}
+
+async fn enforce_request_body_limit(
+    request: Request<Body>,
+    max_body_bytes: Option<usize>,
+) -> Result<Request<Body>, RuntimeServerError> {
+    let Some(limit) = max_body_bytes else {
+        return Ok(request);
+    };
+
+    let (parts, body) = request.into_parts();
+    if let Some(content_length) = parts
+        .headers
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        && content_length > limit
+    {
+        return Err(RuntimeServerError::RequestBodyTooLarge { limit });
+    }
+
+    let bytes = to_bytes(body, limit)
+        .await
+        .map_err(|_| RuntimeServerError::RequestBodyTooLarge { limit })?;
+    Ok(Request::from_parts(parts, Body::from(bytes)))
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn customer_hook_auth_subject_is_absent_for_anonymous_requests() {
+        let principal = PrincipalContext {
+            principal_id: None,
+            principal_kind: RequestPrincipalKind::Anonymous,
+            granted_capabilities: HashSet::new(),
+        };
+
+        assert!(customer_hook_auth_subject(&principal).is_none());
+    }
+
+    #[test]
+    fn customer_hook_auth_subject_preserves_service_accounts() {
+        let principal = PrincipalContext {
+            principal_id: Some("runtime.webhooks".to_string()),
+            principal_kind: RequestPrincipalKind::ServiceAccount,
+            granted_capabilities: HashSet::new(),
+        };
+
+        assert_eq!(
+            customer_hook_auth_subject(&principal),
+            Some(coil_auth::DefaultSubject::entity(
+                coil_auth::Entity::service_account("runtime.webhooks"),
+            ))
+        );
+    }
+}

@@ -2,7 +2,7 @@
 title: Writing And Installing WASM Extensions
 ---
 
-This page shows the full path for a Davenda WASM extension:
+This page shows the full path for a Coil WASM extension:
 
 1. define the product slot in the customer app
 2. describe the package in `extensions/<id>/package.toml`

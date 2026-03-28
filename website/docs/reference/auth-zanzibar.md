@@ -2,7 +2,7 @@
 title: Zanzibar And Core Auth
 ---
 
-Davenda authorisation is Zanzibar-inspired.
+Coil authorisation is Zanzibar-inspired.
 
 That means access is modeled as relationships between subjects and resources, not as one global role table.
 
@@ -20,11 +20,11 @@ If you have used role-based systems before, the important shift is:
 - you are not asking "what global role does this user have?"
 - you are asking "what relationship chain connects this subject to this resource and permission?"
 
-That is a better fit for Davenda's target workloads because sites, pages, products, bookings, memberships, and admin surfaces do not all share one flat ownership model.
+That is a better fit for Coil's target workloads because sites, pages, products, bookings, memberships, and admin surfaces do not all share one flat ownership model.
 
-## Why Davenda Uses This Model
+## Why Coil Uses This Model
 
-Davenda needs one auth system that can cover:
+Coil needs one auth system that can cover:
 
 - multi-site storefronts
 - editorial publishing
@@ -59,9 +59,9 @@ Core does not own one universal set of relation names.
 
 That is the job of the active auth package.
 
-## What Davenda Adds On Top
+## What Coil Adds On Top
 
-Davenda does not expose Zanzibar-style relations directly as the module contract.
+Coil does not expose Zanzibar-style relations directly as the module contract.
 
 It adds:
 
@@ -125,13 +125,13 @@ In Zanzibar-style terms:
 - `relation` or `permission`: the semantic being evaluated
 - `tuple`: one stored relationship fact
 
-Davenda adds a stable capability layer on top so official modules do not couple themselves to one relation graph.
+Coil adds a stable capability layer on top so official modules do not couple themselves to one relation graph.
 
 ## Full Implementation
 
 The Zanzibar-inspired engine and package boundary show up in these repo areas:
 
-- `crates/davenda-auth/`
+- `crates/coil-auth/`
 - `apps/shoppr/auth/shoppr-auth/package.toml`
 - `apps/shoppr/auth/shoppr-auth/model.auth`
 - `apps/shoppr/auth/shoppr-auth/capabilities.toml`
@@ -151,7 +151,7 @@ If official modules depended directly on relation names, "custom auth schema" wo
 
 A common mistake is trying to model auth as if every action needs a new module-side role.
 
-The better Davenda pattern is:
+The better Coil pattern is:
 
 1. keep the module capability stable
 2. change the auth package semantics behind it
@@ -162,7 +162,7 @@ That keeps customer policy flexible without turning every official module into a
 
 - Explaining Zanzibar only as "graph auth." The important boundary is not just graph traversal; it is the separation of engine, schema, and capability contracts.
 - Treating capability names as equivalent to stored tuple relations. They are not.
-- Assuming customer code or WASM should read raw auth tables directly. Davenda is designed to keep authorisation decisions inside the core auth service.
+- Assuming customer code or WASM should read raw auth tables directly. Coil is designed to keep authorisation decisions inside the core auth service.
 
 ## Read Next
 

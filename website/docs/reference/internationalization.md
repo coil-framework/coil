@@ -2,7 +2,7 @@
 title: Internationalisation
 ---
 
-Davenda resolves locale on the server, but the public apps currently demonstrate two different
+Coil resolves locale on the server, but the public apps currently demonstrate two different
 copy-delivery patterns on top of that runtime model.
 
 Use this page to keep those patterns straight:
@@ -40,9 +40,9 @@ So locale is not a browser-only afterthought.
 This is the base pattern templates should prefer for request-critical and SEO-relevant output:
 
 ```html
-<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
-  <a dv:attr="href=${links.home}">
-    <span dv:text="${site.brandName}">Brand</span>
+<html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}">
+  <a coil:attr="href=${links.home}">
+    <span coil:text="${site.brandName}">Brand</span>
   </a>
 </html>
 ```
@@ -92,9 +92,9 @@ Use this pattern when:
 - the app wants to own the dictionary format entirely
 - client-side hydration is acceptable
 
-Do not mistake it for “the Davenda i18n API.” It is Gitly’s chosen implementation.
+Do not mistake it for “the Coil i18n API.” It is Gitly’s chosen implementation.
 
-## What Davenda Does Not Yet Ship As A Customer API
+## What Coil Does Not Yet Ship As A Customer API
 
 Current honest state:
 

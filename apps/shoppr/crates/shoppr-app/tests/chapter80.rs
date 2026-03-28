@@ -1,6 +1,6 @@
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
-use davenda_runtime::EnvironmentSecretResolver;
+use coil_runtime::EnvironmentSecretResolver;
 use shoppr_app::{ShopprWorkspace, shoppr_waitlist_tools_demo_sha256};
 use std::ffi::OsString;
 use std::fs;
@@ -144,7 +144,7 @@ fn harbor_readme_and_manifest_make_runtime_installed_wasm_concrete() {
         "{package}"
     );
     assert!(
-        source_wat.contains("__DAVENDA_HANDLER_EXPORT__"),
+        source_wat.contains("__COIL_HANDLER_EXPORT__"),
         "{source_wat}"
     );
 
@@ -272,11 +272,11 @@ signed_url_ttl_secs = 900
     });
 
     assert_eq!(
-        headers.get("x-davenda-wasm-render-hook-count").unwrap(),
+        headers.get("x-coil-wasm-render-hook-count").unwrap(),
         "1"
     );
     assert_eq!(
-        headers.get("x-davenda-wasm-render-hook-handlers").unwrap(),
+        headers.get("x-coil-wasm-render-hook-handlers").unwrap(),
         "home.waitlist.banner"
     );
     assert!(body.contains("Shoppr Waitlist Tools is active"), "{body}");

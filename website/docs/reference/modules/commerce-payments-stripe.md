@@ -7,12 +7,12 @@ flow with hosted checkout handoff and signed webhook reconciliation.
 
 Primary implementation files:
 
-- `crates/davenda-commerce/src/module/stripe.rs`
+- `crates/coil-commerce/src/module/stripe.rs`
 - `apps/shoppr/platform.dev.toml`
 
 ## Why It Exists
 
-Davenda keeps payment-provider integration separate from the base commerce module so a customer app
+Coil keeps payment-provider integration separate from the base commerce module so a customer app
 can choose:
 
 - no provider yet
@@ -23,7 +23,7 @@ without collapsing all provider semantics into the core catalog and order model.
 
 ## What It Provides
 
-The Stripe module manifest in `crates/davenda-commerce/src/module/stripe.rs` contributes:
+The Stripe module manifest in `crates/coil-commerce/src/module/stripe.rs` contributes:
 
 - module id `commerce-payments-stripe`
 - config namespace `commerce_payments_stripe`

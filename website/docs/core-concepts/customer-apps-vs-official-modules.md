@@ -2,7 +2,7 @@
 title: Customer Apps Vs Official Modules
 ---
 
-Davenda makes a hard distinction between a customer application and an official module.
+Coil makes a hard distinction between a customer application and an official module.
 
 That distinction is one of the reasons the framework stays coherent as the product surface grows.
 
@@ -16,7 +16,7 @@ They are designed to be installed into many customer apps.
 
 ### Customer applications
 
-Customer applications are the actual products built with Davenda. They decide:
+Customer applications are the actual products built with Coil. They decide:
 
 - which modules are linked
 - which modules are enabled
@@ -32,7 +32,7 @@ That usually creates two bad outcomes:
 - the framework turns into a pile of one-off application assumptions
 - product teams start forking reusable behaviour because the boundary is unclear
 
-Davenda tries to avoid both.
+Coil tries to avoid both.
 
 ## How It Works
 

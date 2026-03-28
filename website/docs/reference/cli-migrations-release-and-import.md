@@ -9,14 +9,14 @@ This page covers the commands that shape rollout and change-management.
 The platform exposes:
 
 ```text
-platform migrate plan
-platform migrate apply
+coil migrate plan
+coil migrate apply
 ```
 
 A real example from the current Shoppr config:
 
 ```bash
-cargo run -p davenda-cli -- migrate plan --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- migrate plan --config apps/shoppr/platform.dev.toml
 ```
 
 The output is a composed plan with owners such as:
@@ -26,7 +26,7 @@ The output is a composed plan with owners such as:
 - `module:events`
 - `auth:shoppr-auth`
 
-That is what makes Davenda migration planning useful: you see one composed contract, not a pile of
+That is what makes Coil migration planning useful: you see one composed contract, not a pile of
 unexplained SQL files.
 
 If you are a customer-app developer, pair that with the customer binary:
@@ -36,7 +36,7 @@ cd apps/shoppr
 cargo run -p shoppr -- migrate apply --dry-run
 ```
 
-Use `platform migrate plan` to inspect the composed migration contract. Use `shoppr migrate apply
+Use `coil migrate plan` to inspect the composed migration contract. Use `shoppr migrate apply
 --dry-run` to prove the app bootstrap can actually execute it.
 
 For customer-app lifecycle, use the customer binary:
@@ -55,15 +55,15 @@ ready.
 The platform exposes:
 
 ```text
-platform release doctor
-platform release plan
+coil release doctor
+coil release plan
 ```
 
 Use them like this:
 
 ```bash
-cargo run -p davenda-cli -- release doctor --config apps/shoppr/platform.dev.toml
-cargo run -p davenda-cli -- release plan --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- release doctor --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- release plan --config apps/shoppr/platform.dev.toml
 ```
 
 Use `release doctor` when you need a fast readiness diagnostic. Use `release plan` when you need
@@ -71,18 +71,18 @@ the fuller composed release shape.
 
 A practical sequence is:
 
-1. `platform auth package validate`
-2. `platform migrate plan`
-3. `platform release doctor`
-4. `platform release plan`
+1. `coil auth package validate`
+2. `coil migrate plan`
+3. `coil release doctor`
+4. `coil release plan`
 
 ## Import Commands
 
 The platform exposes:
 
 ```text
-platform import run <manifest-path>
-platform import cutover <manifest-path>
+coil import run <manifest-path>
+coil import cutover <manifest-path>
 ```
 
 Cutover supports several explicit modes:
@@ -106,11 +106,11 @@ Use them literally:
 Example:
 
 ```bash
-cargo run -p davenda-cli -- import cutover imports/wordpress-events.toml \
+cargo run -p coil-cli -- import cutover imports/wordpress-events.toml \
   --switch \
   --base-url https://shop.example.com \
   --dns-zone-id zone_123 \
-  --dns-target davenda-origin.example.net \
+  --dns-target coil-origin.example.net \
   --yes
 ```
 

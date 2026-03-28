@@ -6,7 +6,7 @@ import styles from "./index.module.css";
 const features = [
   {
     title: "Build products, not plumbing",
-    body: "Davenda gives Rust teams a coherent product platform: HTML-first rendering, auth, storage, jobs, observability, admin, and customer-app composition in one story.",
+    body: "Coil gives Rust teams a coherent product platform: HTML-first rendering, auth, storage, jobs, observability, admin, and customer-app composition in one story.",
   },
   {
     title: "Lead with ecommerce, support any web app",
@@ -21,8 +21,8 @@ const features = [
 export default function Home(): JSX.Element {
   return (
     <Layout
-      title="Davenda"
-      description="Davenda is a highly opinionated Rust web framework for serious web products."
+      title="Coil"
+      description="Coil is a highly opinionated Rust web framework for serious web products."
     >
       <main className={styles.page}>
         <section className={styles.hero}>
@@ -30,7 +30,7 @@ export default function Home(): JSX.Element {
             <p className={styles.eyebrow}>Highly Opinionated Rust Web Framework</p>
             <h1>Build serious web products in Rust without inventing your own platform first.</h1>
             <p className={styles.lead}>
-              Davenda is built for teams shipping ecommerce and content-rich products that need
+              Coil is built for teams shipping ecommerce and content-rich products that need
               scale, safety, strong extension boundaries, and a believable path from local Docker
               development to production operations.
             </p>
@@ -47,10 +47,10 @@ export default function Home(): JSX.Element {
             <p className={styles.panelEyebrow}>Minimal customer app shape</p>
             <pre className={styles.codeBlock}>
 {`[dependencies]
-davenda-all = "0.1.0"
+coil = "0.1.0"
 
 fn main() -> Result<(), anyhow::Error> {
-    davenda_all::builder()
+    coil::builder()
         .with_customer_plugin(shoppr_backend::plugin())
         .run_from_env()
 }`}
@@ -95,7 +95,7 @@ fn main() -> Result<(), anyhow::Error> {
             <p className={styles.eyebrow}>Ecommerce path</p>
             <h2>Start with Shoppr.</h2>
             <p>
-              Learn Davenda through a premium, multi-market storefront: catalog, merchandising,
+              Learn Coil through a premium, multi-market storefront: catalog, merchandising,
               account flows, checkout, customer-linked Rust, and operator surfaces.
             </p>
             <Link to="/docs/use-cases/shoppr/overview">Explore the Shoppr guide</Link>

@@ -85,10 +85,10 @@ The customer binary does **not** own queue control. Jobs remain an operator/plat
 Use the platform CLI for that:
 
 ```bash
-cargo run -p davenda-cli -- jobs status --config apps/shoppr/platform.dev.toml
-cargo run -p davenda-cli -- jobs ready --config apps/shoppr/platform.dev.toml --queue jobs.work --limit 25
-cargo run -p davenda-cli -- jobs dead-letters --config apps/shoppr/platform.dev.toml --queue jobs.dead-letter --limit 25
-cargo run -p davenda-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
+cargo run -p coil-cli -- jobs status --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- jobs ready --config apps/shoppr/platform.dev.toml --queue jobs.work --limit 25
+cargo run -p coil-cli -- jobs dead-letters --config apps/shoppr/platform.dev.toml --queue jobs.dead-letter --limit 25
+cargo run -p coil-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
 ```
 
 That split is intentional:

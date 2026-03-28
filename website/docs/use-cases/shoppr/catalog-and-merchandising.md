@@ -2,7 +2,7 @@
 title: Catalog And Merchandising
 ---
 
-This guide uses Shoppr to explain how Davenda wants a catalog-driven store to be built through a
+This guide uses Shoppr to explain how Coil wants a catalog-driven store to be built through a
 customer app, not assembled from a fixed storefront widget set.
 
 ## The Catalog Files To Read First

@@ -40,12 +40,12 @@ Shoppr keeps the linked backend split into two crates:
 
 That split is deliberate.
 
-- `shoppr-backend` is the Davenda-facing plugin crate.
+- `shoppr-backend` is the Coil-facing plugin crate.
 - `shoppr-loyalty-backend` is the customer domain library with the real store rules.
 
 If you are building your own app, this is a strong pattern to copy.
 
-## What The Davenda-Facing Plugin Does
+## What The Coil-Facing Plugin Does
 
 That crate:
 
@@ -54,7 +54,7 @@ That crate:
 - registers verified-webhook hooks
 - publishes a stable plugin summary for the customer binary and docs
 
-This is the seam between Davenda and customer code.
+This is the seam between Coil and customer code.
 
 ## What The Customer Domain Library Does
 
@@ -101,13 +101,13 @@ Shoppr is a good example because it makes the linked Rust path feel normal:
 - it uses stable SDK traits
 - it stays inside the same deployment and release path
 
-That is exactly what Davenda wants for first-party customer business logic.
+That is exactly what Coil wants for first-party customer business logic.
 
 ## Adapt This For Your Own App
 
 Copy this structure:
 
-1. one small plugin crate that implements Davenda traits
+1. one small plugin crate that implements Coil traits
 2. one domain library crate that contains the real customer rules
 3. explicit plugin injection from the customer composition root
 

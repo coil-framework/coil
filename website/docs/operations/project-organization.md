@@ -2,7 +2,7 @@
 title: Project Organization
 ---
 
-Davenda works best when the customer app, the runtime configuration, and any optional extension
+Coil works best when the customer app, the runtime configuration, and any optional extension
 lanes are structurally separate.
 
 This is not just source-tree aesthetics. It is the operational boundary that keeps deploys,
@@ -10,7 +10,7 @@ troubleshooting, and ownership clear.
 
 ## What Is This?
 
-This page explains how to lay out a serious Davenda codebase so that:
+This page explains how to lay out a serious Coil codebase so that:
 
 - the customer binary is obvious
 - product and operational inputs are not mixed together
@@ -26,11 +26,11 @@ Bad structure causes predictable operational failures:
 - customer-owned code starts looking like an undocumented plugin system
 - deploy and rollback steps stop matching the repository
 
-Good structure is one of the cheapest ways to keep a Davenda app operable.
+Good structure is one of the cheapest ways to keep a Coil app operable.
 
 ## The Canonical Shape
 
-A healthy Davenda customer project usually has four clear areas:
+A healthy Coil customer project usually has four clear areas:
 
 1. a Rust workspace that owns the customer binary and customer-owned crates
 2. an app root that owns `app.toml`, templates, theme assets, auth files, and extensions
@@ -104,9 +104,9 @@ What each area is for:
 - webhook secrets
 - object-store credentials
 
-## When To Use `davenda-all`
+## When To Use `coil`
 
-Use `davenda-all` when:
+Use `coil` when:
 
 - you want the default official battery while learning
 - you want the shortest path to a coherent full stack
@@ -118,7 +118,7 @@ Use narrower selective dependencies when:
 - you want tighter control over what the binary links
 - you need a very explicit runtime surface for review or compliance
 
-Even when `davenda-all` is used, the customer binary still owns composition.
+Even when `coil` is used, the customer binary still owns composition.
 
 ## How To Add A New Customer Crate
 
@@ -165,7 +165,7 @@ The important distinction is:
 For multi-site products, do not clone the application three times unless there is a real product
 boundary that requires it.
 
-The Davenda shape is:
+The Coil shape is:
 
 - one customer workspace
 - one app manifest

@@ -2,7 +2,7 @@
 title: Extension Package Format
 ---
 
-Davenda runtime-installed extensions are declared in two places:
+Coil runtime-installed extensions are declared in two places:
 
 - the customer app manifest installs them
 - each extension package describes its own artifact, manifest, handlers, and grants
@@ -38,7 +38,7 @@ target = "cms.page.render"
 grants = []
 ```
 
-That pair tells Davenda:
+That pair tells Coil:
 
 - which package is installed
 - which handler is activated
@@ -108,7 +108,7 @@ Important top-level fields:
 ## Manifest Fields
 
 The manifest layer maps to `ExtensionManifest` in
-`crates/davenda-wasm/src/manifest/manifests.rs`.
+`crates/coil-wasm/src/manifest/manifests.rs`.
 
 The main fields are:
 
@@ -198,7 +198,7 @@ approved for the activated handler.
 
 That boundary is enforced through:
 
-- `crates/davenda-wasm/src/grants.rs`
+- `crates/coil-wasm/src/grants.rs`
 - `apps/shoppr/crates/shoppr-app/src/extensions.rs`
 - `apps/gitly/crates/gitly-app/src/extensions.rs`
 
@@ -279,8 +279,8 @@ Package examples:
 
 Runtime model code:
 
-- `crates/davenda-wasm/src/manifest/package.rs`
-- `crates/davenda-wasm/src/manifest/manifests.rs`
+- `crates/coil-wasm/src/manifest/package.rs`
+- `crates/coil-wasm/src/manifest/manifests.rs`
 
 App loaders:
 

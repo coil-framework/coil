@@ -1,4 +1,4 @@
-<section class="product-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
+<section class="product-grid" xmlns:coil="https://coil.rs" coil:fragment="grid">
   <header class="product-grid__header">
     <p class="product-grid__eyebrow">Product cards</p>
     <h2>Jump straight to a product when the customer already knows the silhouette.</h2>
@@ -8,38 +8,38 @@
     </p>
   </header>
 
-  <ul class="product-grid__list" dv:if="${hasProductCards}">
-    <li class="product-grid__item" dv:each="product : ${productCards}">
+  <ul class="product-grid__list" coil:if="${hasProductCards}">
+    <li class="product-grid__item" coil:each="product : ${productCards}">
       <article class="product-card">
-        <a class="product-card__media" href="/shop/products/harbor-cap" dv:href="${product.url}">
+        <a class="product-card__media" href="/shop/products/harbor-cap" coil:href="${product.url}">
           <img
             src="/theme/assets/logo.svg"
-            dv:src="${product.imageUrl}"
+            coil:src="${product.imageUrl}"
             alt="Featured product"
-            dv:attr="alt=${product.imageAlt}"
+            coil:attr="alt=${product.imageAlt}"
           />
         </a>
         <div class="product-card__body">
           <p class="product-card__eyebrow">
             <a
               href="/shop/collections/featured"
-              dv:href="${product.collectionUrl}"
-              dv:text="${product.collectionName}"
+              coil:href="${product.collectionUrl}"
+              coil:text="${product.collectionName}"
             >
               Harbor pantry
             </a>
           </p>
           <h3>
-            <a href="/shop/products/harbor-cap" dv:href="${product.url}" dv:text="${product.name}">
+            <a href="/shop/products/harbor-cap" coil:href="${product.url}" coil:text="${product.name}">
               Harbor tin
             </a>
           </h3>
-          <p class="product-card__summary" dv:text="${product.summary}">
+          <p class="product-card__summary" coil:text="${product.summary}">
             Compact, gift-ready, and easy to restock for repeat buyers.
           </p>
           <div class="product-card__meta">
-            <span class="product-card__price" dv:text="${product.price}">GBP 28</span>
-            <a class="button" href="/shop/products/harbor-cap" dv:href="${product.url}">
+            <span class="product-card__price" coil:text="${product.price}">GBP 28</span>
+            <a class="button" href="/shop/products/harbor-cap" coil:href="${product.url}">
               View look
             </a>
             <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
@@ -47,7 +47,7 @@
                 type="hidden"
                 name="product_slug"
                 value="harbor-cap"
-                dv:attr="value=${product.slug}"
+                coil:attr="value=${product.slug}"
               />
               <input type="hidden" name="quantity" value="1" />
               <button class="button button--secondary" type="submit">Add to cart</button>
@@ -58,7 +58,7 @@
     </li>
   </ul>
 
-  <div class="product-grid__fallback" dv:unless="${hasProductCards}">
+  <div class="product-grid__fallback" coil:unless="${hasProductCards}">
     <article class="product-card">
       <div class="product-card__body">
         <p class="product-card__eyebrow">Featured</p>

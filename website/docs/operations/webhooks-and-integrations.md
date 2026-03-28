@@ -2,7 +2,7 @@
 title: Webhooks And Integrations
 ---
 
-Davenda treats webhook ingress as an operational boundary, not just "some HTTP endpoint."
+Coil treats webhook ingress as an operational boundary, not just "some HTTP endpoint."
 
 ## What Is This?
 

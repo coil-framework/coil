@@ -3,7 +3,7 @@
 **Part:** Appendices  
 **Chapter:** 92
 
-The platform CLI is the operator and developer control surface for migrations, configuration validation, release planning, auth diagnostics, storage work, TLS maintenance, and local development. The examples below use `platform` as the canonical binary name. Customer apps may re-export the same command tree under an app-specific binary, but behavior should remain consistent.
+The platform CLI is the operator and developer control surface for migrations, configuration validation, release planning, auth diagnostics, storage work, TLS maintenance, and local development. The examples below use `coil` as the canonical binary name. Customer apps may re-export the same command tree under an app-specific binary, but behavior should remain consistent.
 
 ## Output Conventions
 
@@ -20,41 +20,41 @@ Long-running commands should emit progress records rather than silent waits. Com
 
 | Command group | Purpose |
 | --- | --- |
-| `platform dev` | Local development server, background worker bootstrap, and fixture loading |
-| `platform config` | Validate, render, and diff effective configuration |
-| `platform migrate` | Plan and apply core, module, and customer-app schema changes |
-| `platform auth` | Validate auth packages, inspect bindings, run checks, and explain decisions |
-| `platform module` | Install, enable, disable, and inspect official modules |
-| `platform cache` | Warm, inspect, and invalidate cache scopes or tags |
-| `platform storage` | Validate storage policy, sync managed assets, and inspect object-store state |
-| `platform assets` | Publish build artifacts and verify asset manifests |
-| `platform tls` | Check certificate status, renew, and validate challenge setup |
-| `platform jobs` | Run workers, inspect queue health, and retry failed jobs |
-| `platform import` | Run staged content or data imports |
-| `platform release` | Produce upgrade plans, run compatibility checks, and mark release state |
+| `coil dev` | Local development server, background worker bootstrap, and fixture loading |
+| `coil config` | Validate, render, and diff effective configuration |
+| `coil migrate` | Plan and apply core, module, and customer-app schema changes |
+| `coil auth` | Validate auth packages, inspect bindings, run checks, and explain decisions |
+| `coil module` | Install, enable, disable, and inspect official modules |
+| `coil cache` | Warm, inspect, and invalidate cache scopes or tags |
+| `coil storage` | Validate storage policy, sync managed assets, and inspect object-store state |
+| `coil assets` | Publish build artifacts and verify asset manifests |
+| `coil tls` | Check certificate status, renew, and validate challenge setup |
+| `coil jobs` | Run workers, inspect queue health, and retry failed jobs |
+| `coil import` | Run staged content or data imports |
+| `coil release` | Produce upgrade plans, run compatibility checks, and mark release state |
 
 ## Representative Commands
 
 ```bash
-platform config validate
-platform migrate plan
-platform migrate apply --dry-run
-platform auth package validate auth/platform-default
-platform auth explain --subject user:42 --capability cms.page.publish --resource page:home
-platform module list
-platform cache warm --scope public --route /events
-platform storage verify --policy
-platform assets publish
-platform tls renew
-platform import run imports/wordpress-events.toml
-platform release doctor
+coil config validate
+coil migrate plan
+coil migrate apply --dry-run
+coil auth package validate auth/coil-default-auth
+coil auth explain --subject user:42 --capability cms.page.publish --resource page:home
+coil module list
+coil cache warm --scope public --route /events
+coil storage verify --policy
+coil assets publish
+coil tls renew
+coil import run imports/wordpress-events.toml
+coil release doctor
 ```
 
 These examples are normative at the behavior level even if subcommand naming evolves slightly. Operators need a consistent mental model.
 
 ## Release And Migration Behavior
 
-The CLI should treat upgrade planning as a first-class workflow. `platform release doctor` or its equivalent should check:
+The CLI should treat upgrade planning as a first-class workflow. `coil release doctor` or its equivalent should check:
 
 - core and module compatibility
 - auth model package and capability registry compatibility
@@ -62,7 +62,7 @@ The CLI should treat upgrade planning as a first-class workflow. `platform relea
 - pending schema migrations
 - incompatible WASM extension host requirements
 
-`platform migrate plan` should present changes grouped by owner, for example core, module, customer app, or auth package. This mirrors the architectural split and makes rollback reasoning much clearer.
+`coil migrate plan` should present changes grouped by owner, for example core, module, customer app, or auth package. This mirrors the architectural split and makes rollback reasoning much clearer.
 
 ## Auth Diagnostics
 

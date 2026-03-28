@@ -1,0 +1,135 @@
+use super::*;
+use std::fmt;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+#[cfg(test)]
+use coil_cache::CacheBackendKind;
+
+#[derive(Clone)]
+pub(crate) struct RuntimeBackendMaterializer {
+    namespace: String,
+    plans: SharedBackendClients,
+    shared_state_root: PathBuf,
+    #[cfg(test)]
+    cache_runtime: Option<Arc<dyn coil_cache::DistributedCacheRuntime>>,
+    jobs_runtime: Arc<Mutex<Option<Arc<dyn coil_jobs::JobsCoordinationRuntime>>>>,
+}
+
+impl RuntimeBackendMaterializer {
+    pub(crate) fn new(
+        namespace: String,
+        plans: SharedBackendClients,
+        shared_state_root: PathBuf,
+    ) -> Self {
+        #[cfg(test)]
+        let cache_runtime = plans.distributed_cache.as_ref().map(|target| {
+            crate::plan::shared_cache_runtime_for_test(
+                cache_backend_kind(target.backend),
+                namespace.clone(),
+            )
+        });
+
+        Self {
+            namespace,
+            plans,
+            shared_state_root,
+            #[cfg(test)]
+            cache_runtime,
+            jobs_runtime: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[cfg_attr(not(test), allow(unused_variables))]
+    pub(crate) fn browser_host(
+        &self,
+        customer_app: String,
+        services: BrowserSecurityServices,
+    ) -> Result<BrowserHost, BrowserHostBuildError> {
+        match self.plans.session_store.as_ref() {
+            Some(target) => {
+                #[cfg(test)]
+                let session_runtime = crate::browser::test_only_sqlite_shared_runtime(
+                    target.kind,
+                    format!("{}:{customer_app}", self.namespace),
+                );
+                #[cfg(not(test))]
+                let session_runtime = crate::browser::live_shared_runtime(
+                    target.kind,
+                    format!("{}:{customer_app}", self.namespace),
+                    self.shared_state_root.clone(),
+                )?;
+
+                BrowserHost::with_session_store_client(
+                    customer_app.clone(),
+                    services.clone(),
+                    DistributedSessionStoreClient::new(target.kind, session_runtime),
+                )
+            }
+            None => Err(BrowserHostBuildError::MemoryStoreRequiresTestOnlyBrowserHost),
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn cache_runtime(&self, planner: CachePlanner) -> CacheRuntime {
+        if planner.topology().supports_shared_invalidation() {
+            self.cache_runtime
+                .as_ref()
+                .map(|runtime| {
+                    CacheRuntime::with_shared_runtime(planner.topology(), runtime.clone())
+                })
+                .unwrap_or_else(|| planner.runtime())
+        } else {
+            planner.runtime()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn jobs_coordinator(
+        &self,
+        _customer_app: &str,
+        runtime: &JobsRuntimeServices,
+    ) -> JobsCoordinator {
+        let shared_runtime = {
+            let mut guard = self
+                .jobs_runtime
+                .lock()
+                .expect("shared jobs runtime mutex poisoned");
+            guard
+                .get_or_insert_with(|| {
+                    crate::plan::shared_jobs_runtime_for_test(runtime, self.namespace.clone())
+                })
+                .clone()
+        };
+
+        runtime.coordinator_with_shared_runtime(shared_runtime)
+    }
+}
+
+impl fmt::Debug for RuntimeBackendMaterializer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("RuntimeBackendMaterializer");
+        debug.field("namespace", &self.namespace);
+        debug.field("plans", &self.plans);
+        debug.field("shared_state_root", &self.shared_state_root);
+        #[cfg(test)]
+        debug.field(
+            "cache_runtime",
+            &self.cache_runtime.as_ref().map(|_| "shared"),
+        );
+        debug.field(
+            "jobs_runtime",
+            &self.jobs_runtime.lock().ok().map(|guard| guard.is_some()),
+        );
+        debug.finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+fn cache_backend_kind(backend: coil_cache::DistributedCacheBackend) -> CacheBackendKind {
+    match backend {
+        coil_cache::DistributedCacheBackend::Redis => CacheBackendKind::Redis,
+        coil_cache::DistributedCacheBackend::Valkey => CacheBackendKind::Valkey,
+    }
+}

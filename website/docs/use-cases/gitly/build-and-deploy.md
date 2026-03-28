@@ -2,7 +2,7 @@
 title: Gitly Build And Deploy
 ---
 
-This page is about the customer-owned Davenda lifecycle for a non-commerce app, with Gitly as the
+This page is about the customer-owned Coil lifecycle for a non-commerce app, with Gitly as the
 supporting example.
 
 Use it when you want to answer:
@@ -83,8 +83,8 @@ and passes the app the same env-backed config values it expects from `platform.d
 - `DATABASE_URL`
 - `REDIS_URL`
 - `OBJECT_STORE_URL`
-- `DAVENDA_COOKIE_SECRET`
-- `DAVENDA_CSRF_SECRET`
+- `COIL_COOKIE_SECRET`
+- `COIL_CSRF_SECRET`
 
 This is the pattern to copy for a one-command local stack.
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-CONFIG_PATH="${DAVENDA_CONFIG:-platform.dev.toml}"
+CONFIG_PATH="${COIL_CONFIG:-platform.dev.toml}"
 
 wait_for_tcp() {
   host="$1"

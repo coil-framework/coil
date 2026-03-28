@@ -138,7 +138,7 @@ async fn contact_updated(
     ExtractJson(update): ExtractJson<CrmContactUpdate>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     let provided_secret = headers
-        .get("x-harbor-backend-secret")
+        .get("x-shoppr-backend-secret")
         .and_then(|value| value.to_str().ok());
 
     if !webhook_secret_matches(&state.webhook_secret, provided_secret) {
@@ -146,7 +146,7 @@ async fn contact_updated(
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
                 error: "webhook_verification_failed".to_string(),
-                detail: "x-harbor-backend-secret did not match the configured backend secret"
+                detail: "x-shoppr-backend-secret did not match the configured backend secret"
                     .to_string(),
             }),
         ));
@@ -173,7 +173,7 @@ mod tests {
     fn config() -> BackendConfig {
         BackendConfig {
             brand: "Shoppr".to_string(),
-            webhook_secret: "harbor-backend-dev-secret".to_string(),
+            webhook_secret: "shoppr-backend-dev-secret".to_string(),
         }
     }
 
@@ -257,7 +257,7 @@ mod tests {
     #[tokio::test]
     async fn crm_webhook_rejects_missing_secret() {
         let request = serde_json::json!({
-            "customer_email": "member@harbor.test",
+            "customer_email": "member@shoppr.test",
             "membership_tier": "standard",
             "lifecycle_stage": "winback",
             "last_order_total_gbp": 42.0
@@ -283,7 +283,7 @@ mod tests {
     #[tokio::test]
     async fn order_review_rejects_missing_shipping_country() {
         let request = serde_json::json!({
-            "customer_email": "member@harbor.test",
+            "customer_email": "member@shoppr.test",
             "membership_tier": "standard",
             "subtotal_gbp": 64.0,
             "cart_skus": ["harbor-cap"],
@@ -312,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn order_review_returns_customer_specific_fulfilment_decision() {
         let request = serde_json::json!({
-            "customer_email": "captain@harbor.test",
+            "customer_email": "captain@shoppr.test",
             "membership_tier": "gold",
             "subtotal_gbp": 240.0,
             "cart_skus": ["cellar-tour-pass"],
@@ -342,7 +342,7 @@ mod tests {
     #[tokio::test]
     async fn crm_webhook_routes_known_member_updates() {
         let request = serde_json::json!({
-            "customer_email": "captain@harbor.test",
+            "customer_email": "captain@shoppr.test",
             "membership_tier": "gold",
             "lifecycle_stage": "retained",
             "last_order_total_gbp": 175.0
@@ -354,7 +354,7 @@ mod tests {
                     .method("POST")
                     .uri("/webhooks/crm/contact-updated")
                     .header("content-type", "application/json")
-                    .header("x-harbor-backend-secret", "harbor-backend-dev-secret")
+                    .header("x-shoppr-backend-secret", "shoppr-backend-dev-secret")
                     .body(Body::from(request.to_string()))
                     .unwrap(),
             )
@@ -370,7 +370,7 @@ mod tests {
     #[tokio::test]
     async fn loyalty_preview_returns_customer_specific_rules() {
         let request = serde_json::json!({
-            "customer_email": "member@harbor.test",
+            "customer_email": "member@shoppr.test",
             "membership_tier": "standard",
             "subtotal_gbp": 64.0,
             "cart_skus": ["tasting-pass"],

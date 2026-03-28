@@ -2,7 +2,7 @@
 title: Product Structure
 ---
 
-This page is about how to structure a non-commerce Davenda product, with Gitly as the example.
+This page is about how to structure a non-commerce Coil product, with Gitly as the example.
 
 Use it when you want to answer:
 
@@ -81,7 +81,7 @@ Gitly’s template tree under `apps/gitly/templates/gitly/` does exactly that:
 - `profile.html`
 - `search.html`
 
-This is the pattern to copy for any Davenda app:
+This is the pattern to copy for any Coil app:
 
 - name templates after real product surfaces
 - keep them product-first, not framework-first

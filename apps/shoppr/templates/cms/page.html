@@ -1,33 +1,33 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
+  xmlns:coil="https://coil.rs"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${page.title}">Shoppr</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${page.title}">Shoppr</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <nav coil:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main">
       <article class="page-shell">
         <p class="catalog-section__eyebrow">CMS Page</p>
-        <h1 dv:text="${cmsPage.title}">Shoppr</h1>
-        <p dv:text="${cmsPage.summary}">
+        <h1 coil:text="${cmsPage.title}">Shoppr</h1>
+        <p coil:text="${cmsPage.summary}">
           Server-rendered CMS page.
         </p>
-        <div dv:utext="${cmsPage.bodyHtml}">
+        <div coil:utext="${cmsPage.bodyHtml}">
           <p>Page body.</p>
         </div>
         <div class="checkout-actions">
-          <a class="button" href="/" dv:attr="href=${links.home}">Return home</a>
-          <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+          <a class="button" href="/" coil:attr="href=${links.home}">Return home</a>
+          <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
             Open catalog
           </a>
         </div>

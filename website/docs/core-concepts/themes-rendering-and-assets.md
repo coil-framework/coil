@@ -2,7 +2,7 @@
 title: Themes, Rendering, And Assets
 ---
 
-This page explains how Davenda turns a customer-owned theme into a final HTML document with working
+This page explains how Coil turns a customer-owned theme into a final HTML document with working
 assets and injected metadata.
 
 ## Start With The Full Path
@@ -23,7 +23,7 @@ That is the real mental model. Themes are part of the render pipeline, not just 
 
 ## What A Theme Contributes
 
-A Davenda theme contributes four practical things:
+A Coil theme contributes four practical things:
 
 - document structure
 - reusable fragments
@@ -38,15 +38,15 @@ Imagine a customer layout like this:
 
 ```html
 <!DOCTYPE html>
-<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
+<html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}">
   <head>
-    <title dv:text="${page.title}">Fallback title</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${page.title}">Fallback title</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body>
-    <nav dv:replace="~{navigation/primary}"></nav>
-    <main dv:slot="content"></main>
-    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+    <nav coil:replace="~{navigation/primary}"></nav>
+    <main coil:slot="content"></main>
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </body>
 </html>
 ```
@@ -56,7 +56,7 @@ What happens:
 - `locale` already comes from request resolution
 - `page.title` already comes from the render model
 - `asset('theme/assets/site.css')` resolves to the published asset URL
-- `dv:replace` pulls in a fragment
+- `coil:replace` pulls in a fragment
 - the runtime later injects canonical, robots, alternate locale links, and JSON-LD into the head
 
 That one example is the entire subsystem in miniature.
@@ -65,7 +65,7 @@ That one example is the entire subsystem in miniature.
 
 This surprises people coming from frameworks that hide the outer document shell.
 
-Davenda keeps full HTML structure in customer templates because:
+Coil keeps full HTML structure in customer templates because:
 
 - the customer app owns the actual product shell
 - the customer app often owns the nav, header, footer, and landmarks
@@ -119,11 +119,11 @@ The important separation is:
 Customer templates should reference logical asset names:
 
 ```html
-dv:href="asset('theme/assets/site.css')"
-dv:src="asset('theme/assets/site.js')"
+coil:href="asset('theme/assets/site.css')"
+coil:src="asset('theme/assets/site.js')"
 ```
 
-Davenda then:
+Coil then:
 
 1. publishes assets from the declared theme asset roots
 2. gives them hashed artifact paths
@@ -160,7 +160,7 @@ At the theme level, the app still owns:
 - contrast
 - usable language and theme controls
 
-That is why rendering, assets, and accessibility are tightly coupled in Davenda.
+That is why rendering, assets, and accessibility are tightly coupled in Coil.
 
 ## Common Mistakes
 
@@ -189,9 +189,9 @@ Concrete supporting files:
 - `apps/shoppr/templates/pages/home.html`
 - `apps/gitly/templates/gitly/home.html`
 - `apps/gitly/theme/assets/site.js`
-- `crates/davenda-runtime/src/render/model.rs`
-- `crates/davenda-runtime/src/render/seo.rs`
-- `crates/davenda-assets/src/release.rs`
+- `crates/coil-runtime/src/render/model.rs`
+- `crates/coil-runtime/src/render/seo.rs`
+- `crates/coil-assets/src/release.rs`
 
 ## What Should I Read Next?
 

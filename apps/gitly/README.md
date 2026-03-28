@@ -1,6 +1,6 @@
 # Gitly
 
-Gitly is a checked-in customer app that makes Davenda look like a GitHub-style forge instead of
+Gitly is a checked-in customer app that makes Coil look like a GitHub-style forge instead of
 a storefront. It is intentionally static-but-honest: there is no real git engine underneath, but
 there are enough repositories, users, organizations, workflow runs, API responses, and extension
 points to show that the framework is modular.
@@ -133,7 +133,7 @@ The important bound to understand is:
   be a full automation product
 
 These packages are runtime-installed, hash-pinned in `app.toml`, and intentionally narrower than
-the linked Rust backend. That is the split Davenda is supposed to show:
+the linked Rust backend. That is the split Coil is supposed to show:
 
 - linked Rust for first-party customer logic
 - WASM for bounded runtime-installed behaviour
@@ -182,7 +182,7 @@ For direct local runs, the important runtime inputs are still the same ones used
 
 ## Reading Order
 
-If you are new to Davenda, read these in order:
+If you are new to Coil, read these in order:
 
 1. `app.toml`
 2. `crates/gitly-app/src/lib.rs`

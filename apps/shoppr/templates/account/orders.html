@@ -1,86 +1,86 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Order history'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Order history'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Order history</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${pageTitle}">Order history</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <nav coil:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main account-page">
       <section class="account-page__intro">
         <p class="account-page__eyebrow">Customer account</p>
         <h1>Order history</h1>
-        <p dv:text="${account.stateSummary}">
+        <p coil:text="${account.stateSummary}">
           Review completed purchases, payment details, and any membership-linked checkout history.
         </p>
-        <p dv:if="${account.hasPrincipal}">
-          Signed in as <strong dv:text="${customer.displayName}">Member Live</strong>.
+        <p coil:if="${account.hasPrincipal}">
+          Signed in as <strong coil:text="${customer.displayName}">Member Live</strong>.
         </p>
-        <p dv:unless="${account.hasPrincipal}">
+        <p coil:unless="${account.hasPrincipal}">
           This order history currently follows the browser session you are using right now. Orders
           placed from another browser will not appear here yet.
         </p>
-        <p dv:if="${account.hasLatestOrder}">
+        <p coil:if="${account.hasLatestOrder}">
           If you have just returned from the payment provider, the latest order can remain in
           <strong>Pending Payment</strong>
           until settlement is confirmed for this same browser session.
         </p>
-        <p dv:if="${account.hasCustomerEmail}">
+        <p coil:if="${account.hasCustomerEmail}">
           Receipt email for this account view:
-          <strong dv:text="${customer.email}">member@example.com</strong>.
+          <strong coil:text="${customer.email}">member@example.com</strong>.
         </p>
       </section>
-      <nav class="account-page__nav" dv:replace="~{account/nav :: nav}"></nav>
+      <nav class="account-page__nav" coil:replace="~{account/nav :: nav}"></nav>
 
-      <section class="account-orders" dv:if="${account.hasRecentOrders}">
+      <section class="account-orders" coil:if="${account.hasRecentOrders}">
         <article class="account-panel">
           <p class="account-panel__eyebrow">Orders</p>
           <h2>Latest purchases</h2>
           <ol class="account-panel__list">
-            <li dv:each="order : ${recentOrders}">
+            <li coil:each="order : ${recentOrders}">
               <div>
-                <strong dv:text="${order.reference}">ORD-10042</strong>
-                <span dv:text="${order.status}">Paid</span>
-                <span dv:text="${order.total}">GBP 84</span>
+                <strong coil:text="${order.reference}">ORD-10042</strong>
+                <span coil:text="${order.status}">Paid</span>
+                <span coil:text="${order.total}">GBP 84</span>
               </div>
               <p>
-                <span dv:text="${order.lineCount}">1</span>
+                <span coil:text="${order.lineCount}">1</span>
                 line items in this order.
               </p>
-              <p dv:if="${order.hasPaymentSummary}" dv:text="${order.paymentSummary}">
+              <p coil:if="${order.hasPaymentSummary}" coil:text="${order.paymentSummary}">
                 Card ending 4242, reference PAY-50001
               </p>
-              <p dv:if="${order.hasCheckoutEmail}">
+              <p coil:if="${order.hasCheckoutEmail}">
                 Receipt email
-                <strong dv:text="${order.checkoutEmail}">member@example.com</strong>
+                <strong coil:text="${order.checkoutEmail}">member@example.com</strong>
               </p>
             </li>
           </ol>
         </article>
       </section>
 
-      <section class="account-orders" dv:unless="${account.hasRecentOrders}">
+      <section class="account-orders" coil:unless="${account.hasRecentOrders}">
         <article class="account-panel">
           <p class="account-panel__eyebrow">Orders</p>
           <h2>No completed orders yet</h2>
-          <p dv:text="${account.ordersEmptyText}">
+          <p coil:text="${account.ordersEmptyText}">
             Completed storefront purchases will appear here once checkout has finished.
           </p>
           <a
             class="button button--secondary"
             href="/shop"
-            dv:attr="href=${account.ordersCtaUrl}"
-            dv:text="${account.ordersCtaLabel}"
+            coil:attr="href=${account.ordersCtaUrl}"
+            coil:text="${account.ordersCtaLabel}"
           >
             Browse storefront
           </a>
@@ -90,22 +90,22 @@
       <section class="account-page__cards">
         <article class="account-card">
           <h2>Memberships</h2>
-          <div dv:if="${account.hasMembership}">
+          <div coil:if="${account.hasMembership}">
             <p>
-              <strong dv:text="${membershipSummary.tierName}">Harbor Circle</strong>
-              <span dv:text="${membershipSummary.status}">Purchased</span>
+              <strong coil:text="${membershipSummary.tierName}">Harbor Circle</strong>
+              <span coil:text="${membershipSummary.status}">Purchased</span>
             </p>
-            <p dv:text="${membershipSummary.renewalText}">
+            <p coil:text="${membershipSummary.renewalText}">
               Renewal timing and entitlement state will appear here after sync.
             </p>
             <a class="button" href="/account/memberships">View memberships</a>
           </div>
-          <div dv:if="${account.hasPendingMembershipOrder}">
+          <div coil:if="${account.hasPendingMembershipOrder}">
             <p>
               Latest order
-              <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+              <strong coil:text="${account.latestOrderReference}">ORD-10042</strong>
               is
-              <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
+              <span coil:text="${account.latestOrderStatus}">Pending Payment</span>.
               Membership access only appears here after a qualifying membership purchase is
               captured for this account view. After a provider return, use this order history to
               confirm the latest status, then return to memberships once payment has settled.
@@ -115,15 +115,15 @@
               Review this order
             </a>
           </div>
-          <div dv:if="${account.needsMembershipPurchase}">
-            <p dv:text="${account.membershipEmptyText}">
+          <div coil:if="${account.needsMembershipPurchase}">
+            <p coil:text="${account.membershipEmptyText}">
               No active membership is attached yet.
             </p>
             <a class="button" href="/account/memberships">View memberships</a>
             <a
               class="button button--secondary"
               href="/shop/collections/memberships"
-              dv:attr="href=${account.membershipCtaUrl}"
+              coil:attr="href=${account.membershipCtaUrl}"
             >
               Explore memberships
             </a>
@@ -131,18 +131,18 @@
         </article>
         <article class="account-card">
           <h2>Next steps</h2>
-          <p dv:if="${account.hasRecentOrders}">
+          <p coil:if="${account.hasRecentOrders}">
             Review order status, then continue shopping or return to checkout if you still have
             work to finish on this browser session. If you bought membership access, the
             memberships page updates from the same session after payment capture. Pending Payment
             after a provider return means settlement is still completing.
           </p>
-          <p dv:unless="${account.hasRecentOrders}">
+          <p coil:unless="${account.hasRecentOrders}">
             Start from the storefront, then come back here once checkout has completed on this
             browser session.
           </p>
           <a class="button" href="/checkout">Open checkout</a>
-          <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+          <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
             Continue shopping
           </a>
         </article>

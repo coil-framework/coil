@@ -6,7 +6,7 @@ The commerce module owns catalog, cart, checkout, order state, and the operator 
 
 Primary implementation files:
 
-- `crates/davenda-commerce/src/module/platform/manifest.rs`
+- `crates/coil-commerce/src/module/platform/manifest.rs`
 - `apps/shoppr/templates/commerce/catalog.html`
 - `apps/shoppr/templates/commerce/product-detail.html`
 - `apps/shoppr/templates/commerce/cart.html`
@@ -28,7 +28,7 @@ That reusable battery belongs in an official module.
 
 ## What It Provides
 
-From `crates/davenda-commerce/src/module/platform/manifest.rs`, commerce adds:
+From `crates/coil-commerce/src/module/platform/manifest.rs`, commerce adds:
 
 - migrations for catalog, checkout, and orders
 - public routes for catalog, collections, product detail, cart, checkout, and confirmation
@@ -121,7 +121,7 @@ Concrete example:
 
 ```html title="templates/commerce/product-detail.html"
 <form method="post" action="/cart">
-  <input type="hidden" name="sku" dv:attr="value=${product.sku}" />
+  <input type="hidden" name="sku" coil:attr="value=${product.sku}" />
   <button type="submit">Add to bag</button>
 </form>
 ```

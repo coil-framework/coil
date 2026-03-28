@@ -1,0 +1,11 @@
+[package]
+name = "coil-admin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coil-auth = { path = "../coil-auth" }
+coil-core = { path = "../coil-core" }
+coil-data = { path = "../coil-data" }
+coil-jobs = { path = "../coil-jobs" }
+coil-wasm = { path = "../coil-wasm" }

@@ -1,6 +1,6 @@
 # Roadmap
 
-Davenda is being shaped as a product-focused Rust web framework with a strong ecommerce core and a wider application model.
+Coil is being shaped as a product-focused Rust web framework with a strong ecommerce core and a wider application model.
 
 Current priorities:
 

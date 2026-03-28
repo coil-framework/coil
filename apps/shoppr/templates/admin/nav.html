@@ -1,38 +1,38 @@
-<nav class="admin-nav" xmlns:dv="https://davenda.dev" dv:fragment="primary" aria-label="Admin navigation">
+<nav class="admin-nav" xmlns:coil="https://coil.rs" coil:fragment="primary" aria-label="Admin navigation">
   <div class="admin-nav__group">
     <p class="admin-nav__label">Commerce</p>
-    <a class="admin-nav__link" href="/admin" dv:attr="href=${links.adminDashboard}">Dashboard</a>
-    <a class="admin-nav__link" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+    <a class="admin-nav__link" href="/admin" coil:attr="href=${links.adminDashboard}">Dashboard</a>
+    <a class="admin-nav__link" href="/admin/orders" coil:attr="href=${links.adminOrders}">
       Orders
     </a>
     <a
       class="admin-nav__link"
       href="/admin/catalog/products"
-      dv:attr="href=${links.adminCatalog}"
+      coil:attr="href=${links.adminCatalog}"
     >
       Catalog
     </a>
   </div>
   <div class="admin-nav__group">
     <p class="admin-nav__label">Content</p>
-    <a class="admin-nav__link" href="/admin/pages" dv:attr="href=${links.adminPages}">
+    <a class="admin-nav__link" href="/admin/pages" coil:attr="href=${links.adminPages}">
       Pages
     </a>
     <a
       class="admin-nav__link"
       href="/admin/navigation"
-      dv:attr="href=${links.adminNavigation}"
+      coil:attr="href=${links.adminNavigation}"
     >
       Navigation
     </a>
     <a
       class="admin-nav__link"
       href="/admin/redirects"
-      dv:attr="href=${links.adminRedirects}"
+      coil:attr="href=${links.adminRedirects}"
     >
       Redirects
     </a>
-    <a class="admin-nav__link" href="/admin/audit" dv:attr="href=${links.adminAudit}">
+    <a class="admin-nav__link" href="/admin/audit" coil:attr="href=${links.adminAudit}">
       Audit
     </a>
   </div>

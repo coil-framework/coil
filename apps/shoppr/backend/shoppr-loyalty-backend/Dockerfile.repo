@@ -24,7 +24,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV HARBOR_BACKEND_BIND=0.0.0.0:8081
+ENV SHOPPR_BACKEND_BIND=0.0.0.0:8081
 WORKDIR /app
 
 COPY --from=builder /workspace/shoppr-loyalty-backend-bin /usr/local/bin/shoppr-loyalty-backend

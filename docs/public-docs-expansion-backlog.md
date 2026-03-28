@@ -2,7 +2,7 @@
 
 This backlog translates the current documentation feedback into a concrete implementation plan.
 
-The goal of this pass is not to replace the current docs. It is to keep all current material and add the missing practical guidance that makes Davenda usable by a real developer without forcing them to reverse-engineer the repository.
+The goal of this pass is not to replace the current docs. It is to keep all current material and add the missing practical guidance that makes Coil usable by a real developer without forcing them to reverse-engineer the repository.
 
 ## Principles
 
@@ -20,7 +20,7 @@ Each non-homepage page should answer these questions in order:
 1. What is this?
 2. Why does it exist?
 3. When should I use it?
-4. How do I use it in Davenda?
+4. How do I use it in Coil?
 5. Which exact files, keys, APIs, templates, commands, or crates are involved?
 6. What does a working example look like?
 7. What are the constraints and common mistakes?
@@ -177,14 +177,14 @@ Gaps:
 
 Add:
 - Minimal composition example
-- Manual composition example without `davenda-all`
+- Manual composition example without `coil`
 - Failure example when app manifest enables a module that the binary did not link
 
 Dependencies:
 - Module reference pages
 
 Acceptance criteria:
-- A developer knows how to choose between `davenda-all` and selective composition
+- A developer knows how to choose between `coil` and selective composition
 
 ### `website/docs/core-concepts/request-and-render-lifecycle.md`
 
@@ -202,7 +202,7 @@ Dependencies:
 - Theme structure page
 
 Acceptance criteria:
-- A developer can explain how a request becomes a response in Davenda
+- A developer can explain how a request becomes a response in Coil
 
 ### `website/docs/core-concepts/sites-locales-and-markets.md`
 
@@ -274,11 +274,11 @@ Acceptance criteria:
 ### `website/docs/core-concepts/accessibility-as-a-platform-contract.md`
 
 Gaps:
-- Too principle-oriented without enough Davenda-specific guidance
+- Too principle-oriented without enough Coil-specific guidance
 
 Add:
 - Practical markup examples
-- What Davenda validates
+- What Coil validates
 - What remains the app’s responsibility
 - Shoppr or Gitly examples for forms, dialogs, tables, and navigation
 
@@ -286,7 +286,7 @@ Dependencies:
 - Accessibility reference expansion
 
 Acceptance criteria:
-- A developer knows how to produce accessible Davenda templates rather than just why accessibility matters
+- A developer knows how to produce accessible Coil templates rather than just why accessibility matters
 
 ### `website/docs/core-concepts/seo-and-discoverability.md`
 
@@ -315,7 +315,7 @@ Gaps:
 
 Add:
 - Recommended project layouts
-- When to use `davenda-all`
+- When to use `coil`
 - When to use selective dependencies
 - How to add a new crate
 - How to add a backend crate
@@ -325,7 +325,7 @@ Dependencies:
 - Composition reference expansion
 
 Acceptance criteria:
-- A developer can organise a Davenda repo correctly without guessing
+- A developer can organise a Coil repo correctly without guessing
 
 ### `website/docs/operations/build-and-deploy.md`
 
@@ -348,7 +348,7 @@ Dependencies:
 - Expanded platform config reference
 
 Acceptance criteria:
-- A developer can build and deploy a real Davenda app from this page
+- A developer can build and deploy a real Coil app from this page
 
 ### `website/docs/operations/configuration-and-secrets.md`
 
@@ -372,7 +372,7 @@ Acceptance criteria:
 ### `website/docs/operations/observability.md`
 
 Gaps:
-- Lists concerns without showing the exact Davenda surfaces
+- Lists concerns without showing the exact Coil surfaces
 
 Add:
 - Built-in logs, metrics, traces, health, readiness, and audit surfaces
@@ -382,13 +382,13 @@ Add:
 - How to add custom audit evidence
 - Where to fetch audit evidence from
 - Shoppr and Gitly examples
-- Suggested dashboards grounded in actual Davenda signals
+- Suggested dashboards grounded in actual Coil signals
 
 Dependencies:
 - Demo observability examples
 
 Acceptance criteria:
-- A developer can instrument and operate a Davenda app without leaving the docs
+- A developer can instrument and operate a Coil app without leaving the docs
 
 ### `website/docs/operations/jobs-and-schedulers.md`
 
@@ -408,7 +408,7 @@ Dependencies:
 - Demo job examples
 
 Acceptance criteria:
-- A developer can add and operate background work in Davenda
+- A developer can add and operate background work in Coil
 
 ### `website/docs/operations/cache-tls-cutover-and-rollback.md`
 
@@ -448,7 +448,7 @@ Add:
 - Webhook troubleshooting
 
 Acceptance criteria:
-- A developer can identify the right Davenda subsystem to inspect for a concrete failure
+- A developer can identify the right Coil subsystem to inspect for a concrete failure
 
 ### New Operations Pages
 
@@ -510,7 +510,7 @@ Acceptance criteria:
 #### `website/docs/reference/auth-overview.md`
 
 Add:
-- Real introduction to Davenda auth
+- Real introduction to Coil auth
 - RBAC comparison
 - Zanzibar explanation in plain language
 
@@ -573,7 +573,7 @@ Add:
 - Several complete Shoppr and Gitly examples
 
 Acceptance criteria:
-- A developer can write Davenda templates from scratch
+- A developer can write Coil templates from scratch
 
 ### `website/docs/reference/theme-structure.md`
 
@@ -614,7 +614,7 @@ Add:
 - Common patterns and anti-patterns
 
 Acceptance criteria:
-- A developer can implement accessible Davenda UI with confidence
+- A developer can implement accessible Coil UI with confidence
 
 ### `website/docs/reference/seo.md`
 
@@ -662,7 +662,7 @@ Acceptance criteria:
 
 Add:
 - Concrete Cargo examples
-- `davenda-all` vs selective dependency guidance
+- `coil` vs selective dependency guidance
 - Common composition patterns
 
 Acceptance criteria:
@@ -709,7 +709,7 @@ Acceptance criteria:
 
 ## Use Cases
 
-These pages should become the practical layer that turns abstract concepts into real Davenda work.
+These pages should become the practical layer that turns abstract concepts into real Coil work.
 
 ### Shoppr Pages
 
@@ -735,7 +735,7 @@ New Shoppr pages:
 - `website/docs/use-cases/shoppr/jobs-webhooks-and-background-work.md`
 
 Acceptance criteria:
-- Shoppr becomes the canonical practical walkthrough for Davenda commerce
+- Shoppr becomes the canonical practical walkthrough for Coil commerce
 
 ### Gitly Pages
 
@@ -804,7 +804,7 @@ Acceptance criteria:
 
 This docs pass is complete only when all of the following are true:
 
-- A developer can configure, build, deploy, observe, extend, localize, theme, authorize, and operate a Davenda app from the docs alone.
+- A developer can configure, build, deploy, observe, extend, localize, theme, authorize, and operate a Coil app from the docs alone.
 - Every abstract page contains at least one concrete example.
 - Every reference page contains descriptions, defaults, examples, and practical guidance.
 - Every major subsystem links to canonical Shoppr or Gitly implementations.

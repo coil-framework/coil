@@ -2,7 +2,7 @@
 title: Request And Render Lifecycle
 ---
 
-Davenda is an HTML-first framework. That sentence is easy to repeat and easy to misunderstand.
+Coil is an HTML-first framework. That sentence is easy to repeat and easy to misunderstand.
 
 The important point is that request handling, auth, route resolution, render-model assembly, and progressive enhancement all belong to one coherent lifecycle.
 
@@ -15,7 +15,7 @@ The request and render lifecycle is the path from an incoming HTTP request to:
 - a redirect after a form action
 - a typed JSON response for a genuinely API-shaped route
 
-Davenda treats full pages as the default path, not as a thin fallback after API design.
+Coil treats full pages as the default path, not as a thin fallback after API design.
 
 ## Why It Exists
 
@@ -26,7 +26,7 @@ Many web stacks split the product in awkward ways:
 - forms and redirects feel secondary
 - auth and route semantics drift between page and API layers
 
-Davenda tries to keep those concerns unified, because real products usually mix:
+Coil tries to keep those concerns unified, because real products usually mix:
 
 - public pages
 - account surfaces
@@ -45,7 +45,7 @@ The exact internals are deeper than this page, but the shape is consistent:
 5. a render model is assembled for page-shaped responses
 6. templates render HTML using explicit data rather than arbitrary code execution
 
-That lifecycle is what lets Davenda keep HTML-first rendering without giving up operational or security discipline.
+That lifecycle is what lets Coil keep HTML-first rendering without giving up operational or security discipline.
 
 ## Shoppr Home Page Example
 
@@ -130,10 +130,10 @@ model = model
 And the product-detail template consumes those exact keys:
 
 ```html
-<section class="product-page__hero" dv:if="${hasProduct}">
-  <h1 dv:text="${product.name}">Harbor Cap</h1>
-  <p class="product-page__price" dv:text="${product.price}">GBP 29</p>
-  <a class="button" dv:attr="href=${links.cart}">Review cart</a>
+<section class="product-page__hero" coil:if="${hasProduct}">
+  <h1 coil:text="${product.name}">Harbor Cap</h1>
+  <p class="product-page__price" coil:text="${product.price}">GBP 29</p>
+  <a class="button" coil:attr="href=${links.cart}">Review cart</a>
 </section>
 ```
 
@@ -201,7 +201,7 @@ This is still part of the same lifecycle. The runtime:
    - usually a redirect
    - sometimes a fragment response for progressive enhancement
 
-This is what “HTML-first” means in Davenda in practice. Forms and redirects are not legacy escape hatches. They are part of the primary model.
+This is what “HTML-first” means in Coil in practice. Forms and redirects are not legacy escape hatches. They are part of the primary model.
 
 ## Where Linked Rust And WASM Participate
 
@@ -245,7 +245,7 @@ Site, locale, auth, and module composition all affect rendering. It is not just 
 
 ### Expecting arbitrary logic in templates
 
-Davenda keeps templates deliberately constrained. Complex state should be prepared in Rust render models, not improvised inside the template engine.
+Coil keeps templates deliberately constrained. Complex state should be prepared in Rust render models, not improvised inside the template engine.
 
 ### Assuming a template file alone defines the page contract
 
@@ -258,7 +258,7 @@ If either side is missing, the template will feel disconnected.
 
 ### Treating form actions as second-class behaviour
 
-In Davenda, stateful form flows are part of the primary model, especially for storefronts, account areas, and admin surfaces.
+In Coil, stateful form flows are part of the primary model, especially for storefronts, account areas, and admin surfaces.
 
 ### Forgetting that host and locale resolution happen before rendering
 

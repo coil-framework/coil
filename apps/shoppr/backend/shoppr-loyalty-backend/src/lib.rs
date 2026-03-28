@@ -1,14 +1,14 @@
 //! Shoppr linked customer backend example.
 //!
 //! This crate is the chapter 96 path for customer-owned first-party Rust logic: a linked library
-//! that a customer workspace composes into its own binary and registers at explicit Davenda hook
+//! that a customer workspace composes into its own binary and registers at explicit Coil hook
 //! points.
 //!
 //! High-level shape:
 //!
 //! ```rust,ignore
 //! fn main() -> Result<(), anyhow::Error> {
-//!     davenda_all::builder()
+//!     coil::builder()
 //!         .with_customer_plugin(shoppr_loyalty_backend::plugin())
 //!         .run_from_env()
 //! }
@@ -20,7 +20,7 @@
 
 mod http;
 
-use davenda_customer_sdk::{
+use coil_customer_sdk::{
     AuditEntry, AuditFacade, AuthFacade, BackendError, BackendErrorKind, CheckoutHooks,
     CommerceFacade, CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor,
     JobsFacade, OrderAdjustment, OrderDraft, OrderReviewDecision, RegisteredHookKind,
@@ -126,9 +126,9 @@ impl VerifiedWebhookHooks for ShopprCustomerBackend {
         &self,
         _ctx: &RequestContext,
         webhook: &VerifiedWebhook,
-        _http: &dyn davenda_customer_sdk::OutboundHttpFacade,
+        _http: &dyn coil_customer_sdk::OutboundHttpFacade,
         _jobs: &dyn JobsFacade,
-        _repositories: &dyn davenda_customer_sdk::RepositoryFacade,
+        _repositories: &dyn coil_customer_sdk::RepositoryFacade,
         audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
         if webhook.source != "crm" || webhook.event != "contact-updated" {
@@ -143,7 +143,7 @@ impl VerifiedWebhookHooks for ShopprCustomerBackend {
                 BackendError::new(
                     BackendErrorKind::InvalidInput,
                     "crm_contact_update_payload",
-                    "verified webhook payload could not be parsed as a Harbor CRM contact update",
+                    "verified webhook payload could not be parsed as a Shoppr CRM contact update",
                 )
                 .with_detail(error.to_string())
             })?;
@@ -486,7 +486,7 @@ fn parse_bool(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use davenda_customer_sdk::{
+    use coil_customer_sdk::{
         AuditFacade, AuthCheckRequest, AuthCheckResult, AuthExplainRequest, AuthExplanation,
         CommerceProduct, CustomerAppContext, CustomerHookRegistry, MoneyAmount, OrderLineDraft,
         OutboundHttpRequest, OutboundHttpResponse, PrincipalContext, TraceContext,
@@ -510,9 +510,9 @@ mod tests {
 
         fn register_cms_hooks(
             &mut self,
-            _hooks: Arc<dyn davenda_customer_sdk::CmsHooks>,
+            _hooks: Arc<dyn coil_customer_sdk::CmsHooks>,
         ) -> Result<(), BackendError> {
-            unreachable!("Harbor loyalty backend should not register CMS hooks")
+            unreachable!("Shoppr loyalty backend should not register CMS hooks")
         }
 
         fn register_verified_webhook_hooks(
@@ -525,9 +525,9 @@ mod tests {
 
         fn register_verified_webhook_asset_hooks(
             &mut self,
-            _hooks: Arc<dyn davenda_customer_sdk::VerifiedWebhookAssetHooks>,
+            _hooks: Arc<dyn coil_customer_sdk::VerifiedWebhookAssetHooks>,
         ) -> Result<(), BackendError> {
-            unreachable!("Harbor loyalty backend should not register verified webhook asset hooks")
+            unreachable!("Shoppr loyalty backend should not register verified webhook asset hooks")
         }
     }
 
@@ -581,7 +581,7 @@ mod tests {
 
     struct NoopHttp;
 
-    impl davenda_customer_sdk::OutboundHttpFacade for NoopHttp {
+    impl coil_customer_sdk::OutboundHttpFacade for NoopHttp {
         fn send(
             &self,
             _request: OutboundHttpRequest,
@@ -599,9 +599,9 @@ mod tests {
     impl JobsFacade for NoopJobs {
         fn enqueue(
             &self,
-            _request: davenda_customer_sdk::JobRequest,
-        ) -> Result<davenda_customer_sdk::JobReceipt, BackendError> {
-            Ok(davenda_customer_sdk::JobReceipt {
+            _request: coil_customer_sdk::JobRequest,
+        ) -> Result<coil_customer_sdk::JobReceipt, BackendError> {
+            Ok(coil_customer_sdk::JobReceipt {
                 queue: "customer-backend".to_string(),
                 job_id: "job-1".to_string(),
             })
@@ -610,12 +610,12 @@ mod tests {
 
     struct NoopRepositories;
 
-    impl davenda_customer_sdk::RepositoryFacade for NoopRepositories {
+    impl coil_customer_sdk::RepositoryFacade for NoopRepositories {
         fn read(
             &self,
-            _query: &davenda_customer_sdk::RepositoryQuery,
-        ) -> Result<davenda_customer_sdk::RepositoryRecordSet, BackendError> {
-            Ok(davenda_customer_sdk::RepositoryRecordSet {
+            _query: &coil_customer_sdk::RepositoryQuery,
+        ) -> Result<coil_customer_sdk::RepositoryRecordSet, BackendError> {
+            Ok(coil_customer_sdk::RepositoryRecordSet {
                 repository: "noop".to_string(),
                 records: Vec::new(),
             })
@@ -623,8 +623,8 @@ mod tests {
 
         fn write(
             &self,
-            _change: davenda_customer_sdk::RepositoryWrite,
-        ) -> Result<davenda_customer_sdk::RepositoryWriteReceipt, BackendError> {
+            _change: coil_customer_sdk::RepositoryWrite,
+        ) -> Result<coil_customer_sdk::RepositoryWriteReceipt, BackendError> {
             Err(BackendError::new(
                 BackendErrorKind::Unsupported,
                 "repository.write.unsupported",
@@ -644,7 +644,7 @@ mod tests {
     #[test]
     fn gold_member_high_value_order_gets_vip_rules() {
         let response = compute_loyalty_preview(&LoyaltyPreviewRequest {
-            customer_email: "captain@harbor.test".to_string(),
+            customer_email: "captain@shoppr.test".to_string(),
             membership_tier: MembershipTier::Gold,
             subtotal_gbp: 175.0,
             cart_skus: vec!["harbor-cap".to_string()],
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn standard_event_order_gets_priority_but_not_vip_discount() {
         let response = compute_loyalty_preview(&LoyaltyPreviewRequest {
-            customer_email: "member@harbor.test".to_string(),
+            customer_email: "member@shoppr.test".to_string(),
             membership_tier: MembershipTier::Standard,
             subtotal_gbp: 64.0,
             cart_skus: vec!["tasting-pass".to_string()],
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn crm_winback_member_requires_follow_up() {
         let route = route_crm_contact(&CrmContactUpdate {
-            customer_email: "member@harbor.test".to_string(),
+            customer_email: "member@shoppr.test".to_string(),
             membership_tier: MembershipTier::Standard,
             lifecycle_stage: "winback".to_string(),
             last_order_total_gbp: Some(42.0),
@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn international_order_requires_manual_review() {
         let review = review_order(&OrderReviewRequest {
-            customer_email: "captain@harbor.test".to_string(),
+            customer_email: "captain@shoppr.test".to_string(),
             membership_tier: MembershipTier::Standard,
             subtotal_gbp: 88.0,
             cart_skus: vec!["harbor-cap".to_string()],
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn gold_member_domestic_order_uses_priority_lane() {
         let review = review_order(&OrderReviewRequest {
-            customer_email: "gold@harbor.test".to_string(),
+            customer_email: "gold@shoppr.test".to_string(),
             membership_tier: MembershipTier::Gold,
             subtotal_gbp: 110.0,
             cart_skus: vec!["harbor-cap".to_string()],
@@ -735,21 +735,21 @@ mod tests {
     #[test]
     fn webhook_secret_fails_closed() {
         assert!(webhook_secret_matches(
-            "harbor-backend-dev-secret",
-            Some("harbor-backend-dev-secret")
+            "shoppr-backend-dev-secret",
+            Some("shoppr-backend-dev-secret")
         ));
         assert!(!webhook_secret_matches(
-            "harbor-backend-dev-secret",
+            "shoppr-backend-dev-secret",
             Some("wrong-secret")
         ));
-        assert!(!webhook_secret_matches("harbor-backend-dev-secret", None));
+        assert!(!webhook_secret_matches("shoppr-backend-dev-secret", None));
     }
 
     #[test]
     fn plugin_surface_wraps_the_same_customer_rules() {
         let backend = plugin();
         let review = backend.review_checkout_order(&OrderReviewRequest {
-            customer_email: "captain@harbor.test".to_string(),
+            customer_email: "captain@shoppr.test".to_string(),
             membership_tier: MembershipTier::Gold,
             subtotal_gbp: 220.0,
             cart_skus: vec!["harbor-cap".to_string()],
@@ -761,7 +761,7 @@ mod tests {
         assert_eq!(review.assigned_queue, "ops-manual-review");
 
         let route = backend.route_crm_contact_update(&CrmContactUpdate {
-            customer_email: "member@harbor.test".to_string(),
+            customer_email: "member@shoppr.test".to_string(),
             membership_tier: MembershipTier::Standard,
             lifecycle_stage: "winback".to_string(),
             last_order_total_gbp: Some(42.0),
@@ -807,14 +807,14 @@ mod tests {
     }
 
     #[test]
-    fn checkout_hook_maps_order_draft_to_harbor_review_logic() {
+    fn checkout_hook_maps_order_draft_to_shoppr_review_logic() {
         let backend = plugin();
         let audit = RecordingAudit::default();
         let decision = CheckoutHooks::review_order(
             &backend,
             &request_context(),
             &OrderDraft {
-                order_id: "ORD-HARBOR-1".to_string(),
+                order_id: "ORD-SHOPPR-1".to_string(),
                 currency_code: "GBP".to_string(),
                 subtotal: MoneyAmount::new("GBP", 8_800),
                 total: MoneyAmount::new("GBP", 8_800),
@@ -831,7 +831,7 @@ mod tests {
                 metadata: BTreeMap::from([
                     (
                         "customer_email".to_string(),
-                        "captain@harbor.test".to_string(),
+                        "captain@shoppr.test".to_string(),
                     ),
                     ("membership_tier".to_string(), "standard".to_string()),
                     ("shipping_country".to_string(), "IE".to_string()),
@@ -879,7 +879,7 @@ mod tests {
                 headers: BTreeMap::new(),
                 content_type: Some("application/json".to_string()),
                 payload: serde_json::to_vec(&CrmContactUpdate {
-                    customer_email: "member@harbor.test".to_string(),
+                    customer_email: "member@shoppr.test".to_string(),
                     membership_tier: MembershipTier::Standard,
                     lifecycle_stage: "winback".to_string(),
                     last_order_total_gbp: Some(42.0),

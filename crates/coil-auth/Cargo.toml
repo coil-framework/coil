@@ -1,0 +1,11 @@
+[package]
+name = "coil-auth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coil-config = { path = "../coil-config" }
+coil-data = { path = "../coil-data" }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+zanzibar = { workspace = true }

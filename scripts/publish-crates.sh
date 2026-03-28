@@ -2,35 +2,35 @@
 set -euo pipefail
 
 PACKAGES=(
-  davenda-a11y
-  davenda-assets
-  davenda-cache
-  davenda-commerce
-  davenda-core
-  davenda-customer-sdk
-  davenda-data
-  davenda-i18n
-  davenda-observability
-  davenda-report
-  davenda-seo
-  davenda-storage
-  davenda-template
-  davenda-tls
-  davenda-wasm
-  davenda-auth
-  davenda-config
-  davenda-app
-  davenda-admin
-  davenda-cms
-  davenda-events
-  davenda-jobs
-  davenda-media
-  davenda-memberships
-  davenda-ops
-  davenda-runtime
-  davenda-import
-  davenda-cli
-  davenda-all
+  coil-a11y
+  coil-assets
+  coil-cache
+  coil-commerce
+  coil-core
+  coil-customer-sdk
+  coil-data
+  coil-i18n
+  coil-observability
+  coil-report
+  coil-seo
+  coil-storage
+  coil-template
+  coil-tls
+  coil-wasm
+  coil-auth
+  coil-config
+  coil-app
+  coil-admin
+  coil-cms
+  coil-events
+  coil-jobs
+  coil-media
+  coil-memberships
+  coil-ops
+  coil-runtime
+  coil-import
+  coil-cli
+  coil
 )
 
 MODE="${DRY_RUN:-false}"

@@ -1,0 +1,25 @@
+[package]
+name = "coil-app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coil-auth = { path = "../coil-auth" }
+coil-assets = { path = "../coil-assets" }
+coil-config = { path = "../coil-config" }
+coil-core = { path = "../coil-core" }
+coil-customer-sdk = { path = "../coil-customer-sdk" }
+coil-data = { path = "../coil-data" }
+coil-i18n = { path = "../coil-i18n" }
+coil-jobs = { path = "../coil-jobs" }
+coil-report = { path = "../coil-report" }
+coil-runtime = { path = "../coil-runtime" }
+coil-template = { path = "../coil-template" }
+coil-wasm = { path = "../coil-wasm" }
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.8.23"
+thiserror = "2.0.17"
+
+[dev-dependencies]
+coil-storage = { path = "../coil-storage" }
+tempfile = "3"

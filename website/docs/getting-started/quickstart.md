@@ -2,9 +2,9 @@
 title: Quickstart
 ---
 
-This quickstart is written for Rust web developers who want to understand what Davenda feels like in practice before reading the deeper architecture material.
+This quickstart is written for Rust web developers who want to understand what Coil feels like in practice before reading the deeper architecture material.
 
-The goal is not just to "get the server running." The goal is to see the three things Davenda is built around:
+The goal is not just to "get the server running." The goal is to see the three things Coil is built around:
 
 - the customer-root workspace shape
 - HTML-first product surfaces backed by a native runtime
@@ -46,7 +46,7 @@ What to inspect:
 
 ## Then Run Gitly
 
-Gitly exists to show that Davenda is not an ecommerce-only framework.
+Gitly exists to show that Coil is not an ecommerce-only framework.
 
 ```bash
 cd apps/gitly
@@ -84,7 +84,7 @@ When you run the demos, pay attention to these questions:
 - How do site, locale, and route resolution show up in the running app?
 - What would need to change if you replaced the example product with your own?
 
-Those questions matter more than whether you personally like the demo copy or visual design. Davenda is about getting the product and runtime boundaries right.
+Those questions matter more than whether you personally like the demo copy or visual design. Coil is about getting the product and runtime boundaries right.
 
 ## Common First-Run Mistakes
 
@@ -98,7 +98,7 @@ The runtime model becomes much clearer if you also inspect the customer app work
 
 ### Expecting a single generic extension story
 
-Davenda intentionally separates:
+Coil intentionally separates:
 
 - official modules
 - linked customer Rust

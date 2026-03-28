@@ -8,7 +8,7 @@ The auth schema is the part of an auth package that defines:
 - relations
 - derived permissions
 
-In Davenda, that schema lives in `model.auth`.
+In Coil, that schema lives in `model.auth`.
 
 ## When You Should Use This Page
 

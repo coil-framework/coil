@@ -81,7 +81,7 @@ This means:
 - the host scheduler already exists
 - the package only contributes the work unit for the named job target
 
-That is why Davenda’s extension model stays operationally coherent. Jobs remain host-owned.
+That is why Coil’s extension model stays operationally coherent. Jobs remain host-owned.
 
 ## Outbound HTTP Example
 

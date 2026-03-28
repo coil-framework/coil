@@ -2,7 +2,7 @@
 title: Contributing
 ---
 
-Davenda welcomes contributions, but the bar is product and architecture quality, not raw activity.
+Coil welcomes contributions, but the bar is product and architecture quality, not raw activity.
 
 This page is the docs-site version of the contribution contract. It should be enough for a new
 contributor to understand how to propose, build, and ship a useful change.
@@ -137,7 +137,7 @@ actionable.
 
 ## Docs Contributions
 
-Docs work is first-class work in Davenda.
+Docs work is first-class work in Coil.
 
 Good docs changes:
 
@@ -157,12 +157,12 @@ issue.
 
 ## Licensing
 
-By contributing to Davenda, you agree that your contributions are licensed under the repository
+By contributing to Coil, you agree that your contributions are licensed under the repository
 license.
 
 ## Read Next
 
 - [Official Modules](../reference/modules.md)
-- [Composition And `davenda-all`](../reference/composition.md)
+- [Composition And `coil`](../reference/composition.md)
 - [Shoppr Overview](../use-cases/shoppr/overview.md)
 - [Gitly Overview](../use-cases/gitly/overview.md)

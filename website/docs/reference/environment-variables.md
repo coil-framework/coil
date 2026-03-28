@@ -2,7 +2,7 @@
 title: Environment Variables
 ---
 
-Davenda does not treat environment variables as a hidden side channel. The runtime reads them
+Coil does not treat environment variables as a hidden side channel. The runtime reads them
 through explicit secret references in platform config and customer bootstrap scripts.
 
 Use this page when you want to answer:
@@ -11,9 +11,9 @@ Use this page when you want to answer:
 - where they are declared in config
 - which ones are platform-wide versus app-specific
 
-## How Davenda Resolves Environment Secrets
+## How Coil Resolves Environment Secrets
 
-The runtime resolver lives in `crates/davenda-runtime/src/server/backend.rs`.
+The runtime resolver lives in `crates/coil-runtime/src/server/backend.rs`.
 
 `EnvironmentSecretResolver` supports:
 
@@ -28,13 +28,13 @@ declared there, not guessed inside random helper code.
 
 These names appear across the checked-in demos and runtime tests:
 
-- `DAVENDA_CONFIG`
+- `COIL_CONFIG`
   - config file path used by app entrypoints and container bootstrap
-- `DAVENDA_BIND`
+- `COIL_BIND`
   - optional bind override used by runtime serve helpers
-- `DAVENDA_COOKIE_SECRET`
+- `COIL_COOKIE_SECRET`
   - session cookie secret
-- `DAVENDA_CSRF_SECRET`
+- `COIL_CSRF_SECRET`
   - CSRF signing secret
 - `DATABASE_URL`
   - database connection string
@@ -93,8 +93,8 @@ The key operational vars remain:
 - `DATABASE_URL`
 - `REDIS_URL`
 - `OBJECT_STORE_URL`
-- `DAVENDA_COOKIE_SECRET`
-- `DAVENDA_CSRF_SECRET`
+- `COIL_COOKIE_SECRET`
+- `COIL_CSRF_SECRET`
 
 ## `OBJECT_STORE_URL`
 
@@ -108,7 +108,7 @@ through Docker Compose values in:
 
 The runtime then parses it through the storage/backend layer in:
 
-- `crates/davenda-runtime/src/server/backend.rs`
+- `crates/coil-runtime/src/server/backend.rs`
 
 ## App Root Variables In Customer Workspaces
 
@@ -119,7 +119,7 @@ The demo customer apps also support workspace-root discovery overrides:
   - `HARBOR_SHOP_APP_ROOT`
 - Gitly:
   - `GITLY_APP_ROOT`
-  - `OCTOHUB_APP_ROOT`
+  - `GITLY_APP_ROOT`
 
 Concrete files:
 
@@ -130,7 +130,7 @@ These exist to make the customer binaries usable from more than one launch conte
 not all equally current:
 
 - `GITLY_APP_ROOT` is the current Gitly override.
-- `OCTOHUB_APP_ROOT` is a legacy compatibility fallback retained during the Gitly rename.
+- `GITLY_APP_ROOT` is a legacy compatibility fallback retained during the Gitly rename.
 - `HARBOUR_SHOP_APP_ROOT` and `HARBOR_SHOP_APP_ROOT` are legacy Shoppr compatibility fallbacks from
   the earlier Harbor naming.
 
@@ -139,7 +139,7 @@ For new local setup and docs, prefer:
 - running the customer binary from the app workspace so root discovery succeeds automatically
 - or passing the explicit binary flag such as `shoppr --app-root ...` / `gitly --app-root ...`
 
-Do not introduce new automation that depends on the legacy Harbor or Octohub variable names.
+Do not introduce new automation that depends on the legacy Harbor or Gitly variable names.
 
 ## What To Put In `.env.example`
 
@@ -157,7 +157,7 @@ That is the pattern to copy for your own customer app.
 - Do not put app secrets only in README prose.
 - Do not assume `OBJECT_STORE_URL` is interchangeable with a plain S3 URL string.
 - Do not forget that the customer binary and container bootstrap may also rely on
-  `DAVENDA_CONFIG` or app-root overrides.
+  `COIL_CONFIG` or app-root overrides.
 
 ## Read Next
 

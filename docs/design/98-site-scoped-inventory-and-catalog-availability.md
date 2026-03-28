@@ -9,7 +9,7 @@ Accepted.
 
 ## Decision
 
-Davenda models site-scoped commerce availability directly in the customer app storefront catalog.
+Coil models site-scoped commerce availability directly in the customer app storefront catalog.
 
 The first production slice supports:
 

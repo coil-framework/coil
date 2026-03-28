@@ -2,14 +2,14 @@
 title: Template Models
 ---
 
-Davenda templates render against a typed `RenderModel`, not an unstructured JSON blob.
+Coil templates render against a typed `RenderModel`, not an unstructured JSON blob.
 
 ## How A Route Actually Reaches A Template
 
 The missing connection for most readers is usually not "what is a `RenderModel`?" but "where does
 this model come from, and how does it get tied to a template?"
 
-In Davenda, those are two separate decisions:
+In Coil, those are two separate decisions:
 
 1. a route chooses a template name
 2. the runtime builds a `RenderModel` for that route execution
@@ -85,10 +85,10 @@ After that, route-specific bindings add the product-specific fields:
 Finally, the template consumes those exact keys:
 
 ```html
-<section class="product-page__hero" dv:if="${hasProduct}">
-  <h1 dv:text="${product.name}">Harbor Cap</h1>
-  <p class="product-page__price" dv:text="${product.price}">GBP 29</p>
-  <p dv:text="${product.summary}">Product summary</p>
+<section class="product-page__hero" coil:if="${hasProduct}">
+  <h1 coil:text="${product.name}">Harbor Cap</h1>
+  <p class="product-page__price" coil:text="${product.price}">GBP 29</p>
+  <p coil:text="${product.summary}">Product summary</p>
 </section>
 ```
 
@@ -180,15 +180,15 @@ let model = RenderModel::new()
 And this template consuming it:
 
 ```html
-<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
+<html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}">
   <head>
-    <link rel="stylesheet" dv:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body>
-    <h1 dv:text="${site.brandName}">Brand</h1>
-    <section dv:if="${hasFlashMessages}">
-      <article dv:each="message : ${flashMessages}">
-        <p dv:text="${message.text}">Fallback</p>
+    <h1 coil:text="${site.brandName}">Brand</h1>
+    <section coil:if="${hasFlashMessages}">
+      <article coil:each="message : ${flashMessages}">
+        <p coil:text="${message.text}">Fallback</p>
       </article>
     </section>
   </body>
@@ -221,9 +221,9 @@ These are the important rules:
 
 - `${page.title}`
   - reads nested object keys
-- `dv:if="${hasFlashMessages}"`
+- `coil:if="${hasFlashMessages}"`
   - expects a boolean
-- `dv:each="entry : ${auditEntries}"`
+- `coil:each="entry : ${auditEntries}"`
   - expects a list of child models
 - `asset('theme/assets/site.css')`
   - reads from the model’s asset-path map
@@ -233,7 +233,7 @@ first. Do not try to invent that logic in the template.
 
 ## The Common Top-Level Request Model
 
-Davenda’s runtime request model usually starts with keys like:
+Coil’s runtime request model usually starts with keys like:
 
 - `customer_app`
 - `route_name`
@@ -256,8 +256,8 @@ That is why templates can usually stay simple: the runtime has already done the 
 Use objects when a group of values belongs together:
 
 ```html
-<span dv:text="${site.brandName}">Brand</span>
-<p dv:text="${page.summary}">Summary</p>
+<span coil:text="${site.brandName}">Brand</span>
+<p coil:text="${page.summary}">Summary</p>
 ```
 
 ### Booleans
@@ -265,8 +265,8 @@ Use objects when a group of values belongs together:
 Use booleans for visibility and state:
 
 ```html
-<section dv:if="${hasFlashMessages}">...</section>
-<p dv:unless="${cartItems}">Your cart is empty.</p>
+<section coil:if="${hasFlashMessages}">...</section>
+<p coil:unless="${cartItems}">Your cart is empty.</p>
 ```
 
 ### Lists
@@ -274,8 +274,8 @@ Use booleans for visibility and state:
 Lists are always lists of child models, not raw primitives:
 
 ```html
-<li dv:each="item : ${cartItems}">
-  <strong dv:text="${item.title}">Fallback</strong>
+<li coil:each="item : ${cartItems}">
+  <strong coil:text="${item.title}">Fallback</strong>
 </li>
 ```
 
@@ -307,7 +307,7 @@ model = model.with_asset_path(
 Then templates read it like this:
 
 ```html
-<link rel="stylesheet" dv:href="asset('theme/assets/site.css')" />
+<link rel="stylesheet" coil:href="asset('theme/assets/site.css')" />
 ```
 
 That is how templates stay readable while production still serves hashed assets.
@@ -344,7 +344,7 @@ examples split the lesson across the repo.
 
 ### Treating the model like untyped JSON
 
-Davenda’s model is intentionally typed. Use booleans, lists, objects, and trusted HTML for their
+Coil’s model is intentionally typed. Use booleans, lists, objects, and trusted HTML for their
 real purposes.
 
 ### Building asset URLs manually
@@ -370,10 +370,10 @@ Use `TrustedHtml` only when the boundary is explicitly trusted.
 
 Full implementation:
 
-- `crates/davenda-template/src/model/render.rs`
-- `crates/davenda-runtime/src/render/model.rs`
-- `crates/davenda-runtime/src/render/mod.rs`
-- `crates/davenda-commerce/src/module/platform/manifest.rs`
+- `crates/coil-template/src/model/render.rs`
+- `crates/coil-runtime/src/render/model.rs`
+- `crates/coil-runtime/src/render/mod.rs`
+- `crates/coil-commerce/src/module/platform/manifest.rs`
 - `apps/shoppr/templates/admin/audit.html`
 - `apps/shoppr/templates/commerce/product-detail.html`
 - `apps/shoppr/templates/pages/home.html`

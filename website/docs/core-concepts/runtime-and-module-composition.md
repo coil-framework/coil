@@ -2,7 +2,7 @@
 title: Runtime And Module Composition
 ---
 
-Davenda is easiest to misuse if you think of composition as "import a few crates and see what happens."
+Coil is easiest to misuse if you think of composition as "import a few crates and see what happens."
 
 Composition is a first-class part of the runtime model.
 
@@ -24,7 +24,7 @@ Official modules are not passive libraries. They contribute explicit surfaces su
 
 Frameworks often drift into invisible composition, where startup code, route wiring, permissions, and module boundaries are spread across too many places.
 
-Davenda tries to keep composition explicit because it affects:
+Coil tries to keep composition explicit because it affects:
 
 - which product batteries are linked
 - which route surfaces exist
@@ -34,7 +34,7 @@ Davenda tries to keep composition explicit because it affects:
 
 ## The Practical Rule
 
-Davenda composition has two layers:
+Coil composition has two layers:
 
 - Cargo dependencies decide what the binary can register
 - the customer app manifest decides what the application actually enables
@@ -55,7 +55,7 @@ Shoppr shows the full composition story in one place:
 - `apps/shoppr/crates/shoppr-app/src/lib.rs`
 - `apps/shoppr/app.toml`
 
-If you want to see what “real Davenda composition” looks like in code, those files are the right starting point.
+If you want to see what “real Coil composition” looks like in code, those files are the right starting point.
 
 ## How It Works
 
@@ -77,11 +77,11 @@ That split matters:
 
 ## Minimal Composition Example
 
-The convenience path is to use `davenda-all` in the customer workspace:
+The convenience path is to use `coil` in the customer workspace:
 
 ```toml
 [workspace.dependencies]
-davenda-all = "0.1.0"
+coil = "0.1.0"
 ```
 
 Then the customer app crate can rely on the official module battery and let the manifest choose which modules are active.
@@ -100,11 +100,11 @@ The convenience battery is not the only model. A customer workspace can choose t
 
 ```toml
 [workspace.dependencies]
-davenda-runtime = "0.1.0"
-davenda-cms = "0.1.0"
-davenda-commerce = "0.1.0"
-davenda-admin = "0.1.0"
-davenda-customer-sdk = "0.1.0"
+coil-runtime = "0.1.0"
+coil-cms = "0.1.0"
+coil-commerce = "0.1.0"
+coil-admin = "0.1.0"
+coil-customer-sdk = "0.1.0"
 ```
 
 Then the customer binary or bootstrap layer explicitly registers only those modules.
@@ -117,7 +117,7 @@ This path makes sense when:
 
 ## Linked Versus Enabled
 
-This is the most important practical distinction in Davenda composition.
+This is the most important practical distinction in Coil composition.
 
 ### Linked
 
@@ -155,9 +155,9 @@ So a full runtime plan is composed from:
 - linked customer plugins
 - installed runtime extensions
 
-## Why `davenda-all` Exists
+## Why `coil` Exists
 
-`davenda-all` is the convenience battery. It exists so developers can start with a coherent full stack while learning or building the default path.
+`coil` is the convenience battery. It exists so developers can start with a coherent full stack while learning or building the default path.
 
 It is useful when:
 
@@ -169,7 +169,7 @@ It is not the only valid entrypoint. Narrower composition is still part of the i
 
 ## A Good Composition Checklist
 
-Before calling a Davenda app “properly composed”, you should be able to answer all of these:
+Before calling a Coil app “properly composed”, you should be able to answer all of these:
 
 - Which official modules are linked into the binary?
 - Which of those modules are enabled in `app.toml`?
@@ -194,7 +194,7 @@ Modules affect runtime behaviour, auth, data model shape, and operations, not ju
 
 The customer binary should still make the product shape understandable. If composition becomes hard to trace, debugging the runtime will get harder too.
 
-### Treating `davenda-all` as mandatory
+### Treating `coil` as mandatory
 
 It is a convenience battery, not the only valid composition story.
 
@@ -202,5 +202,5 @@ It is a convenience battery, not the only valid composition story.
 
 - [Request and render lifecycle](request-and-render-lifecycle.md)
 - [Customer apps vs official modules](customer-apps-vs-official-modules.md)
-- [Composition and davenda-all](../reference/composition.md)
+- [Composition and coil](../reference/composition.md)
 - [Official modules](../reference/modules.md)

@@ -11,11 +11,11 @@ services:
       minio-init:
         condition: service_completed_successfully
     environment:
-      DAVENDA_CONFIG: platform.dev.toml
-      DATABASE_URL: postgres://davenda:devpass@postgres:5432/davenda_gitly
+      COIL_CONFIG: platform.dev.toml
+      DATABASE_URL: postgres://coil:devpass@postgres:5432/coil_gitly
       REDIS_URL: redis://redis:6379
-      DAVENDA_COOKIE_SECRET: "01234567012345670123456701234567"
-      DAVENDA_CSRF_SECRET: "76543210765432107654321076543210"
+      COIL_COOKIE_SECRET: "01234567012345670123456701234567"
+      COIL_CSRF_SECRET: "76543210765432107654321076543210"
       OBJECT_STORE_URL: |-
         endpoint_url="http://minio:9000"
         bucket="gitly"
@@ -25,7 +25,7 @@ services:
     ports:
       - "${GITLY_HTTP_PORT:-58080}:8080"
     volumes:
-      - gitly-appdata:/app/.davenda
+      - gitly-appdata:/app/.coil
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
       interval: 10s
@@ -36,15 +36,15 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: davenda
+      POSTGRES_USER: coil
       POSTGRES_PASSWORD: devpass
-      POSTGRES_DB: davenda_gitly
+      POSTGRES_DB: coil_gitly
     ports:
       - "${GITLY_POSTGRES_PORT:-55438}:5432"
     volumes:
       - gitly-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U davenda -d davenda_gitly"]
+      test: ["CMD-SHELL", "pg_isready -U coil -d coil_gitly"]
       interval: 5s
       timeout: 5s
       retries: 20

@@ -2,7 +2,7 @@
 title: Cache, TLS, Cutover, And Rollback
 ---
 
-Davenda exposes cache, TLS, cutover, and rollback as operator-visible concerns because they are
+Coil exposes cache, TLS, cutover, and rollback as operator-visible concerns because they are
 common sources of production risk.
 
 Treat them as explicit release surfaces, not hidden implementation details.
@@ -19,7 +19,7 @@ This page explains how to operate four areas that often determine whether a rele
 
 ## Cache Topology
 
-Davenda supports a two-layer cache model:
+Coil supports a two-layer cache model:
 
 - `l1`: in-process cache such as Moka
 - `l2`: shared cache such as Redis or Valkey
@@ -55,9 +55,9 @@ Use both when:
 Representative cache commands:
 
 ```bash
-platform cache warm --config apps/shoppr/platform.toml --scope public --route /en-GB/shop
-platform cache inspect --config apps/shoppr/platform.toml --route /en-GB/shop
-platform cache invalidate --config apps/shoppr/platform.toml --tag route:events.list --tag locale:en-GB --yes
+coil cache warm --config apps/shoppr/platform.toml --scope public --route /en-GB/shop
+coil cache inspect --config apps/shoppr/platform.toml --route /en-GB/shop
+coil cache invalidate --config apps/shoppr/platform.toml --tag route:events.list --tag locale:en-GB --yes
 ```
 
 Use them to make caching legible, not magical.
@@ -92,9 +92,9 @@ That split is healthy:
 Representative TLS commands:
 
 ```bash
-platform tls status --config apps/shoppr/platform.toml
-platform tls validate-challenge --config apps/shoppr/platform.toml
-platform tls renew --config apps/shoppr/platform.toml --certificate cert-live --replacement cert-next --dry-run
+coil tls status --config apps/shoppr/platform.toml
+coil tls validate-challenge --config apps/shoppr/platform.toml
+coil tls renew --config apps/shoppr/platform.toml --certificate cert-live --replacement cert-next --dry-run
 ```
 
 If operators cannot tell whether challenge setup and renewal are healthy, the deployment is not
@@ -126,7 +126,7 @@ Operators should know:
 - whether caches need rewarming or invalidation
 - which asset release should become active again
 
-## A Practical Davenda Cutover Sequence
+## A Practical Coil Cutover Sequence
 
 1. Validate the target release.
 2. Apply approved migrations.

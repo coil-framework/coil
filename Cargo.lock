@@ -320,6 +320,407 @@ dependencies = [
 ]
 
 [[package]]
+name = "coil"
+version = "0.1.0"
+dependencies = [
+ "coil-admin",
+ "coil-app",
+ "coil-auth",
+ "coil-cms",
+ "coil-commerce",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-events",
+ "coil-media",
+ "coil-memberships",
+ "coil-ops",
+ "coil-runtime",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "coil-a11y"
+version = "0.1.0"
+dependencies = [
+ "coil-i18n",
+]
+
+[[package]]
+name = "coil-admin"
+version = "0.1.0"
+dependencies = [
+ "coil-auth",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "coil-wasm",
+]
+
+[[package]]
+name = "coil-app"
+version = "0.1.0"
+dependencies = [
+ "coil-assets",
+ "coil-auth",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-data",
+ "coil-i18n",
+ "coil-jobs",
+ "coil-report",
+ "coil-runtime",
+ "coil-storage",
+ "coil-template",
+ "coil-wasm",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "coil-assets"
+version = "0.1.0"
+dependencies = [
+ "coil-auth",
+ "coil-config",
+ "coil-storage",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-auth"
+version = "0.1.0"
+dependencies = [
+ "coil-config",
+ "coil-data",
+ "serde",
+ "toml",
+ "zanzibar",
+]
+
+[[package]]
+name = "coil-cache"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "redis",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "coil-cli"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "coil-admin",
+ "coil-app",
+ "coil-assets",
+ "coil-auth",
+ "coil-cache",
+ "coil-cms",
+ "coil-commerce",
+ "coil-config",
+ "coil-core",
+ "coil-data",
+ "coil-events",
+ "coil-import",
+ "coil-jobs",
+ "coil-media",
+ "coil-memberships",
+ "coil-ops",
+ "coil-report",
+ "coil-runtime",
+ "coil-storage",
+ "coil-tls",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "zanzibar",
+]
+
+[[package]]
+name = "coil-cms"
+version = "0.1.0"
+dependencies = [
+ "coil-auth",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+]
+
+[[package]]
+name = "coil-commerce"
+version = "0.1.0"
+dependencies = [
+ "coil-auth",
+ "coil-config",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "toml",
+]
+
+[[package]]
+name = "coil-config"
+version = "0.1.0"
+dependencies = [
+ "ipnet",
+ "serde",
+ "thiserror 1.0.69",
+ "toml",
+ "url",
+]
+
+[[package]]
+name = "coil-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
+ "coil-a11y",
+ "coil-auth",
+ "coil-cache",
+ "coil-config",
+ "coil-data",
+ "coil-i18n",
+ "coil-jobs",
+ "coil-observability",
+ "coil-seo",
+ "coil-template",
+ "coil-tls",
+ "coil-wasm",
+ "hmac",
+ "rand 0.8.5",
+ "sha2",
+ "thiserror 1.0.69",
+ "toml",
+]
+
+[[package]]
+name = "coil-customer-sdk"
+version = "0.1.0"
+
+[[package]]
+name = "coil-data"
+version = "0.1.0"
+dependencies = [
+ "coil-config",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "coil-events"
+version = "0.1.0"
+dependencies = [
+ "coil-auth",
+ "coil-commerce",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "coil-memberships",
+]
+
+[[package]]
+name = "coil-i18n"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "coil-import"
+version = "0.1.0"
+dependencies = [
+ "coil-report",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "coil-jobs"
+version = "0.1.0"
+dependencies = [
+ "coil-config",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
+name = "coil-media"
+version = "0.1.0"
+dependencies = [
+ "coil-assets",
+ "coil-auth",
+ "coil-core",
+ "coil-data",
+ "coil-storage",
+]
+
+[[package]]
+name = "coil-memberships"
+version = "0.1.0"
+dependencies = [
+ "coil-auth",
+ "coil-commerce",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+]
+
+[[package]]
+name = "coil-observability"
+version = "0.1.0"
+dependencies = [
+ "coil-config",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-ops"
+version = "0.1.0"
+dependencies = [
+ "coil-auth",
+ "coil-config",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-report"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-runtime"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "coil-admin",
+ "coil-assets",
+ "coil-auth",
+ "coil-cache",
+ "coil-cms",
+ "coil-commerce",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-data",
+ "coil-events",
+ "coil-i18n",
+ "coil-jobs",
+ "coil-media",
+ "coil-memberships",
+ "coil-observability",
+ "coil-ops",
+ "coil-seo",
+ "coil-storage",
+ "coil-template",
+ "coil-tls",
+ "coil-wasm",
+ "hmac",
+ "ipnet",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tower",
+ "ureq",
+ "url",
+ "wat",
+ "zanzibar",
+]
+
+[[package]]
+name = "coil-seo"
+version = "0.1.0"
+dependencies = [
+ "coil-i18n",
+]
+
+[[package]]
+name = "coil-storage"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "coil-config",
+ "futures",
+ "object_store",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "url",
+]
+
+[[package]]
+name = "coil-template"
+version = "0.1.0"
+dependencies = [
+ "html5ever",
+ "markup5ever",
+ "markup5ever_rcdom",
+]
+
+[[package]]
+name = "coil-tls"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "coil-config",
+ "coil-data",
+ "lers",
+ "openssl",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "coil-wasm"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "sha2",
+ "wasmtime",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -606,407 +1007,6 @@ name = "data-encoding"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
-
-[[package]]
-name = "davenda-a11y"
-version = "0.1.0"
-dependencies = [
- "davenda-i18n",
-]
-
-[[package]]
-name = "davenda-admin"
-version = "0.1.0"
-dependencies = [
- "davenda-auth",
- "davenda-core",
- "davenda-data",
- "davenda-jobs",
- "davenda-wasm",
-]
-
-[[package]]
-name = "davenda-all"
-version = "0.1.0"
-dependencies = [
- "davenda-admin",
- "davenda-app",
- "davenda-auth",
- "davenda-cms",
- "davenda-commerce",
- "davenda-config",
- "davenda-core",
- "davenda-customer-sdk",
- "davenda-events",
- "davenda-media",
- "davenda-memberships",
- "davenda-ops",
- "davenda-runtime",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "davenda-app"
-version = "0.1.0"
-dependencies = [
- "davenda-assets",
- "davenda-auth",
- "davenda-config",
- "davenda-core",
- "davenda-customer-sdk",
- "davenda-data",
- "davenda-i18n",
- "davenda-jobs",
- "davenda-report",
- "davenda-runtime",
- "davenda-storage",
- "davenda-template",
- "davenda-wasm",
- "serde",
- "tempfile",
- "thiserror 2.0.18",
- "toml",
-]
-
-[[package]]
-name = "davenda-assets"
-version = "0.1.0"
-dependencies = [
- "davenda-auth",
- "davenda-config",
- "davenda-storage",
- "sha2",
- "tempfile",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "davenda-auth"
-version = "0.1.0"
-dependencies = [
- "davenda-config",
- "davenda-data",
- "serde",
- "toml",
- "zanzibar",
-]
-
-[[package]]
-name = "davenda-cache"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "redis",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "davenda-cli"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "davenda-admin",
- "davenda-app",
- "davenda-assets",
- "davenda-auth",
- "davenda-cache",
- "davenda-cms",
- "davenda-commerce",
- "davenda-config",
- "davenda-core",
- "davenda-data",
- "davenda-events",
- "davenda-import",
- "davenda-jobs",
- "davenda-media",
- "davenda-memberships",
- "davenda-ops",
- "davenda-report",
- "davenda-runtime",
- "davenda-storage",
- "davenda-tls",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "zanzibar",
-]
-
-[[package]]
-name = "davenda-cms"
-version = "0.1.0"
-dependencies = [
- "davenda-auth",
- "davenda-core",
- "davenda-data",
- "davenda-jobs",
-]
-
-[[package]]
-name = "davenda-commerce"
-version = "0.1.0"
-dependencies = [
- "davenda-auth",
- "davenda-config",
- "davenda-core",
- "davenda-data",
- "davenda-jobs",
- "toml",
-]
-
-[[package]]
-name = "davenda-config"
-version = "0.1.0"
-dependencies = [
- "ipnet",
- "serde",
- "thiserror 1.0.69",
- "toml",
- "url",
-]
-
-[[package]]
-name = "davenda-core"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "base64 0.22.1",
- "davenda-a11y",
- "davenda-auth",
- "davenda-cache",
- "davenda-config",
- "davenda-data",
- "davenda-i18n",
- "davenda-jobs",
- "davenda-observability",
- "davenda-seo",
- "davenda-template",
- "davenda-tls",
- "davenda-wasm",
- "hmac",
- "rand 0.8.5",
- "sha2",
- "thiserror 1.0.69",
- "toml",
-]
-
-[[package]]
-name = "davenda-customer-sdk"
-version = "0.1.0"
-
-[[package]]
-name = "davenda-data"
-version = "0.1.0"
-dependencies = [
- "davenda-config",
- "sqlx",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "davenda-events"
-version = "0.1.0"
-dependencies = [
- "davenda-auth",
- "davenda-commerce",
- "davenda-core",
- "davenda-data",
- "davenda-jobs",
- "davenda-memberships",
-]
-
-[[package]]
-name = "davenda-i18n"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "davenda-import"
-version = "0.1.0"
-dependencies = [
- "davenda-report",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "toml",
-]
-
-[[package]]
-name = "davenda-jobs"
-version = "0.1.0"
-dependencies = [
- "davenda-config",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
-]
-
-[[package]]
-name = "davenda-media"
-version = "0.1.0"
-dependencies = [
- "davenda-assets",
- "davenda-auth",
- "davenda-core",
- "davenda-data",
- "davenda-storage",
-]
-
-[[package]]
-name = "davenda-memberships"
-version = "0.1.0"
-dependencies = [
- "davenda-auth",
- "davenda-commerce",
- "davenda-core",
- "davenda-data",
- "davenda-jobs",
-]
-
-[[package]]
-name = "davenda-observability"
-version = "0.1.0"
-dependencies = [
- "davenda-config",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "davenda-ops"
-version = "0.1.0"
-dependencies = [
- "davenda-auth",
- "davenda-config",
- "davenda-core",
- "davenda-data",
- "davenda-jobs",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "davenda-report"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "davenda-runtime"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "davenda-admin",
- "davenda-assets",
- "davenda-auth",
- "davenda-cache",
- "davenda-cms",
- "davenda-commerce",
- "davenda-config",
- "davenda-core",
- "davenda-customer-sdk",
- "davenda-data",
- "davenda-events",
- "davenda-i18n",
- "davenda-jobs",
- "davenda-media",
- "davenda-memberships",
- "davenda-observability",
- "davenda-ops",
- "davenda-seo",
- "davenda-storage",
- "davenda-template",
- "davenda-tls",
- "davenda-wasm",
- "hmac",
- "ipnet",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "tower",
- "ureq",
- "url",
- "wat",
- "zanzibar",
-]
-
-[[package]]
-name = "davenda-seo"
-version = "0.1.0"
-dependencies = [
- "davenda-i18n",
-]
-
-[[package]]
-name = "davenda-storage"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "davenda-config",
- "futures",
- "object_store",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "url",
-]
-
-[[package]]
-name = "davenda-template"
-version = "0.1.0"
-dependencies = [
- "html5ever",
- "markup5ever",
- "markup5ever_rcdom",
-]
-
-[[package]]
-name = "davenda-tls"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "async-trait",
- "davenda-config",
- "davenda-data",
- "lers",
- "openssl",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "davenda-wasm"
-version = "0.1.0"
-dependencies = [
- "hex",
- "sha2",
- "wasmtime",
-]
 
 [[package]]
 name = "debugid"

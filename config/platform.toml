@@ -12,14 +12,14 @@ idle_timeout_secs = 3600
 absolute_timeout_secs = 86400
 
 [http.session_cookie]
-name = "davenda_session"
+name = "coil_session"
 path = "/"
 same_site = "lax"
 secure = true
 http_only = true
 
 [http.flash_cookie]
-name = "davenda_flash"
+name = "coil_flash"
 path = "/"
 same_site = "lax"
 secure = true
@@ -37,7 +37,7 @@ mode = "external"
 default_class = "public_upload"
 object_store = "s3"
 object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
-local_root = "/var/lib/davenda"
+local_root = "/var/lib/coil"
 
 [cache]
 l1 = "moka"

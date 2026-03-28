@@ -2,7 +2,7 @@
 title: Configuration And Secrets
 ---
 
-Davenda separates customer composition, operational configuration, and secrets on purpose.
+Coil separates customer composition, operational configuration, and secrets on purpose.
 
 That split is one of the platform's core safety properties.
 
@@ -60,7 +60,7 @@ Secrets provide sensitive runtime values:
 - webhook secrets
 - TLS provider credentials
 
-## A Canonical Davenda Example
+## A Canonical Coil Example
 
 This is the mental model you should start from:
 
@@ -219,7 +219,7 @@ Bad differences:
 For local development, a small `.env` can be enough:
 
 ```dotenv
-DATABASE_URL=postgres://davenda:davenda@127.0.0.1:5432/davenda_app
+DATABASE_URL=postgres://coil:coil@127.0.0.1:5432/coil_app
 OBJECT_STORE_URL=...
 STRIPE_PUBLISHABLE_KEY=pk_test_replace_me
 STRIPE_SECRET_KEY=sk_test_replace_me

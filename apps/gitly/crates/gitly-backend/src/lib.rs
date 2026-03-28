@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use davenda_customer_sdk::{
+use coil_customer_sdk::{
     AuditFacade, BackendError, CmsHooks, CmsPageDraft, CmsPublishDecision, CustomerBackendPlugin,
     CustomerHookRegistry, CustomerPluginDescriptor, RegisteredHookKind, RepositoryFacade,
 };
@@ -87,7 +87,7 @@ pub fn repository() -> GitlyRepository {
         forks: 612,
         watchers: 143,
         open_issues: 27,
-        description: "Accessible multilingual UI primitives and customer-app examples for Davenda."
+        description: "Accessible multilingual UI primitives and customer-app examples for Coil."
             .to_string(),
         primary_language: "Rust".to_string(),
         license: "Apache-2.0".to_string(),
@@ -156,7 +156,7 @@ pub fn organization() -> GitlyOrganization {
         members: 42,
         repositories: 18,
         location: "London, UK".to_string(),
-        summary: "A modular product engineering team using Davenda to ship docs, dashboards, and internal forges from one customer workspace.".to_string(),
+        summary: "A modular product engineering team using Coil to ship docs, dashboards, and internal forges from one customer workspace.".to_string(),
     }
 }
 
@@ -166,7 +166,7 @@ pub fn user() -> GitlyUser {
         display_name: "Alex Mariner".to_string(),
         role: "Staff Engineer".to_string(),
         location: "Bristol, UK".to_string(),
-        bio: "Building multilingual developer tools, documentation surfaces, and workflow automation demos in Davenda.".to_string(),
+        bio: "Building multilingual developer tools, documentation surfaces, and workflow automation demos in Coil.".to_string(),
         repositories: 14,
         followers: 238,
     }
@@ -279,7 +279,7 @@ impl CustomerBackendPlugin for GitlyBackend {
 impl CmsHooks for GitlyBackend {
     fn validate_page_publish(
         &self,
-        _ctx: &davenda_customer_sdk::RequestContext,
+        _ctx: &coil_customer_sdk::RequestContext,
         draft: &CmsPageDraft,
         _repositories: &dyn RepositoryFacade,
         audit: &dyn AuditFacade,
@@ -294,7 +294,7 @@ impl CmsHooks for GitlyBackend {
         }
 
         audit.record(
-            davenda_customer_sdk::AuditEntry::new(
+            coil_customer_sdk::AuditEntry::new(
                 "gitly.cms.publish.validated",
                 "cms.page",
                 draft.page_id.clone(),
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn linked_backend_descriptor_is_stable() {
-        let descriptor = davenda_customer_sdk::CustomerBackendPlugin::descriptor(&plugin());
+        let descriptor = coil_customer_sdk::CustomerBackendPlugin::descriptor(&plugin());
 
         assert_eq!(descriptor.id, "gitly-backend");
         assert_eq!(descriptor.display_name, "Gitly Linked Backend");

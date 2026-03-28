@@ -2,7 +2,7 @@
 title: Observability, Monitoring, And Audit
 ---
 
-Davenda already exposes a real operational boundary in the checked-in apps, but the public examples
+Coil already exposes a real operational boundary in the checked-in apps, but the public examples
 show that boundary in a narrower way than a full production observability stack.
 
 Use this page to understand what is demonstrably present today:
@@ -48,16 +48,16 @@ The template itself tells you what the runtime is shaping:
 
 ```html
 <p>
-  Backend <code dv:text="${auditBackend}">local-sqlite</code> at
-  <code dv:text="${auditLocation}">/var/lib/davenda/shared-state</code> with
-  <strong dv:text="${auditEntryCount}">0</strong> recorded entries.
+  Backend <code coil:text="${auditBackend}">local-sqlite</code> at
+  <code coil:text="${auditLocation}">/var/lib/coil/shared-state</code> with
+  <strong coil:text="${auditEntryCount}">0</strong> recorded entries.
 </p>
 ...
-<tr dv:each="entry : ${auditEntries}">
-  <td dv:text="${entry.when}">1764223200</td>
-  <td dv:text="${entry.actor}">operator-live-1</td>
-  <td dv:text="${entry.action}">Issue refund</td>
-  <td dv:text="${entry.capability}">order.refund.issue</td>
+<tr coil:each="entry : ${auditEntries}">
+  <td coil:text="${entry.when}">1764223200</td>
+  <td coil:text="${entry.actor}">operator-live-1</td>
+  <td coil:text="${entry.action}">Issue refund</td>
+  <td coil:text="${entry.capability}">order.refund.issue</td>
 </tr>
 ```
 

@@ -7,7 +7,7 @@ primitives.
 
 Primary implementation files:
 
-- `crates/davenda-ops/src/module/manifest.rs`
+- `crates/coil-ops/src/module/manifest.rs`
 - `apps/shoppr/templates/admin/dashboard.html`
 
 ## Why It Exists
@@ -24,7 +24,7 @@ That is the layer the ops module provides.
 
 ## What It Provides
 
-From `crates/davenda-ops/src/module/manifest.rs`, ops adds:
+From `crates/coil-ops/src/module/manifest.rs`, ops adds:
 
 - migrations for search, reports, and bulk operation state
 - admin routes for `/admin/search`, `/admin/reports`, and `/admin/recovery`
@@ -94,9 +94,9 @@ Customer apps typically extend ops by:
 Concrete example:
 
 ```html title="templates/admin/dashboard.html"
-<section xmlns:dv="https://davenda.dev">
+<section xmlns:coil="https://coil.rs">
   <h3>Recovery</h3>
-  <p>Last catalogue rebuild: <span dv:text="${ops.lastRebuildAt}">never</span></p>
+  <p>Last catalogue rebuild: <span coil:text="${ops.lastRebuildAt}">never</span></p>
 </section>
 ```
 

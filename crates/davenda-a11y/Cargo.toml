@@ -1,7 +1,0 @@
-[package]
-name = "davenda-a11y"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-davenda-i18n = { path = "../davenda-i18n" }

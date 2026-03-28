@@ -2,9 +2,9 @@
 title: CLI Commands
 ---
 
-Davenda has two CLI layers:
+Coil has two CLI layers:
 
-- the root platform CLI, `davenda-cli`
+- the root platform CLI, `coil-cli`
 - customer-owned workspace binaries such as `shoppr` and `gitly`
 
 Use this page when you want to answer:
@@ -16,19 +16,19 @@ Use this page when you want to answer:
 
 ## One Platform, Two Binaries
 
-A new Davenda developer should treat the split like this:
+A new Coil developer should treat the split like this:
 
-- `platform`
+- `coil`
   - generic operator and infrastructure commands that work across customer apps
 - `shoppr` or `gitly`
   - customer-app-shaped commands that know the current app’s templates, extensions, linked backend, and bootstrap
 
-The split exists because Davenda has two audiences:
+The split exists because Coil has two audiences:
 
 - platform operators and maintainers
 - customer developers building one concrete product
 
-If you are inside a customer app workspace, start with the customer binary first. Use `platform`
+If you are inside a customer app workspace, start with the customer binary first. Use `coil`
 when you need deeper operator workflows such as import, cutover, cache, TLS, jobs, or auth
 inspection.
 
@@ -59,14 +59,14 @@ customer binary.
 
 ## Root Platform CLI
 
-The `davenda-cli` crate currently builds the `platform` binary. Real help output starts like this:
+The `coil-cli` crate currently builds the `coil` binary. Real help output starts like this:
 
 ```text
-platform dev server [--config <path>]
-platform config validate [--config <path>] [--json]
-platform auth check [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]
-platform module list [--config <path>] [--json]
-platform migrate plan [--config <path>] [--json]
+coil dev server [--config <path>]
+coil config validate [--config <path>] [--json]
+coil auth check [--config <path>] --subject <subject> --capability <capability> --resource <namespace:id> [--json]
+coil module list [--config <path>] [--json]
+coil migrate plan [--config <path>] [--json]
 ```
 
 The baseline command families are:
@@ -93,7 +93,7 @@ cd apps/shoppr
 cargo run -p shoppr -- validate
 
 # platform-shaped
-cargo run -p davenda-cli -- jobs status --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- jobs status --config apps/shoppr/platform.dev.toml
 ```
 
 The first proves Shoppr can compose its own runtime. The second tells you what the platform job
@@ -128,7 +128,7 @@ Current module operator commands:
 - `module enable`
 - `module disable`
 
-The command registry in `crates/davenda-cli/src/command.rs` already marks install, enable, and
+The command registry in `crates/coil-cli/src/command.rs` already marks install, enable, and
 disable as:
 
 - supporting dry-run
@@ -181,7 +181,7 @@ Current jobs commands:
 - `jobs retry`
 - `jobs promote`
 
-This is one of the clearest signs that Davenda treats jobs as a real operator surface, not just a
+This is one of the clearest signs that Coil treats jobs as a real operator surface, not just a
 library feature.
 
 Detailed usage lives here:
@@ -201,7 +201,7 @@ Current operator commands also include:
 - `import run`
 - `import cutover`
 
-The import cutover flags are modeled in `crates/davenda-cli/src/cli/import.rs`, including:
+The import cutover flags are modeled in `crates/coil-cli/src/cli/import.rs`, including:
 
 - `--apply`
 - `--switch`

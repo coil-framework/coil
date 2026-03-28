@@ -2,13 +2,13 @@
 title: Customer Project Layout
 ---
 
-Davenda's preferred shape is a customer-owned Rust workspace that depends on Davenda as upstream crates.
+Coil's preferred shape is a customer-owned Rust workspace that depends on Coil as upstream crates.
 
 That point is structural, not cosmetic. The customer project is the composition root. It owns the binary, the app manifest, the theme, the customer backend logic, and the decision about which official modules are linked.
 
 ## What It Is
 
-A Davenda customer project usually contains:
+A Coil customer project usually contains:
 
 - one binary crate that starts the application
 - one or more customer-owned Rust crates
@@ -57,7 +57,7 @@ The customer app, not the framework, decides which modules are linked, which cus
 
 ### It keeps upgrades honest
 
-Because the customer project depends on Davenda as ordinary crates, upgrading Davenda looks like a dependency upgrade, not a hidden fork of the framework.
+Because the customer project depends on Coil as ordinary crates, upgrading Coil looks like a dependency upgrade, not a hidden fork of the framework.
 
 ### It gives customer Rust a first-party path
 
@@ -73,7 +73,7 @@ This is the Rust project you own. It contains your binary and your customer-spec
 
 ### 2. The application root
 
-This is where Davenda's runtime-facing application inputs live:
+This is where Coil's runtime-facing application inputs live:
 
 - `app.toml`
 - platform config
@@ -82,7 +82,7 @@ This is where Davenda's runtime-facing application inputs live:
 - auth package files
 - optional extension artifacts
 
-### 3. Davenda crates
+### 3. Coil crates
 
 These are the upstream crates that provide the runtime, official modules, customer SDK, and supporting batteries.
 
@@ -111,7 +111,7 @@ Practical follow-on pages for those examples:
 
 ### Treating customer code as a plugin afterthought
 
-Davenda does support bounded extension points, but customer-owned Rust is not supposed to look like a third-party plugin. It is part of the application.
+Coil does support bounded extension points, but customer-owned Rust is not supposed to look like a third-party plugin. It is part of the application.
 
 ### Hiding product decisions in ad hoc startup code
 
@@ -122,6 +122,6 @@ If module composition, site configuration, or customer hooks are difficult to id
 - [Linked Rust backends](linked-rust-backends.md)
 - [Customer-root workspace](../core-concepts/customer-root-workspace.md)
 - [Runtime and module composition](../core-concepts/runtime-and-module-composition.md)
-- [Composition and davenda-all](../reference/composition.md)
+- [Composition and coil](../reference/composition.md)
 - [Build and deploy](../operations/build-and-deploy.md)
 - [Configuration and secrets](../operations/configuration-and-secrets.md)

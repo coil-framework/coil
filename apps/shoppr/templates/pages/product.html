@@ -1,22 +1,22 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Product detail'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Product detail'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Product detail</title>
+    <title coil:text="${pageTitle}">Product detail</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
-    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
   <body class="shoppr-shell">
     <header class="site-header">
@@ -29,28 +29,28 @@
         </div>
       </div>
       <div class="site-header__main">
-        <a href="/" class="brand" dv:attr="href=${links.home}">
+        <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
         </a>
-        <nav dv:replace="~{navigation/primary}"></nav>
+        <nav coil:replace="~{navigation/primary}"></nav>
       </div>
       <div class="site-header__panels">
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Market</p>
           <ul>
-            <li dv:each="item : ${links.siteSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">Shoppr UK</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.siteSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Language</p>
           <ul>
-            <li dv:each="item : ${links.localeSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">English</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.localeSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
@@ -61,31 +61,31 @@
         <div class="product-page__media">
           <img
             src="/theme/assets/logo.svg"
-            dv:src="${product.imageUrl}"
+            coil:src="${product.imageUrl}"
             alt="Product image"
-            dv:attr="alt=${product.imageAlt}"
+            coil:attr="alt=${product.imageAlt}"
           />
         </div>
         <div class="product-page__details">
           <p class="product-page__eyebrow">
-            <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+            <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">Collections</a>
           </p>
           <p>
-            <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+            <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
             <span>/</span>
-            <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+            <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">Collections</a>
             <span>/</span>
             <a
               href="/shop/collections/featured"
-              dv:href="${product.collectionUrl}"
-              dv:text="${product.collectionName}"
+              coil:href="${product.collectionUrl}"
+              coil:text="${product.collectionName}"
             >
               Harbor pantry
             </a>
           </p>
-          <h1 dv:text="${product.name}">Harbor Cap</h1>
-          <p class="product-page__price" dv:text="${product.price}">GBP 29</p>
-          <p dv:text="${product.summary}">
+          <h1 coil:text="${product.name}">Harbor Cap</h1>
+          <p class="product-page__price" coil:text="${product.price}">GBP 29</p>
+          <p coil:text="${product.summary}">
             Keep the item, quantity, and cart handoff together so this page can genuinely convert.
           </p>
           <div class="product-page__actions">
@@ -94,13 +94,13 @@
                 type="hidden"
                 name="product_slug"
                 value="harbor-cap"
-                dv:attr="value=${product.slug}"
+                coil:attr="value=${product.slug}"
               />
               <input
                 type="hidden"
                 name="product_name"
                 value="Harbor Cap"
-                dv:attr="value=${product.name}"
+                coil:attr="value=${product.name}"
               />
               <label class="commerce-form__field">
                 <span>Quantity</span>
@@ -113,17 +113,17 @@
                 type="hidden"
                 name="product_slug"
                 value="harbor-cap"
-                dv:attr="value=${product.slug}"
+                coil:attr="value=${product.slug}"
               />
               <input type="hidden" name="quantity" value="1" />
               <button class="button button--secondary" type="submit">Buy now</button>
             </form>
           </div>
           <div class="checkout-actions">
-            <a class="button button--secondary" href="/shop/collections/featured" dv:href="${product.collectionUrl}">
+            <a class="button button--secondary" href="/shop/collections/featured" coil:href="${product.collectionUrl}">
               Back to collection
             </a>
-            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
               Review cart
             </a>
           </div>
@@ -148,14 +148,14 @@
             committing the basket.
           </p>
           <div class="checkout-actions">
-            <a class="button button--secondary" href="/shop/collections/featured" dv:href="${product.collectionUrl}">
+            <a class="button button--secondary" href="/shop/collections/featured" coil:href="${product.collectionUrl}">
               Back to collection
             </a>
           </div>
         </article>
       </section>
 
-      <div dv:replace="~{commerce/product-grid :: grid}"></div>
+      <div coil:replace="~{commerce/product-grid :: grid}"></div>
     </main>
     <footer class="site-footer">
       <div>

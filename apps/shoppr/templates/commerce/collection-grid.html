@@ -1,4 +1,4 @@
-<section class="collection-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
+<section class="collection-grid" xmlns:coil="https://coil.rs" coil:fragment="grid">
   <header class="collection-grid__header">
     <p class="collection-grid__eyebrow">Campaign edits</p>
     <h2>Shop the campaign first, then narrow into the product decision.</h2>
@@ -7,24 +7,24 @@
       the customer inside the right assortment before the product page takes over.
     </p>
   </header>
-  <div class="collection-grid__list" dv:if="${hasCatalogSections}">
-    <article class="catalog-section collection-grid__item" dv:each="section : ${catalogSections}">
-      <p class="catalog-section__eyebrow" dv:text="${section.label}">Featured edit</p>
+  <div class="collection-grid__list" coil:if="${hasCatalogSections}">
+    <article class="catalog-section collection-grid__item" coil:each="section : ${catalogSections}">
+      <p class="catalog-section__eyebrow" coil:text="${section.label}">Featured edit</p>
       <h3>
-        <a href="/shop/collections/featured" dv:href="${section.url}" dv:text="${section.title}">
+        <a href="/shop/collections/featured" coil:href="${section.url}" coil:text="${section.title}">
           Featured
         </a>
       </h3>
-      <p dv:text="${section.summary}">
+      <p coil:text="${section.summary}">
         Start here for the campaign promise, then open a product page for price, sizing, quantity,
         and cart actions.
       </p>
-      <a class="button" href="/shop/collections/featured" dv:href="${section.url}">
+      <a class="button" href="/shop/collections/featured" coil:href="${section.url}">
         Open edit
       </a>
     </article>
   </div>
-  <div class="collection-grid__list" dv:unless="${hasCatalogSections}">
+  <div class="collection-grid__list" coil:unless="${hasCatalogSections}">
     <article class="catalog-section collection-grid__item">
       <p class="catalog-section__eyebrow">New season</p>
       <h3>Featured</h3>

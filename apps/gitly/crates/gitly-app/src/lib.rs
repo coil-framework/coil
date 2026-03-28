@@ -7,24 +7,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use davenda_all::official_module;
-use davenda_app::{
+use coil::official_module;
+use coil_app::{
     CustomerAppComposition, CustomerAppManifest, CustomerAppRuntimePlan, MigrationPlanEntry,
     MigrationPlanOwner,
 };
-use davenda_auth::load_auth_model_package_at;
-use davenda_config::{Environment, JobBackend, PlatformConfig};
-use davenda_core::{
+use coil_auth::load_auth_model_package_at;
+use coil_config::{Environment, JobBackend, PlatformConfig};
+use coil_core::{
     ExtensionSlotDescriptor, ExtensionSlotKind, JobTriggerKind, ModuleManifest, PlatformModule,
     RegistrationError, ServiceRegistry,
 };
-use davenda_customer_sdk::CustomerBackendPlugin;
-use davenda_data::{MigrationPlan, MigrationRegistry};
-use davenda_runtime::{
+use coil_customer_sdk::CustomerBackendPlugin;
+use coil_data::{MigrationPlan, MigrationRegistry};
+use coil_runtime::{
     EnvironmentSecretResolver, HandlerDefinition, HttpMethod, HttpServerHost, RouteArea,
     RouteDefinition, RuntimePlan, SecretResolver,
 };
-use davenda_wasm::{ExtensionPoint, HandlerId};
+use coil_wasm::{ExtensionPoint, HandlerId};
 pub use gitly_backend::GitlyLinkedPluginSummary;
 
 const SHOWCASE_MODULE_ID: &str = "gitly-showcase";

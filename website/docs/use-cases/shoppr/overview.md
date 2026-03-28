@@ -2,7 +2,7 @@
 title: Shoppr Overview
 ---
 
-Shoppr is the main Davenda commerce teaching app. It is useful because it shows the whole customer
+Shoppr is the main Coil commerce teaching app. It is useful because it shows the whole customer
 product boundary in one place:
 
 - manifest and config
@@ -13,7 +13,7 @@ product boundary in one place:
 - admin and operator pages
 - customer-owned lifecycle commands
 
-If you want to understand how Davenda is meant to feel in a real ecommerce app, start here.
+If you want to understand how Coil is meant to feel in a real ecommerce app, start here.
 
 ## What Shoppr Is
 
@@ -88,7 +88,7 @@ Important folders:
 - `apps/shoppr/crates/shoppr-bin`
   - customer-owned CLI and server entrypoint
 - `apps/shoppr/crates/shoppr-backend`
-  - Davenda-facing linked plugin wrapper
+  - Coil-facing linked plugin wrapper
 - `apps/shoppr/backend/shoppr-loyalty-backend`
   - customer domain logic used by the linked plugin
 - `apps/shoppr/extensions`
@@ -98,7 +98,7 @@ Important folders:
 - `apps/shoppr/theme`
   - CSS, JS, SVG, and tokens
 
-That structure is the first big lesson. Davenda customer apps are real products with their own
+That structure is the first big lesson. Coil customer apps are real products with their own
 workspace, not just a folder full of overrides.
 
 ## The Canonical Bootstrap Pattern
@@ -189,7 +189,7 @@ The theme then makes those choices visible through:
 - `apps/shoppr/theme/assets/site.js`
 - `apps/shoppr/theme/tokens.toml`
 
-That is the practical Davenda story: site policy, locale policy, and theme behaviour all live in
+That is the practical Coil story: site policy, locale policy, and theme behaviour all live in
 the customer app.
 
 ## Linked Rust And WASM In One Commerce App
@@ -224,7 +224,7 @@ If you want the complete checked-in implementation after learning the pattern:
 
 ## Adapt This For Your Store
 
-If you are building a Davenda store, copy these ideas before copying markup:
+If you are building a Coil store, copy these ideas before copying markup:
 
 - keep the customer workspace explicit
 - let `app.toml` define the product contract

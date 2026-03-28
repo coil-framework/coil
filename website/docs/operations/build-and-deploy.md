@@ -2,7 +2,7 @@
 title: Build And Deploy
 ---
 
-Davenda expects production teams to treat build, migration, asset publication, runtime startup,
+Coil expects production teams to treat build, migration, asset publication, runtime startup,
 and cutover as separate operational steps with explicit verification in between.
 
 That separation is deliberate. A release is not just a compiled binary. It is the coordinated
@@ -18,7 +18,7 @@ bundle of:
 
 ## What Is This?
 
-This page describes the operational release flow for a Davenda customer app:
+This page describes the operational release flow for a Coil customer app:
 
 - what to build
 - which commands to run
@@ -27,7 +27,7 @@ This page describes the operational release flow for a Davenda customer app:
 - how to start the runtime
 - how to think about production rollout
 
-## Why Does Davenda Separate These Steps?
+## Why Does Coil Separate These Steps?
 
 Because they fail differently.
 
@@ -39,7 +39,7 @@ Because they fail differently.
 
 If you collapse all of those into one "deploy" button, incident recovery gets much harder.
 
-## A Practical Davenda Release Sequence
+## A Practical Coil Release Sequence
 
 For a serious deployment, use the same high-level order everywhere:
 
@@ -86,14 +86,14 @@ apps.
 At the platform level, the CLI contract is the same even if the binary name differs:
 
 ```bash
-platform migrate plan --config apps/shoppr/platform.toml
-platform migrate apply --config apps/shoppr/platform.toml --dry-run
-platform assets publish --config apps/shoppr/platform.toml --dry-run
-platform jobs status --config apps/shoppr/platform.toml
-platform tls status --config apps/shoppr/platform.toml
+coil migrate plan --config apps/shoppr/platform.toml
+coil migrate apply --config apps/shoppr/platform.toml --dry-run
+coil assets publish --config apps/shoppr/platform.toml --dry-run
+coil jobs status --config apps/shoppr/platform.toml
+coil tls status --config apps/shoppr/platform.toml
 ```
 
-Use the customer binary when the app re-exports that control plane. Use `platform` when you are
+Use the customer binary when the app re-exports that control plane. Use `coil` when you are
 operating the generic CLI directly.
 
 ## What To Build
@@ -187,7 +187,7 @@ platform rather than Shoppr-specific commerce behaviour.
 
 ## Same-Domain Versus CDN Asset Delivery
 
-Davenda supports both same-origin and CDN-style asset delivery, but the choice should be explicit.
+Coil supports both same-origin and CDN-style asset delivery, but the choice should be explicit.
 
 Use same-domain delivery when:
 

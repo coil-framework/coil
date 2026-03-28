@@ -41,7 +41,7 @@ and exposes a `plugin()` entrypoint that matches the direction in
 High-level intended shape:
 
 ```rust
-davenda_all::builder()
+coil::builder()
     .with_customer_plugin(shoppr_loyalty_backend::plugin())
     .run_from_env()
 ```
@@ -77,7 +77,7 @@ That uses Shoppr itself as the Docker build context and starts the normal Shoppr
 plus the optional sidecar adapter on
 `http://localhost:8081`.
 
-If you are building Shoppr against the live Davenda monorepo before upstream publication, use
+If you are building Shoppr against the live Coil monorepo before upstream publication, use
 the explicit repo override instead:
 
 ```bash
@@ -125,13 +125,13 @@ Exercise the signed webhook path:
 curl -sS \
   -X POST http://localhost:8081/webhooks/crm/contact-updated \
   -H 'content-type: application/json' \
-  -H 'x-harbor-backend-secret: harbor-backend-dev-secret' \
+  -H 'x-shoppr-backend-secret: shoppr-backend-dev-secret' \
   --data @backend/shoppr-loyalty-backend/requests/contact-updated.json
 ```
 
 ## What This Example Is Showing
 
-This is not a replacement for Davenda runtime modules. It is an example of customer-owned Rust
+This is not a replacement for Coil runtime modules. It is an example of customer-owned Rust
 logic that lives with the customer app instead of being scattered through core.
 
 The example intentionally demonstrates three things:

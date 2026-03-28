@@ -11,11 +11,11 @@ services:
       minio-init:
         condition: service_completed_successfully
     environment:
-      DAVENDA_CONFIG: platform.dev.toml
-      DATABASE_URL: postgres://davenda:devpass@postgres:5432/davenda_harbor_shop
+      COIL_CONFIG: platform.dev.toml
+      DATABASE_URL: postgres://coil:devpass@postgres:5432/coil_shoppr
       REDIS_URL: redis://redis:6379
-      DAVENDA_COOKIE_SECRET: "01234567012345670123456701234567"
-      DAVENDA_CSRF_SECRET: "76543210765432107654321076543210"
+      COIL_COOKIE_SECRET: "01234567012345670123456701234567"
+      COIL_CSRF_SECRET: "76543210765432107654321076543210"
       STRIPE_PUBLISHABLE_KEY: "${STRIPE_PUBLISHABLE_KEY:-pk_test_replace_me}"
       STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_test_replace_me}"
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-replace-me}"
@@ -28,7 +28,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - shoppr-appdata:/app/.davenda
+      - shoppr-appdata:/app/.coil
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
       interval: 10s
@@ -36,15 +36,15 @@ services:
       retries: 20
     restart: unless-stopped
 
-  harbor-backend-example:
+  shoppr-backend-example:
     profiles: ["backend-example"]
     build:
       context: .
       dockerfile: backend/shoppr-loyalty-backend/Dockerfile
     environment:
-      HARBOR_BACKEND_BIND: "0.0.0.0:8081"
-      HARBOR_BACKEND_BRAND: "Shoppr"
-      HARBOR_BACKEND_WEBHOOK_SECRET: "${HARBOR_BACKEND_WEBHOOK_SECRET:-harbor-backend-dev-secret}"
+      SHOPPR_BACKEND_BIND: "0.0.0.0:8081"
+      SHOPPR_BACKEND_BRAND: "Shoppr"
+      SHOPPR_BACKEND_WEBHOOK_SECRET: "${SHOPPR_BACKEND_WEBHOOK_SECRET:-shoppr-backend-dev-secret}"
     ports:
       - "8081:8081"
     restart: unless-stopped
@@ -52,15 +52,15 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: davenda
+      POSTGRES_USER: coil
       POSTGRES_PASSWORD: devpass
-      POSTGRES_DB: davenda_harbor_shop
+      POSTGRES_DB: coil_shoppr
     ports:
       - "5438:5432"
     volumes:
       - shoppr-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U davenda -d davenda_harbor_shop"]
+      test: ["CMD-SHELL", "pg_isready -U coil -d coil_shoppr"]
       interval: 5s
       timeout: 5s
       retries: 20

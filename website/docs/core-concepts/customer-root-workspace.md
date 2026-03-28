@@ -2,13 +2,13 @@
 title: Customer-Root Workspace
 ---
 
-The customer-root workspace is the centre of gravity in Davenda.
+The customer-root workspace is the centre of gravity in Coil.
 
 If you understand this concept, the rest of the framework feels much less unusual.
 
 ## What It Is
 
-A Davenda application is expected to live in a customer-owned Rust workspace. That workspace owns:
+A Coil application is expected to live in a customer-owned Rust workspace. That workspace owns:
 
 - the application binary
 - customer-specific Rust crates
@@ -17,7 +17,7 @@ A Davenda application is expected to live in a customer-owned Rust workspace. Th
 - auth package files
 - extension artifacts
 
-Davenda is then consumed as upstream crates from that workspace.
+Coil is then consumed as upstream crates from that workspace.
 
 ## Why It Exists
 
@@ -29,7 +29,7 @@ The customer binary is where module composition and customer plugin registration
 
 ### Upgrades stay ordinary
 
-The customer app consumes Davenda through dependencies rather than through a hidden fork or code generation boundary.
+The customer app consumes Coil through dependencies rather than through a hidden fork or code generation boundary.
 
 ### Product logic stays close to the product
 
@@ -48,7 +48,7 @@ Shoppr is the checked-in reference customer workspace:
 That workspace demonstrates the intended model directly:
 
 - the workspace root owns the product
-- Davenda is a dependency, not the workspace root
+- Coil is a dependency, not the workspace root
 - the binary links the official battery and customer code
 - the app root carries templates, auth, theme assets, and extensions
 
@@ -110,7 +110,7 @@ At runtime, the customer workspace contributes three kinds of input.
 
 The customer binary links:
 
-- the Davenda runtime
+- the Coil runtime
 - whichever official modules are desired
 - customer-owned backend crates
 
@@ -173,7 +173,7 @@ Its responsibilities include:
 - loading the selected auth package from `auth/`
 - resolving runtime-installed extensions from `extensions/`
 - registering linked customer plugins
-- building the Davenda runtime plan
+- building the Coil runtime plan
 
 This is the practical shape you should copy for your own application. Your app-specific naming and hooks will differ, but the ownership pattern should look similar.
 
@@ -218,11 +218,11 @@ If the binary no longer clearly shows which modules and plugins are linked, the 
 
 ### Splitting first-party product logic into unnecessary services
 
-Some service boundaries are real. Many are just workarounds for a weak application composition model. Davenda is trying to avoid the latter.
+Some service boundaries are real. Many are just workarounds for a weak application composition model. Coil is trying to avoid the latter.
 
 ### Treating the workspace root as if it were only a Cargo convenience
 
-In Davenda, the workspace root is a product boundary. It is where the application’s shape becomes visible.
+In Coil, the workspace root is a product boundary. It is where the application’s shape becomes visible.
 
 ## Read Next
 

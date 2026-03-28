@@ -2,12 +2,12 @@
 title: SEO And Discoverability
 ---
 
-This page explains how Davenda’s routing, site, locale, and rendering model combine into search and
+This page explains how Coil’s routing, site, locale, and rendering model combine into search and
 discoverability behaviour.
 
 ## What Is This?
 
-Davenda treats SEO as part of the application model rather than as scattered `<head>` snippets in
+Coil treats SEO as part of the application model rather than as scattered `<head>` snippets in
 templates.
 
 The important moving parts are:
@@ -42,7 +42,7 @@ Whenever they:
 
 ## What Is Automatic Today?
 
-Davenda’s render layer currently injects:
+Coil’s render layer currently injects:
 
 - meta description
 - canonical URL
@@ -53,7 +53,7 @@ Davenda’s render layer currently injects:
 
 That behaviour lives in:
 
-- `crates/davenda-runtime/src/render/seo.rs`
+- `crates/coil-runtime/src/render/seo.rs`
 
 This is the core conceptual shift:
 
@@ -129,7 +129,7 @@ alternate locale set.
 
 ## How Site And Locale Affect Discoverability
 
-Davenda resolves site before locale-sensitive routing.
+Coil resolves site before locale-sensitive routing.
 
 That matters because:
 
@@ -177,4 +177,4 @@ The current runtime model is designed to inject it from typed metadata and confi
 - [SEO](../reference/seo.md)
 - [Internationalisation](../reference/internationalization.md)
 - [Themes, Rendering, And Assets](./themes-rendering-and-assets.md)
-- `crates/davenda-runtime/src/render/seo.rs`
+- `crates/coil-runtime/src/render/seo.rs`

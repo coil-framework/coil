@@ -26,7 +26,7 @@ cms = "CMS"
 title = "Shoppr"
 
 [home.utility]
-summary = "Shoppr reprend le rythme et la finition d'un vaisseau amiral mode moderne tout en exposant la surface modulaire de Davenda."
+summary = "Shoppr reprend le rythme et la finition d'un vaisseau amiral mode moderne tout en exposant la surface modulaire de Coil."
 
 [home.hero]
 title = "Luxe discret, routes rapides et boucle storefront complète dans un seul starter."
@@ -92,7 +92,7 @@ admin = "Ouvrir l'admin"
 
 [home.footer]
 brand = "Shoppr"
-summary = "Starter Davenda orienté mode avec multi-site visible, multi-locale, backend Rust et frontières d'extensions WASM."
+summary = "Starter Coil orienté mode avec multi-site visible, multi-locale, backend Rust et frontières d'extensions WASM."
 explore = "Explorer"
 inspect = "Inspection"
 platform = "Plateforme"

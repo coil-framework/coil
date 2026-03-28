@@ -2,7 +2,7 @@
 title: WASM Extensions
 ---
 
-Shoppr demonstrates Davenda's runtime-installed WASM path with a deliberately bounded example.
+Shoppr demonstrates Coil's runtime-installed WASM path with a deliberately bounded example.
 
 Use this page to understand what a real checked-in package looks like and how it differs from the
 linked backend.

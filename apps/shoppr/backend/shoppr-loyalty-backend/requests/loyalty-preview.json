@@ -1,5 +1,5 @@
 {
-  "customer_email": "captain@harbor.test",
+  "customer_email": "captain@shoppr.test",
   "membership_tier": "gold",
   "subtotal_gbp": 175.0,
   "cart_skus": ["harbor-cap", "harbor-tote"],

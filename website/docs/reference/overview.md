@@ -2,7 +2,7 @@
 title: Reference Overview
 ---
 
-The reference section is where Davenda is documented generically rather than through a specific product lens.
+The reference section is where Coil is documented generically rather than through a specific product lens.
 
 Use it when you need:
 
@@ -48,12 +48,12 @@ Use these when you need to know exactly which blocks exist, what keys are suppor
 ### Auth
 
 - [Auth overview](./auth-overview.md)
-- [Zanzibar and Davenda auth](./auth-zanzibar.md)
+- [Zanzibar and Coil auth](./auth-zanzibar.md)
 - [Auth schema](./auth-schema.md)
 - [Auth packages](./auth-packages.md)
 - [Custom auth schema guidance](./custom-auth-schema.md)
 
-Use this subsection when you need to understand how Davenda expresses authorisation and how to extend or replace the shipped auth model.
+Use this subsection when you need to understand how Coil expresses authorisation and how to extend or replace the shipped auth model.
 
 ### Rendering, Themes, Locales, Accessibility, And SEO
 
@@ -68,7 +68,7 @@ Use these when you need the exact template syntax, theme contract, locale wiring
 ### Official Batteries And Composition
 
 - [Official modules](./modules.md)
-- [Composition and davenda-all](./composition.md)
+- [Composition and coil](./composition.md)
 - [Customer Rust vs third-party WASM](./customer-vs-wasm.md)
 
 Use these when you need to know what the official batteries provide, how to compose them, and how linked customer code differs from runtime-installed extensions.

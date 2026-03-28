@@ -1,27 +1,27 @@
-<section class="account-panels" xmlns:dv="https://davenda.dev" dv:fragment="panels">
+<section class="account-panels" xmlns:coil="https://coil.rs" coil:fragment="panels">
   <div class="account-panels__grid">
     <article class="account-panel">
       <p class="account-panel__eyebrow">Orders</p>
       <h2>Recent purchases</h2>
-      <ul class="account-panel__list" dv:if="${account.hasRecentOrders}">
-        <li dv:each="order : ${recentOrders}">
-          <strong dv:text="${order.reference}">HS-1048</strong>
-          <span dv:text="${order.status}">Packed</span>
-          <span dv:text="${order.total}">GBP 84</span>
-          <span dv:text="${order.lineCount}">1</span>
-          <p dv:if="${order.hasPaymentSummary}" dv:text="${order.paymentSummary}">
+      <ul class="account-panel__list" coil:if="${account.hasRecentOrders}">
+        <li coil:each="order : ${recentOrders}">
+          <strong coil:text="${order.reference}">HS-1048</strong>
+          <span coil:text="${order.status}">Packed</span>
+          <span coil:text="${order.total}">GBP 84</span>
+          <span coil:text="${order.lineCount}">1</span>
+          <p coil:if="${order.hasPaymentSummary}" coil:text="${order.paymentSummary}">
             Card ending 4242, reference PAY-50001
           </p>
         </li>
       </ul>
-      <p dv:unless="${account.hasRecentOrders}" dv:text="${account.ordersEmptyText}">
+      <p coil:unless="${account.hasRecentOrders}" coil:text="${account.ordersEmptyText}">
         Recent orders will appear here once the customer has completed checkout.
       </p>
       <a
         class="button button--secondary"
         href="/account/orders"
-        dv:attr="href=${account.ordersCtaUrl}"
-        dv:text="${account.ordersCtaLabel}"
+        coil:attr="href=${account.ordersCtaUrl}"
+        coil:text="${account.ordersCtaLabel}"
       >
         View order history
       </a>
@@ -30,20 +30,20 @@
     <article class="account-panel">
       <p class="account-panel__eyebrow">Membership</p>
       <h2>Access and renewals</h2>
-      <div dv:if="${account.hasMembership}">
+      <div coil:if="${account.hasMembership}">
         <p>
-          <strong dv:text="${membershipSummary.tierName}">Harbor Circle</strong>
-          <span dv:text="${membershipSummary.status}">Active</span>
+          <strong coil:text="${membershipSummary.tierName}">Harbor Circle</strong>
+          <span coil:text="${membershipSummary.status}">Active</span>
         </p>
-        <p dv:text="${membershipSummary.renewalText}">
+        <p coil:text="${membershipSummary.renewalText}">
           Renewing on 18 April with market-day priority access.
         </p>
         <a class="button" href="/account/memberships">View membership details</a>
       </div>
-      <div dv:if="${account.hasPendingMembershipOrder}">
+      <div coil:if="${account.hasPendingMembershipOrder}">
         <p>
-          <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
-          <span dv:text="${account.latestOrderStatus}">Pending Payment</span>
+          <strong coil:text="${account.latestOrderReference}">ORD-10042</strong>
+          <span coil:text="${account.latestOrderStatus}">Pending Payment</span>
         </p>
         <p>
           Membership access appears here only after a qualifying membership purchase is captured for
@@ -57,14 +57,14 @@
           View order history
         </a>
       </div>
-      <div dv:if="${account.needsMembershipPurchase}">
-        <p dv:text="${account.membershipEmptyText}">
+      <div coil:if="${account.needsMembershipPurchase}">
+        <p coil:text="${account.membershipEmptyText}">
           No membership is attached yet. Join to unlock early-access drops and concierge support.
         </p>
         <a
           class="button"
           href="/en-GB/shop/collections/memberships"
-          dv:attr="href=${account.membershipCtaUrl}"
+          coil:attr="href=${account.membershipCtaUrl}"
         >
           Explore memberships
         </a>
@@ -74,20 +74,20 @@
     <article class="account-panel">
       <p class="account-panel__eyebrow">Support</p>
       <h2>Continue your account journey</h2>
-      <p dv:if="${account.hasCustomerEmail}">
+      <p coil:if="${account.hasCustomerEmail}">
         Use this account area to review orders, retry checkout, or check membership access for
-        <strong dv:text="${customer.email}">member@example.com</strong>.
+        <strong coil:text="${customer.email}">member@example.com</strong>.
       </p>
-      <p dv:if="${account.hasLatestOrder}">
+      <p coil:if="${account.hasLatestOrder}">
         If the latest order still shows
         <strong>Pending Payment</strong>
         after you return from the provider, keep this browser session and refresh the account
         surfaces before contacting support.
       </p>
-      <p dv:if="${account.hasPrincipal}">
+      <p coil:if="${account.hasPrincipal}">
         This browser is already attached to a live customer identity for this account view.
       </p>
-      <p dv:unless="${account.hasPrincipal}">
+      <p coil:unless="${account.hasPrincipal}">
         This customer account currently follows the browser session you are using. Keep this
         browser active if you need to revisit the same order history or membership state. Orders
         and membership changes from another browser will not appear here yet.
@@ -96,7 +96,7 @@
         <li><a href="/account/orders">Review order history</a></li>
         <li><a href="/account/memberships">Check membership status</a></li>
         <li><a href="/checkout">Open checkout</a></li>
-        <li><a href="/en-GB/shop" dv:attr="href=${links.catalog}">Continue shopping</a></li>
+        <li><a href="/en-GB/shop" coil:attr="href=${links.catalog}">Continue shopping</a></li>
       </ul>
     </article>
   </div>

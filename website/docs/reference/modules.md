@@ -2,7 +2,7 @@
 title: Official Modules
 ---
 
-Davenda's official modules are reusable product batteries. They sit above core and below customer
+Coil's official modules are reusable product batteries. They sit above core and below customer
 apps.
 
 Use this page as the entry point when you want to answer practical questions such as:
@@ -27,17 +27,17 @@ combination of:
 
 The clearest source of truth is always the module manifest in the relevant crate:
 
-- `crates/davenda-cms/src/module/platform/manifest.rs`
-- `crates/davenda-media/src/module/manifest.rs`
-- `crates/davenda-commerce/src/module/platform/manifest.rs`
-- `crates/davenda-memberships/src/module/manifest.rs`
-- `crates/davenda-events/src/module/platform/manifest.rs`
-- `crates/davenda-admin/src/module/manifest.rs`
-- `crates/davenda-ops/src/module/manifest.rs`
+- `crates/coil-cms/src/module/platform/manifest.rs`
+- `crates/coil-media/src/module/manifest.rs`
+- `crates/coil-commerce/src/module/platform/manifest.rs`
+- `crates/coil-memberships/src/module/manifest.rs`
+- `crates/coil-events/src/module/platform/manifest.rs`
+- `crates/coil-admin/src/module/manifest.rs`
+- `crates/coil-ops/src/module/manifest.rs`
 
 ## How Modules Are Installed
 
-Davenda has two different decisions:
+Coil has two different decisions:
 
 1. The customer binary links module crates at compile time.
 2. The customer app manifest and platform config enable a subset of those linked modules at
@@ -101,7 +101,7 @@ Shoppr and Gitly are good examples of that split:
 
 ## Read Next
 
-- [Composition And `davenda-all`](./composition.md)
+- [Composition And `coil`](./composition.md)
 - [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
 - [Shoppr Overview](../use-cases/shoppr/overview.md)
 - [Gitly Overview](../use-cases/gitly/overview.md)

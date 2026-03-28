@@ -1,0 +1,21 @@
+[package]
+name = "coil"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coil-admin = { path = "../coil-admin" }
+coil-app = { path = "../coil-app" }
+coil-auth = { path = "../coil-auth" }
+coil-cms = { path = "../coil-cms" }
+coil-commerce = { path = "../coil-commerce" }
+coil-config = { path = "../coil-config" }
+coil-core = { path = "../coil-core" }
+coil-customer-sdk = { path = "../coil-customer-sdk" }
+coil-events = { path = "../coil-events" }
+coil-media = { path = "../coil-media" }
+coil-memberships = { path = "../coil-memberships" }
+coil-ops = { path = "../coil-ops" }
+coil-runtime = { path = "../coil-runtime" }
+thiserror = "1.0"
+tokio = { version = "1", features = ["net", "rt-multi-thread"] }

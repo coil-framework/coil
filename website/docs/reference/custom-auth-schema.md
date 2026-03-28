@@ -14,7 +14,7 @@ mode = "extend"
 storage_schema_version = 1
 model_version = 1
 capability_binding_version = 1
-imports = ["platform-default-auth"]
+imports = ["coil-default-auth"]
 ```
 
 ```text
@@ -59,7 +59,7 @@ Before changing auth, decide which of these problems you actually have:
 
 Those are different problems, and they should not all lead to a full replacement.
 
-## The Safest Davenda Path Today
+## The Safest Coil Path Today
 
 Today, the safest practical path is:
 
@@ -90,7 +90,7 @@ mode = "extend"
 storage_schema_version = 1
 model_version = 1
 capability_binding_version = 1
-imports = ["platform-default-auth"]
+imports = ["coil-default-auth"]
 ```
 
 ```text

@@ -2,11 +2,11 @@
 title: Accessibility As A Platform Contract
 ---
 
-In Davenda, accessibility is part of the rendering contract, not a late design cleanup pass.
+In Coil, accessibility is part of the rendering contract, not a late design cleanup pass.
 
 ## Start With The Practical Standard
 
-A good Davenda page should already make sense before any enhancement script runs.
+A good Coil page should already make sense before any enhancement script runs.
 
 A minimal public shell should look like this:
 
@@ -26,7 +26,7 @@ Accessibility is therefore visible in the template itself, not only in a testing
 
 ## Why Is This A Platform Concern?
 
-Davenda influences:
+Coil influences:
 
 - document structure
 - locale metadata
@@ -38,7 +38,7 @@ Davenda influences:
 Because the framework controls so much of that path, it has a real responsibility to make the
 accessible path the normal path.
 
-## What Davenda Helps With Today
+## What Coil Helps With Today
 
 Current practical advantages:
 
@@ -49,7 +49,7 @@ Current practical advantages:
 
 Current honest limitation:
 
-- Davenda does not currently run a full automatic accessibility validator over every customer
+- Coil does not currently run a full automatic accessibility validator over every customer
   template
 
 So the platform helps strongly, but the customer app still has to execute well.
@@ -58,7 +58,7 @@ So the platform helps strongly, but the customer app still has to execute well.
 
 ### Forms
 
-A Davenda form should remain a real form:
+A Coil form should remain a real form:
 
 ```html
 <form method="get" action="/search">
@@ -116,7 +116,7 @@ if the initial page render looks correct.
 
 ## What Still Belongs To The Customer App?
 
-Davenda does not remove customer responsibility for:
+Coil does not remove customer responsibility for:
 
 - heading hierarchy
 - contrast

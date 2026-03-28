@@ -2,7 +2,7 @@
 title: Customer Rust Vs Third-Party WASM
 ---
 
-Davenda has two different extension models on purpose:
+Coil has two different extension models on purpose:
 
 - linked customer Rust for first-party product logic
 - runtime-installed WASM for bounded, lower-trust extensions
@@ -95,7 +95,7 @@ pub fn plugin() -> ShopprBackend {
 }
 
 // customer binary
-davenda_all::builder()
+coil::builder()
     .with_customer_plugin(shoppr_backend::plugin())
     .run_from_env()
 ```
@@ -273,7 +273,7 @@ Workspace packaging examples:
 
 ## Read Next
 
-- [Composition And `davenda-all`](./composition.md)
+- [Composition And `coil`](./composition.md)
 - [Shoppr Linked Rust Backend](../use-cases/shoppr/linked-rust-backend.md)
 - [Shoppr WASM Extensions](../use-cases/shoppr/wasm-extensions.md)
 - [Gitly API And Background Work](../use-cases/gitly/api-and-background-work.md)

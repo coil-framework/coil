@@ -1,22 +1,22 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Shop Harbor'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Shop Harbor'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Shoppr</title>
+    <title coil:text="${pageTitle}">Shoppr</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
-    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
   <body class="shoppr-shell">
     <header class="site-header">
@@ -29,28 +29,28 @@
         </div>
       </div>
       <div class="site-header__main">
-        <a href="/" class="brand" dv:attr="href=${links.home}">
+        <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
         </a>
-        <nav dv:replace="~{navigation/primary}"></nav>
+        <nav coil:replace="~{navigation/primary}"></nav>
       </div>
       <div class="site-header__panels">
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Market</p>
           <ul>
-            <li dv:each="item : ${links.siteSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">Shoppr UK</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.siteSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Language</p>
           <ul>
-            <li dv:each="item : ${links.localeSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">English</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.localeSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
@@ -69,10 +69,10 @@
             persuasive collection pages, fast product cards, and a checkout handoff that stays in the same public journey.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
               Browse edits
             </a>
-            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
               Review cart
             </a>
           </div>
@@ -95,7 +95,7 @@
         </article>
       </section>
 
-      <div dv:replace="~{commerce/collection-grid :: grid}"></div>
+      <div coil:replace="~{commerce/collection-grid :: grid}"></div>
 
       <section class="catalog-assurance">
         <article>
@@ -107,8 +107,8 @@
         </article>
       </section>
 
-      <div dv:replace="~{commerce/product-grid :: grid}"></div>
-      <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
+      <div coil:replace="~{commerce/product-grid :: grid}"></div>
+      <div coil:replace="~{commerce/storefront-journey :: journey}"></div>
 
       <section class="catalog-assurance">
         <article>
@@ -119,10 +119,10 @@
             obvious.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
               Browse all edits
             </a>
-            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
               Review cart
             </a>
           </div>
@@ -137,7 +137,7 @@
       </div>
       <div>
         <p class="site-footer__eyebrow">Explore</p>
-        <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+        <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">Collections</a>
         <a href="/cart">Cart</a>
         <a href="/account">Account</a>
       </div>

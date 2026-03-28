@@ -1,6 +1,6 @@
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
-use davenda_runtime::EnvironmentSecretResolver;
+use coil_runtime::EnvironmentSecretResolver;
 use gitly_app::{
     GitlyWorkspace, gitly_actions_scheduler_demo_sha256, gitly_community_pulse_demo_sha256,
 };
@@ -390,7 +390,7 @@ fn server_serves_gitly_home_and_wasm_extended_api_surface() {
         });
 
     assert!(
-        home_body.contains("One Davenda app can look like a forge"),
+        home_body.contains("One Coil app can look like a forge"),
         "{home_body}"
     );
     assert!(home_body.contains("data-route=\"home\""), "{home_body}");

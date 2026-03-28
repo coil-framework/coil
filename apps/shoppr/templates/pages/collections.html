@@ -1,26 +1,26 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Collections'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Collections'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Collections</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${pageTitle}">Collections</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <nav coil:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main collections-page">
       <section class="collections-page__intro">
         <p class="collections-page__eyebrow">Collections</p>
         <p>
-          <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+          <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
           <span>/</span>
           <span>Collections</span>
         </p>
@@ -30,14 +30,14 @@
           product detail and cart.
         </p>
         <div class="checkout-actions">
-          <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">Browse full catalog</a>
-          <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+          <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}">Browse full catalog</a>
+          <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
             Review cart
           </a>
         </div>
       </section>
 
-      <div dv:replace="~{commerce/collection-grid :: grid}"></div>
+      <div coil:replace="~{commerce/collection-grid :: grid}"></div>
 
       <section class="catalog-assurance">
         <article>
@@ -66,8 +66,8 @@
         </article>
       </section>
 
-      <div dv:replace="~{commerce/product-grid :: grid}"></div>
-      <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
+      <div coil:replace="~{commerce/product-grid :: grid}"></div>
+      <div coil:replace="~{commerce/storefront-journey :: journey}"></div>
     </main>
     <footer class="site-footer">
       <small>Shoppr</small>

@@ -7,7 +7,7 @@ publish workflow.
 
 Primary implementation files:
 
-- `crates/davenda-cms/src/module/platform/manifest.rs`
+- `crates/coil-cms/src/module/platform/manifest.rs`
 - `apps/shoppr/templates/cms/page.html`
 - `apps/shoppr/templates/cms/pages.html`
 - `apps/shoppr/templates/cms/preview.html`
@@ -16,12 +16,12 @@ Primary implementation files:
 
 ## Why It Exists
 
-Davenda keeps editorial publishing in a first-party module so pages, redirects, SEO, cache
+Coil keeps editorial publishing in a first-party module so pages, redirects, SEO, cache
 invalidation, and publish scheduling stay coherent.
 
 ## What It Provides
 
-From `crates/davenda-cms/src/module/platform/manifest.rs`, CMS contributes:
+From `crates/coil-cms/src/module/platform/manifest.rs`, CMS contributes:
 
 - migrations for pages, navigation, and redirects
 - localized public page routes such as `/pages/{slug}`
@@ -118,12 +118,12 @@ Customer apps can also change CMS behaviour through:
 Concrete example:
 
 ```html title="templates/cms/page.html"
-<article xmlns:dv="https://davenda.dev">
+<article xmlns:coil="https://coil.rs">
   <header>
-    <h1 dv:text="${page.title}">Page title</h1>
+    <h1 coil:text="${page.title}">Page title</h1>
   </header>
-  <section dv:utext="${page.body}"></section>
-  <aside dv:insert="~{fragments/editorial-signpost}"></aside>
+  <section coil:utext="${page.body}"></section>
+  <aside coil:insert="~{fragments/editorial-signpost}"></aside>
 </article>
 ```
 

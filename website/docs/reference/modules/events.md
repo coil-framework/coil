@@ -6,9 +6,9 @@ The events module owns event catalog pages, bookings, waitlists, reminders, and 
 
 Primary implementation files:
 
-- `crates/davenda-events/src/module/platform/manifest.rs`
-- `crates/davenda-events/src/module/platform/surfaces.rs`
-- `crates/davenda-events/src/module/platform/operations.rs`
+- `crates/coil-events/src/module/platform/manifest.rs`
+- `crates/coil-events/src/module/platform/surfaces.rs`
+- `crates/coil-events/src/module/platform/operations.rs`
 
 ## Why It Exists
 
@@ -65,7 +65,7 @@ Important routes from `surfaces.rs`:
 
 ## Required Auth Capabilities
 
-The exact capability set is declared in `crates/davenda-events/src/module/platform/capabilities.rs`,
+The exact capability set is declared in `crates/coil-events/src/module/platform/capabilities.rs`,
 and the public/admin routes are gated by event publish, booking create, and booking check-in
 capabilities.
 
@@ -85,8 +85,8 @@ Customer apps usually extend events by:
 Concrete example:
 
 ```html title="templates/events/event-detail.html"
-<form method="post" dv:attr="action=${event.bookingAction}">
-  <input type="hidden" name="event_id" dv:attr="value=${event.id}" />
+<form method="post" coil:attr="action=${event.bookingAction}">
+  <input type="hidden" name="event_id" coil:attr="value=${event.id}" />
   <button type="submit">Reserve a place</button>
 </form>
 ```

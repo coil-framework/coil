@@ -2,7 +2,7 @@
 title: Auth Packages
 ---
 
-An auth package is the deployable unit of authorisation semantics in Davenda.
+An auth package is the deployable unit of authorisation semantics in Coil.
 
 It packages:
 
@@ -15,7 +15,7 @@ It does not replace the core auth engine. Core still owns tuple storage, checks,
 
 ## Why Auth Packages Exist
 
-Davenda separates three concerns that are often collapsed together:
+Coil separates three concerns that are often collapsed together:
 
 - tuple storage
 - authorisation semantics
@@ -91,7 +91,7 @@ mode = "extend"
 storage_schema_version = 1
 model_version = 1
 capability_binding_version = 1
-imports = ["platform-default-auth"]
+imports = ["coil-default-auth"]
 ```
 
 What the version fields mean:
@@ -144,7 +144,7 @@ Current loader constraint:
 - an extend-mode package must import exactly one base package
 - multiple imported base packages are rejected by the current loader
 
-## How Packages Are Used In Davenda
+## How Packages Are Used In Coil
 
 The normal path is:
 
@@ -230,7 +230,7 @@ mode = "extend"
 storage_schema_version = 1
 model_version = 1
 capability_binding_version = 1
-imports = ["platform-default-auth"]
+imports = ["coil-default-auth"]
 ```
 
 ```text

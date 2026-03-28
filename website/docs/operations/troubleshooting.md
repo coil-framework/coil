@@ -2,7 +2,7 @@
 title: Troubleshooting
 ---
 
-Troubleshooting in Davenda should start with explicit evidence, not guesswork.
+Troubleshooting in Coil should start with explicit evidence, not guesswork.
 
 Use this page to classify a problem by subsystem first, then inspect the right operator surface.
 
@@ -21,7 +21,7 @@ This page is the symptom-driven troubleshooting entry point for:
 
 ## Why Start Here?
 
-Davenda has explicit subsystems. That is an advantage only if operators and developers know which
+Coil has explicit subsystems. That is an advantage only if operators and developers know which
 one to inspect first.
 
 The fastest first question is:
@@ -103,7 +103,7 @@ Concrete commands:
 
 ```bash
 cargo run -p shoppr -- assets publish
-platform assets publish --config apps/shoppr/platform.toml --dry-run
+coil assets publish --config apps/shoppr/platform.toml --dry-run
 ```
 
 ## Session, Cookie, And CSRF Problems
@@ -145,9 +145,9 @@ Check:
 Concrete commands:
 
 ```bash
-platform jobs status --config apps/shoppr/platform.toml
-platform jobs ready --config apps/shoppr/platform.toml --queue jobs.work --limit 25
-platform jobs dead-letters --config apps/shoppr/platform.toml --queue jobs.dead-letter --limit 25
+coil jobs status --config apps/shoppr/platform.toml
+coil jobs ready --config apps/shoppr/platform.toml --queue jobs.work --limit 25
+coil jobs dead-letters --config apps/shoppr/platform.toml --queue jobs.dead-letter --limit 25
 ```
 
 ## Migration Problems

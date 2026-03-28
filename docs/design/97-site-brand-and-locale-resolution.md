@@ -9,7 +9,7 @@ Accepted.
 
 ## Decision
 
-Davenda supports a first-class `site` model inside a single customer app.
+Coil supports a first-class `site` model inside a single customer app.
 
 A customer app may expose:
 
@@ -94,7 +94,7 @@ Global `i18n` and `seo` settings remain valid and continue to describe:
 
 ### Request Resolution
 
-Davenda resolves site before locale-sensitive route matching.
+Coil resolves site before locale-sensitive route matching.
 
 The resolution order is:
 

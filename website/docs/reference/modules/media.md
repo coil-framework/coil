@@ -7,7 +7,7 @@ state above the raw storage engine.
 
 Primary implementation files:
 
-- `crates/davenda-media/src/module/manifest.rs`
+- `crates/coil-media/src/module/manifest.rs`
 - `apps/shoppr/templates/admin/dashboard.html`
 
 ## Why It Exists
@@ -24,7 +24,7 @@ The media module provides that domain layer.
 
 ## What It Provides
 
-From `crates/davenda-media/src/module/manifest.rs`, media adds:
+From `crates/coil-media/src/module/manifest.rs`, media adds:
 
 - migrations for libraries, assets, and derivatives
 - admin routes for `/admin/media` and `/admin/media/storage`
@@ -102,7 +102,7 @@ Concrete example:
 ```html title="templates/commerce/product-detail.html"
 <img
   alt="Product image"
-  dv:attr="src=${product.heroImage.url},alt=${product.heroImage.alt}"
+  coil:attr="src=${product.heroImage.url},alt=${product.heroImage.alt}"
 />
 ```
 

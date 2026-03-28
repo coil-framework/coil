@@ -1,0 +1,12 @@
+[package]
+name = "coil-commerce"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coil-auth = { path = "../coil-auth" }
+coil-config = { path = "../coil-config" }
+coil-core = { path = "../coil-core" }
+coil-data = { path = "../coil-data" }
+coil-jobs = { path = "../coil-jobs" }
+toml = "0.8"

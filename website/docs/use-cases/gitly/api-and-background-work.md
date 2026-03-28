@@ -2,7 +2,7 @@
 title: API And Background Work
 ---
 
-This page is about two reusable Davenda patterns:
+This page is about two reusable Coil patterns:
 
 - customer-owned API-style endpoints
 - bounded background work through explicit slots and jobs

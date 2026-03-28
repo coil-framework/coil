@@ -8,28 +8,28 @@ business logic.
 ## Cache Commands
 
 ```text
-platform cache warm
-platform cache inspect
-platform cache invalidate
+coil cache warm
+coil cache inspect
+coil cache invalidate
 ```
 
 Examples:
 
 ```bash
-cargo run -p davenda-cli -- cache warm \
+cargo run -p coil-cli -- cache warm \
   --config apps/shoppr/platform.dev.toml \
   --scope public \
   --route /en-GB/shop
 ```
 
 ```bash
-cargo run -p davenda-cli -- cache inspect \
+cargo run -p coil-cli -- cache inspect \
   --config apps/shoppr/platform.dev.toml \
   --route /en-GB/shop
 ```
 
 ```bash
-cargo run -p davenda-cli -- cache invalidate \
+cargo run -p coil-cli -- cache invalidate \
   --config apps/shoppr/platform.dev.toml \
   --tag route:events.list \
   --tag locale:en-GB \
@@ -48,20 +48,20 @@ Use them for different moments:
 ## Jobs Commands
 
 ```text
-platform jobs status
-platform jobs run
-platform jobs ready
-platform jobs dead-letters
-platform jobs in-flight
-platform jobs retry
-platform jobs promote
+coil jobs status
+coil jobs run
+coil jobs ready
+coil jobs dead-letters
+coil jobs in-flight
+coil jobs retry
+coil jobs promote
 ```
 
 Examples:
 
 ```bash
-cargo run -p davenda-cli -- jobs status --config apps/shoppr/platform.dev.toml
-cargo run -p davenda-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
+cargo run -p coil-cli -- jobs status --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
 ```
 
 Use `dead-letters`, `retry`, and `promote` when you are handling recovery, not during routine local development.
@@ -76,20 +76,20 @@ Typical operator workflow:
 ## TLS, Storage, And Assets
 
 ```text
-platform tls status
-platform tls validate-challenge
-platform tls renew
-platform storage inspect
-platform storage verify
-platform assets publish
+coil tls status
+coil tls validate-challenge
+coil tls renew
+coil storage inspect
+coil storage verify
+coil assets publish
 ```
 
 Examples:
 
 ```bash
-cargo run -p davenda-cli -- tls status --config apps/shoppr/platform.dev.toml
-cargo run -p davenda-cli -- storage inspect --config apps/shoppr/platform.dev.toml
-cargo run -p davenda-cli -- assets publish --config apps/shoppr/platform.dev.toml --dry-run
+cargo run -p coil-cli -- tls status --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- storage inspect --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- assets publish --config apps/shoppr/platform.dev.toml --dry-run
 ```
 
 Read those commands like this:

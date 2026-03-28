@@ -1,0 +1,11 @@
+[package]
+name = "coil-media"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coil-assets = { path = "../coil-assets" }
+coil-auth = { path = "../coil-auth" }
+coil-core = { path = "../coil-core" }
+coil-data = { path = "../coil-data" }
+coil-storage = { path = "../coil-storage" }

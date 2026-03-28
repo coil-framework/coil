@@ -15,7 +15,7 @@ Real commerce apps need more than product routes. They also need:
 - campaign redirects
 - navigation changes tied to launches
 
-Davenda keeps those inside the same customer app boundary instead of pushing them into a separate
+Coil keeps those inside the same customer app boundary instead of pushing them into a separate
 tooling story.
 
 ## The Main CMS Pattern
@@ -44,7 +44,7 @@ product system, not four unrelated tools.
 ## Where The CMS Routes Come From
 
 The runtime surface is declared by the CMS module in
-`crates/davenda-cms/src/module/platform/manifest.rs`.
+`crates/coil-cms/src/module/platform/manifest.rs`.
 
 That manifest adds:
 
@@ -76,7 +76,7 @@ Two files make this especially clear:
 - `apps/shoppr/templates/cms/navigation.html`
 - `apps/shoppr/templates/cms/redirects.html`
 
-These are useful because they demonstrate a practical Davenda idea:
+These are useful because they demonstrate a practical Coil idea:
 
 - navigation is part of product composition
 - redirects are part of launch and editorial operations
@@ -85,7 +85,7 @@ Neither should be treated as “someone else's infrastructure problem.”
 
 ## How To Add A Custom Page In This Model
 
-In a Davenda customer app, adding a custom page usually means:
+In a Coil customer app, adding a custom page usually means:
 
 1. decide the page type and route role
 2. add or update the page type under `content/page-types/`

@@ -1,4 +1,4 @@
-# Harbor Loyalty Backend
+# Shoppr Loyalty Backend
 
 `shoppr-loyalty-backend` is the checked-in Shoppr example for chapter 96: a linked
 customer-owned Rust backend crate that holds first-party customer logic.
@@ -31,7 +31,7 @@ needs:
 
 `src/main.rs`
 - optional process bootstrap
-- reads `HARBOR_BACKEND_*` environment variables and starts the Axum server
+- reads `SHOPPR_BACKEND_*` environment variables and starts the Axum server
 
 `requests/*.json`
 - checked-in sample payloads for manual `curl` testing
@@ -50,9 +50,9 @@ The primary connection path is the linked crate:
 
 The optional sidecar path is secondary:
 
-1. `apps/shoppr/docker-compose.yml` defines the optional `harbor-backend-example` service
+1. `apps/shoppr/docker-compose.yml` defines the optional `shoppr-backend-example` service
 2. that service builds this crate and exposes it on `http://localhost:8081`
-3. `src/main.rs` loads `HARBOR_BACKEND_*` settings
+3. `src/main.rs` loads `SHOPPR_BACKEND_*` settings
 4. `src/http.rs` maps HTTP routes onto the same rules from `src/lib.rs`
 
 That is the intended Shoppr pattern now: linked crate first, sidecar only when a process
@@ -65,7 +65,7 @@ Read `src/lib.rs` first. It is the primary example.
 High-level intended registration shape:
 
 ```rust
-davenda_all::builder()
+coil::builder()
     .with_customer_plugin(shoppr_loyalty_backend::plugin())
     .run_from_env()
 ```
@@ -85,7 +85,7 @@ cargo run -p shoppr -- linked-backend demo
 ```
 
 That path does not need the optional sidecar. It loads the checked-in sample requests and executes
-the linked backend directly through the Harbor customer workspace.
+the linked backend directly through the Shoppr customer workspace.
 
 ## Optional Sidecar Adapter
 
@@ -104,7 +104,7 @@ cd apps/shoppr
 docker compose --profile backend-example up --build
 ```
 
-If you are building Shoppr against the live Davenda monorepo before upstream publication, use
+If you are building Shoppr against the live Coil monorepo before upstream publication, use
 the explicit repo override:
 
 ```bash
@@ -137,7 +137,7 @@ Exercise the fail-closed webhook route:
 curl -sS \
   -X POST http://localhost:8081/webhooks/crm/contact-updated \
   -H 'content-type: application/json' \
-  -H "x-harbor-backend-secret: ${HARBOR_BACKEND_WEBHOOK_SECRET:-harbor-backend-dev-secret}" \
+  -H "x-shoppr-backend-secret: ${SHOPPR_BACKEND_WEBHOOK_SECRET:-shoppr-backend-dev-secret}" \
   --data @apps/shoppr/backend/shoppr-loyalty-backend/requests/contact-updated.json
 ```
 
@@ -157,7 +157,7 @@ The shortest safe path is:
 1. add request/response types and pure rule logic in `src/lib.rs`
 2. add a new handler and route in `src/http.rs`
 3. add a sample request in `requests/`
-4. add or update `HARBOR_BACKEND_*` env vars in `apps/shoppr/docker-compose.yml` if the route needs configuration or secrets
+4. add or update `SHOPPR_BACKEND_*` env vars in `apps/shoppr/docker-compose.yml` if the route needs configuration or secrets
 5. add unit tests for the rule and HTTP-level tests for the route
 
 That keeps the service maintainable. Pure rules stay easy to test, and the HTTP adapter stays thin.
@@ -179,7 +179,7 @@ That example shows the intended Shoppr customization pattern:
 
 - keep the business rule pure and deterministic in Rust
 - expose it through the linked crate first
-- keep the linked crate ready to implement `davenda-customer-sdk` traits directly
+- keep the linked crate ready to implement `coil-customer-sdk` traits directly
 - keep request validation and HTTP concerns in the adapter only when needed
 - keep a checked-in sample payload next to the code so another developer can exercise the rule immediately
 

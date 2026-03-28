@@ -1,10 +1,10 @@
-# Davenda
+# Coil
 
-[![CI](https://github.com/davenda/davenda/actions/workflows/ci.yml/badge.svg)](https://github.com/davenda/davenda/actions/workflows/ci.yml)
-[![Docs](https://github.com/davenda/davenda/actions/workflows/docs.yml/badge.svg)](https://github.com/davenda/davenda/actions/workflows/docs.yml)
+[![CI](https://github.com/coil-framework/coil/actions/workflows/ci.yml/badge.svg)](https://github.com/coil-framework/coil/actions/workflows/ci.yml)
+[![Docs](https://github.com/coil-framework/coil/actions/workflows/docs.yml/badge.svg)](https://github.com/coil-framework/coil/actions/workflows/docs.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-black.svg)](./LICENSE)
 
-Davenda is a highly opinionated Rust web framework for teams that want to ship real products, not assemble a web stack from spare parts.
+Coil is a highly opinionated Rust web framework for teams that want to ship real products, not assemble a web stack from spare parts.
 
 It leads with ecommerce because that is where the architecture is most demanding:
 
@@ -13,9 +13,9 @@ It leads with ecommerce because that is where the architecture is most demanding
 - operations need to stay boring under load
 - product teams still need room for customer-specific behaviour
 
-But Davenda is not ecommerce-only. The same platform shape also powers non-commerce products like the checked-in Gitly demo. The point is not "Rust for storefronts only." The point is "Rust for serious web applications, with batteries included and strong opinions about where complexity belongs."
+But Coil is not ecommerce-only. The same platform shape also powers non-commerce products like the checked-in Gitly demo. The point is not "Rust for storefronts only." The point is "Rust for serious web applications, with batteries included and strong opinions about where complexity belongs."
 
-## Why Developers Reach For Davenda
+## Why Developers Reach For Coil
 
 - HTML-first by default, with progressive enhancement layered on instead of forcing a SPA-first architecture.
 - Multi-site, multi-locale, and market-aware routing built into the product model instead of bolted on later.
@@ -35,7 +35,7 @@ But Davenda is not ecommerce-only. The same platform shape also powers non-comme
 ## What Is In This Repo
 
 - `crates/`
-  Davenda core crates and official modules.
+  Coil core crates and official modules.
 - `apps/shoppr/`
   The reference multi-market ecommerce starter.
 - `apps/gitly/`
@@ -47,7 +47,7 @@ But Davenda is not ecommerce-only. The same platform shape also powers non-comme
 
 ## Start In Minutes
 
-The fastest way to understand Davenda is to run the product, not just read about it.
+The fastest way to understand Coil is to run the product, not just read about it.
 
 ### 1. Run Shoppr
 
@@ -82,7 +82,7 @@ That gives you:
 
 ## Why The Demos Matter
 
-Davenda is easier to understand through believable products than through isolated crates.
+Coil is easier to understand through believable products than through isolated crates.
 
 - `Shoppr` shows the ecommerce path: markets, locales, merchandising, checkout, admin, and operations.
 - `Gitly` shows the same runtime can power a product that is clearly not a store.
@@ -91,19 +91,19 @@ If a developer opens this repo and sees only abstractions, the framework loses t
 
 ## The Product Shape
 
-Davenda is intentionally split into clear layers:
+Coil is intentionally split into clear layers:
 
-- Davenda core: runtime, routing, storage, cache, auth execution, jobs, observability, TLS, rendering.
+- Coil core: runtime, routing, storage, cache, auth execution, jobs, observability, TLS, rendering.
 - Official modules: CMS, commerce, memberships, events, admin, media, ops, and other reusable batteries.
 - Customer apps: branding, templates, configuration, auth mappings, Rust business logic, and optional WASM extensions.
 
 The demos are not toy frontends taped onto a crate. They are meant to be believable starting points for real customer work.
 
-## What Makes Davenda Different
+## What Makes Coil Different
 
 Most Rust web stacks stop at "we gave you an HTTP framework."
 
-Davenda is trying to solve a different problem:
+Coil is trying to solve a different problem:
 
 - how a team ships a whole web product in Rust
 - how that product stays customizable without collapsing into a plugin free-for-all
@@ -160,7 +160,7 @@ This repo now includes the standard OSS surfaces teams expect before they try a 
 
 ## Contributing
 
-If you want to help shape Davenda:
+If you want to help shape Coil:
 
 - open issues with concrete product or platform gaps
 - send PRs with tests and documentation
@@ -171,10 +171,10 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 
-Davenda is ambitious on purpose. It is opinionated, product-focused, and optimised for teams that want a coherent Rust web platform rather than a thin request router.
+Coil is ambitious on purpose. It is opinionated, product-focused, and optimised for teams that want a coherent Rust web platform rather than a thin request router.
 
 If that is what you are looking for, start with Shoppr and the public docs. They are the shortest route from curiosity to understanding.
 
 ## License
 
-Davenda is available under the [MIT License](./LICENSE).
+Coil is available under the [MIT License](./LICENSE).

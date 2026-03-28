@@ -1,5 +1,5 @@
-use davenda_all::CustomerBackendPlugin;
-use davenda_customer_sdk::RegisteredHookKind;
+use coil::CustomerBackendPlugin;
+use coil_customer_sdk::RegisteredHookKind;
 use shoppr_app::ShopprWorkspace;
 use std::ffi::OsString;
 use std::fs;
@@ -176,7 +176,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
     );
     assert!(!cargo_toml.contains("[patch.crates-io]"), "{cargo_toml}");
     assert!(
-        cargo_toml.contains("davenda-all = \"0.1.0\""),
+        cargo_toml.contains("coil = \"0.1.0\""),
         "{cargo_toml}"
     );
     assert!(
@@ -191,7 +191,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         dockerfile.contains("COPY --from=builder /workspace/shoppr /usr/local/bin/shoppr"),
         "{dockerfile}"
     );
-    assert!(!dockerfile.contains("davenda-cli"), "{dockerfile}");
+    assert!(!dockerfile.contains("coil-cli"), "{dockerfile}");
     assert!(
         dockerfile_repo.contains("WORKDIR /workspace/apps/shoppr"),
         "{dockerfile_repo}"
@@ -200,7 +200,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         dockerfile_repo.contains("cargo build --locked -p shoppr --release"),
         "{dockerfile_repo}"
     );
-    assert!(!dockerfile_repo.contains("davenda-cli"), "{dockerfile_repo}");
+    assert!(!dockerfile_repo.contains("coil-cli"), "{dockerfile_repo}");
 }
 
 #[test]

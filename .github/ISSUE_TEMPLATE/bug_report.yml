@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a defect in Davenda, Shoppr, Gitly, docs, or workflows
+description: Report a defect in Coil, Shoppr, Gitly, docs, or workflows
 title: "[Bug]: "
 labels: ["bug"]
 body:

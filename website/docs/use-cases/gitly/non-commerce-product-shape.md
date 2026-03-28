@@ -2,7 +2,7 @@
 title: Non-Commerce Product Shape
 ---
 
-Gitly is the clearest example of Davenda outside a retail lens. This guide walks through the
+Gitly is the clearest example of Coil outside a retail lens. This guide walks through the
 checked-in Gitly files that make the app feel like a forge rather than a storefront.
 
 ## Customer-Owned Routes, Not Store Routes
@@ -42,7 +42,7 @@ different type of information-dense application surface:
 - `search.html`
   - product-style search surface
 
-That is the first Gitly lesson: a Davenda customer app can mount a completely different information
+That is the first Gitly lesson: a Coil customer app can mount a completely different information
 architecture while still using the same runtime and lifecycle patterns.
 
 ## Data Presentation Through Linked Rust
@@ -161,13 +161,13 @@ The app also keeps the distinction visible in the UI:
 Gitly is not a static site frozen in one product shell. Its linked backend also registers a CMS
 hook through `apps/gitly/crates/gitly-backend/src/lib.rs`.
 
-That hook matters because it proves Gitly still participates in the broader Davenda runtime model:
+That hook matters because it proves Gitly still participates in the broader Coil runtime model:
 
 - the customer app can expose product-specific public routes
 - it can still use CMS module surfaces
 - linked Rust hooks can still enforce customer-specific policy during CMS publishing
 
-So Gitly is not "a special GitHub clone mode." It is a normal Davenda customer app with a
+So Gitly is not "a special GitHub clone mode." It is a normal Coil customer app with a
 different product shape.
 
 ## Suggested Reading Order
@@ -184,5 +184,5 @@ If you want to understand Gitly as a non-commerce product, read these files in o
 8. `apps/gitly/extensions/gitly-community-pulse/package.toml`
 9. `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
 
-That sequence shows how Davenda's customer-app model survives intact when the product is not a
+That sequence shows how Coil's customer-app model survives intact when the product is not a
 storefront at all.

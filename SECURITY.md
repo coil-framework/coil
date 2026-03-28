@@ -23,7 +23,7 @@ If the public repository has GitHub Security Advisories enabled, use that path.
 
 ## Response Goals
 
-Davenda aims to:
+Coil aims to:
 
 - acknowledge valid reports promptly
 - reproduce and assess severity

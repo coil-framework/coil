@@ -2,7 +2,7 @@
 title: Health, Readiness, And Maintenance Mode
 ---
 
-Davenda separates health, readiness, and maintenance because they answer different operator
+Coil separates health, readiness, and maintenance because they answer different operator
 questions.
 
 ## What Is This?

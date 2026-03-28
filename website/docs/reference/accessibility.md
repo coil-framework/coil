@@ -2,11 +2,11 @@
 title: Accessibility
 ---
 
-This page documents the practical accessibility expectations for Davenda customer apps.
+This page documents the practical accessibility expectations for Coil customer apps.
 
 ## What Is This?
 
-Davenda treats accessibility as part of the rendering and interaction contract for:
+Coil treats accessibility as part of the rendering and interaction contract for:
 
 - public pages
 - account flows
@@ -18,7 +18,7 @@ This page focuses on what you need to do in templates and themes today.
 
 ## Why Does It Exist?
 
-Davenda is HTML-first. That means the framework and the customer app have unusually strong leverage
+Coil is HTML-first. That means the framework and the customer app have unusually strong leverage
 over:
 
 - document landmarks
@@ -41,16 +41,16 @@ Use this page whenever you are building or reviewing:
 - a fragment update flow
 - theme-level motion or contrast changes
 
-## What Davenda Helps With Today
+## What Coil Helps With Today
 
-Davenda gives you a few concrete advantages:
+Coil gives you a few concrete advantages:
 
 - server-rendered HTML-first pages by default
 - request-level locale values so `<html lang>` can be correct
 - module and customer templates that remain ordinary HTML
 - progressive enhancement on top of a real baseline page instead of a client-only shell
 
-What Davenda does **not** do today:
+What Coil does **not** do today:
 
 - it does not run a full automatic accessibility validator over every template
 - it does not guarantee customer themes keep sufficient contrast or focus treatment
@@ -137,7 +137,7 @@ Customer apps still own:
 - screen-reader labels for customer-owned controls
 - accessible dialog, drawer, or widget behaviour introduced by customer JS
 
-Davenda gives you the contract and the right rendering shape. You still need to use it correctly.
+Coil gives you the contract and the right rendering shape. You still need to use it correctly.
 
 ## Accessibility And Progressive Enhancement
 
@@ -185,7 +185,7 @@ Internal tools still need accessible tables, forms, and navigation.
 
 ### Replacing semantic HTML with div-only interaction wrappers
 
-Davenda’s HTML-first model is an advantage. Do not throw it away.
+Coil’s HTML-first model is an advantage. Do not throw it away.
 
 ## What Should I Read Next?
 

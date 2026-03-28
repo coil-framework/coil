@@ -1,22 +1,22 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Cart'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Cart'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${page.title}">Cart</title>
+    <title coil:text="${page.title}">Cart</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
-    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
   <body class="shoppr-shell">
     <header class="site-header">
@@ -29,28 +29,28 @@
         </div>
       </div>
       <div class="site-header__main">
-        <a href="/" class="brand" dv:attr="href=${links.home}">
+        <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
         </a>
-        <nav dv:replace="~{navigation/primary}"></nav>
+        <nav coil:replace="~{navigation/primary}"></nav>
       </div>
       <div class="site-header__panels">
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Market</p>
           <ul>
-            <li dv:each="item : ${links.siteSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">Shoppr UK</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.siteSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Language</p>
           <ul>
-            <li dv:each="item : ${links.localeSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">English</a>
-              <span dv:if="${item.active}">Current</span>
+            <li coil:each="item : ${links.localeSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
+              <span coil:if="${item.active}">Current</span>
             </li>
           </ul>
         </div>
@@ -60,9 +60,9 @@
       <section class="cart-page__intro">
         <p class="cart-page__eyebrow">Cart</p>
         <p>
-          <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+          <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
           <span>/</span>
-          <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+          <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">Collections</a>
           <span>/</span>
           <span>Cart</span>
         </p>
@@ -72,20 +72,20 @@
           collection that item came from before moving into checkout.
         </p>
       </section>
-      <section class="storefront-flash" dv:if="${hasFlashMessages}">
-        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
-          <p class="storefront-flash__eyebrow" dv:text="${message.level}">error</p>
-          <p dv:text="${message.text}">Your update could not be applied.</p>
+      <section class="storefront-flash" coil:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" coil:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" coil:text="${message.level}">error</p>
+          <p coil:text="${message.text}">Your update could not be applied.</p>
         </article>
       </section>
-      <section class="storefront-errors" dv:if="${cartForm.hasErrors}">
+      <section class="storefront-errors" coil:if="${cartForm.hasErrors}">
         <article class="storefront-errors__summary">
           <h2>Cart updates need attention</h2>
-          <p dv:text="${cartForm.errorSummary}">
+          <p coil:text="${cartForm.errorSummary}">
             Fix the highlighted cart quantities and try again.
           </p>
           <ul class="storefront-errors__list">
-            <li dv:each="error : ${cartForm.errors}" dv:text="${error.message}">
+            <li coil:each="error : ${cartForm.errors}" coil:text="${error.message}">
               Enter a whole-number quantity for this line.
             </li>
           </ul>
@@ -94,23 +94,23 @@
       <div class="cart-page__grid">
         <section class="cart-card">
           <h2>Items</h2>
-          <form class="commerce-form cart-update-form" action="/cart" method="post" dv:if="${hasCartItems}">
+          <form class="commerce-form cart-update-form" action="/cart" method="post" coil:if="${hasCartItems}">
             <input type="hidden" name="cart_action" value="update" />
             <ul class="cart-lines">
-              <li class="cart-line" dv:each="item : ${cartItems}">
+              <li class="cart-line" coil:each="item : ${cartItems}">
                 <div>
-                  <p class="cart-line__eyebrow" dv:if="${item.hasProductLink}">
-                    <a href="/en-GB/shop/collections/featured" dv:attr="href=${item.collectionUrl}" dv:text="${item.collectionName}">
+                  <p class="cart-line__eyebrow" coil:if="${item.hasProductLink}">
+                    <a href="/en-GB/shop/collections/featured" coil:attr="href=${item.collectionUrl}" coil:text="${item.collectionName}">
                       Featured
                     </a>
                   </p>
-                  <strong dv:if="${item.hasProductLink}">
-                    <a href="/en-GB/shop/products/harbor-cap" dv:attr="href=${item.productUrl}" dv:text="${item.title}">
+                  <strong coil:if="${item.hasProductLink}">
+                    <a href="/en-GB/shop/products/harbor-cap" coil:attr="href=${item.productUrl}" coil:text="${item.title}">
                       Harbor Cap
                     </a>
                   </strong>
-                  <strong dv:unless="${item.hasProductLink}" dv:text="${item.title}">Harbor Cap</strong>
-                  <p dv:text="${item.variant}">Canvas cap</p>
+                  <strong coil:unless="${item.hasProductLink}" coil:text="${item.title}">Harbor Cap</strong>
+                  <p coil:text="${item.variant}">Canvas cap</p>
                 </div>
                 <label class="commerce-form__field commerce-form__field--compact">
                   <span>Qty</span>
@@ -119,30 +119,30 @@
                     name="quantity"
                     min="0"
                     value="1"
-                    dv:attr="name=${item.quantityField},value=${item.quantity}"
+                    coil:attr="name=${item.quantityField},value=${item.quantity}"
                   />
                 </label>
-                <p class="commerce-form__error" dv:if="${item.hasQuantityError}" dv:text="${item.quantityError}">
+                <p class="commerce-form__error" coil:if="${item.hasQuantityError}" coil:text="${item.quantityError}">
                   Enter a whole-number quantity for this line.
                 </p>
-                <strong dv:text="${item.total}">GBP 29</strong>
+                <strong coil:text="${item.total}">GBP 29</strong>
               </li>
             </ul>
             <div class="cart-page__actions">
-              <a class="button button--secondary" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+              <a class="button button--secondary" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
                 Browse collections
               </a>
               <button class="button button--secondary" type="submit">Update cart</button>
             </div>
           </form>
-          <div class="cart-card__empty" dv:unless="${hasCartItems}">
+          <div class="cart-card__empty" coil:unless="${hasCartItems}">
             <p>Your cart is empty right now.</p>
             <p>Browse the catalog, add a product, then return here to review totals before checkout.</p>
             <div class="cart-page__actions">
-              <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+              <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
                 Browse collections
               </a>
-              <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
                 Open full catalog
               </a>
             </div>
@@ -150,26 +150,26 @@
         </section>
         <aside class="cart-card">
           <h2>Summary</h2>
-          <p><span>Subtotal</span><strong dv:text="${cartSummary.subtotal}">GBP 118</strong></p>
-          <p><span>Delivery</span><strong dv:text="${cartSummary.shipping}">GBP 0</strong></p>
-          <p><span>Total</span><strong dv:text="${cartSummary.total}">GBP 118</strong></p>
-          <div class="cart-page__actions" dv:if="${hasCartItems}">
+          <p><span>Subtotal</span><strong coil:text="${cartSummary.subtotal}">GBP 118</strong></p>
+          <p><span>Delivery</span><strong coil:text="${cartSummary.shipping}">GBP 0</strong></p>
+          <p><span>Total</span><strong coil:text="${cartSummary.total}">GBP 118</strong></p>
+          <div class="cart-page__actions" coil:if="${hasCartItems}">
             <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
               <input type="hidden" name="cart_intent" value="reviewed" />
               <button class="button" type="submit">Checkout</button>
             </form>
-            <a class="button button--secondary" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+            <a class="button button--secondary" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
               Browse collections
             </a>
-            <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+            <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
               Full catalog
             </a>
           </div>
-          <div class="cart-page__actions" dv:unless="${hasCartItems}">
-            <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+          <div class="cart-page__actions" coil:unless="${hasCartItems}">
+            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
               Browse collections
             </a>
-            <a class="button button--secondary" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+            <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
               Full catalog
             </a>
           </div>

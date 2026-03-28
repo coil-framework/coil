@@ -2,11 +2,11 @@
 title: SEO
 ---
 
-Davenda SEO is runtime-owned metadata built from route, site, and locale context.
+Coil SEO is runtime-owned metadata built from route, site, and locale context.
 
 ## Start With The Output
 
-On a normal public page, Davenda can inject markup like this into the document head:
+On a normal public page, Coil can inject markup like this into the document head:
 
 ```html
 <meta name="description" content="..." />
@@ -66,7 +66,7 @@ Interaction:
 
 ## What Is Automatic Today?
 
-Davenda currently generates these pieces automatically at the document boundary:
+Coil currently generates these pieces automatically at the document boundary:
 
 - meta description
 - canonical URL
@@ -99,7 +99,7 @@ The extension point is typed metadata from runtime code, not hand-built strings 
 
 ## Canonical And Alternate URL Logic
 
-Davenda builds canonical and alternate URLs from:
+Coil builds canonical and alternate URLs from:
 
 - resolved site
 - site canonical host
@@ -157,9 +157,9 @@ Concrete supporting files:
 - `apps/shoppr/platform.dev.toml`
 - `apps/gitly/platform.toml`
 - `apps/gitly/platform.dev.toml`
-- `crates/davenda-runtime/src/render/seo.rs`
-- `crates/davenda-runtime/src/http/routing/model.rs`
-- `crates/davenda-runtime/src/render/model.rs`
+- `crates/coil-runtime/src/render/seo.rs`
+- `crates/coil-runtime/src/http/routing/model.rs`
+- `crates/coil-runtime/src/render/model.rs`
 
 ## What Should I Read Next?
 

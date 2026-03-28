@@ -7,16 +7,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use davenda_all::official_modules_from_config;
-use davenda_app::{
+use coil::official_modules_from_config;
+use coil_app::{
     CustomerAppComposition, CustomerAppManifest, CustomerAppRuntimePlan, MigrationPlanEntry,
     MigrationPlanOwner,
 };
-use davenda_auth::load_auth_model_package_at;
-use davenda_config::{Environment, PlatformConfig};
-use davenda_customer_sdk::CustomerBackendPlugin;
-use davenda_data::{MigrationPlan, MigrationRegistry};
-use davenda_runtime::{EnvironmentSecretResolver, HttpServerHost, SecretResolver};
+use coil_auth::load_auth_model_package_at;
+use coil_config::{Environment, PlatformConfig};
+use coil_customer_sdk::CustomerBackendPlugin;
+use coil_data::{MigrationPlan, MigrationRegistry};
+use coil_runtime::{EnvironmentSecretResolver, HttpServerHost, SecretResolver};
 pub use shoppr_backend::ShopprLinkedPluginSummary;
 
 #[derive(Debug, Clone)]

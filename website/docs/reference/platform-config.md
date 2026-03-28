@@ -20,7 +20,7 @@ They describe:
 
 ## Why These Files Exist
 
-Davenda keeps runtime operations separate from product composition.
+Coil keeps runtime operations separate from product composition.
 
 - `app.toml` says what the app is
 - `platform.toml` says how it runs in one environment
@@ -106,14 +106,14 @@ idle_timeout_secs = 3600
 absolute_timeout_secs = 86400
 
 [http.session_cookie]
-name = "davenda_session"
+name = "coil_session"
 path = "/"
 same_site = "lax"
 secure = true
 http_only = true
 
 [http.flash_cookie]
-name = "davenda_flash"
+name = "coil_flash"
 path = "/"
 same_site = "lax"
 secure = true
@@ -138,7 +138,7 @@ default_class = "public_upload"
 deployment = "distributed"
 object_store = "s3"
 object_store_secret = { kind = "env", var = "OBJECT_STORE_URL" }
-local_root = "/var/lib/davenda/shoppr"
+local_root = "/var/lib/coil/shoppr"
 
 [cache]
 l1 = "moka"
@@ -299,7 +299,7 @@ These blocks define the cookie transport behaviour for sessions and flash state.
 
 ```toml
 [http.session_cookie]
-name = "davenda_session"
+name = "coil_session"
 path = "/"
 same_site = "lax"
 secure = true
@@ -370,11 +370,11 @@ Supported `provider` values:
 
 ### What This Block Means
 
-This is the TLS ownership and issuance block. It tells Davenda whether:
+This is the TLS ownership and issuance block. It tells Coil whether:
 
-- TLS is handled outside Davenda
-- Davenda should obtain certificates
-- Davenda should validate origin-only certificates
+- TLS is handled outside Coil
+- Coil should obtain certificates
+- Coil should validate origin-only certificates
 - certificates are manually imported
 
 ### Guidance
@@ -462,7 +462,7 @@ This block defines the storage topology and delivery posture for assets and uplo
 - use `distributed` when the app is meant to scale beyond one node
 - treat `single_node_escape_hatch` as an explicit exception, not a default
 - `local_root` still matters even in distributed setups because some local-only classes remain intentionally local
-- `object_store_secret` should resolve to the structured secret shape Davenda expects
+- `object_store_secret` should resolve to the structured secret shape Coil expects
 
 ## `[cache]`
 
@@ -482,7 +482,7 @@ Supported `l2` values:
 
 ### What This Block Means
 
-Davenda uses a two-level cache vocabulary:
+Coil uses a two-level cache vocabulary:
 
 - `l1`: in-process cache close to the runtime instance
 - `l2`: shared cache across instances
@@ -685,7 +685,7 @@ Shoppr demonstrates both:
 
 ### Can I serve production assets from my main site instead of a CDN?
 
-Yes, if your production topology is intentionally built that way and the delivery URL is stable. Davenda does not require a third-party CDN brand name. It requires a reliable published-asset base URL.
+Yes, if your production topology is intentionally built that way and the delivery URL is stable. Coil does not require a third-party CDN brand name. It requires a reliable published-asset base URL.
 
 ### Should I use both `l1` and `l2` cache?
 

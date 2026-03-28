@@ -33,7 +33,7 @@ auth/
 The manifest should at least declare:
 
 ```toml
-name = "platform-default-auth"
+name = "coil-default-auth"
 version = "1.0.0"
 mode = "replace"
 storage_schema_version = 1

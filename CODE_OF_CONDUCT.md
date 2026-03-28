@@ -2,7 +2,7 @@
 
 ## Our Standard
 
-Davenda should be a place where people can do rigorous technical work without harassment, intimidation, or exclusion.
+Coil should be a place where people can do rigorous technical work without harassment, intimidation, or exclusion.
 
 Participants in this project are expected to:
 
@@ -27,7 +27,7 @@ This applies in:
 - pull requests
 - discussions
 - project chat spaces
-- public events or demos tied to Davenda
+- public events or demos tied to Coil
 
 ## Enforcement
 

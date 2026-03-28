@@ -2,7 +2,7 @@
 title: Checkout And Operations
 ---
 
-This page is about Davenda’s checkout and operator model first, with Shoppr as a concrete example.
+This page is about Coil’s checkout and operator model first, with Shoppr as a concrete example.
 
 Use it when you want to answer:
 
@@ -13,7 +13,7 @@ Use it when you want to answer:
 
 ## The Core Pattern
 
-Davenda keeps the commerce lifecycle split across four layers:
+Coil keeps the commerce lifecycle split across four layers:
 
 1. a reusable route and handler contract from the commerce module
 2. customer templates for cart, checkout, confirmation, account, and admin surfaces
@@ -25,7 +25,7 @@ not the pattern itself.
 
 ## Canonical Commerce Route Contract
 
-The route contract comes from `crates/davenda-commerce/src/module/platform/manifest.rs`.
+The route contract comes from `crates/coil-commerce/src/module/platform/manifest.rs`.
 
 The important part is that the module contributes named surfaces like:
 

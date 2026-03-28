@@ -1,10 +1,10 @@
 ---
-title: Composition And davenda-all
+title: Composition And coil
 ---
 
-Davenda gives you two composition styles:
+Coil gives you two composition styles:
 
-- broad convenience through `davenda-all`
+- broad convenience through `coil`
 - explicit crate-by-crate selection in your customer workspace
 
 Both are valid. The right choice depends on how much control you need now.
@@ -13,7 +13,7 @@ Both are valid. The right choice depends on how much control you need now.
 
 Use this page when you want to answer:
 
-- should my customer binary depend on `davenda-all`
+- should my customer binary depend on `coil`
 - when should I link only selected modules
 - how do compile-time linking and runtime enablement differ
 - what do Shoppr and Gitly actually do
@@ -29,21 +29,21 @@ Those are not the same thing.
 
 Concrete example:
 
-- `apps/shoppr/Cargo.toml` links a broad workspace with `davenda-all`.
+- `apps/shoppr/Cargo.toml` links a broad workspace with `coil`.
 - `apps/shoppr/app.toml` and `apps/shoppr/platform.dev.toml` decide the actual installed modules.
 
-## Fastest Path: `davenda-all`
+## Fastest Path: `coil`
 
-Use `davenda-all` when you want a believable product quickly.
+Use `coil` when you want a believable product quickly.
 
 This is the pattern in both demo apps:
 
 ```toml title="apps/shoppr/crates/shoppr-app/Cargo.toml"
 [dependencies]
-davenda-all.workspace = true
-davenda-app.workspace = true
-davenda-auth.workspace = true
-davenda-runtime.workspace = true
+coil.workspace = true
+coil-app.workspace = true
+coil-auth.workspace = true
+coil-runtime.workspace = true
 ```
 
 Why teams start here:
@@ -62,15 +62,15 @@ Use explicit linking when:
 
 A selective customer app still needs:
 
-- `davenda-app`
-- `davenda-auth`
-- `davenda-runtime`
+- `coil-app`
+- `coil-auth`
+- `coil-runtime`
 - whichever official modules you genuinely intend to support
 - any customer-owned linked backend crates
 
 ## Runtime Enablement Still Matters
 
-Even with `davenda-all`, modules are not installed automatically.
+Even with `coil`, modules are not installed automatically.
 
 Shoppr still has to say this explicitly in `apps/shoppr/app.toml`:
 
@@ -126,9 +126,9 @@ apps honest and upgradeable.
 
 ## Choosing Intentionally
 
-Choose `davenda-all` if:
+Choose `coil` if:
 
-- you are learning Davenda
+- you are learning Coil
 - you want the fastest path to a real app
 - you expect to use many official modules
 

@@ -2,13 +2,13 @@ import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
 
 const config: Config = {
-  title: "Davenda",
+  title: "Coil",
   tagline: "A highly opinionated Rust web framework for serious products",
   favicon: "img/favicon.svg",
-  url: "https://davenda.dev",
+  url: "https://coil.rs",
   baseUrl: "/",
-  organizationName: "davenda",
-  projectName: "davenda",
+  organizationName: "coil-framework",
+  projectName: "coil",
   onBrokenLinks: "throw",
   markdown: {
     hooks: {
@@ -50,9 +50,9 @@ const config: Config = {
   themeConfig: {
     image: "img/favicon.svg",
     navbar: {
-      title: "Davenda",
+      title: "Coil",
       logo: {
-        alt: "Davenda",
+        alt: "Coil",
         src: "img/favicon.svg",
       },
       items: [
@@ -60,7 +60,7 @@ const config: Config = {
         { to: "/docs/use-cases/shoppr/overview", label: "Shoppr", position: "left" },
         { to: "/docs/use-cases/gitly/overview", label: "Gitly", position: "left" },
         { to: "/architecture/the-problem-we-are-solving", label: "Architecture", position: "left" },
-        { href: "https://github.com/davenda/davenda", label: "GitHub", position: "right" },
+        { href: "https://github.com/coil-framework/coil", label: "GitHub", position: "right" },
       ],
     },
     footer: {
@@ -86,13 +86,13 @@ const config: Config = {
           title: "Community",
           items: [
             { label: "Contributing", to: "/docs/contributing" },
-            { label: "Code of Conduct", href: "https://github.com/davenda/davenda/blob/main/CODE_OF_CONDUCT.md" },
-            { label: "Security", href: "https://github.com/davenda/davenda/blob/main/SECURITY.md" },
-            { label: "Support", href: "https://github.com/davenda/davenda/blob/main/SUPPORT.md" },
+            { label: "Code of Conduct", href: "https://github.com/coil-framework/coil/blob/main/CODE_OF_CONDUCT.md" },
+            { label: "Security", href: "https://github.com/coil-framework/coil/blob/main/SECURITY.md" },
+            { label: "Support", href: "https://github.com/coil-framework/coil/blob/main/SUPPORT.md" },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Davenda contributors.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Coil contributors.`,
     },
     colorMode: {
       defaultMode: "light",

@@ -1,29 +1,29 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Order status'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Order status'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${page.title}">Order confirmed</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${page.title}">Order confirmed</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <nav coil:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main account-page">
-      <section class="storefront-flash" dv:if="${hasFlashMessages}">
-        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
-          <p class="storefront-flash__eyebrow" dv:text="${message.level}">info</p>
-          <p dv:text="${message.text}">Your order is still moving through payment confirmation.</p>
+      <section class="storefront-flash" coil:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" coil:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" coil:text="${message.level}">info</p>
+          <p coil:text="${message.text}">Your order is still moving through payment confirmation.</p>
         </article>
       </section>
-      <section class="account-page__intro" dv:if="${hasConfirmation}">
+      <section class="account-page__intro" coil:if="${hasConfirmation}">
         <p class="account-page__eyebrow">Stripe return</p>
         <h1>Order and payment status</h1>
         <p>
@@ -31,21 +31,21 @@
           Review the payment state here before leaving the order.
         </p>
         <p class="checkout-confirmation__order">
-          Reference <strong dv:text="${confirmation.orderNumber}">HS-10482</strong>
+          Reference <strong coil:text="${confirmation.orderNumber}">HS-10482</strong>
         </p>
         <p>
-          Status <strong dv:text="${confirmation.status}">Paid</strong>
-          with total <strong dv:text="${confirmation.total}">£0.00</strong>.
+          Status <strong coil:text="${confirmation.status}">Paid</strong>
+          with total <strong coil:text="${confirmation.total}">£0.00</strong>.
         </p>
-        <p dv:if="${confirmation.hasEmail}">
-          Receipt email <strong dv:text="${confirmation.email}">member@example.com</strong>.
+        <p coil:if="${confirmation.hasEmail}">
+          Receipt email <strong coil:text="${confirmation.email}">member@example.com</strong>.
         </p>
-        <p dv:text="${confirmation.nextStep}">
+        <p coil:text="${confirmation.nextStep}">
           A confirmation email and membership activation will follow shortly.
         </p>
         <div class="checkout-confirmation__payment">
           <p>
-            <strong dv:text="${confirmation.providerLabel}">Stripe payment confirmation</strong>
+            <strong coil:text="${confirmation.providerLabel}">Stripe payment confirmation</strong>
           </p>
           <p>
             Shoppr has already recorded the order and is now waiting for the provider result
@@ -53,9 +53,9 @@
           </p>
           <p>
             Payment state
-            <strong dv:text="${confirmation.paymentStatus}">Awaiting provider confirmation</strong>.
+            <strong coil:text="${confirmation.paymentStatus}">Awaiting provider confirmation</strong>.
           </p>
-          <p dv:text="${confirmation.paymentSummary}">
+          <p coil:text="${confirmation.paymentSummary}">
             Card ending 4242, reference PAY-50001
           </p>
           <p>
@@ -68,32 +68,32 @@
           <li>Stripe confirmation updates the payment state shown on this page.</li>
           <li>Order history and memberships in this same browser session reflect the final result.</li>
         </ol>
-        <ul class="checkout-summary checkout-summary--stacked" dv:if="${confirmation.hasLineItems}">
-          <li dv:each="item : ${confirmation.lineItems}">
-            <span dv:text="${item.title}">Harbor pantry set</span>
-            <span dv:text="${item.quantity}">1</span>
-            <strong dv:text="${item.total}">GBP 48</strong>
+        <ul class="checkout-summary checkout-summary--stacked" coil:if="${confirmation.hasLineItems}">
+          <li coil:each="item : ${confirmation.lineItems}">
+            <span coil:text="${item.title}">Harbor pantry set</span>
+            <span coil:text="${item.quantity}">1</span>
+            <strong coil:text="${item.total}">GBP 48</strong>
           </li>
         </ul>
         <div class="checkout-actions">
           <a class="button" href="/account/orders">View order history</a>
           <a class="button button--secondary" href="/account">View account</a>
-          <a class="button button--secondary" href="/account/memberships" dv:if="${confirmation.hasMembershipItems}">
+          <a class="button button--secondary" href="/account/memberships" coil:if="${confirmation.hasMembershipItems}">
             Check memberships
           </a>
           <a
             class="button button--secondary"
             href="/en-GB/shop"
-            dv:attr="href=${links.catalog}"
+            coil:attr="href=${links.catalog}"
           >
             Continue shopping
           </a>
         </div>
       </section>
-      <section class="account-page__intro" dv:unless="${hasConfirmation}">
+      <section class="account-page__intro" coil:unless="${hasConfirmation}">
         <p class="account-page__eyebrow">Stripe return</p>
         <h1>No recent provider return to review</h1>
-        <p dv:text="${confirmation.nextStep}">
+        <p coil:text="${confirmation.nextStep}">
           There is no recent checkout confirmation for this browser session yet.
         </p>
         <p>
@@ -106,13 +106,13 @@
           <a
             class="button button--secondary"
             href="/en-GB/shop"
-            dv:attr="href=${links.catalog}"
+            coil:attr="href=${links.catalog}"
           >
             Continue shopping
           </a>
         </div>
       </section>
-      <div dv:replace="~{account/summary-panels :: panels}"></div>
+      <div coil:replace="~{account/summary-panels :: panels}"></div>
     </main>
     <footer class="site-footer">
       <small>Shoppr</small>

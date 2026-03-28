@@ -9,7 +9,7 @@ Use the right channel for the right kind of problem:
 
 When reporting a problem, include:
 
-- the Davenda version or commit SHA
+- the Coil version or commit SHA
 - the demo or customer app involved
 - exact commands run
 - relevant logs or screenshots

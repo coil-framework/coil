@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use davenda_customer_sdk::{
+use coil_customer_sdk::{
     AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade, CustomerBackendPlugin,
     CustomerHookRegistry, CustomerPluginDescriptor, OrderDraft, OrderReviewDecision,
     OutboundHttpFacade, RegisteredHookKind, RequestContext, VerifiedWebhook, VerifiedWebhookHooks,
@@ -63,7 +63,7 @@ impl CustomerHookRegistry for RecordingRegistry {
 
     fn register_cms_hooks(
         &mut self,
-        _hooks: Arc<dyn davenda_customer_sdk::CmsHooks>,
+        _hooks: Arc<dyn coil_customer_sdk::CmsHooks>,
     ) -> Result<(), BackendError> {
         self.hook_kinds.push(RegisteredHookKind::CmsPagePublish);
         Ok(())
@@ -79,7 +79,7 @@ impl CustomerHookRegistry for RecordingRegistry {
 
     fn register_verified_webhook_asset_hooks(
         &mut self,
-        _hooks: Arc<dyn davenda_customer_sdk::VerifiedWebhookAssetHooks>,
+        _hooks: Arc<dyn coil_customer_sdk::VerifiedWebhookAssetHooks>,
     ) -> Result<(), BackendError> {
         self.hook_kinds
             .push(RegisteredHookKind::VerifiedWebhookAssets);
@@ -140,8 +140,8 @@ impl VerifiedWebhookHooks for ShopprBackend {
         ctx: &RequestContext,
         webhook: &VerifiedWebhook,
         http: &dyn OutboundHttpFacade,
-        jobs: &dyn davenda_customer_sdk::JobsFacade,
-        repositories: &dyn davenda_customer_sdk::RepositoryFacade,
+        jobs: &dyn coil_customer_sdk::JobsFacade,
+        repositories: &dyn coil_customer_sdk::RepositoryFacade,
         audit: &dyn AuditFacade,
     ) -> Result<WebhookHandlingResult, BackendError> {
         self.inner
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn linked_customer_backend_descriptor_is_stable() {
-        let descriptor = davenda_customer_sdk::CustomerBackendPlugin::descriptor(&plugin());
+        let descriptor = coil_customer_sdk::CustomerBackendPlugin::descriptor(&plugin());
 
         assert_eq!(descriptor.id, "shoppr-backend");
         assert_eq!(descriptor.display_name, "Shoppr Linked Backend");

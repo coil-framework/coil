@@ -1,61 +1,61 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Pages'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Pages'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Pages</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${pageTitle}">Pages</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{admin/nav}"></nav>
+      <nav coil:replace="~{admin/nav}"></nav>
     </header>
     <main class="site-main admin-page">
       <section class="admin-page__intro">
         <p class="admin-page__eyebrow">Content operations</p>
-        <h1 dv:text="${page.title}">Pages</h1>
-        <p dv:text="${page.summary}">Live page inventory and publication state.</p>
+        <h1 coil:text="${page.title}">Pages</h1>
+        <p coil:text="${page.summary}">Live page inventory and publication state.</p>
         <p>
           This is now a real draft and publish surface for the checked-in Shoppr sample app.
           Save a draft, review the preview, then publish it to the live <code>/pages/{slug}</code>
           route family.
         </p>
         <div class="admin-page__actions">
-          <a class="button" href="/admin/pages?new=1" dv:attr="href=${newContentPageHref}">
+          <a class="button" href="/admin/pages?new=1" coil:attr="href=${newContentPageHref}">
             Create page
           </a>
-          <a class="button button--secondary" href="/admin/navigation" dv:attr="href=${links.adminNavigation}">
+          <a class="button button--secondary" href="/admin/navigation" coil:attr="href=${links.adminNavigation}">
             Edit navigation
           </a>
-          <a class="button button--secondary" href="/admin/redirects" dv:attr="href=${links.adminRedirects}">
+          <a class="button button--secondary" href="/admin/redirects" coil:attr="href=${links.adminRedirects}">
             Edit redirects
           </a>
         </div>
       </section>
 
-      <section class="admin-panel" dv:if="${hasFlashMessages}">
+      <section class="admin-panel" coil:if="${hasFlashMessages}">
         <p class="admin-panel__eyebrow">Operator messages</p>
         <ul class="flash-list">
-          <li dv:each="message : ${flashMessages}" dv:text="${message.text}">Saved.</li>
+          <li coil:each="message : ${flashMessages}" coil:text="${message.text}">Saved.</li>
         </ul>
       </section>
 
-      <section class="admin-panel" dv:if="${hasErrors}">
+      <section class="admin-panel" coil:if="${hasErrors}">
         <p class="admin-panel__eyebrow">Draft errors</p>
         <h2>Review the page draft</h2>
-        <p dv:text="${errorSummary}">Update the page draft and save again.</p>
+        <p coil:text="${errorSummary}">Update the page draft and save again.</p>
         <ul class="flash-list">
-          <li dv:each="error : ${errors}" dv:text="${error.message}">Error</li>
+          <li coil:each="error : ${errors}" coil:text="${error.message}">Error</li>
         </ul>
       </section>
 
-      <section class="admin-panel" dv:if="${hasContentPages}">
+      <section class="admin-panel" coil:if="${hasContentPages}">
         <p class="admin-panel__eyebrow">Managed pages</p>
         <table class="admin-table">
           <thead>
@@ -68,25 +68,25 @@
             </tr>
           </thead>
           <tbody>
-            <tr dv:each="pageRecord : ${contentPages}">
+            <tr coil:each="pageRecord : ${contentPages}">
               <td>
-                <strong dv:text="${pageRecord.title}">Visit Harbor</strong>
+                <strong coil:text="${pageRecord.title}">Visit Harbor</strong>
               </td>
-              <td dv:text="${pageRecord.statusLabel}">Published</td>
+              <td coil:text="${pageRecord.statusLabel}">Published</td>
               <td>
                 <a
-                  dv:if="${pageRecord.hasLivePath}"
+                  coil:if="${pageRecord.hasLivePath}"
                   href="/pages/visit-harbor"
-                  dv:attr="href=${pageRecord.livePath}"
-                  dv:text="${pageRecord.livePath}"
+                  coil:attr="href=${pageRecord.livePath}"
+                  coil:text="${pageRecord.livePath}"
                 >
                   /pages/visit-harbor
                 </a>
-                <span dv:unless="${pageRecord.hasLivePath}">Not live</span>
+                <span coil:unless="${pageRecord.hasLivePath}">Not live</span>
               </td>
-              <td dv:text="${pageRecord.summary}">Page summary</td>
+              <td coil:text="${pageRecord.summary}">Page summary</td>
               <td>
-                <a class="button button--secondary" href="/admin/pages" dv:attr="href=${pageRecord.editHref}">
+                <a class="button button--secondary" href="/admin/pages" coil:attr="href=${pageRecord.editHref}">
                   Edit draft
                 </a>
               </td>
@@ -95,86 +95,86 @@
         </table>
       </section>
 
-      <section class="admin-panel" dv:if="${hasSelectedContentPage}">
+      <section class="admin-panel" coil:if="${hasSelectedContentPage}">
         <p class="admin-panel__eyebrow">Editor</p>
-        <h2 dv:text="${contentPageEditorTitle}">Draft workflow</h2>
-        <p dv:text="${contentPageEditorSummary}">
+        <h2 coil:text="${contentPageEditorTitle}">Draft workflow</h2>
+        <p coil:text="${contentPageEditorSummary}">
           Update the draft, review the preview, then publish it to the live route.
         </p>
         <form action="/admin/pages/draft" method="post">
-          <input type="hidden" name="page_id" dv:attr="value=${selectedContentPage.id}" />
+          <input type="hidden" name="page_id" coil:attr="value=${selectedContentPage.id}" />
           <div class="admin-card-grid">
             <label class="admin-card">
               <span class="admin-panel__eyebrow">Title</span>
-              <input type="text" name="page_title" dv:attr="value=${selectedContentPage.title}" />
+              <input type="text" name="page_title" coil:attr="value=${selectedContentPage.title}" />
             </label>
             <label class="admin-card">
               <span class="admin-panel__eyebrow">Slug</span>
-              <input type="text" name="page_slug" dv:attr="value=${selectedContentPage.slug}" />
+              <input type="text" name="page_slug" coil:attr="value=${selectedContentPage.slug}" />
             </label>
           </div>
           <label class="admin-card">
             <span class="admin-panel__eyebrow">Summary</span>
-            <textarea name="page_summary" rows="3" dv:text="${selectedContentPage.summary}">Summary</textarea>
+            <textarea name="page_summary" rows="3" coil:text="${selectedContentPage.summary}">Summary</textarea>
           </label>
           <label class="admin-card">
             <span class="admin-panel__eyebrow">Body HTML</span>
-            <textarea name="page_body_html" rows="10" dv:text="${selectedContentPage.bodySource}">
+            <textarea name="page_body_html" rows="10" coil:text="${selectedContentPage.bodySource}">
               <p>Body</p>
             </textarea>
           </label>
           <div class="admin-page__actions">
-            <button class="button button--secondary" type="submit" dv:text="${contentPageSaveLabel}">
+            <button class="button button--secondary" type="submit" coil:text="${contentPageSaveLabel}">
               Save draft
             </button>
             <a
               class="button button--secondary"
               href="/admin/pages"
-              dv:if="${isCreatingContentPage}"
-              dv:attr="href=${links.adminPages}"
+              coil:if="${isCreatingContentPage}"
+              coil:attr="href=${links.adminPages}"
             >
               Cancel
             </a>
           </div>
         </form>
 
-        <div class="admin-page__actions" dv:if="${hasPersistedContentPage}">
+        <div class="admin-page__actions" coil:if="${hasPersistedContentPage}">
           <form action="/admin/pages/publish" method="post">
-            <input type="hidden" name="page_id" dv:attr="value=${selectedContentPage.id}" />
+            <input type="hidden" name="page_id" coil:attr="value=${selectedContentPage.id}" />
             <button class="button" type="submit">Publish live page</button>
           </form>
           <form action="/admin/pages/unpublish" method="post">
-            <input type="hidden" name="page_id" dv:attr="value=${selectedContentPage.id}" />
+            <input type="hidden" name="page_id" coil:attr="value=${selectedContentPage.id}" />
             <button class="button button--secondary" type="submit">Unpublish</button>
           </form>
         </div>
-        <p dv:unless="${hasPersistedContentPage}">
+        <p coil:unless="${hasPersistedContentPage}">
           Save the draft first to generate the stable preview route and unlock publish controls.
         </p>
 
         <div class="admin-card-grid">
           <article class="admin-card">
             <h3>Status</h3>
-            <p dv:text="${selectedContentPage.statusLabel}">Published</p>
-            <p dv:if="${selectedContentPage.hasLivePath}">
+            <p coil:text="${selectedContentPage.statusLabel}">Published</p>
+            <p coil:if="${selectedContentPage.hasLivePath}">
               Live route:
-              <a href="/pages/visit-harbor" dv:attr="href=${selectedContentPage.livePath}" dv:text="${selectedContentPage.livePath}">
+              <a href="/pages/visit-harbor" coil:attr="href=${selectedContentPage.livePath}" coil:text="${selectedContentPage.livePath}">
                 /pages/visit-harbor
               </a>
             </p>
           </article>
           <article class="admin-card">
             <h3>Preview path</h3>
-            <p dv:if="${selectedContentPage.hasPreviewPath}">
+            <p coil:if="${selectedContentPage.hasPreviewPath}">
               <a
                 href="/admin/pages/preview?page=page-visit-harbor"
-                dv:attr="href=${selectedContentPage.previewPath}"
-                dv:text="${selectedContentPage.previewPath}"
+                coil:attr="href=${selectedContentPage.previewPath}"
+                coil:text="${selectedContentPage.previewPath}"
               >
                 /admin/pages/preview?page=page-visit-harbor
               </a>
             </p>
-            <p dv:unless="${selectedContentPage.hasPreviewPath}">
+            <p coil:unless="${selectedContentPage.hasPreviewPath}">
               Save the draft first to get a stable preview endpoint.
             </p>
             <p>The preview below renders the same draft body HTML exposed by the CMS preview endpoint.</p>
@@ -182,21 +182,21 @@
         </div>
       </section>
 
-      <section class="admin-panel" dv:if="${hasSelectedContentPage}">
+      <section class="admin-panel" coil:if="${hasSelectedContentPage}">
         <p class="admin-panel__eyebrow">Draft preview</p>
         <article class="page-shell">
-          <h2 dv:text="${selectedContentPage.title}">Visit Harbor</h2>
-          <p dv:text="${selectedContentPage.summary}">Summary</p>
-          <div dv:utext="${selectedContentPage.bodyHtml}">
+          <h2 coil:text="${selectedContentPage.title}">Visit Harbor</h2>
+          <p coil:text="${selectedContentPage.summary}">Summary</p>
+          <div coil:utext="${selectedContentPage.bodyHtml}">
             <p>Preview body.</p>
           </div>
         </article>
       </section>
 
-      <section class="admin-panel" dv:if="${showPagesEmptyState}">
+      <section class="admin-panel" coil:if="${showPagesEmptyState}">
         <p class="admin-panel__eyebrow">Pages</p>
         <h2>No CMS pages yet</h2>
-        <p dv:text="${pagesEmptyText}">Create a draft page and publish it.</p>
+        <p coil:text="${pagesEmptyText}">Create a draft page and publish it.</p>
       </section>
     </main>
     <footer class="site-footer">

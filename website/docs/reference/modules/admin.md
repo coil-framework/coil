@@ -7,13 +7,13 @@ plug into.
 
 Primary implementation files:
 
-- `crates/davenda-admin/src/module/manifest.rs`
+- `crates/coil-admin/src/module/manifest.rs`
 - `apps/shoppr/templates/admin/dashboard.html`
 - `apps/shoppr/templates/admin/audit.html`
 
 ## Why It Exists
 
-Davenda does not want every domain module to invent its own operator shell. The admin module gives
+Coil does not want every domain module to invent its own operator shell. The admin module gives
 the platform one shared place for:
 
 - admin entry
@@ -23,7 +23,7 @@ the platform one shared place for:
 
 ## What It Provides
 
-From `crates/davenda-admin/src/module/manifest.rs`, admin adds:
+From `crates/coil-admin/src/module/manifest.rs`, admin adds:
 
 - an audit-log migration
 - `/admin`
@@ -86,9 +86,9 @@ Customer apps usually extend it by:
 Concrete example:
 
 ```html title="templates/admin/dashboard.html"
-<section xmlns:dv="https://davenda.dev">
+<section xmlns:coil="https://coil.rs">
   <h2>Shoppr operator overview</h2>
-  <div dv:insert="~{admin/widgets/revenue-summary}"></div>
+  <div coil:insert="~{admin/widgets/revenue-summary}"></div>
 </section>
 ```
 

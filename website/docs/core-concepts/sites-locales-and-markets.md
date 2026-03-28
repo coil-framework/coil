@@ -2,7 +2,7 @@
 title: Sites, Locales, And Markets
 ---
 
-Davenda treats site and locale as runtime concerns. They are not just view-layer labels.
+Coil treats site and locale as runtime concerns. They are not just view-layer labels.
 
 If you skip this distinction, multi-site behaviour becomes confusing quickly.
 
@@ -36,7 +36,7 @@ If those distinctions are flattened together, route resolution and commerce beha
 
 ## How It Works
 
-In Davenda, the request path first resolves the site from the host and then applies locale-aware route matching within that site context.
+In Coil, the request path first resolves the site from the host and then applies locale-aware route matching within that site context.
 
 That lets the runtime carry site and locale through:
 
@@ -158,7 +158,7 @@ This model prevents a common failure mode where "multi-language support" is trea
 - a single assortment
 - a single canonical route graph
 
-Davenda is trying to keep those concerns aligned from the start.
+Coil is trying to keep those concerns aligned from the start.
 
 ## Common Mistakes
 

@@ -2,12 +2,12 @@
 title: Linked Rust Hook APIs
 ---
 
-Linked Rust backends are the first-party customer extension model in Davenda.
+Linked Rust backends are the first-party customer extension model in Coil.
 
 Start with the smallest useful plugin shape:
 
 ```rust
-use davenda_customer_sdk::{
+use coil_customer_sdk::{
     CheckoutHooks, CustomerBackendPlugin, CustomerHookRegistry, PluginDescriptor,
 };
 
@@ -43,7 +43,7 @@ The smallest useful linked backend is not just a trait name. It is a plugin type
 hook registration:
 
 ```rust
-use davenda_customer_sdk::{
+use coil_customer_sdk::{
     BackendError, CheckoutHooks, CustomerBackendPlugin, CustomerHookRegistry,
     CustomerPluginDescriptor, VerifiedWebhookHooks,
 };
@@ -128,7 +128,7 @@ Use them like this:
 
 ## Checkout Hooks
 
-The checkout hook trait lives in `crates/davenda-customer-sdk/src/hooks.rs`:
+The checkout hook trait lives in `crates/coil-customer-sdk/src/hooks.rs`:
 
 - `CheckoutHooks::review_order(...)`
 
@@ -294,7 +294,7 @@ Use verified webhook hooks when you need to:
 
 ## Available Facades
 
-The facade traits live in `crates/davenda-customer-sdk/src/facade.rs`.
+The facade traits live in `crates/coil-customer-sdk/src/facade.rs`.
 
 Current families:
 
@@ -359,13 +359,13 @@ Minimal binary composition:
 
 ```rust
 fn main() -> anyhow::Result<()> {
-    davenda_all::builder()
+    coil::builder()
         .with_customer_plugin(shoppr_backend::plugin())
         .run_from_env()
 }
 ```
 
-That is the whole model. There is no extra sidecar HTTP API and no need to patch core Davenda
+That is the whole model. There is no extra sidecar HTTP API and no need to patch core Coil
 crates.
 
 The extension traits in `RepositoryFacadeExt` are also worth reading because they show the current
@@ -381,7 +381,7 @@ stable repository surfaces directly:
 
 You should be able to explain linked Rust hooks in one sentence:
 
-"Customer-owned Rust implements explicit hook traits and talks to Davenda only through stable SDK facades."
+"Customer-owned Rust implements explicit hook traits and talks to Coil only through stable SDK facades."
 
 If a customization needs private runtime types or deep internal crates, it is crossing the wrong boundary.
 
@@ -441,7 +441,7 @@ Canonical Gitly implementation:
 
 Runtime coverage:
 
-- `crates/davenda-runtime/src/tests/server.rs`
+- `crates/coil-runtime/src/tests/server.rs`
 
 ## Read Next
 

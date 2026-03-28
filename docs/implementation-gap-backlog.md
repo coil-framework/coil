@@ -2,7 +2,7 @@
 title: Implementation Gap Backlog
 ---
 
-# Davenda Implementation Gap Backlog
+# Coil Implementation Gap Backlog
 
 This backlog converts the current gap analysis into an execution plan.
 
@@ -51,9 +51,9 @@ The goal is to close the biggest trust gaps first:
 - Problem:
   Core has locale context and `TranslationRuntime`, but there is no first-class customer-facing translation file contract and no end-to-end server-loaded translation story.
 - Evidence:
-  - [crates/davenda-core/src/bootstrap/factories.rs](/Users/zcourts/projects/worka/davenda/crates/davenda-core/src/bootstrap/factories.rs)
-  - [crates/davenda-config/src/customer_app.rs](/Users/zcourts/projects/worka/davenda/crates/davenda-config/src/customer_app.rs)
-  - [website/docs/reference/internationalization.md](/Users/zcourts/projects/worka/davenda/website/docs/reference/internationalization.md)
+  - [crates/coil-core/src/bootstrap/factories.rs](/Users/zcourts/projects/worka/coil/crates/coil-core/src/bootstrap/factories.rs)
+  - [crates/coil-config/src/customer_app.rs](/Users/zcourts/projects/worka/coil/crates/coil-config/src/customer_app.rs)
+  - [website/docs/reference/internationalization.md](/Users/zcourts/projects/worka/coil/website/docs/reference/internationalization.md)
 - Desired outcome:
   A customer app can declare translation catalogs in a supported format, the runtime loads them, and server-rendered pages can resolve translated strings from those catalogs.
 - Code work:
@@ -77,14 +77,14 @@ The goal is to close the biggest trust gaps first:
 - Priority: `P0`
 - Work types: `Design`, `Code`, `Docs`
 - Problem:
-  There is no template-native translation helper such as `t()` or `dv:t`.
+  There is no template-native translation helper such as `t()` or `coil:t`.
 - Evidence:
-  - [crates/davenda-template/src/parser.rs](/Users/zcourts/projects/worka/davenda/crates/davenda-template/src/parser.rs)
-  - [website/docs/reference/internationalization.md](/Users/zcourts/projects/worka/davenda/website/docs/reference/internationalization.md)
+  - [crates/coil-template/src/parser.rs](/Users/zcourts/projects/worka/coil/crates/coil-template/src/parser.rs)
+  - [website/docs/reference/internationalization.md](/Users/zcourts/projects/worka/coil/website/docs/reference/internationalization.md)
 - Desired outcome:
   Templates can render translated strings directly in a clear, constrained, documented way.
 - Design decisions needed:
-  - helper shape: expression helper `t("key")`, directive `dv:t`, or both
+  - helper shape: expression helper `t("key")`, directive `coil:t`, or both
   - interpolation and pluralisation contract
   - error and fallback behaviour
 - Code work:
@@ -104,11 +104,11 @@ The goal is to close the biggest trust gaps first:
 - Problem:
   Shoppr proves site-aware routing and assortment better than it proves translated content.
 - Evidence:
-  - [apps/shoppr/app.toml](/Users/zcourts/projects/worka/davenda/apps/shoppr/app.toml)
-  - [apps/shoppr/templates/pages/home.html](/Users/zcourts/projects/worka/davenda/apps/shoppr/templates/pages/home.html)
-  - [apps/shoppr/crates/shoppr-app/tests/sites.rs](/Users/zcourts/projects/worka/davenda/apps/shoppr/crates/shoppr-app/tests/sites.rs)
+  - [apps/shoppr/app.toml](/Users/zcourts/projects/worka/coil/apps/shoppr/app.toml)
+  - [apps/shoppr/templates/pages/home.html](/Users/zcourts/projects/worka/coil/apps/shoppr/templates/pages/home.html)
+  - [apps/shoppr/crates/shoppr-app/tests/sites.rs](/Users/zcourts/projects/worka/coil/apps/shoppr/crates/shoppr-app/tests/sites.rs)
 - Desired outcome:
-  Shoppr becomes the canonical proof that Davenda can deliver:
+  Shoppr becomes the canonical proof that Coil can deliver:
   - multi-site
   - per-site locale policy
   - server-rendered translated copy
@@ -131,8 +131,8 @@ The goal is to close the biggest trust gaps first:
 - Problem:
   The current local multi-site story depends on external wildcard DNS and is therefore not self-contained.
 - Evidence:
-  - [apps/shoppr/platform.toml](/Users/zcourts/projects/worka/davenda/apps/shoppr/platform.toml)
-  - [apps/shoppr/README.md](/Users/zcourts/projects/worka/davenda/apps/shoppr/README.md)
+  - [apps/shoppr/platform.toml](/Users/zcourts/projects/worka/coil/apps/shoppr/platform.toml)
+  - [apps/shoppr/README.md](/Users/zcourts/projects/worka/coil/apps/shoppr/README.md)
 - Desired outcome:
   Local multi-site development works without relying on external public wildcard DNS.
 - Candidate directions:
@@ -153,9 +153,9 @@ The goal is to close the biggest trust gaps first:
 - Problem:
   Metrics are currently mostly catalog/config, not live telemetry.
 - Evidence:
-  - [crates/davenda-runtime/src/server/observability.rs](/Users/zcourts/projects/worka/davenda/crates/davenda-runtime/src/server/observability.rs)
-  - [crates/davenda-observability/src/telemetry.rs](/Users/zcourts/projects/worka/davenda/crates/davenda-observability/src/telemetry.rs)
-  - [website/docs/operations/observability.md](/Users/zcourts/projects/worka/davenda/website/docs/operations/observability.md)
+  - [crates/coil-runtime/src/server/observability.rs](/Users/zcourts/projects/worka/coil/crates/coil-runtime/src/server/observability.rs)
+  - [crates/coil-observability/src/telemetry.rs](/Users/zcourts/projects/worka/coil/crates/coil-observability/src/telemetry.rs)
+  - [website/docs/operations/observability.md](/Users/zcourts/projects/worka/coil/website/docs/operations/observability.md)
 - Desired outcome:
   Live request/job/cache/storage/auth/extension metrics are emitted and scrapeable.
 - Code work:
@@ -187,8 +187,8 @@ The goal is to close the biggest trust gaps first:
 - Problem:
   Readiness is bootstrap-shaped, not live dependency-shaped.
 - Evidence:
-  - [crates/davenda-core/src/bootstrap/factories.rs](/Users/zcourts/projects/worka/davenda/crates/davenda-core/src/bootstrap/factories.rs)
-  - [crates/davenda-runtime/src/server/observability.rs](/Users/zcourts/projects/worka/davenda/crates/davenda-runtime/src/server/observability.rs)
+  - [crates/coil-core/src/bootstrap/factories.rs](/Users/zcourts/projects/worka/coil/crates/coil-core/src/bootstrap/factories.rs)
+  - [crates/coil-runtime/src/server/observability.rs](/Users/zcourts/projects/worka/coil/crates/coil-runtime/src/server/observability.rs)
 - Desired outcome:
   `/ready` reflects real dependency reachability and essential runtime viability.
 - Acceptance criteria:
@@ -204,9 +204,9 @@ The goal is to close the biggest trust gaps first:
 - Problem:
   Gitly still leaks old names in environment variables and code surfaces.
 - Evidence:
-  - [apps/gitly/crates/gitly-app/src/lib.rs](/Users/zcourts/projects/worka/davenda/apps/gitly/crates/gitly-app/src/lib.rs)
-  - [apps/gitly/docker-compose.yml](/Users/zcourts/projects/worka/davenda/apps/gitly/docker-compose.yml)
-  - [website/docs/reference/environment-variables.md](/Users/zcourts/projects/worka/davenda/website/docs/reference/environment-variables.md)
+  - [apps/gitly/crates/gitly-app/src/lib.rs](/Users/zcourts/projects/worka/coil/apps/gitly/crates/gitly-app/src/lib.rs)
+  - [apps/gitly/docker-compose.yml](/Users/zcourts/projects/worka/coil/apps/gitly/docker-compose.yml)
+  - [website/docs/reference/environment-variables.md](/Users/zcourts/projects/worka/coil/website/docs/reference/environment-variables.md)
 - Desired outcome:
   Public surface is `Gitly` only.
 - Acceptance criteria:
@@ -220,7 +220,7 @@ The goal is to close the biggest trust gaps first:
 - Problem:
   Shoppr docs still mention site/locale combinations that do not exist.
 - Evidence:
-  - [apps/shoppr/README.md](/Users/zcourts/projects/worka/davenda/apps/shoppr/README.md)
+  - [apps/shoppr/README.md](/Users/zcourts/projects/worka/coil/apps/shoppr/README.md)
 - Acceptance criteria:
   - README matches actual app manifest and tests exactly
 

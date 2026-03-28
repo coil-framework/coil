@@ -1,43 +1,43 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Navigation'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Navigation'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Navigation</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${pageTitle}">Navigation</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{admin/nav}"></nav>
+      <nav coil:replace="~{admin/nav}"></nav>
     </header>
     <main class="site-main admin-page">
       <section class="admin-page__intro">
         <p class="admin-page__eyebrow">Content operations</p>
-        <h1 dv:text="${page.title}">Navigation</h1>
-        <p dv:text="${page.summary}">Navigation trees and top-level route links.</p>
+        <h1 coil:text="${page.title}">Navigation</h1>
+        <p coil:text="${page.summary}">Navigation trees and top-level route links.</p>
         <p>
           Saving this form updates the live primary navigation rendered in the Shoppr public
           shell.
         </p>
       </section>
 
-      <section class="admin-panel" dv:if="${hasFlashMessages}">
+      <section class="admin-panel" coil:if="${hasFlashMessages}">
         <ul class="flash-list">
-          <li dv:each="message : ${flashMessages}" dv:text="${message.text}">Saved.</li>
+          <li coil:each="message : ${flashMessages}" coil:text="${message.text}">Saved.</li>
         </ul>
       </section>
 
-      <section class="admin-panel" dv:if="${hasErrors}">
+      <section class="admin-panel" coil:if="${hasErrors}">
         <h2>Navigation errors</h2>
-        <p dv:text="${errorSummary}">Update the navigation items and save again.</p>
+        <p coil:text="${errorSummary}">Update the navigation items and save again.</p>
         <ul class="flash-list">
-          <li dv:each="error : ${errors}" dv:text="${error.message}">Error</li>
+          <li coil:each="error : ${errors}" coil:text="${error.message}">Error</li>
         </ul>
       </section>
 
@@ -52,12 +52,12 @@
               </tr>
             </thead>
             <tbody>
-              <tr dv:each="item : ${navigationItems}">
+              <tr coil:each="item : ${navigationItems}">
                 <td>
-                  <input type="text" dv:attr="name=${item.labelField},value=${item.label}" />
+                  <input type="text" coil:attr="name=${item.labelField},value=${item.label}" />
                 </td>
                 <td>
-                  <input type="text" dv:attr="name=${item.hrefField},value=${item.href}" />
+                  <input type="text" coil:attr="name=${item.hrefField},value=${item.href}" />
                 </td>
               </tr>
               <tr>
@@ -72,7 +72,7 @@
           </table>
           <div class="admin-page__actions">
             <button class="button" type="submit">Save navigation</button>
-            <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            <a class="button button--secondary" href="/admin/pages" coil:attr="href=${links.adminPages}">
               Back to pages
             </a>
           </div>

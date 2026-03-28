@@ -2,7 +2,7 @@
 title: Linked Rust Backends
 ---
 
-Davenda's preferred customization model is linked customer Rust.
+Coil's preferred customization model is linked customer Rust.
 
 That means customer-specific backend behaviour lives in ordinary Rust crates that are compiled into the customer application, not in a separate API service by default.
 
@@ -10,7 +10,7 @@ That means customer-specific backend behaviour lives in ordinary Rust crates tha
 
 Use this page as the launch point for the customer-owned backend lane.
 
-- Read it if you want to know when Davenda expects linked Rust instead of an external service.
+- Read it if you want to know when Coil expects linked Rust instead of an external service.
 - From here, jump into the customer-root workspace model, the reference boundary between customer
   Rust and WASM, and the checked-in Shoppr and Gitly examples.
 - If you are already convinced and just need the app shape, go back to
@@ -18,7 +18,7 @@ Use this page as the launch point for the customer-owned backend lane.
 
 ## What It Is
 
-A linked Rust backend is customer-owned code that plugs into Davenda through supported public APIs and hook/facade boundaries.
+A linked Rust backend is customer-owned code that plugs into Coil through supported public APIs and hook/facade boundaries.
 
 Typical responsibilities include:
 
@@ -27,11 +27,11 @@ Typical responsibilities include:
 - verified webhook handling
 - customer-specific admin or integration behaviour
 
-The exact extension points are intentionally explicit. Davenda does not expose the whole runtime as an ambient bag of internals.
+The exact extension points are intentionally explicit. Coil does not expose the whole runtime as an ambient bag of internals.
 
 ## Why It Exists
 
-Davenda makes this the primary customization path because it keeps the application honest.
+Coil makes this the primary customization path because it keeps the application honest.
 
 ### You get compile-time integration
 
@@ -39,17 +39,17 @@ Your product logic is built, typed, and tested together with the application ins
 
 ### You avoid unnecessary infrastructure
 
-Many teams default to "add another API" because their framework has no good first-party customization path. Davenda is trying to remove that pressure.
+Many teams default to "add another API" because their framework has no good first-party customization path. Coil is trying to remove that pressure.
 
 ### You keep trust boundaries explicit
 
-Customer-owned Rust has a different trust model from third-party extensions. Davenda treats those as different things on purpose.
+Customer-owned Rust has a different trust model from third-party extensions. Coil treats those as different things on purpose.
 
 ## How It Works
 
 At a high level:
 
-1. The customer binary links Davenda crates plus customer-owned crates.
+1. The customer binary links Coil crates plus customer-owned crates.
 2. The customer backend implements supported plugin or hook traits.
 3. The runtime exposes stable facades instead of leaking arbitrary internals.
 4. Request-time or lifecycle-time hooks are invoked through those public surfaces.
@@ -81,7 +81,7 @@ You may still want:
 - a third-party WASM extension when the code is lower-trust or marketplace-style
 - plain HTTP integration when the dependency should remain external
 
-The point is not "everything must be linked." The point is that Davenda has a clear default path when the code is truly customer-owned application logic.
+The point is not "everything must be linked." The point is that Coil has a clear default path when the code is truly customer-owned application logic.
 
 ## Common Mistakes
 

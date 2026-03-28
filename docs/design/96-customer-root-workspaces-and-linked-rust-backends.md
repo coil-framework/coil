@@ -6,11 +6,11 @@
 
 This decision refines the customer-app architecture described earlier in the design set.
 
-Davenda remains a reusable upstream platform made of core crates and official modules. Customer
+Coil remains a reusable upstream platform made of core crates and official modules. Customer
 stores remain separate deployable products. The accepted change is in how customer-owned native
 behavior is integrated.
 
-The platform will treat the customer project as the primary workspace root, with Davenda consumed
+The platform will treat the customer project as the primary workspace root, with Coil consumed
 as a normal dependency rather than as the top-level repository that customer code is embedded into.
 Customer-owned first-party logic will be linked into the build through a stable customer SDK and
 explicit hook registration. Runtime-installed WASM extensions remain part of the design, but they
@@ -41,7 +41,7 @@ right primary model for normal customer-owned application logic.
 
 The accepted architecture therefore needs three explicit customization tiers:
 
-- Davenda core and official native modules for platform-owned first-party capabilities
+- Coil core and official native modules for platform-owned first-party capabilities
 - linked customer-owned Rust code for store-owned first-party behavior compiled into the product
 - bounded WASM extensions for runtime-installed third-party or marketplace customization
 
@@ -50,11 +50,11 @@ The accepted architecture therefore needs three explicit customization tiers:
 The accepted model is:
 
 - the customer store is the workspace root
-- Davenda is consumed as a normal upstream dependency, typically from crates.io or a pinned git ref
-- the customer workspace may depend on `davenda-all` for the full official distribution or depend on
-  individual Davenda crates directly when it wants a narrower battery set
+- Coil is consumed as a normal upstream dependency, typically from crates.io or a pinned git ref
+- the customer workspace may depend on `coil` for the full official distribution or depend on
+  individual Coil crates directly when it wants a narrower battery set
 - customer-owned Rust behavior is implemented in customer crates inside that workspace
-- the customer binary links Davenda plus customer-owned crates together through a stable SDK and
+- the customer binary links Coil plus customer-owned crates together through a stable SDK and
   explicit hook registration
 - third-party extensibility remains runtime-oriented and bounded through WASM extension contracts
 
@@ -65,19 +65,19 @@ as the same thing.
 
 ### It matches the product shape
 
-Davenda is not supposed to be a giant application with hidden customer branches inside it. It is a
+Coil is not supposed to be a giant application with hidden customer branches inside it. It is a
 platform plus separate customer apps. Making the customer project the real workspace root is the
 most honest way to reflect that in code.
 
 ### It avoids encouraging forks of core
 
-Customers should not be pushed toward vendoring or modifying Davenda internals just because they
+Customers should not be pushed toward vendoring or modifying Coil internals just because they
 need custom product logic. A normal dependency relationship is healthier:
 
-- Davenda stays an upstream product
+- Coil stays an upstream product
 - the customer pins versions explicitly
 - upgrades remain visible and intentional
-- unsupported source edits to Davenda become the exception rather than the recommended path
+- unsupported source edits to Coil become the exception rather than the recommended path
 
 ### It gives customer-owned code a first-party integration path
 
@@ -132,10 +132,10 @@ In that layout:
 - `shoppr-backend` owns customer-specific Rust logic and hook implementations
 - `apps/shoppr/` still owns the customer manifest, templates, theme assets, auth package, and
   extension packages
-- Davenda crates are normal dependencies declared in the customer workspace manifest
+- Coil crates are normal dependencies declared in the customer workspace manifest
 
 This model intentionally does **not** rely on dynamic Cargo manifest tricks, environment-variable
-path interpolation, generated dependency hacks, or vendored copies of Davenda as the default
+path interpolation, generated dependency hacks, or vendored copies of Coil as the default
 workflow.
 
 ## Capability Selection and Product Composition
@@ -150,8 +150,8 @@ the second.
 
 That means:
 
-- `davenda-all` is a convenience meta-crate that brings in the full official distribution
-- direct dependencies on specific Davenda crates are the narrower composition path
+- `coil` is a convenience meta-crate that brings in the full official distribution
+- direct dependencies on specific Coil crates are the narrower composition path
 - `app.toml` still decides which official modules are actually installed and active for the store
 - the runtime validates that the app manifest only enables modules that the linked binary actually
   registered
@@ -161,14 +161,14 @@ control.
 
 ## Customer SDK and Hook Model
 
-Davenda should expose a stable crate for customer-linked native integration, such as
-`davenda-customer-sdk`.
+Coil should expose a stable crate for customer-linked native integration, such as
+`coil-customer-sdk`.
 
 That crate should provide:
 
 - customer plugin registration traits
 - stable hook traits for explicit lifecycle points
-- typed facades over Davenda services
+- typed facades over Coil services
 - stable request, response, and domain contract types
 - strongly typed error contracts
 
@@ -211,7 +211,7 @@ With the full official battery:
 
 ```rust
 fn main() -> Result<(), anyhow::Error> {
-    davenda_all::builder()
+    coil::builder()
         .with_customer_plugin(harbor_shop_backend::plugin())
         .run_from_env()
 }
@@ -221,10 +221,10 @@ With explicit subsystem selection:
 
 ```rust
 fn main() -> Result<(), anyhow::Error> {
-    davenda_runtime::Builder::new()
-        .register_module(davenda_cms::module())
-        .register_module(davenda_commerce::module())
-        .register_module(davenda_memberships::module())
+    coil_runtime::Builder::new()
+        .register_module(coil_cms::module())
+        .register_module(coil_commerce::module())
+        .register_module(coil_memberships::module())
         .register_customer_plugin(harbor_shop_backend::plugin())
         .run_from_env()
 }
@@ -232,7 +232,7 @@ fn main() -> Result<(), anyhow::Error> {
 
 This is the preferred product-composition model because it keeps the app's ownership legible:
 
-- Davenda supplies the runtime and official modules
+- Coil supplies the runtime and official modules
 - the customer binary decides what to link and register
 - the customer app manifest decides what to enable
 
@@ -268,7 +268,7 @@ They are not the default answer for normal customer-owned Rust logic.
 
 Shoppr should eventually demonstrate both supported customization paths:
 
-- a linked customer-owned Rust backend crate implementing Davenda hook traits
+- a linked customer-owned Rust backend crate implementing Coil hook traits
 - a bounded WASM extension installed through the normal extension packaging path
 
 That split is intentional. Shoppr should show third-party developers and customer teams the
@@ -286,16 +286,16 @@ presented as the primary future model.
 
 - the customer-app boundary becomes clearer in code and packaging
 - customer teams get a better native customization path
-- Davenda remains an upstream dependency rather than encouraging silent source forks
+- Coil remains an upstream dependency rather than encouraging silent source forks
 - the separation between first-party customer logic and third-party runtime plugins becomes honest
 - module selection becomes legible through normal dependency composition
 
 ### Negative
 
-- Davenda must now own a stable customer SDK surface rather than relying on ad hoc internal access
+- Coil must now own a stable customer SDK surface rather than relying on ad hoc internal access
 - the bootstrap and registration model must become more explicit
 - Shoppr and local development workflows will need to move from "embedded example app inside
-  the Davenda repo" toward "reference customer workspace that consumes Davenda"
+  the Coil repo" toward "reference customer workspace that consumes Coil"
 - some existing docs that describe WASM as the default customer-extension path need to be read in
   light of this decision and updated over time
 
@@ -304,9 +304,9 @@ presented as the primary future model.
 To keep this model healthy:
 
 - customer crates must not be encouraged to depend directly on arbitrary runtime internals
-- `davenda-customer-sdk` must stay smaller and more stable than the implementation crates behind it
+- `coil-customer-sdk` must stay smaller and more stable than the implementation crates behind it
 - app-manifest module enablement must be validated against the modules linked into the binary
-- Davenda upgrades must remain explicit through pinned versions rather than hidden vendored copies
+- Coil upgrades must remain explicit through pinned versions rather than hidden vendored copies
 - third-party runtime plugins must remain capability-scoped and isolated through WASM
 
 ## Relationship to Earlier Chapters

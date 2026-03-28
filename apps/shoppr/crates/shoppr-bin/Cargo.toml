@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-davenda-all.workspace = true
+coil.workspace = true
 shoppr-app = { path = "../shoppr-app" }
 shoppr-backend = { path = "../shoppr-backend" }
 serde.workspace = true

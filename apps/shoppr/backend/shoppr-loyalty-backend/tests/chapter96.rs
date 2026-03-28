@@ -40,7 +40,7 @@ fn customer_root_workspace_shape_matches_chapter_96_model() {
     );
     assert!(bin_cargo.contains("name = \"shoppr\""), "{bin_cargo}");
     assert!(
-        backend_cargo.contains("davenda-customer-sdk.workspace = true"),
+        backend_cargo.contains("coil-customer-sdk.workspace = true"),
         "{backend_cargo}"
     );
 
@@ -50,7 +50,7 @@ fn customer_root_workspace_shape_matches_chapter_96_model() {
     );
     assert!(sidecar_cargo.contains("publish = false"), "{sidecar_cargo}");
     assert!(
-        sidecar_cargo.contains("davenda-customer-sdk.workspace = true"),
+        sidecar_cargo.contains("coil-customer-sdk.workspace = true"),
         "{sidecar_cargo}"
     );
     assert!(
@@ -225,11 +225,11 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{compose}"
     );
     assert!(
-        compose.contains("HARBOR_BACKEND_BIND: \"0.0.0.0:8081\""),
+        compose.contains("SHOPPR_BACKEND_BIND: \"0.0.0.0:8081\""),
         "{compose}"
     );
     assert!(
-        compose.contains("HARBOR_BACKEND_WEBHOOK_SECRET"),
+        compose.contains("SHOPPR_BACKEND_WEBHOOK_SECRET"),
         "{compose}"
     );
     assert!(repo_compose.contains("context: ../.."), "{repo_compose}");

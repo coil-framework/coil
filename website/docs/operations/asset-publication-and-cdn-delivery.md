@@ -2,7 +2,7 @@
 title: Asset Publication And CDN Delivery
 ---
 
-Davenda treats asset publication as a release step, not a side effect of rendering.
+Coil treats asset publication as a release step, not a side effect of rendering.
 
 ## What Is This?
 
@@ -36,8 +36,8 @@ healthy.
 The operator shape should be explicit:
 
 ```bash
-platform assets publish --config config/platform.toml --dry-run
-platform assets publish --config config/platform.toml --yes
+coil assets publish --config config/platform.toml --dry-run
+coil assets publish --config config/platform.toml --yes
 ```
 
 Customer binaries may re-export the same lifecycle, for example:

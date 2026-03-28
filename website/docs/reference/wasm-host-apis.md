@@ -2,7 +2,7 @@
 title: WASM Host APIs
 ---
 
-Davenda’s WASM runtime is intentionally narrow. Packages do not get arbitrary process access.
+Coil’s WASM runtime is intentionally narrow. Packages do not get arbitrary process access.
 
 Start with the key idea:
 
@@ -125,7 +125,7 @@ For a third-party extension author, the important operational split is:
 ## Current Host Capability Families
 
 The main grant families are defined by `HostCapabilityGrant` in
-`crates/davenda-wasm/src/grants.rs`.
+`crates/coil-wasm/src/grants.rs`.
 
 Current families include:
 
@@ -285,7 +285,7 @@ Important behaviours already implemented there:
 - response size is capped
 - reserved headers such as `Host` and `Content-Length` are blocked
 
-That is the same posture Davenda now uses for linked customer outbound HTTP too: approved
+That is the same posture Coil now uses for linked customer outbound HTTP too: approved
 integration targets, not unrestricted guest-controlled egress.
 
 Minimal example:

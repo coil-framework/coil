@@ -1,0 +1,49 @@
+[package]
+name = "coil-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8"
+coil-auth = { path = "../coil-auth" }
+coil-assets = { path = "../coil-assets" }
+coil-cache = { path = "../coil-cache" }
+coil-commerce = { path = "../coil-commerce" }
+coil-config = { path = "../coil-config" }
+coil-core = { path = "../coil-core" }
+coil-customer-sdk = { path = "../coil-customer-sdk" }
+coil-data = { path = "../coil-data" }
+coil-i18n = { path = "../coil-i18n" }
+coil-jobs = { path = "../coil-jobs" }
+coil-memberships = { path = "../coil-memberships" }
+coil-observability = { path = "../coil-observability" }
+coil-ops = { path = "../coil-ops" }
+coil-seo = { path = "../coil-seo" }
+coil-storage = { path = "../coil-storage" }
+coil-template = { path = "../coil-template" }
+coil-tls = { path = "../coil-tls" }
+coil-wasm = { path = "../coil-wasm" }
+hmac = "0.12"
+ipnet = "2"
+rusqlite = { version = "0.30", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.7", default-features = false, features = ["postgres", "runtime-tokio-rustls"] }
+sha2 = "0.10"
+thiserror = "1.0"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+toml = "0.8"
+tower = { version = "0.5", features = ["util"] }
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
+url = "2"
+zanzibar = { workspace = true }
+
+[dev-dependencies]
+async-trait = "0.1"
+coil-admin = { path = "../coil-admin" }
+coil-cms = { path = "../coil-cms" }
+coil-events = { path = "../coil-events" }
+coil-media = { path = "../coil-media" }
+coil-memberships = { path = "../coil-memberships" }
+coil-observability = { path = "../coil-observability" }
+wat = "1"

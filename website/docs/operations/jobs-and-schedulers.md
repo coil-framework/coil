@@ -2,7 +2,7 @@
 title: Jobs And Schedulers
 ---
 
-Davenda treats background work as a first-class operator surface, but the checked-in public apps
+Coil treats background work as a first-class operator surface, but the checked-in public apps
 demonstrate different parts of that story.
 
 - Gitly is the clearest public example of a scheduled-job contract plus a bounded runtime-installed
@@ -100,10 +100,10 @@ The customer binaries do not own queue control. The operator surface is still th
 Start with:
 
 ```bash
-cargo run -p davenda-cli -- jobs status --config apps/shoppr/platform.dev.toml
-cargo run -p davenda-cli -- jobs ready --config apps/shoppr/platform.dev.toml --queue jobs.work --limit 25
-cargo run -p davenda-cli -- jobs dead-letters --config apps/shoppr/platform.dev.toml --queue jobs.dead-letter --limit 25
-cargo run -p davenda-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
+cargo run -p coil-cli -- jobs status --config apps/shoppr/platform.dev.toml
+cargo run -p coil-cli -- jobs ready --config apps/shoppr/platform.dev.toml --queue jobs.work --limit 25
+cargo run -p coil-cli -- jobs dead-letters --config apps/shoppr/platform.dev.toml --queue jobs.dead-letter --limit 25
+cargo run -p coil-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
 ```
 
 Those four commands cover the minimum real workflow:

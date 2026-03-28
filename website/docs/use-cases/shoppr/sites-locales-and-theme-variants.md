@@ -2,7 +2,7 @@
 title: Sites, Locales, And Theme Variants
 ---
 
-Shoppr is the clearest current example of Davenda's site model in a commerce app.
+Shoppr is the clearest current example of Coil's site model in a commerce app.
 
 It shows one customer app serving several related storefronts with shared code, shared modules,
 and controlled differences in host, locale, and branding.
@@ -75,7 +75,7 @@ Instead it uses one app with:
 - site-aware copy and branding
 - shared module surfaces
 
-That is the practical Davenda pattern. Variation should come from explicit site and locale policy,
+That is the practical Coil pattern. Variation should come from explicit site and locale policy,
 not from duplicating the whole app.
 
 ## Adapt This For Your Store

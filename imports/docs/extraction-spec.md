@@ -5,4 +5,4 @@
 - Snapshot timezone: `Europe/London`
 - Record extraction batches: users, media, pages, then events
 
-The checked-in fixture package models the import contract used by `platform import run`.
+The checked-in fixture package models the import contract used by `coil import run`.

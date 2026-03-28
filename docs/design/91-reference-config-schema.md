@@ -43,7 +43,7 @@ provider = "cloudflare-dns"
 [storage]
 default_class = "public_upload"
 object_store = "s3"
-local_root = "/var/lib/platform"
+local_root = "/var/lib/coil"
 
 [cache]
 l1 = "moka"
@@ -74,7 +74,7 @@ fallback_locale = "en-GB"
 emit_json_ld = true
 
 [auth]
-package = "platform-default-auth"
+package = "coil-default-auth"
 explain_api = false
 
 [modules]

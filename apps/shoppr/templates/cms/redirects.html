@@ -1,43 +1,43 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle='Redirects'"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle='Redirects'"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Redirects</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <title coil:text="${pageTitle}">Redirects</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
       <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{admin/nav}"></nav>
+      <nav coil:replace="~{admin/nav}"></nav>
     </header>
     <main class="site-main admin-page">
       <section class="admin-page__intro">
         <p class="admin-page__eyebrow">Content operations</p>
-        <h1 dv:text="${page.title}">Redirects</h1>
-        <p dv:text="${page.summary}">Redirect rules and route handoff records.</p>
+        <h1 coil:text="${page.title}">Redirects</h1>
+        <p coil:text="${page.summary}">Redirect rules and route handoff records.</p>
         <p>
           Saving this form updates the redirect inventory used for unmatched live requests, so it
           can carry legacy WordPress URLs into the current Shoppr storefront.
         </p>
       </section>
 
-      <section class="admin-panel" dv:if="${hasFlashMessages}">
+      <section class="admin-panel" coil:if="${hasFlashMessages}">
         <ul class="flash-list">
-          <li dv:each="message : ${flashMessages}" dv:text="${message.text}">Saved.</li>
+          <li coil:each="message : ${flashMessages}" coil:text="${message.text}">Saved.</li>
         </ul>
       </section>
 
-      <section class="admin-panel" dv:if="${hasErrors}">
+      <section class="admin-panel" coil:if="${hasErrors}">
         <h2>Redirect errors</h2>
-        <p dv:text="${errorSummary}">Update the redirect rules and save again.</p>
+        <p coil:text="${errorSummary}">Update the redirect rules and save again.</p>
         <ul class="flash-list">
-          <li dv:each="error : ${errors}" dv:text="${error.message}">Error</li>
+          <li coil:each="error : ${errors}" coil:text="${error.message}">Error</li>
         </ul>
       </section>
 
@@ -53,16 +53,16 @@
               </tr>
             </thead>
             <tbody>
-              <tr dv:each="redirect : ${redirects}">
+              <tr coil:each="redirect : ${redirects}">
                 <td>
-                  <input type="text" dv:attr="name=${redirect.fromField},value=${redirect.from}" />
+                  <input type="text" coil:attr="name=${redirect.fromField},value=${redirect.from}" />
                 </td>
                 <td>
-                  <input type="text" dv:attr="name=${redirect.toField},value=${redirect.to}" />
+                  <input type="text" coil:attr="name=${redirect.toField},value=${redirect.to}" />
                 </td>
                 <td>
-                  <input type="checkbox" value="yes" dv:attr="name=${redirect.permanentField}" dv:if="${redirect.permanent}" checked="checked" />
-                  <input type="checkbox" value="yes" dv:attr="name=${redirect.permanentField}" dv:unless="${redirect.permanent}" />
+                  <input type="checkbox" value="yes" coil:attr="name=${redirect.permanentField}" coil:if="${redirect.permanent}" checked="checked" />
+                  <input type="checkbox" value="yes" coil:attr="name=${redirect.permanentField}" coil:unless="${redirect.permanent}" />
                 </td>
               </tr>
               <tr>
@@ -80,7 +80,7 @@
           </table>
           <div class="admin-page__actions">
             <button class="button" type="submit">Save redirects</button>
-            <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            <a class="button button--secondary" href="/admin/pages" coil:attr="href=${links.adminPages}">
               Back to pages
             </a>
           </div>

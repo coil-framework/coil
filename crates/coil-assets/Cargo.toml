@@ -1,0 +1,14 @@
+[package]
+name = "coil-assets"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coil-auth = { path = "../coil-auth" }
+coil-storage = { path = "../coil-storage" }
+sha2 = "0.10"
+thiserror = "1.0"
+
+[dev-dependencies]
+coil-config = { path = "../coil-config" }
+tempfile = "3"

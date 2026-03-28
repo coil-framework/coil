@@ -2,7 +2,7 @@
 title: Core Concepts
 ---
 
-This section is the architecture narrative for Rust web developers who want to understand how Davenda is put together.
+This section is the architecture narrative for Rust web developers who want to understand how Coil is put together.
 
 Each page focuses on one concept and answers five questions:
 
@@ -16,7 +16,7 @@ Each page focuses on one concept and answers five questions:
 
 Use **Core Concepts** when you want the architectural model first.
 
-- Start here if you are asking "how is Davenda shaped?"
+- Start here if you are asking "how is Coil shaped?"
 - Switch to **Reference** when you need exact fields, APIs, or supported surfaces.
 - Switch to **Use Cases** when you want to see how the concepts appear in a real customer app.
 - Switch to **Operations** when you are ready to run or ship an app rather than just understand its design.
@@ -37,7 +37,7 @@ In practice, most readers should move through these sections in a loop:
 If you want the exactness layer while reading:
 
 - [Reference overview](../reference/overview.md)
-- [Composition and davenda-all](../reference/composition.md)
+- [Composition and coil](../reference/composition.md)
 - [Official modules](../reference/modules.md)
 
 Recommended order:
@@ -61,7 +61,7 @@ Choose one of these after the concept chapter:
 
 - Product composition path:
   [Customer project layout](../getting-started/customer-project-layout.md),
-  [Composition and davenda-all](../reference/composition.md),
+  [Composition and coil](../reference/composition.md),
   [Shoppr overview](../use-cases/shoppr/overview.md)
 - Runtime and request path:
   [Request and render lifecycle](request-and-render-lifecycle.md),

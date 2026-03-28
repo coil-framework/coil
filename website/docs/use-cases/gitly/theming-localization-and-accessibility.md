@@ -2,7 +2,7 @@
 title: Theming, Localisation, And Accessibility
 ---
 
-Gitly is the best public non-commerce example of a customer-owned frontend layer on Davenda.
+Gitly is the best public non-commerce example of a customer-owned frontend layer on Coil.
 
 It is also important to read it honestly:
 
@@ -74,7 +74,7 @@ function applyCopy(locale) {
 }
 ```
 
-That makes Gitly a good example of a customer-owned dictionary pattern, not a proof that Davenda
+That makes Gitly a good example of a customer-owned dictionary pattern, not a proof that Coil
 already ships a built-in `t()` helper.
 
 ## Accessibility Is Visible In The Markup

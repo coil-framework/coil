@@ -1,11 +1,11 @@
-<nav class="primary-nav" xmlns:dv="https://davenda.dev" dv:fragment="primary">
+<nav class="primary-nav" xmlns:coil="https://coil.rs" coil:fragment="primary">
   <div class="primary-nav__links">
     <a
       class="primary-nav__link"
       href="/"
-      dv:each="item : ${navigation.primary}"
-      dv:attr="href=${item.href}"
-      dv:text="${item.label}"
+      coil:each="item : ${navigation.primary}"
+      coil:attr="href=${item.href}"
+      coil:text="${item.label}"
     >
       Navigation item
     </a>
@@ -17,7 +17,7 @@
       data-panel-toggle="market-panel"
       aria-expanded="false"
       aria-controls="market-panel"
-      dv:t="nav.market"
+      coil:t="nav.market"
     >
       Market
     </button>
@@ -27,7 +27,7 @@
       data-panel-toggle="locale-panel"
       aria-expanded="false"
       aria-controls="locale-panel"
-      dv:t="nav.language"
+      coil:t="nav.language"
     >
       Language
     </button>

@@ -1,56 +1,56 @@
 <!doctype html>
 <html
-  xmlns:dv="https://davenda.dev"
-  dv:with="pageTitle=t('home.meta.title')"
+  xmlns:coil="https://coil.rs"
+  coil:with="pageTitle=t('home.meta.title')"
   lang="en-GB"
-  dv:attr="lang=${locale}"
+  coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Shoppr</title>
+    <title coil:text="${pageTitle}">Shoppr</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
-    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
   <body class="shoppr-shell">
     <header class="site-header">
       <div class="site-header__utility">
-        <p dv:t="home.utility.summary">Shoppr mirrors the pace and polish of a modern fashion flagship while still exposing Davenda’s modular surface.</p>
+        <p coil:t="home.utility.summary">Shoppr mirrors the pace and polish of a modern fashion flagship while still exposing Coil’s modular surface.</p>
         <div class="site-header__utility-links">
-          <a href="/__dev" dv:t="shell.utility.dev_tools">Dev Tools</a>
-          <a href="/admin" dv:t="shell.utility.admin">Admin</a>
-          <a href="/account" dv:t="shell.utility.account">Account</a>
+          <a href="/__dev" coil:t="shell.utility.dev_tools">Dev Tools</a>
+          <a href="/admin" coil:t="shell.utility.admin">Admin</a>
+          <a href="/account" coil:t="shell.utility.account">Account</a>
         </div>
       </div>
       <div class="site-header__main">
-        <a href="/" class="brand" dv:attr="href=${links.home}">
+        <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
         </a>
-        <nav dv:replace="~{navigation/primary}"></nav>
+        <nav coil:replace="~{navigation/primary}"></nav>
       </div>
       <div class="site-header__panels">
         <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" dv:t="nav.market">Market</p>
+          <p class="switcher-panel__eyebrow" coil:t="nav.market">Market</p>
           <ul>
-            <li dv:each="item : ${links.siteSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">Shoppr UK</a>
-              <span dv:if="${item.active}" dv:t="nav.current">Current</span>
+            <li coil:each="item : ${links.siteSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
+              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
             </li>
           </ul>
         </div>
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" dv:t="nav.language">Language</p>
+          <p class="switcher-panel__eyebrow" coil:t="nav.language">Language</p>
           <ul>
-            <li dv:each="item : ${links.localeSwitches}">
-              <a href="/" dv:attr="href=${item.href}" dv:text="${item.label}">English</a>
-              <span dv:if="${item.active}" dv:t="nav.current">Current</span>
+            <li coil:each="item : ${links.localeSwitches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
+              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
             </li>
           </ul>
         </div>
@@ -66,12 +66,12 @@
               style="--hero-image:url('https://unsplash.com/photos/woman-in-white-dress-choosing-coat-from-fur-coats-oyLU7C-2kRE/download?force=true&amp;w=1600&amp;q=80')"
             >
               <div class="home-hero__content">
-                <p class="home-hero__eyebrow" dv:text="${site.displayName}">Shoppr UK</p>
-                <h1 dv:t="home.hero.title">Quiet luxury, fast routes, and the full storefront loop in one starter.</h1>
-                <p dv:t="home.hero.summary">Shoppr is now a fashion-first demo: immersive campaigns, catalog depth, interactive product detail, and visible market and language switching across one customer app.</p>
+                <p class="home-hero__eyebrow" coil:text="${site.displayName}">Shoppr UK</p>
+                <h1 coil:t="home.hero.title">Quiet luxury, fast routes, and the full storefront loop in one starter.</h1>
+                <p coil:t="home.hero.summary">Shoppr is now a fashion-first demo: immersive campaigns, catalog depth, interactive product detail, and visible market and language switching across one customer app.</p>
                 <div class="checkout-actions">
-                  <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}" dv:t="home.hero.primary_cta">Shop new arrivals</a>
-                  <a class="button button--secondary" href="/en-GB/shop/collections" dv:attr="href=${links.collections}" dv:t="home.hero.secondary_cta">Browse collections</a>
+                  <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="home.hero.primary_cta">Shop new arrivals</a>
+                  <a class="button button--secondary" href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="home.hero.secondary_cta">Browse collections</a>
                 </div>
               </div>
             </article>
@@ -81,111 +81,111 @@
               style="--hero-image:url('https://unsplash.com/photos/woman-in-colorful-outfit-and-fur-coat-DxSHu4GI0Ao/download?force=true&amp;w=1600&amp;q=80')"
             >
               <div class="home-hero__content">
-                <p class="home-hero__eyebrow" dv:t="home.hero_secondary.eyebrow">Interactive layering</p>
-                <h1 dv:t="home.hero_secondary.title">Static-first pages with motion, panels, galleries, and commerce actions layered on.</h1>
-                <p dv:t="home.hero_secondary.summary">The demo keeps the HTML-first contract intact while showing the richer interaction layer real customers expect from a premium multi-region storefront.</p>
+                <p class="home-hero__eyebrow" coil:t="home.hero_secondary.eyebrow">Interactive layering</p>
+                <h1 coil:t="home.hero_secondary.title">Static-first pages with motion, panels, galleries, and commerce actions layered on.</h1>
+                <p coil:t="home.hero_secondary.summary">The demo keeps the HTML-first contract intact while showing the richer interaction layer real customers expect from a premium multi-region storefront.</p>
                 <div class="checkout-actions">
-                  <a class="button" href="/cart" dv:attr="href=${links.cart}" dv:t="home.hero_secondary.cart_cta">Open cart</a>
-                  <a class="button button--secondary" href="/account" dv:t="home.hero_secondary.account_cta">Explore account</a>
+                  <a class="button" href="/cart" coil:attr="href=${links.cart}" coil:t="home.hero_secondary.cart_cta">Open cart</a>
+                  <a class="button button--secondary" href="/account" coil:t="home.hero_secondary.account_cta">Explore account</a>
                 </div>
               </div>
             </article>
           </div>
-          <div class="home-hero__controls" aria-label="Campaign carousel controls" dv:attr="aria-label=t('home.hero_secondary.controls')">
-            <button type="button" class="carousel-control" data-carousel-prev="prev" aria-label="Previous campaign" dv:attr="aria-label=t('home.hero_secondary.previous')" dv:t="home.hero_secondary.previous">Prev</button>
-            <button type="button" class="carousel-control" data-carousel-next="next" aria-label="Next campaign" dv:attr="aria-label=t('home.hero_secondary.next')" dv:t="home.hero_secondary.next">Next</button>
+          <div class="home-hero__controls" aria-label="Campaign carousel controls" coil:attr="aria-label=t('home.hero_secondary.controls')">
+            <button type="button" class="carousel-control" data-carousel-prev="prev" aria-label="Previous campaign" coil:attr="aria-label=t('home.hero_secondary.previous')" coil:t="home.hero_secondary.previous">Prev</button>
+            <button type="button" class="carousel-control" data-carousel-next="next" aria-label="Next campaign" coil:attr="aria-label=t('home.hero_secondary.next')" coil:t="home.hero_secondary.next">Next</button>
           </div>
         </section>
 
         <section class="editorial-rail">
           <article class="editorial-card editorial-card--image" style="--card-image:url('https://unsplash.com/photos/a-storefront-with-clothes-displayed-inside-Sd_vsr_eA5U/download?force=true&amp;w=1200&amp;q=80')">
             <div class="editorial-card__content">
-              <p class="editorial-card__eyebrow" dv:t="home.editorial.store.eyebrow">Store view</p>
-              <h2 dv:t="home.editorial.store.title">Three markets, one brand system.</h2>
-              <p dv:t="home.editorial.store.summary">Run UK, France, and Poland from one customer workspace while keeping inventory and stories market-aware.</p>
+              <p class="editorial-card__eyebrow" coil:t="home.editorial.store.eyebrow">Store view</p>
+              <h2 coil:t="home.editorial.store.title">Three markets, one brand system.</h2>
+              <p coil:t="home.editorial.store.summary">Run UK, France, and Poland from one customer workspace while keeping inventory and stories market-aware.</p>
             </div>
           </article>
           <article class="editorial-card">
-            <p class="editorial-card__eyebrow" dv:t="home.editorial.developer.eyebrow">Developer-visible</p>
-            <h2 dv:t="home.editorial.developer.title">Every polished page still exposes the platform underneath.</h2>
-            <p dv:t="home.editorial.developer.summary">Admin, account, dev login, CMS, and linked backend affordances stay easy to discover from the public shell.</p>
-            <a class="button button--secondary" href="/admin" dv:t="home.editorial.developer.cta">Open admin</a>
+            <p class="editorial-card__eyebrow" coil:t="home.editorial.developer.eyebrow">Developer-visible</p>
+            <h2 coil:t="home.editorial.developer.title">Every polished page still exposes the platform underneath.</h2>
+            <p coil:t="home.editorial.developer.summary">Admin, account, dev login, CMS, and linked backend affordances stay easy to discover from the public shell.</p>
+            <a class="button button--secondary" href="/admin" coil:t="home.editorial.developer.cta">Open admin</a>
           </article>
         </section>
 
         <section class="market-showcase">
           <header class="market-showcase__header">
-            <p class="collection-grid__eyebrow" dv:t="home.markets.eyebrow">Multi-site demo</p>
-            <h2 dv:t="home.markets.title">One customer app, three Shoppr markets.</h2>
-            <p dv:t="home.markets.summary">Each market keeps its own host, default locale, assortment emphasis, and merchandising mood while sharing the same core application.</p>
+            <p class="collection-grid__eyebrow" coil:t="home.markets.eyebrow">Multi-site demo</p>
+            <h2 coil:t="home.markets.title">One customer app, three Shoppr markets.</h2>
+            <p coil:t="home.markets.summary">Each market keeps its own host, default locale, assortment emphasis, and merchandising mood while sharing the same core application.</p>
           </header>
           <div class="market-showcase__grid">
             <article class="market-card">
-              <p class="market-card__eyebrow" dv:t="home.markets.uk.eyebrow">shoppr-uk</p>
-              <h3 dv:t="home.markets.uk.title">UK flagship storefront</h3>
-              <p dv:t="home.markets.uk.summary">Lead with new arrivals, sharp product detail, and the full path from browse to checkout.</p>
-              <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}" dv:t="home.markets.uk.cta">Open UK shop</a>
+              <p class="market-card__eyebrow" coil:t="home.markets.uk.eyebrow">shoppr-uk</p>
+              <h3 coil:t="home.markets.uk.title">UK flagship storefront</h3>
+              <p coil:t="home.markets.uk.summary">Lead with new arrivals, sharp product detail, and the full path from browse to checkout.</p>
+              <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="home.markets.uk.cta">Open UK shop</a>
             </article>
             <article class="market-card">
-              <p class="market-card__eyebrow" dv:t="home.markets.fr.eyebrow">shoppr-fr</p>
-              <h3 dv:t="home.markets.fr.title">France city edit</h3>
-              <p dv:t="home.markets.fr.summary">Give the Paris market a tighter campaign voice and an event-led edit without forking the app.</p>
-              <a class="button" href="/fr-FR/events" dv:t="home.markets.fr.cta">Open France edit</a>
+              <p class="market-card__eyebrow" coil:t="home.markets.fr.eyebrow">shoppr-fr</p>
+              <h3 coil:t="home.markets.fr.title">France city edit</h3>
+              <p coil:t="home.markets.fr.summary">Give the Paris market a tighter campaign voice and an event-led edit without forking the app.</p>
+              <a class="button" href="/fr-FR/events" coil:t="home.markets.fr.cta">Open France edit</a>
             </article>
             <article class="market-card">
-              <p class="market-card__eyebrow" dv:t="home.markets.pl.eyebrow">shoppr-pl</p>
-              <h3 dv:t="home.markets.pl.title">Poland cold-weather edit</h3>
-              <p dv:t="home.markets.pl.summary">Show a different winter assortment and localized Polish routes on the same shared platform.</p>
-              <a class="button" href="/pl-PL/shop/products/harbor-scarf" dv:t="home.markets.pl.cta">Open Poland product</a>
+              <p class="market-card__eyebrow" coil:t="home.markets.pl.eyebrow">shoppr-pl</p>
+              <h3 coil:t="home.markets.pl.title">Poland cold-weather edit</h3>
+              <p coil:t="home.markets.pl.summary">Show a different winter assortment and localized Polish routes on the same shared platform.</p>
+              <a class="button" href="/pl-PL/shop/products/harbor-scarf" coil:t="home.markets.pl.cta">Open Poland product</a>
             </article>
           </div>
         </section>
 
-        <div dv:replace="~{commerce/collection-grid :: grid}"></div>
-        <div dv:replace="~{commerce/product-grid :: grid}"></div>
+        <div coil:replace="~{commerce/collection-grid :: grid}"></div>
+        <div coil:replace="~{commerce/product-grid :: grid}"></div>
 
         <section class="catalog-sections">
           <article class="catalog-section">
-            <p class="catalog-section__eyebrow" dv:t="home.sections.interactivity.eyebrow">Layered interactivity</p>
-            <h2 dv:t="home.sections.interactivity.title">The storefront stays HTML-first while behaving like a modern flagship.</h2>
-            <p dv:t="home.sections.interactivity.summary">Carousel controls, market and locale switchers, product accordions, and gallery states are layered on rather than replacing the base render contract.</p>
+            <p class="catalog-section__eyebrow" coil:t="home.sections.interactivity.eyebrow">Layered interactivity</p>
+            <h2 coil:t="home.sections.interactivity.title">The storefront stays HTML-first while behaving like a modern flagship.</h2>
+            <p coil:t="home.sections.interactivity.summary">Carousel controls, market and locale switchers, product accordions, and gallery states are layered on rather than replacing the base render contract.</p>
           </article>
           <article class="catalog-section">
-            <p class="catalog-section__eyebrow" dv:t="home.sections.shortcuts.eyebrow">Developer shortcuts</p>
-            <h2 dv:t="home.sections.shortcuts.title">Nothing important is hidden.</h2>
-            <p dv:t="home.sections.shortcuts.summary">Public pages link cleanly into account, cart, admin, and local dev tools so developers can evaluate the whole app boundary from first run.</p>
+            <p class="catalog-section__eyebrow" coil:t="home.sections.shortcuts.eyebrow">Developer shortcuts</p>
+            <h2 coil:t="home.sections.shortcuts.title">Nothing important is hidden.</h2>
+            <p coil:t="home.sections.shortcuts.summary">Public pages link cleanly into account, cart, admin, and local dev tools so developers can evaluate the whole app boundary from first run.</p>
             <div class="checkout-actions">
-              <a class="button" href="/__dev" dv:t="home.sections.shortcuts.dev_tools">Open dev tools</a>
-              <a class="button button--secondary" href="/admin" dv:t="home.sections.shortcuts.admin">Open admin</a>
+              <a class="button" href="/__dev" coil:t="home.sections.shortcuts.dev_tools">Open dev tools</a>
+              <a class="button button--secondary" href="/admin" coil:t="home.sections.shortcuts.admin">Open admin</a>
             </div>
           </article>
         </section>
-        <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
+        <div coil:replace="~{commerce/storefront-journey :: journey}"></div>
       </section>
     </main>
     <footer class="site-footer">
       <div>
-        <p class="site-footer__eyebrow" dv:t="home.footer.brand">Shoppr</p>
-        <strong dv:text="${site.displayName}">Shoppr UK</strong>
-        <p dv:t="home.footer.summary">Fashion-led Davenda starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries.</p>
+        <p class="site-footer__eyebrow" coil:t="home.footer.brand">Shoppr</p>
+        <strong coil:text="${site.displayName}">Shoppr UK</strong>
+        <p coil:t="home.footer.summary">Fashion-led Coil starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries.</p>
       </div>
       <div>
-        <p class="site-footer__eyebrow" dv:t="home.footer.explore">Explore</p>
-        <a href="/en-GB/shop" dv:attr="href=${links.catalog}" dv:t="shell.footer.catalog">Catalog</a>
-        <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}" dv:t="shell.footer.collections">Collections</a>
-        <a href="/cart" dv:t="shell.footer.cart">Cart</a>
+        <p class="site-footer__eyebrow" coil:t="home.footer.explore">Explore</p>
+        <a href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="shell.footer.catalog">Catalog</a>
+        <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="shell.footer.collections">Collections</a>
+        <a href="/cart" coil:t="shell.footer.cart">Cart</a>
       </div>
       <div>
-        <p class="site-footer__eyebrow" dv:t="home.footer.inspect">Inspect</p>
-        <a href="/account" dv:t="shell.utility.account">Account</a>
-        <a href="/admin" dv:t="shell.utility.admin">Admin</a>
-        <a href="/__dev" dv:t="shell.utility.dev_tools">Dev Tools</a>
+        <p class="site-footer__eyebrow" coil:t="home.footer.inspect">Inspect</p>
+        <a href="/account" coil:t="shell.utility.account">Account</a>
+        <a href="/admin" coil:t="shell.utility.admin">Admin</a>
+        <a href="/__dev" coil:t="shell.utility.dev_tools">Dev Tools</a>
       </div>
       <div>
-        <p class="site-footer__eyebrow" dv:t="home.footer.platform">Platform</p>
-        <a href="/admin/catalog" dv:t="shell.footer.catalog_admin">Catalog admin</a>
-        <a href="/admin/orders" dv:t="shell.footer.orders">Orders</a>
-        <a href="/admin/pages" dv:t="shell.footer.cms">CMS</a>
+        <p class="site-footer__eyebrow" coil:t="home.footer.platform">Platform</p>
+        <a href="/admin/catalog" coil:t="shell.footer.catalog_admin">Catalog admin</a>
+        <a href="/admin/orders" coil:t="shell.footer.orders">Orders</a>
+        <a href="/admin/pages" coil:t="shell.footer.cms">CMS</a>
       </div>
     </footer>
   </body>

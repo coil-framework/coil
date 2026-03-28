@@ -2,7 +2,7 @@
 title: Storefront Structure
 ---
 
-This guide uses Shoppr to show how Davenda expects a storefront to be structured in a real customer
+This guide uses Shoppr to show how Coil expects a storefront to be structured in a real customer
 app.
 
 The key idea is simple: the storefront is a set of customer-owned pages and templates that use
@@ -29,13 +29,13 @@ Each step has a different job:
 - cart
   - continuity into checkout
 
-Davenda works best when the storefront is explicit at this level instead of hiding the whole browse
+Coil works best when the storefront is explicit at this level instead of hiding the whole browse
 loop behind one generic listing view.
 
 ## Where The Routes Come From
 
 The route contracts come from the commerce module manifest in
-`crates/davenda-commerce/src/module/platform/manifest.rs`.
+`crates/coil-commerce/src/module/platform/manifest.rs`.
 
 That manifest defines routes such as:
 
@@ -55,11 +55,11 @@ The storefront shell should separate document chrome from route-specific markup.
 A good pattern looks like this:
 
 ```html
-<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
+<html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}">
   <body>
-    <dv:include src="navigation/primary.html" />
+    <coil:include src="navigation/primary.html" />
     <main>
-      <dv:slot />
+      <coil:slot />
     </main>
   </body>
 </html>
@@ -101,7 +101,7 @@ It keeps together:
 - supporting product facts and details
 - related product browsing
 
-This is a good Davenda page to copy structurally because it stays HTML-first even when the theme
+This is a good Coil page to copy structurally because it stays HTML-first even when the theme
 adds richer behaviour.
 
 ## How The Product Template Gets Its Model
@@ -119,9 +119,9 @@ In Shoppr, the product-detail page is not a free-floating HTML file. The binding
 The important consequence is that this markup:
 
 ```html
-<h1 dv:text="${product.name}">Harbor Cap</h1>
-<p class="product-page__price" dv:text="${product.price}">GBP 29</p>
-<p dv:text="${product.summary}">Product summary</p>
+<h1 coil:text="${product.name}">Harbor Cap</h1>
+<p class="product-page__price" coil:text="${product.price}">GBP 29</p>
+<p coil:text="${product.summary}">Product summary</p>
 ```
 
 only works because the runtime has already shaped a `product` object for `commerce.product-detail`.
@@ -168,12 +168,12 @@ If you want the complete Shoppr storefront after learning the structure:
 
 The route and model side of the same page lives here:
 
-- `crates/davenda-commerce/src/module/platform/manifest.rs`
-- `crates/davenda-runtime/src/render/model.rs`
+- `crates/coil-commerce/src/module/platform/manifest.rs`
+- `crates/coil-runtime/src/render/model.rs`
 
 ## What To Copy Into Your Own App
 
-If you are building a Davenda storefront, copy this structure before you copy Shoppr's exact look:
+If you are building a Coil storefront, copy this structure before you copy Shoppr's exact look:
 
 1. top-level page per customer decision stage
 2. layouts and fragments for repeated shell markup

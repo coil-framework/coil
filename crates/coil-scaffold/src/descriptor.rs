@@ -2,6 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+pub const DEFAULT_FRAMEWORK_VERSION: &str = "0.1.0";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectProduct {
@@ -75,8 +77,8 @@ pub struct SiteDescriptor {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolingSection {
-    #[serde(default = "default_coil_version")]
-    pub coil_version: String,
+    #[serde(alias = "coil_version", default = "default_framework_version")]
+    pub framework_version: String,
     #[serde(default)]
     pub dependency_source: DependencySource,
     #[serde(default = "default_true")]
@@ -88,7 +90,7 @@ pub struct ToolingSection {
 impl Default for ToolingSection {
     fn default() -> Self {
         Self {
-            coil_version: default_coil_version(),
+            framework_version: default_framework_version(),
             dependency_source: DependencySource::default(),
             linked_rust_backend: true,
             wasm_directory: true,
@@ -213,6 +215,9 @@ impl ProjectDescriptor {
                 }
             }
         }
+        if self.tooling.framework_version.trim().is_empty() {
+            bail!("tooling.framework_version must not be empty");
+        }
 
         Ok(())
     }
@@ -271,8 +276,8 @@ fn default_true() -> bool {
     true
 }
 
-fn default_coil_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+fn default_framework_version() -> String {
+    DEFAULT_FRAMEWORK_VERSION.to_string()
 }
 
 fn default_additional_domains(canonical_domain: &str) -> Vec<String> {
@@ -286,5 +291,30 @@ fn default_additional_domains(canonical_domain: &str) -> Vec<String> {
         Vec::new()
     } else {
         vec![alias]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tooling_defaults_to_built_in_framework_version() {
+        let tooling = ToolingSection::default();
+        assert_eq!(tooling.framework_version, DEFAULT_FRAMEWORK_VERSION);
+    }
+
+    #[test]
+    fn tooling_accepts_legacy_coil_version_field() {
+        let tooling: ToolingSection = toml::from_str(
+            r#"
+coil_version = "0.1.3"
+linked_rust_backend = true
+wasm_directory = true
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(tooling.framework_version, "0.1.3");
     }
 }

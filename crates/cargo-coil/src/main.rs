@@ -1,11 +1,13 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use coil_scaffold::{
-    DependencySource, LocaleAddOptions, ModuleEditAction, ProjectDescriptor, SiteAddOptions,
-    add_locale, add_site, apply_descriptor, create_project, doctor, load_descriptor,
-    modify_modules, run_wizard, sanitize_slug,
+    DEFAULT_FRAMEWORK_VERSION, DependencySource, LocaleAddOptions, ModuleEditAction,
+    ProjectDescriptor, SiteAddOptions, add_locale, add_site, apply_descriptor, create_project,
+    doctor, load_descriptor, modify_modules, run_wizard, sanitize_slug,
 };
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Debug, Parser)]
 #[command(name = "cargo-coil")]
@@ -69,6 +71,9 @@ struct NewCommand {
 
     #[arg(long)]
     coil_path: Option<PathBuf>,
+
+    #[arg(long, help = "Framework version to generate against. Use an explicit version or `latest`.")]
+    framework_version: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -99,6 +104,9 @@ struct InitCommand {
 
     #[arg(long)]
     coil_path: Option<PathBuf>,
+
+    #[arg(long, help = "Framework version to generate against. Use an explicit version or `latest`.")]
+    framework_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -175,6 +183,7 @@ fn normalized_args() -> Vec<String> {
 }
 
 fn new_project(command: NewCommand) -> Result<()> {
+    let framework_version = resolve_framework_version(command.framework_version)?;
     let root = command.path;
     let descriptor = if command.no_input {
         descriptor_from_noninteractive(
@@ -185,11 +194,17 @@ fn new_project(command: NewCommand) -> Result<()> {
             command.modules,
             command.source,
             command.coil_path,
+            framework_version.clone(),
             &root,
         )?
     } else {
         let wizard = run_wizard(&root)?;
-        descriptor_from_wizard(wizard, command.source, command.coil_path)?
+        descriptor_from_wizard(
+            wizard,
+            command.source,
+            command.coil_path,
+            framework_version.clone(),
+        )?
     };
     let report = create_project(&root, &descriptor)?;
     println!("Created Coil project at {}", report.root.display());
@@ -202,6 +217,7 @@ fn new_project(command: NewCommand) -> Result<()> {
 }
 
 fn init_project(command: InitCommand) -> Result<()> {
+    let framework_version = resolve_framework_version(command.framework_version)?;
     let root = command.root;
     let descriptor = if command.no_input {
         descriptor_from_noninteractive(
@@ -212,11 +228,17 @@ fn init_project(command: InitCommand) -> Result<()> {
             command.modules,
             command.source,
             command.coil_path,
+            framework_version.clone(),
             &root,
         )?
     } else {
         let wizard = run_wizard(&root)?;
-        descriptor_from_wizard(wizard, command.source, command.coil_path)?
+        descriptor_from_wizard(
+            wizard,
+            command.source,
+            command.coil_path,
+            framework_version.clone(),
+        )?
     };
     let report = apply_descriptor(&root, &descriptor)?;
     println!("Initialised Coil project at {}", report.root.display());
@@ -335,6 +357,7 @@ fn descriptor_from_noninteractive(
     modules: Vec<String>,
     source: Option<DependencySourceArg>,
     coil_path: Option<PathBuf>,
+    framework_version: String,
     root: &Path,
 ) -> Result<ProjectDescriptor> {
     let path_name = root
@@ -353,6 +376,7 @@ fn descriptor_from_noninteractive(
     if !modules.is_empty() {
         descriptor.modules.enabled = modules;
     }
+    descriptor.tooling.framework_version = framework_version;
     descriptor.i18n.supported_locales = dedup(locales);
     descriptor.sites[0].supported_locales = descriptor.i18n.supported_locales.clone();
     descriptor.tooling.dependency_source = resolve_dependency_source(source, coil_path)?;
@@ -364,6 +388,7 @@ fn descriptor_from_wizard(
     wizard: coil_scaffold::WizardInput,
     source: Option<DependencySourceArg>,
     coil_path: Option<PathBuf>,
+    framework_version: String,
 ) -> Result<ProjectDescriptor> {
     let mut descriptor = ProjectDescriptor::new(
         wizard.name,
@@ -371,6 +396,7 @@ fn descriptor_from_wizard(
         wizard.default_locale,
     );
     descriptor.modules.enabled = wizard.modules;
+    descriptor.tooling.framework_version = framework_version;
     descriptor.i18n.supported_locales = dedup(wizard.supported_locales);
     descriptor.sites[0].supported_locales = descriptor.i18n.supported_locales.clone();
     descriptor.tooling.dependency_source = resolve_dependency_source(source, coil_path)?;
@@ -448,4 +474,107 @@ fn find_coil_repo_root(start: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn resolve_framework_version(requested: Option<String>) -> Result<String> {
+    resolve_framework_version_with(requested.as_deref(), fetch_latest_published_framework_version)
+}
+
+fn resolve_framework_version_with<F>(requested: Option<&str>, fetch_latest: F) -> Result<String>
+where
+    F: FnOnce() -> Result<String>,
+{
+    match requested.map(str::trim).filter(|value| !value.is_empty()) {
+        Some("latest") => fetch_latest(),
+        Some(version) => Ok(version.to_string()),
+        None => match fetch_latest() {
+            Ok(version) => Ok(version),
+            Err(error) => {
+                eprintln!(
+                    "info: unable to resolve the latest published Coil framework version ({error:#}); using built-in default {}",
+                    DEFAULT_FRAMEWORK_VERSION
+                );
+                Ok(DEFAULT_FRAMEWORK_VERSION.to_string())
+            }
+        },
+    }
+}
+
+fn fetch_latest_published_framework_version() -> Result<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .user_agent(format!("cargo-coil/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .context("failed to construct crates.io client")?;
+
+    let version = fetch_max_stable_version(&client, "coil-rs")?;
+    ensure_version_exists(&client, "coil-customer-sdk", &version)?;
+    Ok(version)
+}
+
+fn fetch_max_stable_version(client: &reqwest::blocking::Client, package: &str) -> Result<String> {
+    let payload: CratesIoCrateResponse = client
+        .get(format!("https://crates.io/api/v1/crates/{package}"))
+        .send()
+        .with_context(|| format!("failed to query crates.io for `{package}`"))?
+        .error_for_status()
+        .with_context(|| format!("crates.io returned an error for `{package}`"))?
+        .json()
+        .with_context(|| format!("failed to parse crates.io response for `{package}`"))?;
+
+    let version = payload.krate.max_stable_version.trim();
+    if version.is_empty() {
+        bail!("crates.io did not report a stable version for `{package}`");
+    }
+    Ok(version.to_string())
+}
+
+fn ensure_version_exists(
+    client: &reqwest::blocking::Client,
+    package: &str,
+    version: &str,
+) -> Result<()> {
+    client
+        .get(format!("https://crates.io/api/v1/crates/{package}/{version}"))
+        .send()
+        .with_context(|| format!("failed to verify `{package}` v{version} on crates.io"))?
+        .error_for_status()
+        .with_context(|| format!("`{package}` v{version} is not published on crates.io"))?;
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct CratesIoCrateResponse {
+    #[serde(rename = "crate")]
+    krate: CratesIoCrateMeta,
+}
+
+#[derive(Debug, Deserialize)]
+struct CratesIoCrateMeta {
+    max_stable_version: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_framework_version_wins() {
+        let version = resolve_framework_version_with(Some("0.2.7"), || Ok("9.9.9".to_string()))
+            .unwrap();
+        assert_eq!(version, "0.2.7");
+    }
+
+    #[test]
+    fn latest_uses_live_lookup() {
+        let version = resolve_framework_version_with(Some("latest"), || Ok("0.3.1".to_string()))
+            .unwrap();
+        assert_eq!(version, "0.3.1");
+    }
+
+    #[test]
+    fn default_falls_back_to_built_in_version() {
+        let version = resolve_framework_version_with(None, || bail!("network unavailable")).unwrap();
+        assert_eq!(version, DEFAULT_FRAMEWORK_VERSION);
+    }
 }

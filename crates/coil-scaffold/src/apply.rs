@@ -293,7 +293,7 @@ fn root_cargo_toml(descriptor: &ProjectDescriptor) -> String {
     let dependency_block = match &descriptor.tooling.dependency_source {
         DependencySource::CratesIo => format!(
             "coil = {{ package = \"coil-rs\", version = \"{version}\" }}\ncoil-customer-sdk = \"{version}\"",
-            version = descriptor.tooling.coil_version
+            version = descriptor.tooling.framework_version
         ),
         DependencySource::Path { repo_root } => format!(
             "coil = {{ package = \"coil-rs\", path = \"{repo_root}/crates/coil\" }}\ncoil-customer-sdk = {{ path = \"{repo_root}/crates/coil-customer-sdk\" }}"
@@ -1246,5 +1246,22 @@ mod tests {
         let config = std::fs::read_to_string(workspace.path().join("platform.dev.toml")).unwrap();
         assert!(config.contains("canonical_host = \"shop-fr.localhost\""));
         assert!(config.contains("hosts = [\"www.shop-fr.localhost\"]"));
+    }
+
+    #[test]
+    fn workspace_cargo_toml_uses_explicit_framework_version() {
+        let workspace = tempdir().unwrap();
+        let mut descriptor = ProjectDescriptor::new(
+            "acme".to_string(),
+            "Acme".to_string(),
+            "en-GB".to_string(),
+        );
+        descriptor.tooling.framework_version = "0.9.1".to_string();
+
+        apply_descriptor(workspace.path(), &descriptor).unwrap();
+
+        let manifest = std::fs::read_to_string(workspace.path().join("Cargo.toml")).unwrap();
+        assert!(manifest.contains("coil = { package = \"coil-rs\", version = \"0.9.1\" }"));
+        assert!(manifest.contains("coil-customer-sdk = \"0.9.1\""));
     }
 }

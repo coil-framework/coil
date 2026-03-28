@@ -10,6 +10,8 @@ pub use apply::{
     SiteAddOptions, add_locale, add_site, apply_descriptor, build_descriptor, create_project,
     descriptor_path, load_descriptor, modify_modules, save_descriptor,
 };
-pub use descriptor::{DependencySource, ProjectDescriptor, ProjectProduct, SiteDescriptor};
+pub use descriptor::{
+    DEFAULT_FRAMEWORK_VERSION, DependencySource, ProjectDescriptor, ProjectProduct, SiteDescriptor,
+};
 pub use doctor::{DoctorIssue, DoctorReport, doctor};
 pub use wizard::{WizardInput, run_wizard, sanitize_slug};

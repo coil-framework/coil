@@ -2,41 +2,79 @@
 title: CLI Commands
 ---
 
-Coil has two CLI layers:
+Coil has three CLI surfaces:
 
+- the project lifecycle CLI, `cargo-coil`
 - the root platform CLI, `coil-cli`
-- customer-owned workspace binaries such as `shoppr` and `gitly`
+- customer-owned workspace binaries such as `shoppr`, `gitly`, or `my-store`
 
 Use this page when you want to answer:
 
+- which commands belong to `cargo coil`
 - which commands the platform CLI already supports
 - when to use the customer binary instead
 - which commands are safe to expose in docs and automation
-- why there is a customer binary at all
+- why there are multiple Coil CLI surfaces at all
 
-## One Platform, Two Binaries
+## One Platform, Three CLI Surfaces
 
 A new Coil developer should treat the split like this:
 
+- `cargo coil`
+  - create and evolve the customer workspace
+  - write and reconcile `.coil/project.toml`
+  - add modules, sites, and locales
 - `coil`
   - generic operator and infrastructure commands that work across customer apps
-- `shoppr` or `gitly`
+- `shoppr`, `gitly`, or `my-store`
   - customer-app-shaped commands that know the current app’s templates, extensions, linked backend, and bootstrap
 
-The split exists because Coil has two audiences:
+The split exists because Coil has three distinct concerns:
 
-- platform operators and maintainers
-- customer developers building one concrete product
+- project generation
+- platform operations
+- app-local lifecycle
 
-If you are inside a customer app workspace, start with the customer binary first. Use `coil`
-when you need deeper operator workflows such as import, cutover, cache, TLS, jobs, or auth
-inspection.
+If you are starting a new product, begin with `cargo coil`. If you are inside a customer app
+workspace, start with the customer binary first. Use `coil` when you need deeper operator
+workflows such as import, cutover, cache, TLS, jobs, or auth inspection.
 
-## The Relationship Between The Two CLIs
+## `cargo coil`
 
-There are two binaries because they solve different problems.
+The `cargo-coil` crate builds the Cargo subcommand:
 
-The platform CLI is generic:
+```text
+cargo coil new
+cargo coil init
+cargo coil apply
+cargo coil doctor
+cargo coil module add|remove
+cargo coil site add
+cargo coil locale add
+```
+
+These commands own the customer workspace shape.
+
+Detailed command pages:
+
+- [Cargo Coil Overview](./cargo-coil-overview.md)
+- [cargo coil new](./cargo-coil-new.md)
+- [cargo coil init](./cargo-coil-init.md)
+- [cargo coil apply](./cargo-coil-apply.md)
+- [cargo coil doctor](./cargo-coil-doctor.md)
+- [cargo coil module add and remove](./cargo-coil-module.md)
+- [cargo coil site add](./cargo-coil-site.md)
+- [cargo coil locale add](./cargo-coil-locale.md)
+
+## The Relationship Between The CLI Surfaces
+
+`cargo coil` is project-shaped:
+
+- workspace generation
+- descriptor-backed regeneration
+- structural edits such as sites and locales
+
+The platform CLI is operator-shaped:
 
 - auth
 - modules
@@ -47,15 +85,18 @@ The platform CLI is generic:
 - imports
 - release planning
 
-The customer binary is app-shaped:
+The customer binary is runtime-shaped for one actual app:
 
 - validate the customer workspace
 - describe the customer composition
 - run app-specific asset and migration flows
 - expose app-specific diagnostics such as linked-backend or extension checksums
 
-The customer binary does not replace the platform CLI, and the platform CLI does not replace the
-customer binary.
+None of these replaces the others:
+
+- `cargo coil` does not replace `coil`
+- `coil` does not replace the customer binary
+- the customer binary does not replace `cargo coil`
 
 ## Root Platform CLI
 
@@ -88,6 +129,9 @@ The baseline command families are:
 The fastest way to make the split real is to run one command from each layer:
 
 ```bash
+# project-shaped
+cargo run -p cargo-coil -- new my-store
+
 # app-shaped
 cd apps/shoppr
 cargo run -p shoppr -- validate

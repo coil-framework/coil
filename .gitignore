@@ -6,3 +6,6 @@
 .worker-logs/
 .next
 .davenda
+website/node_modules/
+website/.docusaurus/
+website/build/

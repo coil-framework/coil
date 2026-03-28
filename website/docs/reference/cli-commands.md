@@ -55,6 +55,12 @@ cargo coil locale add
 
 These commands own the customer workspace shape.
 
+Install the subcommand with:
+
+```bash
+cargo install cargo-coil --locked
+```
+
 Detailed command pages:
 
 - [Cargo Coil Overview](./cargo-coil-overview.md)
@@ -130,7 +136,7 @@ The fastest way to make the split real is to run one command from each layer:
 
 ```bash
 # project-shaped
-cargo run -p cargo-coil -- new my-store
+cargo coil new my-store
 
 # app-shaped
 cd apps/shoppr

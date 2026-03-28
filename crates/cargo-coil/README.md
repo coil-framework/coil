@@ -3,6 +3,7 @@
 `cargo-coil` provides the Cargo subcommand for Coil:
 
 ```bash
+cargo install cargo-coil --locked
 cargo coil new my-store
 ```
 

@@ -6,6 +6,12 @@ title: cargo coil new
 
 This is the normal starting point for a new store or product.
 
+Install the subcommand first:
+
+```bash
+cargo install cargo-coil --locked
+```
+
 ## Default Behaviour
 
 Interactive mode is the default:
@@ -63,7 +69,21 @@ and prefers `path` dependencies when it can.
 
 ## Example End-To-End Flow
 
-From a Coil checkout:
+Normal installed flow:
+
+```bash
+cargo coil new my-store
+cd my-store
+docker compose up -d
+export DATABASE_URL=postgres://coil:coil@127.0.0.1:5432/my-store
+export REDIS_URL=redis://127.0.0.1:6379/0
+export COIL_COOKIE_SECRET=replace-me-with-a-long-random-secret
+export COIL_CSRF_SECRET=replace-me-with-a-long-random-secret
+cargo run -p my-store -- validate
+cargo run -p my-store -- serve
+```
+
+If you are working from a local Coil checkout instead, use:
 
 ```bash
 cargo run -p cargo-coil -- new my-store
@@ -75,12 +95,6 @@ export COIL_COOKIE_SECRET=replace-me-with-a-long-random-secret
 export COIL_CSRF_SECRET=replace-me-with-a-long-random-secret
 cargo run -p my-store -- validate
 cargo run -p my-store -- serve
-```
-
-If `cargo-coil` is installed on your `PATH`, the same command becomes:
-
-```bash
-cargo coil new my-store
 ```
 
 ## Read Next

@@ -4,6 +4,12 @@ title: Cargo Coil Overview
 
 `cargo coil` is the project lifecycle CLI for Coil customer applications.
 
+Install it like any other Cargo subcommand:
+
+```bash
+cargo install cargo-coil --locked
+```
+
 Use it when you need to create or evolve a customer-root workspace:
 
 - initialise a new store or product workspace
@@ -106,6 +112,9 @@ explicitly pass:
 ```bash
 cargo coil new my-store --source path --coil-path /path/to/coil
 ```
+
+For a fully registry-backed new project, the generated workspace also expects the public framework
+crates such as `coil-rs` and `coil-customer-sdk` to be available on crates.io.
 
 ## Command Map
 

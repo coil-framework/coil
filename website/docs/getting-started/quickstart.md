@@ -24,15 +24,13 @@ first, then read the concept pages with a working picture in mind.
 
 ## Create A Store With `cargo coil`
 
-Start by generating a customer workspace.
+Install the Cargo subcommand first:
 
 ```bash
-git clone git@github.com:coil-framework/coil.git
-cd coil
-cargo run -p cargo-coil -- new my-store
+cargo install cargo-coil --locked
 ```
 
-If `cargo-coil` is already installed on your `PATH`, the same command becomes:
+Then generate a customer workspace:
 
 ```bash
 cargo coil new my-store
@@ -48,6 +46,15 @@ Interactive mode is the default. The wizard asks for:
 - optional extra sites
 
 When it finishes, Coil writes a customer-root workspace under `my-store/`.
+
+If you are developing Coil itself from a local checkout before the published crates have propagated,
+the equivalent source-driven path is:
+
+```bash
+git clone git@github.com:coil-framework/coil.git
+cd coil
+cargo run -p cargo-coil -- new my-store
+```
 
 ## Start The Local Dependencies
 

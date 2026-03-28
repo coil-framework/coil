@@ -229,6 +229,16 @@ The most common examples are:
 
 Davenda expressions are intentionally small.
 
+That means the template language currently supports only four expression categories:
+
+- model lookups
+- asset lookups
+- string literals
+- boolean literals
+
+It does **not** support a general expression language with arithmetic, filters, chained function
+calls, or inline object construction.
+
 ### Model lookups
 
 These all resolve as render-model lookups today:
@@ -237,11 +247,24 @@ These all resolve as render-model lookups today:
 - `#{value}`
 - `*{value}`
 
+Important: these three forms are currently equivalent aliases.
+
+Today they all parse to the same model-key lookup. They do **not** mean different scopes or access
+rules.
+
+Preferred style:
+
+- use `${...}` for normal model lookups
+
+That keeps templates easier to read and avoids implying distinctions that do not currently exist.
+
 Nested access uses dotted keys:
 
 ```html
 <span dv:text="${site.brandName}">Brand</span>
 ```
+
+This is the normal lookup style you should expect to use in real templates.
 
 ### Asset lookups
 
@@ -250,6 +273,25 @@ Supported asset syntax:
 - `@{theme/assets/site.css}`
 - `asset('theme/assets/site.css')`
 - `asset("theme/assets/site.css")`
+
+Important: these three forms are also currently equivalent aliases.
+
+Today they all resolve to the same asset-path lookup. There is no runtime semantic difference
+between them.
+
+Preferred style:
+
+- use `asset('...')` for asset lookups
+
+That makes the intent obvious to readers and distinguishes asset resolution from normal model
+resolution.
+
+Example:
+
+```html
+<link rel="stylesheet" dv:href="asset('theme/assets/site.css')" />
+<script defer="defer" dv:src="asset('theme/assets/site.js')"></script>
+```
 
 ### Literals
 

@@ -5,6 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static RUNTIME_PLAN_SCOPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn next_runtime_plan_scope() -> String {
+    if let Ok(scope) = std::env::var("COIL_SHARED_BACKEND_SCOPE") {
+        let trimmed = scope.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
     format!(
         "runtime-plan:{}",
         RUNTIME_PLAN_SCOPE_SEQUENCE.fetch_add(1, Ordering::Relaxed)

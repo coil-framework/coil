@@ -497,6 +497,9 @@ fn shared_jobs_runtime(
     runtime: &JobsRuntimeServices,
     namespace: String,
 ) -> Result<Arc<dyn coil_jobs::JobsCoordinationRuntime>, String> {
+    if use_emulated_shared_backends() {
+        return Ok(emulated_shared_jobs_runtime(runtime, namespace));
+    }
     coil_jobs::JobsBackendAdapter::live_shared_runtime(runtime, namespace, PathBuf::new())
         .map_err(|error| error.to_string())
 }
@@ -514,7 +517,69 @@ fn shared_cache_runtime(
     backend: coil_cache::CacheBackendKind,
     namespace: String,
 ) -> Arc<dyn coil_cache::DistributedCacheRuntime> {
+    if use_emulated_shared_backends() {
+        return emulated_shared_cache_runtime(backend, namespace);
+    }
     coil_cache::DistributedCacheClient::live_shared_runtime(backend, namespace, PathBuf::new())
+}
+
+fn use_emulated_shared_backends() -> bool {
+    std::env::var("COIL_EMULATED_SHARED_BACKENDS")
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(test))]
+fn emulated_shared_jobs_runtime(
+    runtime: &JobsRuntimeServices,
+    namespace: String,
+) -> Arc<dyn coil_jobs::JobsCoordinationRuntime> {
+    use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+
+    static REGISTRY: OnceLock<
+        Mutex<BTreeMap<String, Arc<dyn coil_jobs::JobsCoordinationRuntime>>>,
+    > = OnceLock::new();
+
+    let key = format!(
+        "{:?}:{}:{}:{}:{}:{}",
+        runtime.backend,
+        runtime.topology.work_queue.as_str(),
+        runtime.topology.scheduled_queue.as_str(),
+        runtime.topology.domain_events_queue.as_str(),
+        runtime.topology.dead_letter_queue.as_str(),
+        namespace
+    );
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry.lock().expect("emulated jobs registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| coil_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
+        .clone()
+}
+
+#[cfg(not(test))]
+fn emulated_shared_cache_runtime(
+    backend: coil_cache::CacheBackendKind,
+    namespace: String,
+) -> Arc<dyn coil_cache::DistributedCacheRuntime> {
+    use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+
+    static REGISTRY: OnceLock<
+        Mutex<BTreeMap<String, Arc<dyn coil_cache::DistributedCacheRuntime>>>,
+    > = OnceLock::new();
+
+    let key = format!("{backend:?}:{namespace}");
+    let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut guard = registry.lock().expect("emulated cache registry mutex poisoned");
+    guard
+        .entry(key)
+        .or_insert_with(|| coil_cache::DistributedCacheClient::emulated_shared_runtime(backend))
+        .clone()
 }
 
 fn required_env_bytes(name: &'static str) -> Result<Vec<u8>, RuntimeBootstrapError> {

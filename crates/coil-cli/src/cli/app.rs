@@ -724,25 +724,46 @@ fn live_jobs_state_unavailable_reason(
         )));
     };
 
+    if let Err(error) = verify_live_jobs_state_available(built, runtime, database_url) {
+        return Ok(Some(error));
+    }
+
+    Ok(None)
+}
+
+#[cfg(test)]
+fn verify_live_jobs_state_available(
+    _built: &BuiltCustomerAppContext,
+    _runtime: &tokio::runtime::Runtime,
+    _database_url: String,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn verify_live_jobs_state_available(
+    built: &BuiltCustomerAppContext,
+    runtime: &tokio::runtime::Runtime,
+    database_url: String,
+) -> Result<(), String> {
     let data_runtime = built
         .runtime_plan
         .runtime
         .data
         .with_resolved_connection_url(database_url);
+
     let client = data_runtime.connect_lazy_postgres().map_err(|error| {
-        CliRunError::execution(format!(
+        format!(
             "failed to initialize the live jobs backend for `{}`: {error}",
             built.manifest.id
-        ))
+        )
     })?;
-    if let Err(error) = runtime.block_on(client.ping()) {
-        return Ok(Some(format!(
+    runtime.block_on(client.ping()).map_err(|error| {
+        format!(
             "live jobs coordinator state is unavailable for `{}`: DATABASE_URL could not initialize live state: {error}",
             built.manifest.id
-        )));
-    }
-
-    Ok(None)
+        )
+    })
 }
 
 fn build_cli_jobs_host(
@@ -12214,6 +12235,14 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    fn ensure_emulated_shared_backends_for_cli_tests() {
+        static INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        INIT.get_or_init(|| unsafe {
+            std::env::set_var("COIL_EMULATED_SHARED_BACKENDS", "1");
+            std::env::set_var("COIL_SHARED_BACKEND_SCOPE", "cli-tests");
+        });
+    }
+
     struct CustomerAppAssetFixture {
         config_path: PathBuf,
         _server: ObjectStoreTestServer,
@@ -12757,6 +12786,7 @@ enabled = ["cms"]
         config_contents: String,
         modules: &[&str],
     ) -> PathBuf {
+        ensure_emulated_shared_backends_for_cli_tests();
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -12974,6 +13004,7 @@ enabled = ["cms"]
     }
 
     fn import_fixture() -> ImportFixture {
+        ensure_emulated_shared_backends_for_cli_tests();
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

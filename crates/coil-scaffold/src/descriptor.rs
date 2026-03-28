@@ -253,6 +253,15 @@ impl ProjectDescriptor {
     }
 
     pub fn add_site(&mut self, site: SiteDescriptor) -> Result<()> {
+        let mut site = site;
+        if site.additional_domains.is_empty() {
+            site.additional_domains = default_additional_domains(&site.canonical_domain);
+        }
+        for locale in &site.supported_locales {
+            if !self.i18n.supported_locales.contains(locale) {
+                self.i18n.supported_locales.push(locale.clone());
+            }
+        }
         self.sites.push(site);
         self.validate()
     }
@@ -264,4 +273,18 @@ fn default_true() -> bool {
 
 fn default_coil_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+fn default_additional_domains(canonical_domain: &str) -> Vec<String> {
+    let trimmed = canonical_domain.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let alias = format!("www.{trimmed}");
+    if alias == trimmed {
+        Vec::new()
+    } else {
+        vec![alias]
+    }
 }

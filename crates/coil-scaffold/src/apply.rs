@@ -574,9 +574,7 @@ fn platform_config(descriptor: &ProjectDescriptor, production: bool) -> String {
         .sites
         .iter()
         .map(|site| {
-            let mut hosts = Vec::with_capacity(1 + site.additional_domains.len());
-            hosts.push(site.canonical_domain.clone());
-            hosts.extend(site.additional_domains.iter().cloned());
+            let hosts = rendered_site_hosts(site);
             format!(
                 "[[sites]]\nid = \"{id}\"\ndisplay_name = \"{display_name}\"\nbrand_name = \"{brand_name}\"\ncanonical_host = \"{canonical_host}\"\nhosts = {hosts}\ndefault_locale = \"{default_locale}\"\nsupported_locales = {supported_locales}\n",
                 id = site.id,
@@ -692,6 +690,24 @@ publish_manifest = false
         modules = toml_array(&descriptor.modules.enabled),
         sites = sites,
     )
+}
+
+fn rendered_site_hosts(site: &SiteDescriptor) -> Vec<String> {
+    let mut hosts = site
+        .additional_domains
+        .iter()
+        .filter(|host| host.as_str() != site.canonical_domain)
+        .cloned()
+        .collect::<Vec<_>>();
+    if hosts.is_empty() {
+        let fallback = format!("www.{}", site.canonical_domain);
+        if fallback != site.canonical_domain {
+            hosts.push(fallback);
+        }
+    }
+    hosts.sort();
+    hosts.dedup();
+    hosts
 }
 
 fn base_layout(descriptor: &ProjectDescriptor) -> String {
@@ -1229,6 +1245,6 @@ mod tests {
 
         let config = std::fs::read_to_string(workspace.path().join("platform.dev.toml")).unwrap();
         assert!(config.contains("canonical_host = \"shop-fr.localhost\""));
-        assert!(config.contains("hosts = [\"shop-fr.localhost\"]"));
+        assert!(config.contains("hosts = [\"www.shop-fr.localhost\"]"));
     }
 }

@@ -51,8 +51,8 @@ journey without requiring a pre-seeded database user or live Stripe credentials:
 
 `backend/`
 - customer-app-owned Rust backend example code
-- the primary example is a linked customer crate consistent with chapter 96
-- the optional HTTP sidecar adapter remains here only for cases that truly need a process boundary
+- the linked customer-backend implementation lives in this tree and is registered through the Harbor Shop workspace crates
+- the `backend/harbor-loyalty-backend` crate is the shared business-rules library the linked crate wraps
 
 `Cargo.toml`, `Cargo.lock`, `crates/`
 - the Harbor Shop nested Cargo workspace
@@ -82,7 +82,10 @@ That is the chapter 96 shape in repo form:
 - Davenda is modeled here as normal upstream `0.1.0` dependencies
 - Harbor Shop owns a binary crate that links the official modules it needs
 - Harbor Shop owns a linked backend crate that registers customer-specific behavior through public Davenda APIs
-- the optional sidecar adapter still exists, but it is no longer the primary Rust integration story
+- the checked-in backend library remains customer-owned code, but the store consumes it through the linked plugin path rather than a separate service boundary
+
+The optional sidecar adapter still exists for integrations that genuinely need a separate
+HTTP/process boundary, but it is not the primary Harbor Shop customization model.
 
 The committed workspace is intentionally free of `patch.crates-io` overlays and other repo-local
 dependency rewrites. Harbor Shop is checked in as a normal customer project that can resolve
@@ -123,6 +126,24 @@ by the Harbor Shop workspace.
 The checked-in linked plugin in this workspace is:
 
 - `Harbor Shop Linked Backend` (`harbor-shop-backend`)
+
+Harbor Shop also demonstrates three sites under one customer app boundary:
+
+- `harbor-uk`
+  - flagship UK storefront
+  - host: `uk.127.0.0.1.nip.io`
+  - default locale: `en-GB`
+- `harbor-us`
+  - events-led US site
+  - host: `us.127.0.0.1.nip.io`
+  - default locale: `en-US`
+- `harbor-de`
+  - DE assortment with localized merchandising
+  - host: `de.127.0.0.1.nip.io`
+  - default locale: `de-DE`
+
+Those `*.127.0.0.1.nip.io` hosts resolve to localhost automatically, so the three-site demo works
+without editing your hosts file.
 
 Once Harbor Shop is running, the same linked-backend shape is visible inside the app itself:
 
@@ -171,17 +192,16 @@ cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build
 ```
 
-If you also want the optional sidecar adapter for the checked-in Rust backend example running locally:
-
-```bash
-docker compose --profile backend-example up --build
-```
-
 Then open:
 
 - `http://localhost:8080/`
 - `http://localhost:8080/__dev`
-- `http://localhost:8081/`
+
+If you want to exercise the three-site demo explicitly, open these real local hosts:
+
+- `http://uk.127.0.0.1.nip.io:8080/en-GB/shop`
+- `http://us.127.0.0.1.nip.io:8080/en-US/events`
+- `http://de.127.0.0.1.nip.io:8080/de-DE/shop/products/harbor-scarf`
 
 The `__dev` page gives you one-click local login shortcuts for the checked-in customer and admin
 paths. This is the local bootstrap mechanism for authenticated walkthroughs; Harbor Shop does not
@@ -246,25 +266,19 @@ Use these dev shortcuts for authenticated flows:
 The intended first-run path is:
 
 1. open `/` and confirm the storefront home renders with CSS
-2. open `/en-GB/shop` and browse the catalog
-3. open a product detail page
-4. add an item to cart
-5. open `/cart`
-6. open `/checkout`
-7. use the dev login shortcut and inspect `/account`
-8. use the admin shortcut and inspect `/admin`
+2. open `http://uk.127.0.0.1.nip.io:8080/en-GB/shop` and browse the UK catalog
+3. open `http://us.127.0.0.1.nip.io:8080/en-US/events` and confirm the US events-led surface
+4. open `http://de.127.0.0.1.nip.io:8080/de-DE/shop/products/harbor-scarf` and confirm the DE-only product
+5. add an item to cart from the UK or DE site
+6. open `/cart`
+7. open `/checkout`
+8. use the dev login shortcut and inspect `/account`
+9. use the admin shortcut and inspect `/admin`
 
 That is a complete local walkthrough. You do not need a seeded SQL user to exercise account or
 admin routes in the default development stack.
 
-If you started the optional backend-example profile, also visit:
-
-- `http://localhost:8081/`
-- `http://localhost:8081/health`
-- `POST http://localhost:8081/api/loyalty/preview`
-- `POST http://localhost:8081/api/orders/review`
-
-If you want to inspect the same linked backend behavior without running the optional sidecar, use:
+If you want to inspect the linked backend behavior directly from the customer workspace, use:
 
 ```bash
 ./scripts/prepare-local-dev.sh
@@ -425,7 +439,6 @@ The practical rule is:
 - use Harbor Shop templates, config, auth bindings, and linked customer Rust crates for first-party customer product logic
 - use WASM extensions for bounded third-party or runtime-installed customization
 - use native Rust modules when you need deeper access to transactions, shared data ownership, or widely reused domain logic
-- use the optional sidecar adapter under `apps/harbor-shop/backend/` only when the linked crate genuinely needs a separate HTTP/process boundary
 - use `crates/` only when the behavior is becoming a reusable native module or needs platform-level ownership
 
 For customer-specific native Rust work, the right place is a customer-app-owned crate in the
@@ -439,70 +452,42 @@ Examples of native-Rust changes that are reasonable:
 
 Harbor Shop now includes a concrete checked-in example under:
 
-- `backend/harbor-loyalty-backend/`
+- `crates/harbor-shop-backend/`
 
-Read this as a linked customer-backend example first and an optional sidecar second.
+Read this as the first-party linked backend example.
 
 This example is intentionally small but real:
 
 - `src/lib.rs` is the primary chapter 96 example
-- it exposes `harbor_loyalty_backend::plugin()` plus Harbor Shop-specific hook logic
-- it shows how customer-owned rules stay in a linked Rust crate instead of starting in WASM or a sidecar
-- `src/http.rs` and `src/main.rs` are the optional sidecar adapter around the same linked crate
-- the sidecar path remains useful for external webhook/process integration, but it is not the primary model
+- it exposes `harbor_shop_backend::plugin()` plus Harbor Shop-specific hook logic
+- it shows how customer-owned rules stay in a linked Rust crate instead of starting in WASM or a separate service
+- the checked-in Harbor binary composes and registers that plugin directly during startup
 
 Read these files first if you want to add customer-owned Rust logic:
 
-- `backend/README.md`
-- `backend/harbor-loyalty-backend/README.md`
+- `crates/harbor-shop-backend/src/lib.rs`
 - `backend/harbor-loyalty-backend/src/lib.rs`
-- `backend/harbor-loyalty-backend/src/http.rs`
+- `crates/harbor-shop-app/src/lib.rs`
+- `crates/harbor-shop-bin/src/main.rs`
 
-To run the optional sidecar adapter with the local stack:
+The example is meant to be copied and reshaped by third-party developers building a customer-owned
+store on Davenda without editing platform core.
 
-```bash
-docker compose --profile backend-example up --build
-```
+If you want the shortest “how do I add my own Rust rule?” path:
 
-Then exercise it with the checked-in sample payloads:
-
-```bash
-curl -sS \
-  -X POST http://localhost:8081/api/loyalty/preview \
-  -H 'content-type: application/json' \
-  --data @backend/harbor-loyalty-backend/requests/loyalty-preview.json
-```
-
-```bash
-curl -sS \
-  -X POST http://localhost:8081/api/orders/review \
-  -H 'content-type: application/json' \
-  --data @backend/harbor-loyalty-backend/requests/order-review.json
-```
-
-```bash
-curl -sS \
-  -X POST http://localhost:8081/webhooks/crm/contact-updated \
-  -H 'content-type: application/json' \
-  -H "x-harbor-backend-secret: ${HARBOR_BACKEND_WEBHOOK_SECRET:-harbor-backend-dev-secret}" \
-  --data @backend/harbor-loyalty-backend/requests/contact-updated.json
-```
-
-The example is meant to be copied and reshaped by third-party developers who need customer-owned
-Rust logic linked into Harbor Shop without leaking into platform core. The optional sidecar is only
-the transport wrapper for cases that need it.
-
-If you want the shortest “how do I add my own Rust rule?” path, start with the linked crate API in
-`src/lib.rs`, then optionally add an HTTP adapter if the integration truly needs one.
+1. add a new function or service in `backend/harbor-loyalty-backend/src/lib.rs`
+2. expose or wrap it through `crates/harbor-shop-backend/src/lib.rs`
+3. expose the result through an existing template/render hook, checkout hook, or verified-webhook hook
+4. add a focused unit test in the backend crate and, if needed, an integration assertion in `crates/harbor-shop-app/tests/`
 
 The checked-in `review_order(...)` example is still the fastest rule to copy:
 
-- define request/response types and a pure rule in `src/lib.rs`
-- add the thin HTTP adapter in `src/http.rs`
-- add a sample payload under `requests/`
-- add tests for both the pure rule and the route
+- define request/response types and a pure rule in `backend/harbor-loyalty-backend/src/lib.rs`
+- re-export or register it in `crates/harbor-shop-backend/src/lib.rs`
+- keep the behavior behind the linked plugin boundary
+- add tests for both the pure rule and the Harbor Shop runtime surface that consumes it
 
-To work on the example crate without Docker Compose:
+If you want to work on the shared backend library directly without Docker Compose:
 
 ```bash
 cd apps/harbor-shop

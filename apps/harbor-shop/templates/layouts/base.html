@@ -17,14 +17,14 @@
   </head>
   <body class="harbor">
     <header class="site-header">
-      <a href="/" class="brand">Harbor Shop</a>
+      <a href="/" class="brand" dv:attr="href=${links.home}" dv:text="${site.brandName}">Harbor Shop</a>
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main" dv:slot="content">
       <section>Content goes here.</section>
     </main>
     <footer class="site-footer">
-      <small>Harbor Shop</small>
+      <small dv:text="${site.displayName}">Harbor Shop</small>
     </footer>
   </body>
 </html>

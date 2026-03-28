@@ -54,13 +54,40 @@ l2 = "redis"
 
 [i18n]
 default_locale = "en-GB"
-supported_locales = ["en-GB", "fr-FR"]
+supported_locales = ["en-GB", "fr-FR", "de-DE", "en-US"]
 fallback_locale = "en-GB"
 localized_routes = true
 
 [seo]
-canonical_host = "shop.example.com"
+canonical_host = "uk.127.0.0.1.nip.io"
 emit_json_ld = true
+
+[[sites]]
+id = "harbor-uk"
+display_name = "Harbor Shop UK"
+brand_name = "Harbor Shop"
+canonical_host = "uk.127.0.0.1.nip.io"
+hosts = ["shop.example.com", "www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR"]
+
+[[sites]]
+id = "harbor-us"
+display_name = "Harbor Shop US"
+brand_name = "Harbor Events"
+canonical_host = "us.127.0.0.1.nip.io"
+hosts = ["us-store.127.0.0.1.nip.io"]
+default_locale = "en-US"
+supported_locales = ["en-US"]
+
+[[sites]]
+id = "harbor-de"
+display_name = "Harbor Shop DE"
+brand_name = "Harbor Europa"
+canonical_host = "de.127.0.0.1.nip.io"
+hosts = ["de-store.127.0.0.1.nip.io"]
+default_locale = "de-DE"
+supported_locales = ["de-DE", "en-GB"]
 
 [auth]
 package = "harbor-auth"

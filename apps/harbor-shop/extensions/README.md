@@ -11,8 +11,8 @@ Use this folder for customization that should remain:
 - appropriate for a third-party, partner, or marketplace-style add-on
 
 Do not use this folder for Harbor Shop's first-party store logic. That path is the linked Rust
-customer workspace under `crates/harbor-shop-backend` and
-`backend/harbor-loyalty-backend`, per chapter 96.
+customer workspace under `crates/harbor-shop-backend`, backed by the shared customer-owned rules
+in `backend/harbor-loyalty-backend`, per chapter 96.
 
 The checked-in example here is:
 

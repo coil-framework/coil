@@ -93,6 +93,48 @@
       </section>
 
       <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Three-site demo</p>
+        <h2>Host-to-journey mapping</h2>
+        <p>
+          Harbor Shop now demonstrates three sites under the same customer app boundary: a UK
+          flagship store, a US events-led surface, and a DE assortment with localized
+          merchandising and memberships.
+        </p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h3>harbor-uk</h3>
+            <p>
+              Validate the main browse loop from catalog to collection to product detail to cart on
+              the UK storefront host.
+            </p>
+            <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Open shop route
+            </a>
+          </article>
+          <article class="admin-card">
+            <h3>harbor-us</h3>
+            <p>
+              Validate the US events journey and the site-specific event inventory without routing
+              traffic through the UK catalog first.
+            </p>
+            <a class="button" href="/en-US/events">
+              Open US events route
+            </a>
+          </article>
+          <article class="admin-card">
+            <h3>harbor-de</h3>
+            <p>
+              Validate the DE-specific assortment and localized merchandising path, including
+              products that are not visible on the other sites.
+            </p>
+            <a class="button" href="/de-DE/shop/products/harbor-scarf">
+              Open DE product
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
         <p class="admin-panel__eyebrow">Launch sign-off</p>
         <div class="admin-card-grid">
           <article class="admin-card">

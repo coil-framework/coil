@@ -3,18 +3,21 @@ handle = "featured"
 title = "Featured"
 label = "Featured edit"
 summary = "Current campaign picks spanning merch, memberships, and event offers."
+site_ids = ["harbor-uk", "harbor-us", "harbor-de"]
 
 [[collections]]
 handle = "memberships"
 title = "Memberships"
 label = "Recurring value"
 summary = "Recurring and premium access products that unlock customer benefits."
+site_ids = ["harbor-uk", "harbor-de"]
 
 [[collections]]
 handle = "events"
 title = "Events"
 label = "Event-led offer"
 summary = "Bookable offers and event-linked passes surfaced alongside editorial content."
+site_ids = ["harbor-uk", "harbor-us"]
 
 [[products]]
 sku = "harbor-cap"
@@ -26,6 +29,8 @@ currency = "GBP"
 collection_handle = "featured"
 variant_title = "Standard"
 product_kind = "physical"
+site_ids = ["harbor-uk", "harbor-de"]
+inventory_locations = ["uk-warehouse", "de-warehouse"]
 
 [[products]]
 sku = "membership-gold"
@@ -38,6 +43,8 @@ collection_handle = "memberships"
 variant_title = "Annual"
 product_kind = "membership"
 entitlement_key = "membership.gold"
+site_ids = ["harbor-uk", "harbor-de"]
+inventory_locations = ["uk-digital", "de-digital"]
 
 [[products]]
 sku = "tasting-pass"
@@ -49,3 +56,31 @@ currency = "GBP"
 collection_handle = "events"
 variant_title = "Single pass"
 product_kind = "physical"
+site_ids = ["harbor-uk", "harbor-us"]
+inventory_locations = ["uk-events", "us-events"]
+
+[[products]]
+sku = "harbor-scarf"
+handle = "harbor-scarf"
+title = "Harbor Scarf"
+summary = "A cold-weather staple reserved for the DE storefront assortment."
+price_minor = 3900
+currency = "EUR"
+collection_handle = "featured"
+variant_title = "Winter weave"
+product_kind = "physical"
+site_ids = ["harbor-de"]
+inventory_locations = ["de-warehouse"]
+
+[[products]]
+sku = "brooklyn-night-pass"
+handle = "brooklyn-night-pass"
+title = "Brooklyn Night Pass"
+summary = "A US-only after-hours event pass reserved for the Harbor Events site."
+price_minor = 6500
+currency = "USD"
+collection_handle = "events"
+variant_title = "Evening entry"
+product_kind = "physical"
+site_ids = ["harbor-us"]
+inventory_locations = ["us-events"]

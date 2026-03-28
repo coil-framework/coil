@@ -3,12 +3,39 @@ name = "harbor-shop"
 display_name = "Harbor Shop"
 
 [domains]
-canonical = "shop.example.com"
-additional = ["www.example.com"]
+canonical = "uk.127.0.0.1.nip.io"
+additional = ["us.127.0.0.1.nip.io", "de.127.0.0.1.nip.io", "shop.example.com", "www.example.com"]
 
 [i18n]
 default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE", "en-US"]
+
+[[sites]]
+id = "harbor-uk"
+display_name = "Harbor Shop UK"
+brand_name = "Harbor Shop"
+canonical_domain = "uk.127.0.0.1.nip.io"
+additional_domains = ["shop.example.com", "www.example.com"]
+default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR"]
+
+[[sites]]
+id = "harbor-us"
+display_name = "Harbor Shop US"
+brand_name = "Harbor Events"
+canonical_domain = "us.127.0.0.1.nip.io"
+additional_domains = ["us-store.127.0.0.1.nip.io"]
+default_locale = "en-US"
+supported_locales = ["en-US"]
+
+[[sites]]
+id = "harbor-de"
+display_name = "Harbor Shop DE"
+brand_name = "Harbor Europa"
+canonical_domain = "de.127.0.0.1.nip.io"
+additional_domains = ["de-store.127.0.0.1.nip.io"]
+default_locale = "de-DE"
+supported_locales = ["de-DE", "en-GB"]
 
 [theme]
 active = "harbor"

@@ -13,7 +13,7 @@
   </head>
   <body class="harbor">
     <header class="site-header">
-      <a href="/" class="brand">Harbor Shop</a>
+      <a href="/" class="brand" dv:attr="href=${links.home}" dv:text="${site.brandName}">Harbor Shop</a>
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main">
@@ -22,6 +22,50 @@
         <div dv:replace="~{commerce/collection-grid :: grid}"></div>
         <div dv:replace="~{commerce/product-grid :: grid}"></div>
         <section class="catalog-sections">
+          <article class="catalog-section">
+            <p class="catalog-section__eyebrow">Three-site demo</p>
+            <h2>One customer app, three Harbor sites</h2>
+            <p>
+              Harbor Shop now demonstrates three market-specific sites on one customer app
+              boundary: a UK flagship storefront, a US events-led site, and a DE assortment with
+              localized merchandising and memberships.
+            </p>
+            <div class="admin-card-grid">
+              <article class="admin-card">
+                <p class="admin-panel__eyebrow">harbor-uk</p>
+                <h3>UK flagship storefront</h3>
+                <p>
+                  Lead with the full catalog and featured collections for the main UK browse,
+                  membership, and checkout journey.
+                </p>
+                <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+                  Open shop route
+                </a>
+              </article>
+              <article class="admin-card">
+                <p class="admin-panel__eyebrow">harbor-us</p>
+                <h3>US events site</h3>
+                <p>
+                  Start from events and event-linked product drops, including the US-only Brooklyn
+                  Night Pass assortment.
+                </p>
+                <a class="button" href="/en-US/events">
+                  Open US events route
+                </a>
+              </article>
+              <article class="admin-card">
+                <p class="admin-panel__eyebrow">harbor-de</p>
+                <h3>DE localized assortment</h3>
+                <p>
+                  Surface the DE-only scarf and German-language storefront path without cloning the
+                  whole app into a separate deployment.
+                </p>
+                <a class="button" href="/de-DE/shop/products/harbor-scarf">
+                  Open DE product
+                </a>
+              </article>
+            </div>
+          </article>
           <article class="catalog-section">
             <p class="catalog-section__eyebrow">Start here</p>
             <h2>New to Harbor Shop?</h2>
@@ -57,7 +101,7 @@
       </section>
     </main>
     <footer class="site-footer">
-      <small>Harbor Shop</small>
+      <small dv:text="${site.displayName}">Harbor Shop</small>
     </footer>
   </body>
 </html>

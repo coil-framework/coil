@@ -180,7 +180,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         "{cargo_toml}"
     );
     assert!(
-        entrypoint.contains("exec harbor-shop up --config"),
+        entrypoint.contains("exec harbor-shop --config \"$CONFIG_PATH\" up"),
         "{entrypoint}"
     );
     assert!(

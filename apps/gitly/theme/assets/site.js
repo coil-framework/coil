@@ -89,19 +89,25 @@ const GITLY = (() => {
         "pulls.status.passed": "Checks passed",
         "pulls.status.draft": "Draft",
         "actions.title": "Workflow runs",
-        "actions.summary": "Mock scheduled tasks simulate GitHub Actions cadence. The scheduler surface is customer-owned and extension-friendly.",
+        "actions.summary": "Workflow rows remain fixture data, but the scheduler panel below is derived from the built runtime plan and the installed scheduled-job extension.",
         "actions.schedule": "Scheduled automation",
         "actions.scheduleBody": "The `github.actions.refresh` surface is declared by the Gitly customer module and can be fulfilled by a runtime-installed scheduled-job extension.",
         "actions.extension": "WASM runtime story",
-        "actions.extensionBody": "Gitly ships both a custom API extension and a mock scheduled-job extension to show how third-party behavior stays bounded at runtime.",
-        "actions.mockTitle": "Mock scheduler heartbeat",
-        "actions.mockBody": "This browser-side loop simulates a scheduled refresh so the Actions demo shows visible cadence instead of static counters only.",
-        "actions.mockContract": "Contract",
-        "actions.mockExtension": "Extension",
-        "actions.mockRuns": "Simulated runs",
-        "actions.mockLastRun": "Last simulated run",
-        "actions.mockJustNow": "just now",
-        "actions.mockMinutes": "{count} minute(s) ago",
+        "actions.extensionBody": "Gitly ships both a custom API extension and a scheduled-job extension to show how third-party behavior stays bounded at runtime.",
+        "actions.runtimeTitle": "Runtime scheduler state",
+        "actions.runtimeBody": "These values come from the Gitly runtime plan and registered scheduled-job handler, not browser local storage.",
+        "actions.runtimeContract": "Contract",
+        "actions.runtimeModule": "Module",
+        "actions.runtimeExtension": "Extension",
+        "actions.runtimeHandler": "Handler",
+        "actions.runtimeTrigger": "Trigger",
+        "actions.runtimeSchedule": "Schedule",
+        "actions.runtimeQueue": "Queue",
+        "actions.runtimeBackend": "Backend",
+        "actions.runtimeRetryLimit": "Retry limit",
+        "actions.runtimeDeadLetter": "Dead-letter queue",
+        "actions.runtimeScheduledJobs": "Registered scheduled jobs",
+        "actions.runtimeHandlerCount": "Installed handlers",
         "actions.job2": "Localization smoke",
         "actions.job2Cadence": "Every hour",
         "actions.job3": "WASM extension contract",
@@ -134,7 +140,7 @@ const GITLY = (() => {
         "search.result.repo": "Accessible multilingual UI primitives and customer-app examples for Davenda.",
         "search.result.docs": "Versioned docs and editorial policy examples running in the same customer-root workspace.",
         "search.result.profile": "Staff Engineer focused on accessibility, multilingual delivery, and workflow tooling.",
-        "search.result.actions": "Mock scheduled tasks and bounded WASM extensions simulate GitHub Actions cadence.",
+        "search.result.actions": "Workflow rows stay fixture-backed, while scheduler contract and handler details come from the runtime job plan.",
         "api.visibility.public": "Public",
         "api.status.active": "active",
         "api.workflow.primary": "UI regression",
@@ -230,19 +236,25 @@ const GITLY = (() => {
         "pulls.status.passed": "Checks validés",
         "pulls.status.draft": "Brouillon",
         "actions.title": "Exécutions de workflow",
-        "actions.summary": "Des tâches planifiées simulées reproduisent la cadence de GitHub Actions. La surface de planification appartient au client et accepte les extensions.",
+        "actions.summary": "Les lignes de workflow restent des fixtures, mais le panneau du planificateur ci-dessous est dérivé du plan d’exécution construit et de l’extension de tâche planifiée installée.",
         "actions.schedule": "Automatisation planifiée",
         "actions.scheduleBody": "La surface `github.actions.refresh` est déclarée par le module client Gitly et peut être remplie par une extension WASM planifiée.",
         "actions.extension": "Chemin WASM à l’exécution",
         "actions.extensionBody": "Gitly fournit une extension API personnalisée et une extension de tâche planifiée pour montrer comment le comportement tiers reste borné à l’exécution.",
-        "actions.mockTitle": "Battement du planificateur simulé",
-        "actions.mockBody": "Cette boucle côté navigateur simule une exécution planifiée afin que la démo Actions montre une cadence visible plutôt que de simples compteurs statiques.",
-        "actions.mockContract": "Contrat",
-        "actions.mockExtension": "Extension",
-        "actions.mockRuns": "Exécutions simulées",
-        "actions.mockLastRun": "Dernière exécution simulée",
-        "actions.mockJustNow": "à l’instant",
-        "actions.mockMinutes": "il y a {count} minute(s)",
+        "actions.runtimeTitle": "État du planificateur à l’exécution",
+        "actions.runtimeBody": "Ces valeurs proviennent du plan d’exécution Gitly et du handler de tâche planifiée enregistré, pas du stockage local du navigateur.",
+        "actions.runtimeContract": "Contrat",
+        "actions.runtimeModule": "Module",
+        "actions.runtimeExtension": "Extension",
+        "actions.runtimeHandler": "Handler",
+        "actions.runtimeTrigger": "Déclencheur",
+        "actions.runtimeSchedule": "Planification",
+        "actions.runtimeQueue": "File",
+        "actions.runtimeBackend": "Backend",
+        "actions.runtimeRetryLimit": "Limite de reprise",
+        "actions.runtimeDeadLetter": "File de lettres mortes",
+        "actions.runtimeScheduledJobs": "Tâches planifiées enregistrées",
+        "actions.runtimeHandlerCount": "Handlers installés",
         "actions.job2": "Vérification de localisation",
         "actions.job2Cadence": "Chaque heure",
         "actions.job3": "Contrat d’extension WASM",
@@ -275,7 +287,7 @@ const GITLY = (() => {
         "search.result.repo": "Primitives UI accessibles et multilingues ainsi qu’exemples d’applications clientes pour Davenda.",
         "search.result.docs": "Documentation versionnée et exemples de politique éditoriale dans le même espace client.",
         "search.result.profile": "Staff Engineer axé sur l’accessibilité, la livraison multilingue et l’outillage de workflows.",
-        "search.result.actions": "Des tâches planifiées simulées et des extensions WASM bornées reproduisent la cadence d’Actions.",
+        "search.result.actions": "Les lignes de workflow restent des fixtures, tandis que le contrat et les handlers du planificateur viennent du plan de jobs d’exécution.",
         "api.visibility.public": "Public",
         "api.status.active": "actif",
         "api.workflow.primary": "Régression UI",
@@ -371,19 +383,25 @@ const GITLY = (() => {
         "pulls.status.passed": "Checks bestanden",
         "pulls.status.draft": "Entwurf",
         "actions.title": "Workflow-Läufe",
-        "actions.summary": "Simulierte geplante Aufgaben zeigen GitHub-Actions-Taktung. Die Scheduler-Fläche gehört der Customer-App und bleibt erweiterbar.",
+        "actions.summary": "Die Workflow-Zeilen bleiben Fixture-Daten, aber das Scheduler-Panel unten wird aus dem gebauten Runtime-Plan und der installierten Scheduled-Job-Erweiterung abgeleitet.",
         "actions.schedule": "Geplante Automatisierung",
         "actions.scheduleBody": "Die Fläche `github.actions.refresh` wird vom Gitly-Kundenmodul deklariert und kann von einer installierten Scheduled-Job-Erweiterung bedient werden.",
         "actions.extension": "WASM zur Laufzeit",
         "actions.extensionBody": "Gitly liefert sowohl eine eigene API-Erweiterung als auch eine geplante Job-Erweiterung, um begrenztes Drittanbieter-Verhalten zur Laufzeit zu zeigen.",
-        "actions.mockTitle": "Simulierter Scheduler-Takt",
-        "actions.mockBody": "Diese Schleife im Browser simuliert einen geplanten Refresh, damit die Actions-Demo sichtbare Taktung statt nur statischer Zähler zeigt.",
-        "actions.mockContract": "Vertrag",
-        "actions.mockExtension": "Erweiterung",
-        "actions.mockRuns": "Simulierte Läufe",
-        "actions.mockLastRun": "Letzter simulierter Lauf",
-        "actions.mockJustNow": "gerade eben",
-        "actions.mockMinutes": "vor {count} Minute(n)",
+        "actions.runtimeTitle": "Runtime-Scheduler-Status",
+        "actions.runtimeBody": "Diese Werte stammen aus dem Gitly-Runtime-Plan und dem registrierten Scheduled-Job-Handler, nicht aus dem lokalen Browser-Speicher.",
+        "actions.runtimeContract": "Vertrag",
+        "actions.runtimeModule": "Modul",
+        "actions.runtimeExtension": "Erweiterung",
+        "actions.runtimeHandler": "Handler",
+        "actions.runtimeTrigger": "Auslöser",
+        "actions.runtimeSchedule": "Zeitplan",
+        "actions.runtimeQueue": "Queue",
+        "actions.runtimeBackend": "Backend",
+        "actions.runtimeRetryLimit": "Retry-Limit",
+        "actions.runtimeDeadLetter": "Dead-Letter-Queue",
+        "actions.runtimeScheduledJobs": "Registrierte Scheduled Jobs",
+        "actions.runtimeHandlerCount": "Installierte Handler",
         "actions.job2": "Lokalisierungs-Smoketest",
         "actions.job2Cadence": "Jede Stunde",
         "actions.job3": "WASM-Erweiterungsvertrag",
@@ -416,7 +434,7 @@ const GITLY = (() => {
         "search.result.repo": "Zugängliche mehrsprachige UI-Bausteine und Customer-App-Beispiele für Davenda.",
         "search.result.docs": "Versionierte Dokumentation und redaktionelle Richtlinien im selben Customer-Root-Workspace.",
         "search.result.profile": "Staff Engineer mit Fokus auf Barrierefreiheit, Mehrsprachigkeit und Workflow-Werkzeuge.",
-        "search.result.actions": "Simulierte geplante Aufgaben und begrenzte WASM-Erweiterungen bilden die Actions-Taktung nach.",
+        "search.result.actions": "Workflow-Zeilen bleiben Fixture-Daten, während Scheduler-Vertrag und Handler-Details aus dem Runtime-Job-Plan stammen.",
         "api.visibility.public": "Öffentlich",
         "api.status.active": "aktiv",
         "api.workflow.primary": "UI-Regression",
@@ -602,40 +620,6 @@ const GITLY = (() => {
     empty.hidden = matches.length !== 0;
   }
 
-  function formatMockHeartbeat(locale, timestamp) {
-    const messages = translations[locale] || translations["en-GB"];
-    const elapsedMinutes = Math.floor((Date.now() - timestamp) / 60000);
-    if (elapsedMinutes <= 0) return messages.copy["actions.mockJustNow"];
-    return messages.copy["actions.mockMinutes"].replace("{count}", String(elapsedMinutes));
-  }
-
-  function simulateActionsHeartbeat(locale) {
-    if (currentRoute() !== "actions") return;
-    const countNode = document.querySelector("[data-actions-heartbeat-count]");
-    const timeNode = document.querySelector("[data-actions-heartbeat-time]");
-    if (!countNode || !timeNode) return;
-
-    const key = "gitly-actions-heartbeat";
-    const stored = JSON.parse(localStorage.getItem(key) || "{\"count\":0,\"timestamp\":0}");
-
-    const sync = (count, timestamp) => {
-      countNode.textContent = String(count);
-      timeNode.textContent = formatMockHeartbeat(locale, timestamp);
-    };
-
-    const nextState = {
-      count: Math.max(stored.count, 0) + 1,
-      timestamp: Date.now()
-    };
-    localStorage.setItem(key, JSON.stringify(nextState));
-    sync(nextState.count, nextState.timestamp);
-
-    window.setInterval(() => {
-      const current = JSON.parse(localStorage.getItem(key) || JSON.stringify(nextState));
-      sync(current.count, current.timestamp);
-    }, 15000);
-  }
-
   function boot() {
     const locale = currentLocale();
     applyCopy(locale);
@@ -647,7 +631,6 @@ const GITLY = (() => {
       button.addEventListener("click", () => applyTheme(button.getAttribute("data-theme-option")));
     });
     renderSearchResults(locale);
-    simulateActionsHeartbeat(locale);
     hydrateApi(locale);
   }
 

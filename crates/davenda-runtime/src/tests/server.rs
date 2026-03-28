@@ -1,4 +1,5 @@
 use super::*;
+use axum::http::header::CONTENT_TYPE;
 use axum::response::Response;
 use davenda_config::Environment;
 use davenda_customer_sdk::{
@@ -9,6 +10,9 @@ use davenda_customer_sdk::{
     OutboundHttpFacade, RepositoryFacade, RepositoryFacadeExt, RequestContext, VerifiedWebhook,
     VerifiedWebhookAssetHooks, VerifiedWebhookHooks, WebhookHandlingResult,
 };
+use davenda_i18n::TranslationCatalog;
+use davenda_i18n::LocaleTag;
+use davenda_jobs::{JobId, JobInstant, JobName, JobSpec};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::collections::BTreeMap;
@@ -1244,6 +1248,24 @@ fn checked_in_harbor_shop_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/shoppr")
 }
 
+fn checked_in_harbor_shop_translation_catalogs() -> Vec<TranslationCatalog> {
+    let template_root = checked_in_harbor_shop_root();
+    [
+        ("en-GB", "translations/en-GB.toml"),
+        ("fr-FR", "translations/fr-FR.toml"),
+        ("pl-PL", "translations/pl-PL.toml"),
+    ]
+    .into_iter()
+    .map(|(locale, path)| {
+        TranslationCatalog::from_toml_file(
+            LocaleTag::new(locale).expect("checked-in locale tag should be valid"),
+            template_root.join(path),
+        )
+        .expect("checked-in shoppr translation catalog should load")
+    })
+    .collect()
+}
+
 #[tokio::test]
 async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
@@ -1336,6 +1358,19 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
         .unwrap();
     assert_ne!(storefront_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
+    let mut jobs = plan.jobs_host("observability-probe").unwrap();
+    jobs.enqueue_spec(
+        JobSpec::new(
+            JobId::new("job:observability:1").unwrap(),
+            JobName::new("observability-probe").unwrap(),
+            plan.jobs.topology.work_queue.clone(),
+            "probe queued job",
+        )
+        .unwrap(),
+        JobInstant::from_unix_seconds(1),
+    )
+    .unwrap();
+
     let metrics = server
         .router()
         .oneshot(
@@ -1347,6 +1382,10 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        metrics.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        Some("text/plain; version=0.0.4; charset=utf-8")
+    );
     let metrics_body = String::from_utf8(
         to_bytes(metrics.into_body(), usize::MAX)
             .await
@@ -1354,49 +1393,13 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
             .to_vec(),
     )
     .unwrap();
-    assert!(metrics_body.contains("davenda.http.request.latency_ms"));
-    assert!(metrics_body.contains("\"metrics_enabled\":true"));
-    let metrics_json: serde_json::Value = serde_json::from_str(&metrics_body).unwrap();
-    let metrics = metrics_json
-        .get("metrics")
-        .and_then(serde_json::Value::as_array)
-        .unwrap();
-    let request_total = metrics
-        .iter()
-        .find(|metric| metric.get("name") == Some(&serde_json::Value::String("davenda.http.requests.total".to_string())))
-        .unwrap();
-    assert_eq!(
-        request_total
-            .get("reading")
-            .and_then(|reading| reading.get("counter"))
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
-    let in_flight = metrics
-        .iter()
-        .find(|metric| metric.get("name") == Some(&serde_json::Value::String("davenda.http.requests.in_flight".to_string())))
-        .unwrap();
-    assert_eq!(
-        in_flight
-            .get("reading")
-            .and_then(|reading| reading.get("gauge"))
-            .and_then(serde_json::Value::as_i64),
-        Some(0)
-    );
-    let latency = metrics
-        .iter()
-        .find(|metric| metric.get("name") == Some(&serde_json::Value::String("davenda.http.request.latency_ms".to_string())))
-        .unwrap();
-    let latency_histogram = latency
-        .get("reading")
-        .and_then(|reading| reading.get("histogram"))
-        .unwrap();
-    assert_eq!(
-        latency_histogram
-            .get("samples")
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
+    assert!(metrics_body.contains("# davenda_metrics_enabled 1"));
+    assert!(metrics_body.contains("davenda_http_requests_total 1"));
+    assert!(metrics_body.contains("davenda_http_requests_in_flight 0"));
+    assert!(metrics_body.contains("davenda_http_request_latency_ms_samples 1"));
+    assert!(metrics_body.contains("davenda_queue_depth 1"));
+    assert!(metrics_body.contains("davenda_runtime_jobs_ready 1"));
+    assert!(metrics_body.contains("# davenda_trace"));
 
     let public_diagnostics = server
         .public_router()
@@ -1427,6 +1430,75 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
         .await
         .unwrap();
     assert_eq!(diagnostics.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn readiness_marks_unreachable_object_store_endpoint_unhealthy() {
+    let mut config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    config.storage.local_root = std::env::temp_dir()
+        .join(unique_app_name("object-store-readiness"))
+        .display()
+        .to_string();
+
+    let mut plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .build()
+        .unwrap();
+    plan.observability.readiness = davenda_observability::HealthReport::new(
+        davenda_observability::HealthProbeKind::Readiness,
+    )
+    .with_dependency(
+        davenda_observability::DependencyKind::ObjectStore,
+        true,
+        davenda_observability::DependencyStatus::Healthy,
+    )
+    .unwrap();
+
+    let unreachable_object_store_secret = r#"
+endpoint_url = "https://127.0.0.1:9"
+bucket = "runtime"
+region = "eu-west-2"
+access_key_id = "runtime-access"
+secret_access_key = "runtime-secret"
+signed_url_ttl_secs = 900
+"#;
+
+    let resolver = live_backend_secret_resolver_with_object_store_secret(unreachable_object_store_secret)
+        .with_secret(
+            davenda_config::SecretRef::Env {
+                var: "DAVENDA_PAYMENT_WEBHOOK_SECRET".to_string(),
+            },
+            PAYMENT_WEBHOOK_SECRET,
+        )
+        .unwrap();
+    let server = plan
+        .server_host(
+            &resolver,
+            b"01234567012345670123456701234567",
+            b"76543210765432107654321076543210",
+        )
+        .unwrap();
+
+    let readiness = server
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/ready")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(readiness.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let readiness_body = String::from_utf8(
+        to_bytes(readiness.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(readiness_body.contains("\"kind\":\"object_store\""));
+    assert!(readiness_body.contains("\"status\":\"unhealthy\""));
 }
 
 #[tokio::test]
@@ -1580,6 +1652,7 @@ async fn server_router_bootstraps_development_admin_session_from_dev_route() {
         .with_handler(HandlerDefinition::page("home", "pages/home").unwrap())
         .with_module(AdminModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -2406,6 +2479,7 @@ async fn server_host_loads_customer_storefront_templates_from_template_roots() {
 
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -2478,6 +2552,7 @@ async fn server_host_loads_customer_account_templates_from_template_roots() {
 
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .with_route(
             RouteDefinition::new("account.dashboard", HttpMethod::Get, "/account")
                 .unwrap()
@@ -2654,6 +2729,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
 
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .with_route(
             RouteDefinition::new("commerce.checkout", HttpMethod::Get, "/checkout")
                 .unwrap()
@@ -2958,6 +3034,7 @@ async fn server_host_bootstraps_guest_storefront_session_and_injects_live_state(
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -3081,6 +3158,7 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -3402,6 +3480,7 @@ async fn server_host_rejects_checkout_completion_without_payment_details() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -3628,6 +3707,7 @@ async fn server_host_rejects_checkout_completion_without_reserved_payment_intent
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -3833,6 +3913,7 @@ async fn server_host_redirects_cart_validation_failures_back_to_cart_with_repopu
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -3968,6 +4049,7 @@ async fn server_host_renders_checkout_form_defaults_for_active_checkout() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -4085,6 +4167,7 @@ async fn server_host_rejects_native_stripe_webhooks_with_invalid_stripe_signatur
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -4149,6 +4232,7 @@ async fn server_host_rejects_native_stripe_webhooks_with_stale_timestamps() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -4220,6 +4304,7 @@ async fn server_host_rejects_payment_webhooks_for_an_unconfigured_provider() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -4279,6 +4364,7 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -4474,6 +4560,7 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -4699,6 +4786,7 @@ async fn server_host_ignores_regressive_payment_failure_after_capture() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -4861,6 +4949,7 @@ async fn server_host_accepts_checkout_completion_with_card_last4_only() {
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -5030,6 +5119,7 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -5321,6 +5411,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -5471,6 +5562,7 @@ async fn server_host_can_end_a_checked_in_harbor_shop_account_session() {
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -5585,6 +5677,7 @@ async fn server_host_renders_checked_in_harbor_shop_catalog_collection_and_produ
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -5728,6 +5821,7 @@ fn runtime_plan_registers_checked_in_harbor_shop_root_route_from_customer_home_t
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
 
@@ -5760,6 +5854,7 @@ async fn server_host_injects_hidden_csrf_inputs_into_checked_in_storefront_forms
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -5929,6 +6024,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -6379,6 +6475,7 @@ async fn server_host_runs_sdk_checkout_hooks_before_stripe_handoff() {
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -6580,6 +6677,7 @@ async fn server_host_preserves_checkout_line_metadata_for_live_customer_hooks() 
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -6761,6 +6859,7 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -6986,6 +7085,7 @@ async fn server_host_accepts_native_stripe_webhooks_and_exposes_raw_json_to_cust
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -7127,6 +7227,7 @@ async fn server_host_rejects_replayed_native_stripe_webhook_deliveries_across_se
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -7413,6 +7514,7 @@ async fn server_host_exposes_persisted_commerce_orders_to_verified_webhook_hooks
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -7609,6 +7711,7 @@ async fn server_host_exposes_typed_catalog_repository_access_to_verified_webhook
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -7870,6 +7973,7 @@ async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payme
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
@@ -8099,6 +8203,7 @@ async fn server_host_persists_linked_customer_managed_assets_across_requests() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook_and_object_store_secret(
@@ -8225,6 +8330,7 @@ async fn server_host_rejects_payment_webhook_mutation_when_sdk_hook_rejects_it()
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -8324,6 +8430,7 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -8727,6 +8834,7 @@ async fn server_host_reconciles_paid_stripe_checkout_session_on_provider_return(
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -8947,6 +9055,7 @@ async fn server_host_completes_checked_in_harbor_shop_local_checkout_stub_with_p
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_placeholder_stripe();
@@ -9129,6 +9238,7 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -9555,6 +9665,7 @@ async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -9634,7 +9745,7 @@ async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
         product_body.contains("value=\"gold-membership\""),
         "{product_body}"
     );
-    assert!(product_body.contains("Add to cart"), "{product_body}");
+    assert!(product_body.contains("Ajouter au panier"), "{product_body}");
 
     let cart_bootstrap = server
         .respond(
@@ -9847,6 +9958,7 @@ async fn server_host_renders_honest_checked_in_harbor_shop_events_surfaces() {
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(EventsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -10389,6 +10501,7 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -10515,6 +10628,7 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -10755,6 +10869,7 @@ async fn server_host_allows_linked_cms_hooks_to_rewrite_the_draft_before_publish
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -10870,6 +10985,7 @@ async fn server_host_runs_sdk_cms_publish_hooks_before_live_publish() {
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -11058,6 +11174,7 @@ async fn server_host_creates_and_publishes_new_checked_in_harbor_shop_cms_page()
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -11261,6 +11378,7 @@ async fn server_host_allows_linked_cms_hooks_to_update_navigation_and_redirects_
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .register_customer_plugin(RewriteCmsWorkspacePublishPlugin)
         .build()
         .unwrap();
@@ -11437,6 +11555,7 @@ async fn server_host_renders_checked_in_harbor_shop_cms_preview_for_saved_draft(
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -11558,6 +11677,7 @@ async fn server_host_updates_checked_in_harbor_shop_navigation_from_cms_admin() 
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -11704,6 +11824,7 @@ async fn server_host_applies_checked_in_harbor_shop_redirect_rules_from_cms_admi
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -11844,6 +11965,7 @@ async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface()
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -12161,6 +12283,7 @@ async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_sh
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver();
@@ -12411,6 +12534,7 @@ async fn server_host_renders_live_completed_orders_on_checked_in_admin_orders_su
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -12535,6 +12659,7 @@ async fn server_host_supports_checked_in_harbor_shop_order_detail_and_refund_flo
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -12765,6 +12890,7 @@ async fn server_host_supports_checked_in_harbor_shop_order_fulfillment_flow() {
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_module(davenda_memberships::MembershipsModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -12978,6 +13104,7 @@ async fn server_host_replays_refund_validation_errors_on_checked_in_order_detail
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();
@@ -13170,6 +13297,7 @@ async fn server_host_explains_pending_payment_refund_block_on_order_detail() {
         .with_module(CommerceModule::new())
         .with_module(davenda_commerce::CommercePaymentsStripeModule::new())
         .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
         .unwrap();
     let resolver = live_backend_secret_resolver_with_payment_webhook();

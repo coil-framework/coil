@@ -21,6 +21,12 @@ That crate owns:
 - the linked customer plugin descriptor
 - CMS publish policy for README-style pages
 
+The Gitly Actions page now splits responsibility cleanly:
+
+- workflow rows still come from linked-backend fixture data
+- scheduler contract, queue, retry, backend, and installed handler details are derived from the
+  built runtime plan and installed scheduled-job extension
+
 Useful commands from `apps/gitly`:
 
 ```bash

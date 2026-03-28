@@ -3,8 +3,8 @@ use davenda_app::CustomerExtension;
 use davenda_wasm::{
     ApiExtensionPoint, ContractVersion, ExtensionArtifactSource, ExtensionConfigSchema,
     ExtensionInstallation, ExtensionManifest, ExtensionPackage, ExtensionPoint, HandlerId,
-    HandlerInstallation, HandlerManifest, HostGrantSet, ResourceLimits,
-    ScheduledJobExtensionPoint, TypedExecutionOutput, TypedMetadata,
+    HandlerInstallation, HandlerManifest, HostGrantSet, ResourceLimits, ScheduledJobExtensionPoint,
+    TypedExecutionOutput, TypedMetadata,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};

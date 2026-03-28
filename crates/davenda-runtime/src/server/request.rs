@@ -419,12 +419,45 @@ pub(super) async fn execute_live_request(
 ) -> Result<Response<Body>, RuntimeServerError> {
     let telemetry = &state.plan.observability.telemetry;
     let started_at = Instant::now();
+    let request_method = request.method().as_str().to_string();
+    let request_path = request.uri().path().to_string();
+    let request_host = request
+        .headers()
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let request_id = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("http:{}:{}", request_method, request_path));
     let _ = telemetry.adjust_gauge("davenda.http.requests.in_flight", 1);
     let result = execute_live_request_inner(state, request, remote_addr).await;
     let elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     let _ = telemetry.adjust_gauge("davenda.http.requests.in_flight", -1);
     let _ = telemetry.increment_counter("davenda.http.requests.total", 1);
     let _ = telemetry.record_histogram("davenda.http.request.latency_ms", elapsed_ms);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (outcome, status) = match &result {
+        Ok(response) => ("ok".to_string(), response.status().as_u16().to_string()),
+        Err(error) => (
+            live_request_error_outcome(error),
+            live_request_error_status(error).as_u16().to_string(),
+        ),
+    };
+    let _ = telemetry.record_trace(
+        davenda_observability::TraceRecord::new(request_id, "http.request", outcome, now)
+            .with_field("method", request_method)
+            .with_field("host", request_host)
+            .with_field("path", request_path)
+            .with_field("status", status)
+            .with_field("duration_ms", elapsed_ms.to_string()),
+    );
     result
 }
 
@@ -651,6 +684,94 @@ pub(super) fn error_response(error: RuntimeServerError) -> Response<Body> {
             (StatusCode::BAD_REQUEST, error.to_string()).into_response()
         }
         _ => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+fn live_request_error_status(error: &RuntimeServerError) -> StatusCode {
+    match error {
+        RuntimeServerError::Storefront(
+            StorefrontStateError::UnknownSku { .. }
+            | StorefrontStateError::InvalidQuantity
+            | StorefrontStateError::MissingPaymentMethod
+            | StorefrontStateError::MissingCheckoutEmail
+            | StorefrontStateError::InvalidPaymentLast4
+            | StorefrontStateError::MissingPaymentIntent
+            | StorefrontStateError::PaymentIntentMismatch { .. }
+            | StorefrontStateError::CheckoutNotReady { .. }
+            | StorefrontStateError::EmptyCart { .. }
+            | StorefrontStateError::UnknownPaymentReference { .. }
+            | StorefrontStateError::UnknownPaymentWebhookEvent { .. }
+            | StorefrontStateError::UnexpectedPaymentWebhookProvider { .. }
+            | StorefrontStateError::MissingPaymentWebhookDeliveryId
+            | StorefrontStateError::InvalidPaymentWebhookSignature,
+        ) => StatusCode::BAD_REQUEST,
+        RuntimeServerError::Storefront(StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            ..
+        }) => StatusCode::CONFLICT,
+        RuntimeServerError::Storefront(StorefrontStateError::MissingPaymentWebhookSecret) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
+            StatusCode::NOT_FOUND
+        }
+        RuntimeServerError::Execution(RequestExecutionError::SessionRequired { .. }) => {
+            StatusCode::UNAUTHORIZED
+        }
+        RuntimeServerError::Execution(RequestExecutionError::CapabilityRequired { .. }) => {
+            StatusCode::FORBIDDEN
+        }
+        RuntimeServerError::Execution(
+            RequestExecutionError::MissingCsrfToken { .. }
+            | RequestExecutionError::MissingSessionForCsrf { .. }
+            | RequestExecutionError::InvalidCsrfToken { .. },
+        ) => StatusCode::FORBIDDEN,
+        RuntimeServerError::Execution(RequestExecutionError::MaintenanceMode { .. }) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        RuntimeServerError::Execution(RequestExecutionError::FeatureFlagDisabled { .. }) => {
+            StatusCode::NOT_FOUND
+        }
+        RuntimeServerError::RequestBodyTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
+        RuntimeServerError::CustomerHookRejected { .. } => StatusCode::CONFLICT,
+        RuntimeServerError::CustomerHookFailed { .. } => StatusCode::SERVICE_UNAVAILABLE,
+        RuntimeServerError::MissingHost | RuntimeServerError::InvalidHeaderValue { .. } => {
+            StatusCode::BAD_REQUEST
+        }
+        RuntimeServerError::Execution(_) => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn live_request_error_outcome(error: &RuntimeServerError) -> String {
+    match error {
+        RuntimeServerError::Execution(RequestExecutionError::RouteNotFound { .. }) => {
+            "route_not_found".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::SessionRequired { .. }) => {
+            "session_required".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::CapabilityRequired { .. }) => {
+            "capability_required".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::MaintenanceMode { .. }) => {
+            "maintenance_mode".to_string()
+        }
+        RuntimeServerError::Execution(RequestExecutionError::FeatureFlagDisabled { .. }) => {
+            "feature_flag_disabled".to_string()
+        }
+        RuntimeServerError::Storefront(StorefrontStateError::ReplayedPaymentWebhookDelivery {
+            ..
+        }) => "storefront_conflict".to_string(),
+        RuntimeServerError::Storefront(_) => "storefront_error".to_string(),
+        RuntimeServerError::CustomerHookRejected { .. } => "customer_hook_rejected".to_string(),
+        RuntimeServerError::CustomerHookFailed { .. } => "customer_hook_failed".to_string(),
+        RuntimeServerError::RequestBodyTooLarge { .. } => "request_body_too_large".to_string(),
+        RuntimeServerError::Execution(_) => "request_error".to_string(),
+        RuntimeServerError::Authorization { .. } => "authorization_error".to_string(),
+        RuntimeServerError::Configuration { .. } => "configuration_error".to_string(),
+        RuntimeServerError::MissingHost => "missing_host".to_string(),
+        RuntimeServerError::InvalidHeaderValue { .. } => "invalid_header".to_string(),
+        _ => "internal_error".to_string(),
     }
 }
 

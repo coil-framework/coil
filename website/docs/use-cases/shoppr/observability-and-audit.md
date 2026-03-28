@@ -2,151 +2,123 @@
 title: Shoppr Observability And Audit
 ---
 
-Shoppr is the best place in the repo to understand how Davenda surfaces operator trust signals in a
-real customer app.
+Shoppr is the strongest public example of operator-facing trust signals in a real customer app.
 
-Use this page when you want to answer:
+Use it to study three concrete things:
 
-- where metrics, tracing, and audit are enabled
-- which admin pages expose the resulting state
-- how linked customer hooks participate in audit
+- runtime observability toggles in app config
+- audit visibility in the admin shell
+- order/admin surfaces that stay truthful after checkout and webhook follow-up
 
-## Start With Runtime Config
+## Start With The Config
 
-Shoppr’s local observability settings live in `apps/shoppr/platform.dev.toml`.
+Shoppr enables observability in the same file a developer already uses to boot the app:
 
-The relevant blocks are:
+```toml
+[observability]
+metrics = true
+tracing = true
 
-- `[observability]`
-  - `metrics = true`
-  - `tracing = true`
-- `[jobs]`
-  - background-work backend
-- `[cache]`
-  - L1 and L2 cache setup
+[jobs]
+backend = "redis"
+```
 
-That file is the operational contract. The templates are just the UI on top.
+That lives in `apps/shoppr/platform.dev.toml`.
 
-## The Main Operator Surfaces
+This is the first useful lesson: observability is part of the runtime contract the customer app
+ships, not a hidden post-deploy tweak.
 
-Read these templates together:
+## The Audit Page Is A Real Surface
 
-- `apps/shoppr/templates/admin/dashboard.html`
-- `apps/shoppr/templates/admin/audit.html`
-- `apps/shoppr/templates/commerce/orders.html`
-- `apps/shoppr/templates/commerce/order-detail.html`
+The Shoppr audit template is a good public example because it tells you exactly what operators can
+expect:
 
-These pages are intentionally honest about what the app can and cannot yet do.
+```html
+<p>
+  Backend <code dv:text="${auditBackend}">local-sqlite</code> at
+  <code dv:text="${auditLocation}">/var/lib/davenda/shared-state</code> with
+  <strong dv:text="${auditEntryCount}">0</strong> recorded entries.
+</p>
+...
+<tr dv:each="entry : ${auditEntries}">
+  <td dv:text="${entry.when}">1764223200</td>
+  <td dv:text="${entry.actor}">operator-live-1</td>
+  <td dv:text="${entry.action}">Issue refund</td>
+  <td dv:text="${entry.capability}">order.refund.issue</td>
+</tr>
+```
 
-## Audit Is A Real Runtime Surface
-
-The Shoppr audit page is not just placeholder copy anymore. The current template in
-`apps/shoppr/templates/admin/audit.html` expects:
-
-- `auditBackend`
-- `auditLocation`
-- `auditEntryCount`
-- `hasAuditEntries`
-- `auditEntries`
-
-Those are runtime-backed fields shaped in `crates/davenda-runtime/src/render/model.rs`.
-
-This is important because it means the product is teaching a real audit boundary:
+That teaches the right operator questions:
 
 - who acted
 - what they did
-- what capability it mapped to
-- what resource changed
+- which capability/resource changed
 - whether the action succeeded
 
-## Where Audit Records Come From
+## Orders Are Part Of Observability Too
 
-There are two main sources in the current design:
+Shoppr’s observability story is not just `/admin/audit`.
 
-- native admin/operator actions
-- linked customer hook audit calls through `AuditFacade`
+The orders page is also teaching operator truth:
 
-The linked-customer audit facade lives in:
+```html
+<p>
+  This queue is store-wide. Use it to confirm payment state, review checkout email and totals,
+  and move into the per-order support detail view before escalating a checkout case.
+</p>
+```
 
-- `crates/davenda-runtime/src/render/model.rs`
-- `crates/davenda-customer-sdk/src/facade.rs`
+And:
 
-The shared metadata audit persistence path lives in:
+```html
+<p>
+  After a Stripe return, compare the customer account view and provider callback window before
+  treating Pending Payment as a failed checkout.
+</p>
+```
 
-- `crates/davenda-runtime/src/wasm/host/services/metadata/shared.rs`
+That is observability in the product, not just in logs.
 
-That means the same system can record:
+## What A New Developer Should Actually Open
 
-- CMS/admin actions
-- order operations
-- customer hook side effects
+Once Shoppr is running, inspect:
 
-## Shoppr Examples To Read
+- `/ready`
+- `/admin`
+- `/admin/audit`
+- `/admin/orders`
 
-### Admin audit UI
+That sequence is more useful than starting in runtime internals, because it shows how operational
+signals appear in the actual store.
 
-Read:
+## Linked Customer Hooks Still Fit The Same Boundary
 
-- `apps/shoppr/templates/admin/audit.html`
+Shoppr’s linked backend can record customer-owned evidence through the stable runtime facade. That
+matters because customer logic should not invent a second audit pipeline beside the app.
 
-This template is a good example because it teaches both states:
+The right public takeaway is:
 
-- truthful empty state
-- real audit table once entries exist
+- native admin actions and customer hooks should land in one operator-history lane
+- the app surfaces that evidence through the shared admin shell
 
-### Order operations
+## Honest Limits
 
-Read:
+Shoppr does not yet ship:
 
-- `apps/shoppr/templates/commerce/orders.html`
-- `apps/shoppr/templates/commerce/order-detail.html`
+- a public dashboard definition for metrics
+- a trace backend walkthrough
+- a second, non-commerce app with comparable audit visibility
 
-These templates show how audit and operator history matter in support work, not just in an abstract
-"audit subsystem."
+So copy Shoppr for:
 
-### Linked customer backend
+- audit UI shape
+- truthful operator empty states
+- post-checkout/admin support visibility
 
-Read:
-
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
-- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-
-These files show where customer-owned Rust can add audit-aware logic without escaping the stable
-host boundary.
-
-## Tests That Prove The Boundary
-
-The strongest runtime coverage lives in:
-
-- `crates/davenda-runtime/src/tests/server.rs`
-
-Relevant test areas in that file cover:
-
-- diagnostics probe access control
-- metadata audit backend selection
-- verified webhook hook execution
-- linked customer asset and repository behaviour
-
-If you want proof the observability boundary is real, not just documented, start there.
-
-## What A New Developer Should Copy
-
-From Shoppr, copy this pattern:
-
-1. enable observability in `platform.dev.toml`
-2. expose honest admin surfaces in templates
-3. shape runtime audit and operator fields in the render model
-4. let linked hooks record audit entries through the facade instead of inventing side channels
-
-## Common Mistakes
-
-- Do not describe an audit page as available if the template only has placeholder prose.
-- Do not let customer hooks write their own parallel audit log outside the stable facade.
-- Do not hide observability expectations only in operator docs.
-  - surface them in the customer app config and templates too
+Do not claim the repo already contains a complete production monitoring stack tutorial.
 
 ## Read Next
 
-- [Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work.md)
-- [Shoppr Checkout And Operations](./checkout-and-operations.md)
+- [Shoppr Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work.md)
+- [Observability, monitoring, and audit](../../operations/observability.md)
 - [Environment Variables](../../reference/environment-variables.md)

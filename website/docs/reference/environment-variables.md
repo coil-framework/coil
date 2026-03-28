@@ -119,13 +119,27 @@ The demo customer apps also support workspace-root discovery overrides:
   - `HARBOR_SHOP_APP_ROOT`
 - Gitly:
   - `GITLY_APP_ROOT`
+  - `OCTOHUB_APP_ROOT`
 
 Concrete files:
 
 - `apps/shoppr/crates/shoppr-app/src/lib.rs`
 - `apps/gitly/crates/gitly-app/src/lib.rs`
 
-These exist to make the customer binaries usable from more than one launch context.
+These exist to make the customer binaries usable from more than one launch context, but they are
+not all equally current:
+
+- `GITLY_APP_ROOT` is the current Gitly override.
+- `OCTOHUB_APP_ROOT` is a legacy compatibility fallback retained during the Gitly rename.
+- `HARBOUR_SHOP_APP_ROOT` and `HARBOR_SHOP_APP_ROOT` are legacy Shoppr compatibility fallbacks from
+  the earlier Harbor naming.
+
+For new local setup and docs, prefer:
+
+- running the customer binary from the app workspace so root discovery succeeds automatically
+- or passing the explicit binary flag such as `shoppr --app-root ...` / `gitly --app-root ...`
+
+Do not introduce new automation that depends on the legacy Harbor or Octohub variable names.
 
 ## What To Put In `.env.example`
 

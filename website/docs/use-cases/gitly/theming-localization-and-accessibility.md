@@ -2,75 +2,114 @@
 title: Theming, Localisation, And Accessibility
 ---
 
-Gitly is the best non-commerce example of Davenda's theme and frontend behaviour model.
+Gitly is the best public non-commerce example of a customer-owned frontend layer on Davenda.
 
-## Theme Files To Read
+It is also important to read it honestly:
 
-Start with:
+- theme switching is frontend-owned
+- localized routes are runtime-backed
+- most visible translated copy is currently applied in frontend JS, not through a server-rendered
+  translation API
 
-- `apps/gitly/theme/assets/site.css`
-- `apps/gitly/theme/assets/site.js`
-- `apps/gitly/theme/tokens.toml`
+## Theme Switching Is A Customer-Frontend Behavior
 
-These files show how the customer app owns visual identity and browser behaviour directly.
+The relevant control markup is simple:
 
-## Theme Switching
+```html
+<div class="theme-switcher" role="group" aria-labelledby="theme-switcher-label">
+  <button type="button" data-theme-option="light">Light</button>
+  <button type="button" data-theme-option="dark">Dark</button>
+  <button type="button" data-theme-option="system">System</button>
+</div>
+```
 
-Gitly's theme switcher lives in `apps/gitly/theme/assets/site.js`.
+And the behavior is owned by the app’s JS:
 
-That file owns:
+```js
+function applyTheme(theme) {
+  const resolved = theme === "system"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : theme;
+  document.documentElement.dataset.theme = resolved;
+  localStorage.setItem("gitly-theme", theme);
+}
+```
 
-- `light`, `dark`, and `system` mode switching
-- persistence of the chosen theme
-- the small client-side behaviour needed by the product shell
+That is a good public example because it keeps theming in customer assets, not in framework magic.
 
-This is a good example because it keeps theming in customer-owned frontend assets rather than a
-framework-owned control panel.
+## Localisation Is Split Across Runtime And Frontend
 
-## Localisation In Practice
+Gitly still declares locales and localized routes in config:
 
-Gitly's localisation story is split across:
+```toml
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+localized_routes = true
+```
 
-- `apps/gitly/app.toml`
-- `apps/gitly/platform.dev.toml`
-- `apps/gitly/theme/assets/site.js`
+So the runtime side is real:
 
-The app and platform config declare supported locales and localised routes. Then `site.js` carries
-the customer-owned translation tables and route-aware locale switching behaviour.
+- locale-prefixed routes exist
+- locale-aware links exist
+- the request already resolves under a locale
 
-That is a useful example because it shows Davenda's i18n model in a product that is not a store.
+But the visible copy on many pages is then applied by a customer-owned frontend dictionary:
 
-## Accessibility In A Dense Product UI
+```html
+<h1 data-i18n="actions.title">Workflow runs</h1>
+<p data-i18n="actions.mockBody">
+  This browser-side loop simulates a scheduled refresh so the Actions demo shows visible cadence.
+</p>
+```
 
-Gitly is also a strong accessibility example because its pages are not simple marketing layouts.
+```js
+function applyCopy(locale) {
+  const messages = translations[locale] || translations["en-GB"];
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    const key = node.getAttribute("data-i18n");
+    const value = messages.copy[key] || messages[key];
+    if (value) node.textContent = value;
+  });
+}
+```
 
-Read:
+That makes Gitly a good example of a customer-owned dictionary pattern, not a proof that Davenda
+already ships a built-in `t()` helper.
 
-- `apps/gitly/templates/gitly/repository.html`
-- `apps/gitly/templates/gitly/issues.html`
-- `apps/gitly/templates/gitly/pulls.html`
-- `apps/gitly/theme/assets/site.css`
+## Accessibility Is Visible In The Markup
 
-These files demonstrate:
+Gitly is worth studying because it applies these behaviors in dense product pages, not only in a
+marketing homepage.
 
-- visible focus states
-- keyboard-oriented navigation patterns
-- readable dense tables and panels
-- theme and contrast concerns
+For example, the Actions page already includes:
 
-That makes Gitly a useful reference app for product UIs that need more than hero banners and cards.
+- a skip link
+- labelled primary navigation
+- labelled language and theme controls
+- dense panels that still keep semantic headings and readable control groups
 
-## Adapt This For Your App
+That keeps accessibility work in the same customer-owned template and asset layer as the rest of
+the UI.
 
-Copy these patterns:
+## What To Copy From Gitly
 
-- keep theme assets customer-owned
-- let the app own translated UI copy where that is the current product choice
-- make theme switching a visible product behaviour
-- keep accessibility work in the same frontend layer as the actual UI
+Copy Gitly when you want:
+
+- customer-owned theme switching
+- localized routes plus app-owned UI dictionaries
+- accessible product-shell controls
+- a non-commerce example of the same site/locale/runtime model
+
+Do not copy Gitly as proof of:
+
+- server-rendered translated copy everywhere
+- a framework-owned translation file system
+
+That is not what this app is demonstrating.
 
 ## Read Next
 
-- [Theme Structure](../../reference/theme-structure.md)
 - [Internationalisation](../../reference/internationalization.md)
+- [Theme Structure](../../reference/theme-structure.md)
 - [Accessibility](../../reference/accessibility.md)

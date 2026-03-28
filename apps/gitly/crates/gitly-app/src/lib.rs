@@ -13,10 +13,10 @@ use davenda_app::{
     MigrationPlanOwner,
 };
 use davenda_auth::load_auth_model_package_at;
-use davenda_config::{Environment, PlatformConfig};
+use davenda_config::{Environment, JobBackend, PlatformConfig};
 use davenda_core::{
-    ExtensionSlotDescriptor, ExtensionSlotKind, ModuleManifest, PlatformModule, RegistrationError,
-    ServiceRegistry,
+    ExtensionSlotDescriptor, ExtensionSlotKind, JobTriggerKind, ModuleManifest, PlatformModule,
+    RegistrationError, ServiceRegistry,
 };
 use davenda_customer_sdk::CustomerBackendPlugin;
 use davenda_data::{MigrationPlan, MigrationRegistry};
@@ -24,6 +24,7 @@ use davenda_runtime::{
     EnvironmentSecretResolver, HandlerDefinition, HttpMethod, HttpServerHost, RouteArea,
     RouteDefinition, RuntimePlan, SecretResolver,
 };
+use davenda_wasm::{ExtensionPoint, HandlerId};
 pub use gitly_backend::GitlyLinkedPluginSummary;
 
 const SHOWCASE_MODULE_ID: &str = "gitly-showcase";
@@ -208,7 +209,8 @@ impl GitlyWorkspace {
                 )
             })?;
 
-        let modules = resolve_modules_from_config(&config).context("failed to resolve Gitly modules")?;
+        let modules =
+            resolve_modules_from_config(&config).context("failed to resolve Gitly modules")?;
         let extension_packages = extensions::load_extension_packages(
             &self.app_root,
             Path::new(&config.wasm.directory),
@@ -542,7 +544,7 @@ fn augment_runtime_plan(runtime: &mut RuntimePlan) -> Result<()> {
         ensure_handler(runtime, HandlerDefinition::page(route_name, template)?)?;
     }
 
-    for (route, payload) in gitly_api_routes() {
+    for (route, payload) in gitly_api_routes(runtime) {
         let route_name = route.name.clone();
         ensure_route(runtime, route)?;
         ensure_handler(runtime, HandlerDefinition::json(route_name, payload)?)?;
@@ -552,7 +554,12 @@ fn augment_runtime_plan(runtime: &mut RuntimePlan) -> Result<()> {
 }
 
 fn ensure_route(runtime: &mut RuntimePlan, route: RouteDefinition) -> Result<()> {
-    if runtime.http.routes.iter().any(|existing| existing.name == route.name) {
+    if runtime
+        .http
+        .routes
+        .iter()
+        .any(|existing| existing.name == route.name)
+    {
         bail!("duplicate Gitly route `{}`", route.name);
     }
     runtime.http.routes.push(route);
@@ -594,19 +601,16 @@ fn gitly_page_routes() -> Vec<(RouteDefinition, &'static str)> {
             } else {
                 format!("{prefix}{path}")
             };
-            let route = RouteDefinition::new(
-                format!("gitly.{code}.{name}"),
-                HttpMethod::Get,
-                full_path,
-            )
-            .expect("static Gitly routes should be valid");
+            let route =
+                RouteDefinition::new(format!("gitly.{code}.{name}"), HttpMethod::Get, full_path)
+                    .expect("static Gitly routes should be valid");
             routes.push((route, template));
         }
     }
     routes
 }
 
-fn gitly_api_routes() -> Vec<(RouteDefinition, BTreeMap<String, String>)> {
+fn gitly_api_routes(runtime: &RuntimePlan) -> Vec<(RouteDefinition, BTreeMap<String, String>)> {
     let definitions = [
         (
             "gitly.api.repository",
@@ -621,7 +625,7 @@ fn gitly_api_routes() -> Vec<(RouteDefinition, BTreeMap<String, String>)> {
         (
             "gitly.api.workflows",
             "/api/github/workflows",
-            gitly_backend::workflow_api_payload(),
+            workflow_api_payload(runtime),
         ),
         (
             "gitly.api.organization",
@@ -656,6 +660,147 @@ fn gitly_api_routes() -> Vec<(RouteDefinition, BTreeMap<String, String>)> {
         .collect()
 }
 
+fn workflow_api_payload(runtime: &RuntimePlan) -> BTreeMap<String, String> {
+    let runs = gitly_backend::workflow_runs();
+    let running = runs.iter().filter(|run| run.status == "Running").count();
+    let queued = runs.iter().filter(|run| run.status == "Queued").count();
+    let scheduled_jobs = runtime
+        .registered_runtime_jobs
+        .iter()
+        .filter(|job| job.contract.trigger == JobTriggerKind::Scheduled)
+        .count();
+    let scheduler_job = runtime
+        .registered_runtime_jobs
+        .iter()
+        .find(|job| job.contract.name == "github.actions.refresh");
+    let scheduler_extension = gitly_actions_scheduler(runtime);
+
+    let mut payload = BTreeMap::from([
+        ("workflow_count".to_string(), runs.len().to_string()),
+        ("running".to_string(), running.to_string()),
+        ("queued".to_string(), queued.to_string()),
+        ("primary_workflow".to_string(), runs[0].workflow.clone()),
+        ("primary_cadence".to_string(), runs[0].cadence.clone()),
+        (
+            "scheduler_backend".to_string(),
+            job_backend_label(runtime.config.jobs.backend).to_string(),
+        ),
+        (
+            "scheduled_job_count".to_string(),
+            scheduled_jobs.to_string(),
+        ),
+    ]);
+
+    if let Some(job) = scheduler_job {
+        payload.insert("scheduler_contract".to_string(), job.contract.name.clone());
+        payload.insert(
+            "scheduler_trigger".to_string(),
+            job_trigger_label(job.contract.trigger).to_string(),
+        );
+        payload.insert(
+            "scheduler_queue".to_string(),
+            job.queue.as_str().to_string(),
+        );
+        payload.insert(
+            "scheduler_retry_limit".to_string(),
+            job.retry_policy.max_attempts.to_string(),
+        );
+        payload.insert(
+            "scheduler_dead_letter_queue".to_string(),
+            job.retry_policy
+                .dead_letter_queue
+                .as_ref()
+                .map(|queue| queue.as_str().to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        );
+        payload.insert("scheduler_module".to_string(), job.module.clone());
+    } else {
+        payload.insert(
+            "scheduler_contract".to_string(),
+            "github.actions.refresh".to_string(),
+        );
+        payload.insert("scheduler_trigger".to_string(), "missing".to_string());
+        payload.insert("scheduler_queue".to_string(), "unregistered".to_string());
+        payload.insert("scheduler_retry_limit".to_string(), "0".to_string());
+        payload.insert(
+            "scheduler_dead_letter_queue".to_string(),
+            "unregistered".to_string(),
+        );
+        payload.insert("scheduler_module".to_string(), "unregistered".to_string());
+    }
+
+    if let Some(extension) = scheduler_extension {
+        payload.insert(
+            "scheduler_extension".to_string(),
+            extension.extension_id.clone(),
+        );
+        payload.insert(
+            "scheduler_handler".to_string(),
+            extension.handler_id.as_str().to_string(),
+        );
+        payload.insert("scheduler_schedule".to_string(), extension.schedule.clone());
+        payload.insert(
+            "scheduler_handler_count".to_string(),
+            extension.handler_count.to_string(),
+        );
+    } else {
+        payload.insert("scheduler_extension".to_string(), "none".to_string());
+        payload.insert("scheduler_handler".to_string(), "none".to_string());
+        payload.insert(
+            "scheduler_schedule".to_string(),
+            "not configured".to_string(),
+        );
+        payload.insert("scheduler_handler_count".to_string(), "0".to_string());
+    }
+
+    payload
+}
+
+struct GitlyScheduledExtensionState {
+    extension_id: String,
+    handler_id: HandlerId,
+    schedule: String,
+    handler_count: usize,
+}
+
+fn gitly_actions_scheduler(runtime: &RuntimePlan) -> Option<GitlyScheduledExtensionState> {
+    for extension in runtime.extension_registry.extensions() {
+        for handler in &extension.manifest().handlers {
+            let ExtensionPoint::ScheduledJob(job) = &handler.point else {
+                continue;
+            };
+            if job.job_name != "github.actions.refresh" {
+                continue;
+            }
+
+            return Some(GitlyScheduledExtensionState {
+                extension_id: extension.manifest().id.as_str().to_string(),
+                handler_id: handler.id.clone(),
+                schedule: job.schedule.clone(),
+                handler_count: extension.installed_handler_count(),
+            });
+        }
+    }
+    None
+}
+
+fn job_trigger_label(trigger: JobTriggerKind) -> &'static str {
+    match trigger {
+        JobTriggerKind::Scheduled => "scheduled",
+        JobTriggerKind::Operator => "operator",
+        JobTriggerKind::Webhook => "webhook",
+        JobTriggerKind::DomainEvent => "domain_event",
+        JobTriggerKind::InlineFollowup => "inline_followup",
+    }
+}
+
+fn job_backend_label(backend: JobBackend) -> &'static str {
+    match backend {
+        JobBackend::Redis => "redis",
+        JobBackend::Valkey => "valkey",
+    }
+}
+
 fn manual_customer_migration_entries_from_composition(
     composition: &CustomerAppComposition,
     app_id: &str,
@@ -685,9 +830,9 @@ fn pending_migration_plan(
         if applied_keys.contains(&(step.owner.to_string(), step.id.to_string())) {
             continue;
         }
-        pending.insert(step.clone()).with_context(|| {
-            format!("failed to stage pending Gitly migration `{}`", step.id)
-        })?;
+        pending
+            .insert(step.clone())
+            .with_context(|| format!("failed to stage pending Gitly migration `{}`", step.id))?;
     }
     Ok(pending)
 }

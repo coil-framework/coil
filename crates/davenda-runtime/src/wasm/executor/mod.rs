@@ -11,6 +11,7 @@ use super::support::{
 };
 use super::*;
 use std::sync::OnceLock;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 pub(super) struct RuntimeHostServiceExecutor {
@@ -40,6 +41,26 @@ impl RuntimeHostServiceExecutor {
             result,
         }
     }
+
+    fn record_observability(
+        &self,
+        span: &str,
+        trace_id: &str,
+        outcome: &str,
+        duration_ms: u64,
+    ) {
+        let telemetry = &self.plan.observability.telemetry;
+        let _ = telemetry.record_histogram("davenda.extension.runtime_ms", duration_ms);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let _ = telemetry.record_trace(
+            davenda_observability::TraceRecord::new(trace_id.to_string(), span, outcome, now)
+                .with_field("customer_app", self.plan.config.app.name.clone())
+                .with_field("duration_ms", duration_ms.to_string()),
+        );
+    }
 }
 
 impl HostServiceExecutor for RuntimeHostServiceExecutor {
@@ -48,7 +69,19 @@ impl HostServiceExecutor for RuntimeHostServiceExecutor {
         call: &HostServiceCall,
         context: &InvocationContext,
     ) -> Result<HostServiceExecution, WasmModelError> {
-        match &call.request {
+        let span = match &call.request {
+            HostServiceRequest::Auth(_) => "wasm.host.auth",
+            HostServiceRequest::Data(_) => "wasm.host.data",
+            HostServiceRequest::Storage(_) => "wasm.host.storage",
+            HostServiceRequest::Render(_) => "wasm.host.render",
+            HostServiceRequest::CacheIntent(_) => "wasm.host.cache_intent",
+            HostServiceRequest::OutboundHttp { .. } => "wasm.host.outbound_http",
+            HostServiceRequest::SecretRead { .. } => "wasm.host.secret_read",
+            HostServiceRequest::EnqueueJob { .. } => "wasm.host.enqueue_job",
+            HostServiceRequest::MetadataWrite { .. } => "wasm.host.metadata_write",
+        };
+        let started_at = Instant::now();
+        let result = match &call.request {
             HostServiceRequest::Auth(request) => self.execute_auth(call, context, request),
             HostServiceRequest::Data(request) => self.execute_data(call, context, request),
             HostServiceRequest::Storage(request) => self.execute_storage(call, context, request),
@@ -70,7 +103,15 @@ impl HostServiceExecutor for RuntimeHostServiceExecutor {
             HostServiceRequest::MetadataWrite { kind } => {
                 self.execute_metadata(call, context, *kind)
             }
-        }
+        };
+        let elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        self.record_observability(
+            span,
+            trace_id(context),
+            if result.is_ok() { "ok" } else { "error" },
+            elapsed_ms,
+        );
+        result
     }
 }
 

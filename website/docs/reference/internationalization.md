@@ -2,155 +2,42 @@
 title: Internationalisation
 ---
 
-Davenda internationalisation starts at request resolution, not in a browser-only translation
-helper.
+Davenda resolves locale on the server, but the public apps currently demonstrate two different
+copy-delivery patterns on top of that runtime model.
 
-## Start With The Two Real Patterns
+Use this page to keep those patterns straight:
 
-Current Davenda apps use two honest patterns, but they sit on top of richer server-side runtime
-primitives than the demos currently make obvious.
+- Shoppr shows server-resolved locale, host-aware sites, and locale-aware links
+- Gitly shows customer-owned frontend dictionaries on top of localized routes
 
-### Pattern 1: server-rendered localised values
+## The Runtime Part Is Already Real
 
-```html
-<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
-  <h1 dv:text="${page.title}">Fallback title</h1>
-  <p dv:text="${account.stateSummary}">Fallback summary</p>
-</html>
-```
-
-This is the right path for:
-
-- first render
-- transactional pages
-- SEO-relevant copy
-- module-owned surfaces
-
-### Pattern 2: customer-owned translation-key dictionaries
-
-```html
-<h1 data-i18n="home.title">One Davenda app can look like a forge.</h1>
-<button type="button" data-i18n-control="dark">Dark</button>
-```
-
-This is the checked-in Gitly pattern for:
-
-- theme controls
-- demo copy
-- app-owned frontend strings
-
-The key distinction is important:
-
-- Davenda resolves locale at the runtime level
-- a translation-key dictionary is currently a customer convention, not a built-in template API
-
-## What Already Exists In Core
-
-Davenda already has server-side i18n runtime primitives in core:
-
-- locale tags
-- locale contexts
-- fallback chains
-- translation catalogs
-- translation runtime lookup
-- locale-aware URL routing
-
-So the platform is not limited to browser-only translation.
-
-What is still missing from the public customer-facing story is narrower:
-
-- a first-class customer translation file convention
-- a template-native translation helper
-- a checked-in demo that wires customer translation catalogs into server-rendered page copy
-
-## What Is Configured?
-
-At the app level:
+Shoppr’s manifest is the shortest concrete example:
 
 ```toml
 [i18n]
 default_locale = "en-GB"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 localized_routes = true
-```
 
-At the runtime level:
-
-```toml
-[i18n]
-default_locale = "en-GB"
-supported_locales = ["en-GB", "fr-FR", "pl-PL"]
-fallback_locale = "en-GB"
-localized_routes = true
-```
-
-At the site level:
-
-```toml
 [[sites]]
 id = "shoppr-fr"
+canonical_domain = "fr.localhost"
 default_locale = "fr-FR"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 ```
 
-## Field Reference
-
-### `default_locale`
-
-- Required: yes
-- Type: locale tag string
-- Meaning: default locale for the app or site
-
-### `supported_locales`
-
-- Required: yes
-- Type: array of locale tag strings
-- Meaning: locales the app or site is willing to serve
-
-### `localized_routes`
-
-- Required: yes in current checked-in manifests
-- Type: boolean
-- Meaning: whether locale is part of the route contract
-
-### `fallback_locale`
-
-- Required: runtime-level field in current checked-in configs
-- Type: locale tag string
-- Meaning: fallback behaviour for runtime locale handling
-
-## How Request Resolution Works
-
-Davenda resolves:
+That contract means the runtime already resolves:
 
 1. site from the host
-2. locale inside that site’s locale policy
-3. route under the resulting site-and-locale context
+2. locale inside that site
+3. route and links under that site-and-locale context
 
-That keeps these things aligned:
+So locale is not a browser-only afterthought.
 
-- localised URLs
-- render values
-- canonical URLs
-- alternate locale links
+## Pattern 1: Server-Resolved Locale Values
 
-The practical outcome is simple:
-
-- templates should use `locale`, `site.*`, and `links.*`
-- templates should not hand-build locale-prefixed paths
-
-## What Templates Can Read
-
-The base request model includes values such as:
-
-- `locale`
-- `site.id`
-- `site.displayName`
-- `site.brandName`
-- `site.canonicalHost`
-- `links.*`
-
-Typical usage:
+This is the base pattern templates should prefer for request-critical and SEO-relevant output:
 
 ```html
 <html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
@@ -160,85 +47,107 @@ Typical usage:
 </html>
 ```
 
-That is the correct template boundary. Locale-aware runtime values are already shaped before the
-template runs.
+That is the Shoppr-style boundary:
 
-## Translation Files And Dictionaries Today
+- the runtime resolves `locale`
+- the runtime shapes `links.*`
+- the template consumes already-localized routing context
+
+Use this pattern for:
+
+- alternate locale links
+- page shells
+- account and admin surfaces
+- checkout and confirmation pages
+
+## Pattern 2: Customer-Owned Frontend Dictionaries
+
+Gitly intentionally uses a narrower, app-owned pattern for copy:
+
+```html
+<h1 data-i18n="actions.title">Workflow runs</h1>
+<p data-i18n="actions.mockBody">
+  This browser-side loop simulates a scheduled refresh so the Actions demo shows visible cadence.
+</p>
+```
+
+And its frontend script applies the dictionary after the page is rendered:
+
+```js
+function applyCopy(locale) {
+  const messages = translations[locale] || translations["en-GB"];
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    const key = node.getAttribute("data-i18n");
+    const value = messages.copy[key] || messages[key];
+    if (value) node.textContent = value;
+  });
+}
+```
+
+That demonstrates a real customer choice, not a platform limit.
+
+Use this pattern when:
+
+- the strings are product-shell or demo copy
+- the app wants to own the dictionary format entirely
+- client-side hydration is acceptable
+
+Do not mistake it for “the Davenda i18n API.” It is Gitly’s chosen implementation.
+
+## What Davenda Does Not Yet Ship As A Customer API
 
 Current honest state:
 
-- Davenda does not yet ship a framework-owned customer translation file format
-- Davenda does not yet ship a template-native `t("key")` helper
-- Gitly demonstrates a customer-owned locale dictionary in frontend JS
-- Shoppr demonstrates server-rendered, locale-aware values, multi-site locale configuration, and
-  route-aware server-rendered market and locale switch URLs
+- there is no built-in customer translation file convention
+- there is no template-native `t("key")` helper
+- the public demos do not yet wire a checked-in customer translation catalog into server-rendered
+  page copy
 
-So if you need translation keys today, define a customer-owned convention and document it clearly.
+So if you need translation dictionaries today, define them in customer code and document that
+choice clearly.
 
-## Key Naming Pattern
+## What To Copy Right Now
 
-A stable pattern looks like this:
+### If you need server-first locale behavior
 
-- page prefix: `home`, `search`, `explore`, `actions`
-- field suffix: `title`, `summary`, `empty`
-- grouped controls: `controls.language`, `controls.theme`
-- grouped navigation: `nav.home`, `nav.profile`
+Copy the Shoppr pattern:
 
-That is exactly the pattern Gitly uses.
+- declare locales and sites in `app.toml`
+- declare runtime locale policy in `platform.dev.toml`
+- consume `locale`, `site.*`, and `links.*` in templates
 
-## Adding A New Locale
+### If you need app-owned UI copy dictionaries
 
-The practical sequence is:
+Copy the Gitly pattern:
 
-1. add the locale to app-level `supported_locales`
-2. add it to the relevant site’s `supported_locales`
-3. decide whether the site’s `default_locale` changes
-4. update customer-owned translation dictionaries if you use them
-5. update localised content and server-rendered copy
-6. verify localised routes and SEO output
-
-If the host, brand, or assortment also changes, you probably need a new site, not just a new locale.
+- keep localized routes in app/runtime config
+- keep dictionary keys in app-owned assets
+- apply those strings in frontend code
+- document clearly that this is a customer convention
 
 ## Common Mistakes
 
-### Pretending there is already a built-in translation-file system and `t()` helper
+### Claiming Gitly is “server-rendered translated copy”
 
-There is not. Be explicit about the current customer convention.
+It is not. Gitly’s route/locale resolution is runtime-backed, but the visible translated copy is
+currently applied in frontend JS.
 
-### Mistaking the Gitly `site.js` dictionary for the platform boundary
-
-It is a demo choice, not the architectural limit of Davenda.
-
-### Hardcoding `/en-GB/` or `/fr/` paths in templates
+### Hardcoding locale-prefixed paths in templates
 
 Use runtime-generated links instead.
 
-### Treating locale as only text replacement
+### Treating locale as only a text problem
 
-Locale also affects routes and SEO.
+Locale also affects routes, canonical URLs, and alternate links.
 
 ### Confusing site with locale
 
-Site is the public brand and host boundary. Locale is the language and formatting layer inside it.
+Site is the host/brand/public-surface boundary. Locale is the language/formatting layer inside
+that surface.
 
-## Supporting Implementation And Repo Examples
+## Read Next
 
-Concrete supporting files:
-
-- `apps/shoppr/app.toml`
-- `apps/shoppr/platform.toml`
-- `apps/shoppr/platform.dev.toml`
-- `apps/shoppr/catalog.toml`
-- `apps/gitly/app.toml`
-- `apps/gitly/platform.toml`
-- `apps/gitly/platform.dev.toml`
-- `apps/gitly/theme/assets/site.js`
-- `crates/davenda-runtime/src/http/routing/model.rs`
-- `crates/davenda-runtime/src/render/seo.rs`
-
-## What Should I Read Next?
-
-- [Template Models](./template-models.md)
 - [SEO](./seo.md)
-- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
-- [Internationalisation, Localisation, And Content](../core-concepts/internationalization-localization-and-content.md)
+- [Template Models](./template-models.md)
+- [Gitly Theming, Localization, And Accessibility](../use-cases/gitly/theming-localization-and-accessibility.md)
+- [Sites, locales, and markets](../core-concepts/sites-locales-and-markets.md)

@@ -11,9 +11,9 @@ It demonstrates:
 - a linked Rust backend crate
 - bounded runtime-installed WASM packages
 - custom GitHub-style API routes
-- mock scheduled jobs that simulate Actions
-- multilingual frontend copy in `en-GB`, `fr-FR`, and `de-DE`
-- light, dark, and system theme switching from the frontend
+- a real scheduled-job extension contract plus runtime-derived scheduler state on the Actions page
+- localized routes plus client-side multilingual frontend copy in `en-GB`, `fr-FR`, and `de-DE`
+- light, dark, and system theme switching from the frontend with local persistence
 
 ## Quick Start
 
@@ -24,8 +24,14 @@ From this folder:
 docker compose up --build
 ```
 
-If those ports collide with another local stack, copy `.env.example` to `.env` and change the
-published host ports before running Compose.
+If those ports collide with another local stack, set the published host ports through Compose env
+vars before running:
+
+- `GITLY_HTTP_PORT`
+- `GITLY_POSTGRES_PORT`
+- `GITLY_REDIS_PORT`
+- `GITLY_MINIO_PORT`
+- `GITLY_MINIO_CONSOLE_PORT`
 
 Then open:
 
@@ -51,7 +57,7 @@ What you should see:
 - static repository, organization, and profile surfaces
 - custom API-driven summary cards
 - a WASM-backed community pulse endpoint
-- a mock scheduled-job surface for GitHub Actions
+- a runtime-derived scheduled-job surface for GitHub Actions
 
 ## What Lives Where
 
@@ -68,7 +74,8 @@ What you should see:
 - the GitHub-inspired light/dark design system and responsive layout
 
 `theme/assets/site.js`
-- locale switching, theme switching, and client-side API hydration
+- locale switching, theme switching, client-side API hydration, and the customer-owned translation
+  dictionary used by the demo shell
 
 `crates/gitly-backend/`
 - the linked customer-owned Rust backend
@@ -119,6 +126,12 @@ Gitly also demonstrates the bounded third-party path:
 - `gitly-actions-scheduler`
   - fulfils the `github.actions.refresh` scheduled-job slot
 
+The important bound to understand is:
+
+- the scheduled-job contract and installed extension are real
+- the workflow rows are still fixture data, so the demo stays understandable without pretending to
+  be a full automation product
+
 These packages are runtime-installed, hash-pinned in `app.toml`, and intentionally narrower than
 the linked Rust backend. That is the split Davenda is supposed to show:
 
@@ -161,7 +174,11 @@ cargo run -p gitly -- migrate apply --dry-run
 cargo run -p gitly -- up
 ```
 
-`.env.example` documents the minimum local variables expected by the app.
+For direct local runs, the important runtime inputs are still the same ones used by Compose:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `OBJECT_STORE_URL`
 
 ## Reading Order
 

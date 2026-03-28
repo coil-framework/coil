@@ -17,7 +17,7 @@ pub use health::{
 pub use runtime::ObservabilityRuntime;
 pub use telemetry::{
     HistogramReading, MetricDefinition, MetricKind, MetricReading, MetricUnit, TelemetryCatalog,
-    TracePolicy,
+    TracePolicy, TraceRecord,
 };
 pub use validation::{
     BrandId, CohortId, CustomerAppId, DimensionKey, FeatureFlagId, MetricName, SiteId,

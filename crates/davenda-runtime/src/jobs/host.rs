@@ -10,6 +10,7 @@ pub struct JobsHost {
     pub customer_app: String,
     pub scheduler_node_id: String,
     pub runtime: JobsRuntimeServices,
+    pub telemetry: davenda_observability::TelemetryCatalog,
     pub queue_topology: QueueTopology,
     pub registered_jobs: Vec<RuntimeJobDefinition>,
     pub registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
@@ -20,12 +21,21 @@ pub struct JobsHost {
     next_event_sequence: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobsQueueSnapshot {
+    pub ready: usize,
+    pub scheduled: usize,
+    pub in_flight: usize,
+    pub dead_letters: usize,
+}
+
 impl JobsHost {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn new(
         customer_app: String,
         scheduler_node_id: String,
         runtime: JobsRuntimeServices,
+        telemetry: davenda_observability::TelemetryCatalog,
         queue_topology: QueueTopology,
         registered_jobs: Vec<RuntimeJobDefinition>,
         registered_event_subscriptions: Vec<RuntimeEventSubscriptionDefinition>,
@@ -38,6 +48,7 @@ impl JobsHost {
             customer_app,
             scheduler_node_id,
             runtime,
+            telemetry,
             queue_topology,
             registered_jobs,
             registered_event_subscriptions,
@@ -56,6 +67,7 @@ impl JobsHost {
     ) -> Result<JobId, RuntimeJobsError> {
         let job_id = spec.job_id.clone();
         self.coordinator.enqueue(spec, now)?;
+        self.refresh_observability("jobs.enqueue_spec", "ok", Some(job_id.as_str()), now);
         Ok(job_id)
     }
 
@@ -67,6 +79,12 @@ impl JobsHost {
         let dead_letter_id = DeadLetterId::new(dead_letter_id.into())?;
         let now = JobInstant::from_unix_seconds(now_unix_seconds);
         let record = self.coordinator.retry_dead_letter(&dead_letter_id, now)?;
+        self.refresh_observability(
+            "jobs.retry_dead_letter",
+            "ok",
+            Some(record.spec.job_id.as_str()),
+            now,
+        );
         Ok(record.spec.job_id)
     }
 
@@ -133,6 +151,7 @@ impl JobsHost {
 
         let job_id = spec.job_id.clone();
         self.coordinator.enqueue(spec, now)?;
+        self.refresh_observability("jobs.enqueue_job", "ok", Some(job_id.as_str()), now);
         Ok(job_id)
     }
 
@@ -198,6 +217,8 @@ impl JobsHost {
             enqueued_jobs.push(job_id);
         }
 
+        self.refresh_observability("jobs.emit_domain_event", "ok", Some(event_id.as_str()), now);
+
         Ok(DomainEventDispatch {
             event_id,
             event_type,
@@ -210,17 +231,21 @@ impl JobsHost {
         now: JobInstant,
         lease_ttl: std::time::Duration,
     ) -> Result<SchedulerLeadership, RuntimeJobsError> {
-        Ok(self.coordinator.acquire_scheduler_leadership(
+        let leadership = self.coordinator.acquire_scheduler_leadership(
             self.scheduler_node_id.clone(),
             now,
             lease_ttl,
-        )?)
+        )?;
+        self.refresh_observability("jobs.acquire_scheduler_leadership", "ok", None, now);
+        Ok(leadership)
     }
 
     pub fn promote_due_jobs(&mut self, now: JobInstant) -> Result<Vec<JobId>, RuntimeJobsError> {
-        Ok(self
+        let promoted = self
             .coordinator
-            .promote_due_jobs(&self.scheduler_node_id, now)?)
+            .promote_due_jobs(&self.scheduler_node_id, now)?;
+        self.refresh_observability("jobs.promote_due_jobs", "ok", None, now);
+        Ok(promoted)
     }
 
     pub fn lease_ready_jobs(
@@ -231,9 +256,11 @@ impl JobsHost {
         lease_ttl: std::time::Duration,
         max_jobs: usize,
     ) -> Result<Vec<JobLease>, RuntimeJobsError> {
-        Ok(self
+        let leased = self
             .coordinator
-            .lease_ready_jobs(queue, worker_id, now, lease_ttl, max_jobs)?)
+            .lease_ready_jobs(queue, worker_id, now, lease_ttl, max_jobs)?;
+        self.refresh_observability("jobs.lease_ready_jobs", "ok", None, now);
+        Ok(leased)
     }
 
     pub fn acknowledge_completed(
@@ -241,7 +268,14 @@ impl JobsHost {
         lease: &JobLease,
         now: JobInstant,
     ) -> Result<(), RuntimeJobsError> {
-        Ok(self.coordinator.acknowledge_completed(lease, now)?)
+        self.coordinator.acknowledge_completed(lease, now)?;
+        self.refresh_observability(
+            "jobs.acknowledge_completed",
+            "ok",
+            Some(lease.record.spec.job_id.as_str()),
+            now,
+        );
+        Ok(())
     }
 
     pub fn acknowledge_failed(
@@ -251,13 +285,30 @@ impl JobsHost {
         reason: DeadLetterReason,
         error_message: impl Into<String>,
     ) -> Result<JobFailureDisposition, RuntimeJobsError> {
-        Ok(self
+        let outcome = self
             .coordinator
-            .acknowledge_failed(lease, now, reason, error_message.into())?)
+            .acknowledge_failed(lease, now, reason, error_message.into())?;
+        self.refresh_observability(
+            "jobs.acknowledge_failed",
+            "ok",
+            Some(lease.record.spec.job_id.as_str()),
+            now,
+        );
+        Ok(outcome)
     }
 
     pub fn coordinator(&self) -> &JobsCoordinator {
         &self.coordinator
+    }
+
+    pub fn queue_snapshot(&mut self) -> JobsQueueSnapshot {
+        self.coordinator.refresh();
+        JobsQueueSnapshot {
+            ready: self.coordinator.ready_jobs().len(),
+            scheduled: self.coordinator.scheduled_jobs().len(),
+            in_flight: self.coordinator.in_flight_jobs().len(),
+            dead_letters: self.coordinator.dead_letters().len(),
+        }
     }
 
     fn issue_job_id(&mut self, job_name: &str) -> Result<JobId, RuntimeJobsError> {
@@ -274,5 +325,35 @@ impl JobsHost {
             "evt:{}:{}",
             event_type, self.next_event_sequence
         ))?)
+    }
+
+    fn refresh_observability(
+        &mut self,
+        span: &str,
+        outcome: &str,
+        trace_id: Option<&str>,
+        now: JobInstant,
+    ) {
+        let snapshot = self.queue_snapshot();
+        let depth = snapshot.ready + snapshot.scheduled + snapshot.in_flight;
+        let _ = self
+            .telemetry
+            .set_gauge("davenda.queue.depth", depth.min(i64::MAX as usize) as i64);
+        let _ = self.telemetry.record_trace(
+            davenda_observability::TraceRecord::new(
+                trace_id
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| format!("{}:{}", span, self.scheduler_node_id)),
+                span,
+                outcome,
+                now.as_unix_seconds(),
+            )
+            .with_field("customer_app", self.customer_app.clone())
+            .with_field("scheduler_node_id", self.scheduler_node_id.clone())
+            .with_field("ready", snapshot.ready.to_string())
+            .with_field("scheduled", snapshot.scheduled.to_string())
+            .with_field("in_flight", snapshot.in_flight.to_string())
+            .with_field("dead_letters", snapshot.dead_letters.to_string()),
+        );
     }
 }

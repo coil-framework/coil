@@ -2,8 +2,10 @@ use crate::ObservabilityError;
 use crate::health::ErrorCategory;
 use crate::validation::{DimensionKey, MetricName};
 use davenda_config::{Environment, ObservabilityConfig};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
+
+const MAX_RECENT_TRACES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MetricKind {
@@ -42,9 +44,41 @@ pub enum MetricReading {
     Histogram(HistogramReading),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceRecord {
+    pub trace_id: String,
+    pub span: String,
+    pub outcome: String,
+    pub recorded_at_unix_seconds: u64,
+    pub fields: BTreeMap<String, String>,
+}
+
+impl TraceRecord {
+    pub fn new(
+        trace_id: impl Into<String>,
+        span: impl Into<String>,
+        outcome: impl Into<String>,
+        recorded_at_unix_seconds: u64,
+    ) -> Self {
+        Self {
+            trace_id: trace_id.into(),
+            span: span.into(),
+            outcome: outcome.into(),
+            recorded_at_unix_seconds,
+            fields: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.fields.insert(key.into(), value.into());
+        self
+    }
+}
+
 #[derive(Debug, Default)]
 struct TelemetryState {
     readings: BTreeMap<MetricName, MetricReading>,
+    recent_traces: VecDeque<TraceRecord>,
 }
 
 impl MetricDefinition {
@@ -157,6 +191,7 @@ impl TelemetryCatalog {
             ]),
             live_state: Arc::new(Mutex::new(TelemetryState {
                 readings: initial_readings,
+                recent_traces: VecDeque::new(),
             })),
         })
     }
@@ -205,6 +240,40 @@ impl TelemetryCatalog {
             }
             _ => false,
         })
+    }
+
+    pub fn set_gauge(&self, name: &str, value: i64) -> bool {
+        self.update_metric(name, |reading| match reading {
+            MetricReading::Gauge(current) => {
+                *current = value;
+                true
+            }
+            _ => false,
+        })
+    }
+
+    pub fn record_trace(&self, trace: TraceRecord) -> bool {
+        if !self.trace.enabled {
+            return false;
+        }
+
+        let mut state = self.live_state.lock().expect("telemetry mutex poisoned");
+        if state.recent_traces.len() >= MAX_RECENT_TRACES {
+            state.recent_traces.pop_front();
+        }
+        state.recent_traces.push_back(trace);
+        true
+    }
+
+    pub fn recent_traces(&self, limit: usize) -> Vec<TraceRecord> {
+        let state = self.live_state.lock().expect("telemetry mutex poisoned");
+        state
+            .recent_traces
+            .iter()
+            .rev()
+            .take(limit)
+            .cloned()
+            .collect()
     }
 
     fn update_metric(

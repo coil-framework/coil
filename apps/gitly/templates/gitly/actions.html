@@ -29,7 +29,7 @@
     <main id="main" class="shell">
       <section class="section-head">
         <h1 data-i18n="actions.title">Workflow runs</h1>
-        <p data-i18n="actions.summary">Mock scheduled tasks simulate GitHub Actions cadence. The scheduler surface is customer-owned and extension-friendly.</p>
+        <p data-i18n="actions.summary">Workflow rows remain fixture data, but the scheduler panel below is derived from the built runtime plan and the installed scheduled-job extension.</p>
       </section>
       <section class="page-grid">
         <article class="list-card">
@@ -43,7 +43,7 @@
         </article>
         <aside class="summary-card">
           <h2 data-i18n="actions.extension">WASM runtime story</h2>
-          <p data-i18n="actions.extensionBody">Gitly ships both a custom API extension and a mock scheduled-job extension to show how third-party behavior stays bounded at runtime.</p>
+          <p data-i18n="actions.extensionBody">Gitly ships both a custom API extension and a scheduled-job extension to show how third-party behavior stays bounded at runtime.</p>
           <dl class="meta-list">
             <div><dt data-i18n="actions.meta.running">Running</dt><dd data-api="workflows.running">1</dd></div>
             <div><dt data-i18n="actions.meta.queued">Queued</dt><dd data-api="workflows.queued">1</dd></div>
@@ -53,13 +53,21 @@
       </section>
       <section class="page-grid">
         <article class="summary-card">
-          <h2 data-i18n="actions.mockTitle">Mock scheduler heartbeat</h2>
-          <p data-i18n="actions.mockBody">This browser-side loop simulates a scheduled refresh so the Actions demo shows visible cadence instead of static counters only.</p>
+          <h2 data-i18n="actions.runtimeTitle">Runtime scheduler state</h2>
+          <p data-i18n="actions.runtimeBody">These values come from the Gitly runtime plan and registered scheduled-job handler, not browser local storage.</p>
           <dl class="meta-list">
-            <div><dt data-i18n="actions.mockContract">Contract</dt><dd data-api="workflows.scheduler_contract">github.actions.refresh</dd></div>
-            <div><dt data-i18n="actions.mockExtension">Extension</dt><dd data-api="workflows.scheduler_extension">gitly-actions-scheduler</dd></div>
-            <div><dt data-i18n="actions.mockRuns">Simulated runs</dt><dd data-actions-heartbeat-count="count">1</dd></div>
-            <div><dt data-i18n="actions.mockLastRun">Last simulated run</dt><dd data-actions-heartbeat-time="time">just now</dd></div>
+            <div><dt data-i18n="actions.runtimeContract">Contract</dt><dd data-api="workflows.scheduler_contract">github.actions.refresh</dd></div>
+            <div><dt data-i18n="actions.runtimeModule">Module</dt><dd data-api="workflows.scheduler_module">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeExtension">Extension</dt><dd data-api="workflows.scheduler_extension">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeHandler">Handler</dt><dd data-api="workflows.scheduler_handler">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeTrigger">Trigger</dt><dd data-api="workflows.scheduler_trigger">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeSchedule">Schedule</dt><dd data-api="workflows.scheduler_schedule">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeQueue">Queue</dt><dd data-api="workflows.scheduler_queue">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeBackend">Backend</dt><dd data-api="workflows.scheduler_backend">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeRetryLimit">Retry limit</dt><dd data-api="workflows.scheduler_retry_limit">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeDeadLetter">Dead-letter queue</dt><dd data-api="workflows.scheduler_dead_letter_queue">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeScheduledJobs">Registered scheduled jobs</dt><dd data-api="workflows.scheduled_job_count">Loading...</dd></div>
+            <div><dt data-i18n="actions.runtimeHandlerCount">Installed handlers</dt><dd data-api="workflows.scheduler_handler_count">Loading...</dd></div>
           </dl>
         </article>
       </section>

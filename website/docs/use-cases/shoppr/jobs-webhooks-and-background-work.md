@@ -2,17 +2,18 @@
 title: Shoppr Jobs, Webhooks, And Background Work
 ---
 
-Shoppr is the best checked-in example for Davenda’s production-style background-work story because
-it combines:
+Shoppr is not the scheduler showcase app. It is the best public example of why background work
+matters to a real store.
 
-- checkout
-- Stripe handoff and webhook verification
-- linked customer webhook hooks
-- admin/operator visibility
+Use it to learn:
 
-## Where The Runtime Contract Starts
+- how checkout hands work off to webhook and queue-driven follow-up
+- what the operator needs to inspect after browser return
+- where the customer app ends and the platform jobs surface begins
 
-The shortest useful example is the runtime config shape:
+## Start With The Live Runtime Contract
+
+Shoppr’s development config already says the important part out loud:
 
 ```toml
 [jobs]
@@ -24,118 +25,121 @@ checkout_mode = "hosted-checkout"
 webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
 ```
 
-That tells you the real product story immediately:
+That gives you the real product boundary:
 
-- jobs are part of the live runtime, not a demo fiction
-- payment-provider webhook handling is part of the checked-in config contract
-- background work and settlement are first-class operational concerns
+- requests are not the whole payment flow
+- settlement depends on webhook handling
+- background work must be operationally visible
 
-## Customer App Composition
+## What Developers Can Actually Exercise Locally
 
-Shoppr’s customer app and customer binary own:
+Without real Stripe credentials, Shoppr still runs through the built-in local hosted-checkout stub.
 
-- validate
-- migrate
-- asset publish
-- serve/up
+With real Stripe test credentials, use:
 
-from the customer binary, while the runtime plan composes modules, auth, extensions, and linked
-customer plugins.
+```bash
+stripe listen --forward-to http://uk.localhost:8080/webhooks/commerce/payment-provider
+```
 
-## Linked Webhook Hooks
+That is the shortest honest path to see:
 
-Shoppr’s linked backend example lives in:
+1. request-path checkout
+2. provider return
+3. webhook callback
+4. resulting order/operator state
 
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
-- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
+## The Product-Side Operator Story
 
-These are the right files to read when you want to understand:
+The admin orders screen is the main product surface to study:
+
+```html
+<p>
+  This queue is store-wide. Use it to confirm payment state, review checkout email and totals,
+  and move into the per-order support detail view before escalating a checkout case.
+</p>
+```
+
+And the same template teaches the real support boundary:
+
+```html
+<p>
+  After a Stripe return, compare the customer account view and provider callback window before
+  treating Pending Payment as a failed checkout.
+</p>
+```
+
+That is why Shoppr matters here. It does not just say “jobs exist.” It shows the operator
+consequence of async settlement in the product itself.
+
+## Where The Customer Binary Stops
+
+The Shoppr customer binary owns:
+
+- `validate`
+- `migrate apply`
+- `assets publish`
+- `up`
+
+The customer binary does **not** own queue control. Jobs remain an operator/platform concern.
+
+Use the platform CLI for that:
+
+```bash
+cargo run -p davenda-cli -- jobs status --config apps/shoppr/platform.dev.toml
+cargo run -p davenda-cli -- jobs ready --config apps/shoppr/platform.dev.toml --queue jobs.work --limit 25
+cargo run -p davenda-cli -- jobs dead-letters --config apps/shoppr/platform.dev.toml --queue jobs.dead-letter --limit 25
+cargo run -p davenda-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
+```
+
+That split is intentional:
+
+- customer binaries compose the product
+- the platform CLI operates the shared job system
+
+## Linked Customer Hooks In This Flow
+
+Shoppr’s linked backend is relevant because webhook handling is not purely native module code.
+
+The checked-in backend demonstrates:
 
 - checkout review hooks
 - verified webhook hooks
-- verified webhook asset hooks
-- customer-owned logic that still runs inside stable runtime boundaries
+- customer-owned logic running through the stable runtime boundary
 
-The hook traits themselves are in:
+Read those after you understand the product flow:
 
-- `crates/davenda-customer-sdk/src/hooks.rs`
-
-## Runtime Proof
-
-The decisive runtime proof is not the templates. It is that the server contract already exercises:
-
-- payment webhook signature validation
-- Stripe-specific webhook verification
-- replay protection across server reopen
-- linked verified webhook hooks
-- linked webhook repository access
-- linked webhook jobs enqueue
-- linked webhook managed-asset publication and inspection
-
-That is why this page talks about webhook handling as a real platform story, not as documentation
-wishful thinking.
-
-## Operator Surfaces
-
-Once background work exists, the app also needs operator visibility.
-
-Read these templates:
-
-- `apps/shoppr/templates/commerce/orders.html`
-- `apps/shoppr/templates/commerce/order-detail.html`
-- `apps/shoppr/templates/admin/audit.html`
-
-Together they show:
-
-- post-checkout status visibility
-- provider-pending versus settled order states
-- refund and support visibility
-- audit traceability for privileged actions
-
-## What Shoppr Teaches About Jobs
-
-Shoppr is not a generic jobs demo app, but it still teaches the practical background-work split:
-
-- the runtime owns queueing, leases, retries, and dead letters
-- the app owns the product meaning of checkout, webhook side effects, and support visibility
-
-For operator commands, the root CLI is still the main surface:
-
-- `jobs status`
-- `jobs ready`
-- `jobs in-flight`
-- `jobs dead-letters`
-- `jobs retry`
-- `jobs promote`
-- `jobs run`
-
-See `crates/davenda-cli/src/command.rs` and `crates/davenda-cli/src/cli/args.rs`.
-
-## Full Implementation
-
-If you want the full Shoppr implementation after learning the pattern:
-
-- `apps/shoppr/platform.dev.toml`
-- `apps/shoppr/crates/shoppr-app/src/lib.rs`
-- `apps/shoppr/crates/shoppr-bin/src/main.rs`
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
 - `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-- `apps/shoppr/templates/commerce/checkout.html`
-- `apps/shoppr/templates/commerce/checkout-confirmation.html`
-- `apps/shoppr/templates/commerce/orders.html`
-- `apps/shoppr/templates/admin/audit.html`
-- `crates/davenda-runtime/src/tests/server.rs`
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
 
-## Common Mistakes
+But start with the product pages and config above. That is where the behavior becomes real for a
+new developer.
 
-- Do not document jobs as if the customer binary owns queue control.
-  - that remains the platform/operator CLI surface
-- Do not trust browser return from Stripe as payment truth.
-  - Shoppr’s runtime and docs now treat webhook settlement as the real payment boundary
-- Do not describe verified webhooks without pointing to replay protection and signature checks
+## What Shoppr Teaches Better Than Gitly
+
+Gitly is the clearer scheduler-slot demo.
+
+Shoppr is the clearer example for:
+
+- webhook-driven follow-up
+- customer-visible payment state
+- order-support consequences of async work
+- audit/operator traces around privileged actions
+
+So if you are building commerce, learn the operator meaning of async work from Shoppr first.
+
+## Honest Limits
+
+Shoppr is still not a public “queue tutorial app.” It does not ship a polished in-app worker
+dashboard or a demo page dedicated to ready/dead-letter queue internals.
+
+That is why the public jobs operator learning path still spans:
+
+- Shoppr for product and webhook consequences
+- the platform CLI for queue control
+- Gitly for a bounded scheduled-job extension example
 
 ## Read Next
 
-- [Shoppr Checkout And Operations](./checkout-and-operations.md)
 - [Shoppr Observability And Audit](./observability-and-audit.md)
+- [Jobs and schedulers](../../operations/jobs-and-schedulers.md)
 - [CLI Commands](../../reference/cli-commands.md)

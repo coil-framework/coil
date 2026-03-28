@@ -1,4 +1,5 @@
 use super::*;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) async fn authorize_live_request(
     state: &RuntimeServerState,
@@ -60,10 +61,32 @@ pub(crate) async fn authorize_live_request(
             principal_id.to_string(),
         )),
     };
+    let started_at = Instant::now();
     let allowed = state
         .route_authorizer
         .check_capability(&subject, capability, &object)
         .await?;
+    let elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let _ = state
+        .plan
+        .observability
+        .telemetry
+        .record_histogram("davenda.auth.check.latency_ms", elapsed_ms);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let _ = state.plan.observability.telemetry.record_trace(
+        davenda_observability::TraceRecord::new(
+            format!("auth:{}:{}", matched.resolved.route_name, capability.as_str()),
+            "auth.check",
+            if allowed { "allowed" } else { "denied" },
+            now,
+        )
+        .with_field("route", matched.resolved.route_name.clone())
+        .with_field("capability", capability.as_str())
+        .with_field("duration_ms", elapsed_ms.to_string()),
+    );
 
     if allowed {
         request.granted_capabilities.insert(capability);

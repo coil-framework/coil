@@ -422,3 +422,131 @@ fn server_serves_gitly_home_and_wasm_extended_api_surface() {
         "{search_body}"
     );
 }
+
+#[test]
+fn server_exposes_runtime_derived_scheduler_state_on_gitly_actions_surface() {
+    let _env_lock = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _runtime_env = set_runtime_env_vars();
+    let temp_root = temp_workspace_without_theme_assets();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let (api_body, actions_body) = runtime.block_on(async move {
+        let workspace = GitlyWorkspace::at(&temp_root.path).unwrap();
+        let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
+        let resolver = EnvironmentSecretResolver::default();
+        let server = bootstrap
+            .server_host(
+                &resolver,
+                b"01234567012345670123456701234567",
+                b"76543210765432107654321076543210",
+            )
+            .unwrap();
+
+        let api_response: axum::http::Response<Body> = server
+            .respond(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/github/workflows")
+                    .header("host", "gitly.localhost")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let api_body = String::from_utf8(
+            to_bytes(api_response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+
+        let actions_response: axum::http::Response<Body> = server
+            .respond(
+                Request::builder()
+                    .method("GET")
+                    .uri("/forgeflow/platform-ui/actions")
+                    .header("host", "gitly.localhost")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let actions_body = String::from_utf8(
+            to_bytes(actions_response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+
+        std::mem::forget(server);
+        std::mem::forget(bootstrap);
+        (api_body, actions_body)
+    });
+
+    assert!(
+        api_body.contains("\"scheduler_contract\":\"github.actions.refresh\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_extension\":\"gitly-actions-scheduler\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_handler\":\"nightly-refresh\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_schedule\":\"*/30 * * * *\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_queue\":\"jobs.scheduled\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_backend\":\"redis\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_retry_limit\":\"1\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_dead_letter_queue\":\"none\""),
+        "{api_body}"
+    );
+    assert!(
+        api_body.contains("\"scheduler_module\":\"extension:gitly-actions-scheduler\""),
+        "{api_body}"
+    );
+    assert!(
+        actions_body.contains("data-api=\"workflows.scheduler_schedule\""),
+        "{actions_body}"
+    );
+    assert!(
+        actions_body.contains("data-api=\"workflows.scheduler_module\""),
+        "{actions_body}"
+    );
+    assert!(
+        !actions_body.contains("data-actions-heartbeat-count"),
+        "{actions_body}"
+    );
+    assert!(
+        !actions_body.contains("data-actions-heartbeat-time"),
+        "{actions_body}"
+    );
+    assert!(
+        actions_body.contains("Runtime scheduler state"),
+        "{actions_body}"
+    );
+    assert!(actions_body.contains("Loading..."), "{actions_body}");
+}

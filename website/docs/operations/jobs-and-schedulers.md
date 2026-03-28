@@ -2,184 +2,183 @@
 title: Jobs And Schedulers
 ---
 
-Davenda treats background work as a first-class platform concern.
+Davenda treats background work as a first-class operator surface, but the checked-in public apps
+demonstrate different parts of that story.
 
-That includes:
+- Gitly is the clearest public example of a scheduled-job contract plus a bounded runtime-installed
+  extension.
+- Shoppr is the clearest public example of why jobs and webhooks matter to a real product flow:
+  checkout return, payment settlement, order visibility, and operator follow-up.
 
-- scheduled jobs
-- retryable work
-- domain-event-driven work
-- queue inspection and recovery
+## Start With The Runtime Contract
 
-## What Is This?
-
-This page explains:
-
-- what kinds of work belong in Davenda jobs
-- how the checked-in apps demonstrate jobs and schedulers
-- which operator commands and signals matter
-
-## Why Does Davenda Care About Jobs So Much?
-
-Because async work is where many products become operationally unsafe:
-
-- side effects are retried blindly
-- queues are opaque
-- release rollouts ignore background work entirely
-- dead letters accumulate without ownership
-
-Davenda is trying to make jobs inspectable and recoverable instead.
-
-## What Runs In The Job System
-
-Typical uses include:
-
-- webhook fan-out
-- follow-up integration work
-- scheduled refreshes
-- exports and reports
-- asset housekeeping
-- retryable operational tasks
-
-The goal is not "make everything async." The goal is to move the right work off the request path
-without making it invisible.
-
-## Concrete Repo Examples
-
-### Gitly scheduled work
-
-Gitly is the clearest checked-in public jobs example.
-
-Relevant files:
-
-- `apps/gitly/extensions/gitly-actions-scheduler/`
-- `apps/gitly/app.toml`
-- `apps/gitly/platform.dev.toml`
-
-Gitly uses a bounded runtime-installed extension to simulate GitHub Actions refresh work. That
-gives you a real scheduled-work example without turning the whole repo into a queue tutorial.
-
-### Runtime config
-
-Both checked-in apps currently use Redis-backed jobs:
+Every checked-in app declares a shared jobs backend in platform config:
 
 ```toml
 [jobs]
 backend = "redis"
 ```
 
-Concrete files:
+You can see that in:
 
 - `apps/shoppr/platform.dev.toml`
-- `apps/shoppr/platform.toml`
 - `apps/gitly/platform.dev.toml`
-- `apps/gitly/platform.toml`
 
-## How To Operate Jobs
+That is the first practical point to copy: background work is part of runtime configuration, not a
+theme or frontend concern.
 
-The operator surface is the platform jobs command group.
+## What The Public Examples Actually Demonstrate
 
-Representative commands:
+### Gitly: a bounded scheduled-job contract
 
-```bash
-platform jobs status --config apps/shoppr/platform.toml
-platform jobs run --config apps/shoppr/platform.toml --worker-id worker-a --limit 25
-platform jobs ready --config apps/shoppr/platform.toml --queue jobs.work --limit 25
-platform jobs dead-letters --config apps/shoppr/platform.toml --queue jobs.dead-letter --limit 25
-platform jobs in-flight --config apps/shoppr/platform.toml --queue jobs.work --worker-id worker-a --limit 25
-platform jobs retry dead-letter:job-retry --config apps/shoppr/platform.toml --dry-run
-platform jobs promote --config apps/shoppr/platform.toml --dry-run
+Gitly declares a real runtime-installed scheduled-job extension in `app.toml`:
+
+```toml
+[[extensions]]
+id = "gitly-actions-scheduler"
+
+[[extensions.handlers]]
+id = "nightly-refresh"
 ```
 
-That is the control-plane shape operators should build around:
+And the Actions page makes the contract explicit in the product itself:
 
-- inspect
-- run
-- observe ready work
-- inspect dead letters
-- inspect in-flight work
-- retry safely
-- promote safely
+```html
+<p data-i18n="actions.scheduleBody">
+  The `github.actions.refresh` surface is declared by the Gitly customer module and can be
+  fulfilled by a runtime-installed scheduled-job extension.
+</p>
+<p data-i18n="actions.mockBody">
+  This browser-side loop simulates a scheduled refresh so the Actions demo shows visible cadence
+  instead of static counters only.
+</p>
+```
 
-## How To Think About Job Types
+That is an honest public example:
 
-### Scheduled jobs
+- the extension contract is real
+- the runtime-installed package is real
+- the visible heartbeat on the page is still a browser-side simulation, not a polished production
+  worker demo
 
-Use these when work should be promoted on a schedule.
+So use Gitly to learn the extension and operator contract, not to study a full end-to-end
+scheduler product.
 
-Current public example:
+### Shoppr: a real product consequence of jobs and webhooks
 
-- Gitly Actions refresh simulation
+Shoppr is where background work becomes operationally meaningful:
 
-### Retryable jobs
+```toml
+[jobs]
+backend = "redis"
 
-Use these when a side effect can legitimately fail and should be retried under a bounded policy.
+[modules."commerce-payments-stripe"]
+provider = "stripe"
+checkout_mode = "hosted-checkout"
+webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
+```
 
-### Domain-event-driven jobs
+And the operator-facing orders page teaches the support consequence directly:
 
-Use these when the request path should emit a durable event and let follow-up work happen
-asynchronously.
+```html
+<p>
+  This queue is store-wide. Use it to confirm payment state, review checkout email and totals,
+  and move into the per-order support detail view before escalating a checkout case.
+</p>
+```
 
-The public repo demonstrates the runtime and CLI surfaces for this lane, but the public website
-docs are still thinner than ideal on a single polished end-to-end domain-event example.
+That is the right way to read Shoppr:
 
-## What Operators Need To Know
+- request-path checkout is not the whole story
+- settlement and follow-up work continue after browser return
+- the operator must be able to inspect resulting order state
 
-At minimum, operators should be able to answer:
+## Operator Commands To Learn First
 
-- which queues exist
-- what is ready right now
-- what is in flight
-- what is retrying
-- what is dead-lettered
-- which worker is currently making progress
+The customer binaries do not own queue control. The operator surface is still the platform CLI.
 
-If those answers require database spelunking, the jobs surface is not being used properly.
+Start with:
 
-## Release Guidance
+```bash
+cargo run -p davenda-cli -- jobs status --config apps/shoppr/platform.dev.toml
+cargo run -p davenda-cli -- jobs ready --config apps/shoppr/platform.dev.toml --queue jobs.work --limit 25
+cargo run -p davenda-cli -- jobs dead-letters --config apps/shoppr/platform.dev.toml --queue jobs.dead-letter --limit 25
+cargo run -p davenda-cli -- jobs run --config apps/shoppr/platform.dev.toml --worker-id worker-a --limit 25
+```
 
-Before deploying code that changes job behaviour, verify:
+Those four commands cover the minimum real workflow:
 
-- whether pending jobs were created by older code
-- whether new jobs depend on new schema
-- whether a rollback would replay external side effects
-- whether workers should be paused, drained, or restarted during cutover
+1. inspect the queues
+2. inspect ready work
+3. inspect failures
+4. run a worker
 
-Jobs are part of release planning, not an afterthought.
+Only then should you move on to `jobs in-flight`, `jobs retry`, and `jobs promote`.
 
-## Current Example Coverage And Limits
+## Local Product Examples To Copy
 
-Strong public example coverage exists for:
+### For webhook-driven commerce work
 
-- job backend config
-- worker/operator command surface
-- scheduled work through Gitly
+Use Shoppr’s local Stripe forwarding path:
 
-Public example coverage is still thinner for:
+```bash
+stripe listen --forward-to http://uk.localhost:8080/webhooks/commerce/payment-provider
+```
 
-- a polished linked-Rust customer job definition walkthrough
-- a public end-to-end domain-event job tutorial page
+That gives you a concrete local story for:
 
-So use Gitly as the current canonical scheduler example, and treat the general jobs contract as
-stable even where the public examples are still catching up.
+- browser redirect out to a provider
+- webhook return into the runtime
+- resulting order/admin visibility
 
-## Common Mistakes
+### For scheduled extension work
 
-### Treating dead letters as an archive
+Use Gitly’s Actions surface:
 
-Dead letters are an operational signal that needs ownership and follow-up.
+- `/forgeflow/platform-ui/actions`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+- `apps/gitly/templates/gitly/actions.html`
 
-### Running workers without queue inspection
+That shows how to expose a bounded scheduled-job slot in a customer app without pretending the demo
+already ships a full production automation product.
 
-If operators cannot see ready, in-flight, and dead-letter state, they are operating blind.
+## What Belongs In Jobs
 
-### Forgetting job impact during rollout
+Good candidates:
 
-Background work can replay, stall, or corrupt expectations during a bad deploy just as easily as
-request-path logic can.
+- verified webhook follow-up
+- scheduled refresh or reconciliation work
+- retryable integration side effects
+- exports and bulk operations
+- operational recovery tasks
 
-## What To Read Next
+Bad candidates:
+
+- request-path work that must complete before the user gets a truthful answer
+- frontend timers pretending to be durable background processing
+
+Gitly intentionally uses the second pattern only for visible demo cadence. The docs should not
+confuse that with durable queue execution.
+
+## Honest Limits In The Public Examples
+
+The public repo is strong on:
+
+- operator queue inspection and worker commands
+- a real scheduled-job extension slot in Gitly
+- a real webhook-driven product consequence in Shoppr
+
+The public repo is still thinner on:
+
+- a polished linked-Rust customer job-definition tutorial
+- a single public example app whose visible scheduled work is entirely runtime-driven rather than
+  partly browser-simulated
+
+That means the jobs operator model is real today, but the demos still split the story across two
+apps for clarity.
+
+## Read Next
 
 - [Observability, monitoring, and audit](observability.md)
 - [Troubleshooting](troubleshooting.md)
-- [Build and deploy](build-and-deploy.md)
+- [Shoppr Jobs, Webhooks, And Background Work](../use-cases/shoppr/jobs-webhooks-and-background-work.md)

@@ -154,6 +154,7 @@ impl RuntimePlan {
             self.config.app.name.clone(),
             scheduler_node_id,
             self.jobs.clone(),
+            self.observability.telemetry.clone(),
             self.jobs.describe().clone(),
             self.registered_runtime_jobs.clone(),
             self.registered_runtime_event_subscriptions.clone(),

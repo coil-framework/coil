@@ -206,6 +206,20 @@ pub(crate) async fn serve_diagnostics_probe(
                         "enabled": state.plan.observability.telemetry.trace.enabled,
                         "sample_permyriad": state.plan.observability.telemetry.trace.sample_permyriad,
                     },
+                    "recent_traces": state
+                        .plan
+                        .observability
+                        .telemetry
+                        .recent_traces(50)
+                        .into_iter()
+                        .map(|trace| json!({
+                            "trace_id": trace.trace_id,
+                            "span": trace.span,
+                            "outcome": trace.outcome,
+                            "recorded_at_unix_seconds": trace.recorded_at_unix_seconds,
+                            "fields": trace.fields,
+                        }))
+                        .collect::<Vec<_>>(),
                 },
             },
             "backends": {

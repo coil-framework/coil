@@ -28,7 +28,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - shoppr-appdata:/app/.coil
+      - coil-shoppr-appdata:/app/.coil
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
       interval: 10s
@@ -58,7 +58,7 @@ services:
     ports:
       - "5438:5432"
     volumes:
-      - shoppr-postgres:/var/lib/postgresql/data
+      - coil-shoppr-postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coil -d coil_shoppr"]
       interval: 5s
@@ -71,7 +71,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - shoppr-redis:/data
+      - coil-shoppr-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -89,7 +89,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - shoppr-minio:/data
+      - coil-shoppr-minio:/data
     restart: unless-stopped
 
   minio-init:
@@ -108,7 +108,7 @@ services:
     restart: "no"
 
 volumes:
-  shoppr-appdata:
-  shoppr-postgres:
-  shoppr-redis:
-  shoppr-minio:
+  coil-shoppr-appdata:
+  coil-shoppr-postgres:
+  coil-shoppr-redis:
+  coil-shoppr-minio:

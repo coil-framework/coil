@@ -25,7 +25,7 @@ services:
     ports:
       - "${GITLY_HTTP_PORT:-58080}:8080"
     volumes:
-      - gitly-appdata:/app/.coil
+      - coil-gitly-appdata:/app/.coil
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
       interval: 10s
@@ -42,7 +42,7 @@ services:
     ports:
       - "${GITLY_POSTGRES_PORT:-55438}:5432"
     volumes:
-      - gitly-postgres:/var/lib/postgresql/data
+      - coil-gitly-postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coil -d coil_gitly"]
       interval: 5s
@@ -55,7 +55,7 @@ services:
     ports:
       - "${GITLY_REDIS_PORT:-56380}:6379"
     volumes:
-      - gitly-redis:/data
+      - coil-gitly-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -73,7 +73,7 @@ services:
       - "${GITLY_MINIO_PORT:-9002}:9000"
       - "${GITLY_MINIO_CONSOLE_PORT:-9003}:9001"
     volumes:
-      - gitly-minio:/data
+      - coil-gitly-minio:/data
     restart: unless-stopped
 
   minio-init:
@@ -92,7 +92,7 @@ services:
     restart: "no"
 
 volumes:
-  gitly-appdata:
-  gitly-postgres:
-  gitly-redis:
-  gitly-minio:
+  coil-gitly-appdata:
+  coil-gitly-postgres:
+  coil-gitly-redis:
+  coil-gitly-minio:

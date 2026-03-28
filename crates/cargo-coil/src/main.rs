@@ -154,7 +154,7 @@ enum LocaleCommand {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(normalized_args());
     match cli.command {
         Command::New(command) => new_project(command),
         Command::Init(command) => init_project(command),
@@ -164,6 +164,14 @@ fn main() -> Result<()> {
         Command::Site { command } => site_command(command),
         Command::Locale { command } => locale_command(command),
     }
+}
+
+fn normalized_args() -> Vec<String> {
+    let mut args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("coil") {
+        args.remove(1);
+    }
+    args
 }
 
 fn new_project(command: NewCommand) -> Result<()> {

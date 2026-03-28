@@ -697,3 +697,33 @@ fn explicit_sites_override_top_level_localized_route_policy() {
     assert!(!config.localized_routes_for_site(Some("storefront")));
     assert!(!config.localized_routes_for_site(None));
 }
+
+#[test]
+fn site_lookup_accepts_browser_host_headers_with_ports() {
+    let config = PlatformConfig::from_toml_str(
+        &format!(
+            "{}\n[[sites]]\nid = \"storefront\"\ndisplay_name = \"Showcase Storefront\"\ncanonical_host = \"shop.example.com\"\nhosts = [\"www.example.com\", \"localhost\", \"127.0.0.1\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"fr-FR\"]\nlocalized_routes = false\n",
+            VALID_CONFIG
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        config
+            .site_for_host("shop.example.com:443")
+            .map(|site| site.id.as_str()),
+        Some("storefront")
+    );
+    assert_eq!(
+        config
+            .site_for_host("localhost:58080")
+            .map(|site| site.id.as_str()),
+        Some("storefront")
+    );
+    assert_eq!(
+        config
+            .site_for_host("127.0.0.1:58080")
+            .map(|site| site.id.as_str()),
+        Some("storefront")
+    );
+}

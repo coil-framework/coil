@@ -78,8 +78,10 @@ impl PlatformConfig {
     }
 
     pub fn site_for_host(&self, host: &str) -> Option<&SiteConfig> {
+        let host = normalize_host(host);
         self.sites.iter().find(|site| {
-            site.canonical_host == host || site.hosts.iter().any(|value| value == host)
+            normalize_host(&site.canonical_host) == host
+                || site.hosts.iter().any(|value| normalize_host(value) == host)
         })
     }
 
@@ -121,6 +123,25 @@ impl PlatformConfig {
             .or_else(|| self.default_site())
             .and_then(|site| site.localized_routes)
             .unwrap_or(self.i18n.localized_routes)
+    }
+}
+
+fn normalize_host(host: &str) -> &str {
+    if let Some(stripped) = host.strip_prefix('[') {
+        if let Some(end) = stripped.find(']') {
+            return &stripped[..end];
+        }
+    }
+
+    match host.rsplit_once(':') {
+        Some((candidate, port))
+            if !candidate.contains(':')
+                && !candidate.is_empty()
+                && port.chars().all(|ch| ch.is_ascii_digit()) =>
+        {
+            candidate
+        }
+        _ => host,
     }
 }
 

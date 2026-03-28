@@ -385,4 +385,41 @@ mod tests {
         assert_eq!(resolved.response_cookies.len(), 1);
         assert!(resolved.response_cookies[0].contains("session="));
     }
+
+    #[test]
+    fn resolve_request_rejects_expired_cookie_backed_sessions() {
+        let services = services(SessionStoreTopology::Database);
+        let client =
+            DistributedSessionStoreClient::local_for_testing(SessionStoreBackendKind::Database);
+        let mut host = BrowserHost::with_session_store_client(
+            "browser-db-shared".to_string(),
+            services,
+            client,
+        )
+        .unwrap();
+        let cookie_secret = b"01234567012345670123456701234567";
+        let issued = host
+            .issue_session(
+                SessionIssueRequest::new()
+                    .for_principal("member-db")
+                    .unwrap(),
+                cookie_secret,
+                BrowserInstant::from_unix_seconds(100),
+            )
+            .unwrap();
+
+        let request = RequestInput::new(HttpMethod::Get, "www.example.com", "/")
+            .unwrap()
+            .with_session_cookie(issued.cookie_value);
+        let error = host
+            .resolve_request(&request, cookie_secret, BrowserInstant::from_unix_seconds(4_000))
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            RuntimeBrowserError::ExpiredSession {
+                session_id: issued.record.session_id,
+            }
+        );
+    }
 }

@@ -290,11 +290,7 @@ impl BrowserHost {
                 Ok((principal_id, refreshed_cookie)) => {
                     (session_id, principal_id, refreshed_cookie)
                 }
-                Err(
-                    RuntimeBrowserError::UnknownSession { .. }
-                    | RuntimeBrowserError::ExpiredSession { .. }
-                    | RuntimeBrowserError::RevokedSession { .. },
-                ) if resolved_from_cookie => {
+                Err(RuntimeBrowserError::UnknownSession { .. }) if resolved_from_cookie => {
                     let issued =
                         self.issue_session(SessionIssueRequest::new(), cookie_secret, now)?;
                     (

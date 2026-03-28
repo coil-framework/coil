@@ -1,0 +1,65 @@
+<!doctype html>
+<html xmlns:dv="https://davenda.dev" lang="en-GB" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>octocorp/platform-ui</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+  </head>
+  <body data-route="repo">
+    <a class="skip-link" href="#main" data-i18n-control="skip">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" data-route-link="home" href="/"><span class="brand__mark" aria-hidden="true">O</span><span data-brand="brand">OctoHub</span></a>
+      <nav class="topnav" aria-label="Primary navigation" data-i18n-aria-label="primaryNavigation">
+        <a data-route-link="home" data-i18n-nav="home" href="/">Home</a>
+        <a data-route-link="explore" data-i18n-nav="explore" href="/explore">Explore</a>
+        <a data-route-link="repo" data-i18n-nav="repo" href="/octocorp/platform-ui">Repository</a>
+        <a data-route-link="pulls" data-i18n-nav="pulls" href="/octocorp/platform-ui/pulls">Pull requests</a>
+        <a data-route-link="actions" data-i18n-nav="actions" href="/octocorp/platform-ui/actions">Actions</a>
+        <a data-route-link="org" data-i18n-nav="org" href="/orgs/octocorp">Organization</a>
+        <a data-route-link="profile" data-i18n-nav="profile" href="/alexmariner">Profile</a>
+      </nav>
+      <div class="toolbar">
+        <label class="search"><span class="sr-only" data-i18n-control="search">Search</span><input data-search="search" type="search" placeholder="Search repositories, users, docs, and workflows" /></label>
+        <nav class="language-switcher" aria-labelledby="language-switcher-label"><span class="sr-only" id="language-switcher-label" data-i18n-control="language">Language</span><a data-language-link="en-GB" href="/" lang="en-GB" hreflang="en-GB">EN</a><a data-language-link="fr-FR" href="/fr" lang="fr-FR" hreflang="fr-FR">FR</a><a data-language-link="de-DE" href="/de" lang="de-DE" hreflang="de-DE">DE</a></nav>
+        <div class="theme-switcher" role="group" aria-labelledby="theme-switcher-label"><span class="sr-only" id="theme-switcher-label" data-i18n-control="theme">Theme</span><button type="button" data-theme-option="light" data-i18n-control="light">Light</button><button type="button" data-theme-option="dark" data-i18n-control="dark">Dark</button><button type="button" data-theme-option="system" data-i18n-control="system">System</button></div>
+      </div>
+    </header>
+    <main id="main" class="shell">
+      <section class="repo-header">
+        <span class="pill" data-api="repo.visibility">Public</span>
+        <h1><span data-api="repo.owner">octocorp</span>/<span data-api="repo.name">platform-ui</span></h1>
+      </section>
+      <p data-i18n="repo.summary">Accessible multilingual UI primitives and customer-app examples for Davenda.</p>
+      <nav class="repo-tabs" aria-label="Repository navigation" data-i18n-aria-label="repositoryNavigation">
+        <a data-route-link="repo" href="/octocorp/platform-ui" aria-current="page" data-i18n="repo.code">Code</a>
+        <a href="#" data-i18n="repo.issues">Issues</a>
+        <a data-route-link="pulls" href="/octocorp/platform-ui/pulls" data-i18n="repo.pulls">Pull requests</a>
+        <a data-route-link="actions" href="/octocorp/platform-ui/actions" data-i18n="repo.actions">Actions</a>
+      </nav>
+      <section class="repo-grid">
+        <article class="readme">
+          <h2 data-i18n="repo.readmeTitle">README</h2>
+          <p data-i18n="repo.readmeBody">OctoHub demonstrates a customer-owned workspace using Davenda as an upstream dependency. Linked Rust hooks govern editorial policy, custom routes expose GitHub-like APIs, and bounded WASM packages extend selected runtime surfaces.</p>
+          <div class="button-row">
+            <a class="button" data-route-link="pulls" href="/octocorp/platform-ui/pulls" data-i18n="repo.reviewPulls">Review open pull requests</a>
+            <a class="button" data-route-link="actions" href="/octocorp/platform-ui/actions" data-i18n="repo.inspectActions">Inspect workflow runs</a>
+          </div>
+        </article>
+        <aside class="summary-card">
+          <h2 data-i18n="repo.about">About this repository</h2>
+          <dl class="meta-list">
+            <div><dt data-i18n="repo.meta.stars">Stars</dt><dd data-api="repo.stars">4872</dd></div>
+            <div><dt data-i18n="repo.meta.forks">Forks</dt><dd data-api="repo.forks">612</dd></div>
+            <div><dt data-i18n="repo.meta.watchers">Watchers</dt><dd data-api="repo.watchers">143</dd></div>
+            <div><dt data-i18n="repo.meta.issues">Issues</dt><dd data-api="repo.open_issues">27</dd></div>
+            <div><dt data-i18n="repo.meta.language">Language</dt><dd data-api="repo.language">Rust</dd></div>
+            <div><dt data-i18n="repo.meta.license">License</dt><dd data-api="repo.license">Apache-2.0</dd></div>
+          </dl>
+        </aside>
+      </section>
+    </main>
+    <footer class="footer"><small data-footer="footer">OctoHub is a customer-root Davenda demo showing CMS, custom API surfaces, linked Rust hooks, and runtime-installed WASM.</small></footer>
+  </body>
+</html>

@@ -1,0 +1,121 @@
+<!doctype html>
+<html xmlns:dv="https://davenda.dev" lang="en-GB" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OctoHub</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+  </head>
+  <body data-route="home">
+    <a class="skip-link" href="#main" data-i18n-control="skip">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" data-route-link="home" href="/">
+        <span class="brand__mark" aria-hidden="true">O</span>
+        <span data-brand="brand">OctoHub</span>
+      </a>
+      <nav class="topnav" aria-label="Primary navigation" data-i18n-aria-label="primaryNavigation">
+        <a data-route-link="home" data-i18n-nav="home" href="/">Home</a>
+        <a data-route-link="explore" data-i18n-nav="explore" href="/explore">Explore</a>
+        <a data-route-link="repo" data-i18n-nav="repo" href="/octocorp/platform-ui">Repository</a>
+        <a data-route-link="pulls" data-i18n-nav="pulls" href="/octocorp/platform-ui/pulls">Pull requests</a>
+        <a data-route-link="actions" data-i18n-nav="actions" href="/octocorp/platform-ui/actions">Actions</a>
+        <a data-route-link="org" data-i18n-nav="org" href="/orgs/octocorp">Organization</a>
+        <a data-route-link="profile" data-i18n-nav="profile" href="/alexmariner">Profile</a>
+      </nav>
+      <div class="toolbar">
+        <label class="search">
+          <span class="sr-only" data-i18n-control="search">Search</span>
+          <input data-search="search" type="search" placeholder="Search repositories, users, docs, and workflows" />
+        </label>
+        <nav class="language-switcher" aria-labelledby="language-switcher-label">
+          <span class="sr-only" id="language-switcher-label" data-i18n-control="language">Language</span>
+          <a data-language-link="en-GB" href="/" lang="en-GB" hreflang="en-GB">EN</a>
+          <a data-language-link="fr-FR" href="/fr" lang="fr-FR" hreflang="fr-FR">FR</a>
+          <a data-language-link="de-DE" href="/de" lang="de-DE" hreflang="de-DE">DE</a>
+        </nav>
+        <div class="theme-switcher" role="group" aria-labelledby="theme-switcher-label">
+          <span class="sr-only" id="theme-switcher-label" data-i18n-control="theme">Theme</span>
+          <button type="button" data-theme-option="light" data-i18n-control="light">Light</button>
+          <button type="button" data-theme-option="dark" data-i18n-control="dark">Dark</button>
+          <button type="button" data-theme-option="system" data-i18n-control="system">System</button>
+        </div>
+      </div>
+    </header>
+    <main id="main" class="shell">
+      <section class="hero">
+        <div>
+          <span class="hero__eyebrow" data-i18n="home.eyebrow">Customer-root GitHub-style demo</span>
+          <h1 data-i18n="home.title">One Davenda app can look like a forge, not just a storefront.</h1>
+          <p data-i18n="home.summary">OctoHub is a multilingual, theme-switchable, accessible demo with linked Rust business rules, custom API endpoints, and runtime-installed WASM.</p>
+          <div class="button-row">
+            <a class="button button--primary" data-route-link="repo" href="/octocorp/platform-ui" data-i18n="home.primary">Open repository</a>
+            <a class="button" data-route-link="actions" href="/octocorp/platform-ui/actions" data-i18n="home.secondary">View Actions</a>
+          </div>
+        </div>
+        <aside class="summary-card" aria-labelledby="pulse-title">
+          <h2 id="pulse-title" data-i18n="home.pulse">Community pulse</h2>
+          <p data-i18n="home.pulseBody">This card is hydrated from a custom API surface. One endpoint is extended through the bounded WASM path.</p>
+          <dl class="meta-list">
+            <div>
+              <dt data-i18n="home.extensionLabel">Extension</dt>
+              <dd data-api="pulse.widget">community-pulse</dd>
+            </div>
+            <div>
+              <dt data-i18n="home.statusLabel">Status</dt>
+              <dd data-api="pulse.status">active</dd>
+            </div>
+            <div>
+              <dt data-i18n="home.runtimeLabel">Runtime</dt>
+              <dd data-i18n="home.runtimeValue">WASM API surface</dd>
+            </div>
+          </dl>
+        </aside>
+      </section>
+
+      <section class="stats-grid" aria-label="Repository summary" data-i18n-aria-label="repositorySummary">
+        <article class="summary-card">
+          <div class="stat-label" data-i18n="home.stars">Stars</div>
+          <div class="stat-value" data-api="repo.stars">4872</div>
+        </article>
+        <article class="summary-card">
+          <div class="stat-label" data-i18n="home.forks">Forks</div>
+          <div class="stat-value" data-api="repo.forks">612</div>
+        </article>
+        <article class="summary-card">
+          <div class="stat-label" data-i18n="home.openIssues">Open issues</div>
+          <div class="stat-value" data-api="repo.open_issues">27</div>
+        </article>
+        <article class="summary-card">
+          <div class="stat-label" data-i18n="home.workflowRuns">Workflow runs</div>
+          <div class="stat-value" data-api="workflows.workflow_count">3</div>
+        </article>
+      </section>
+
+      <section class="page-grid">
+        <article class="list-card">
+          <h2 data-i18n="home.feed">Recent activity</h2>
+          <ol class="timeline">
+            <li data-i18n="home.item1">alexmariner merged ARIA navigation updates into main</li>
+            <li data-i18n="home.item2">Localization smoke refreshed French and German strings</li>
+            <li data-i18n="home.item3">Actions scheduler queued the next UI regression pass</li>
+          </ol>
+        </article>
+        <aside class="summary-card">
+          <h2 data-i18n="home.activity">Contribution graph</h2>
+          <p data-i18n="home.graphBody">Static repositories, users, and workflow runs create the GitHub feel without pretending there is a real git engine underneath.</p>
+          <p class="sr-only" data-i18n="home.graphSummary">Contribution activity is shown as a decorative weekly sparkline. This demo does not expose detailed contribution counts.</p>
+          <p class="muted" data-i18n="home.weekdays">Mon Tue Wed Thu Fri Sat Sun</p>
+          <p aria-hidden="true">■■■■ ■■■□ ■■□□ ■■■■ ■■■□ ■■□□ ■■■■</p>
+        </aside>
+      </section>
+
+      <aside class="flash-card" data-api-flash="flash" hidden="hidden" role="status" aria-live="polite" data-i18n="home.apiFallback">
+        API hydration failed. The static fallback content is still available.
+      </aside>
+    </main>
+    <footer class="footer">
+      <small data-footer="footer">OctoHub is a customer-root Davenda demo showing CMS, custom API surfaces, linked Rust hooks, and runtime-installed WASM.</small>
+    </footer>
+  </body>
+</html>

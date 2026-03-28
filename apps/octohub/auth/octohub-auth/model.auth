@@ -1,0 +1,5 @@
+type product
+  relations
+    merchandiser: user | group#member
+  permissions
+    featured_edit = merchandiser

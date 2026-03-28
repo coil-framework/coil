@@ -1,0 +1,5 @@
+/.cargo/
+/.davenda/
+/.env
+/target
+**/.davenda/

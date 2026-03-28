@@ -1,0 +1,53 @@
+[app]
+name = "octohub"
+display_name = "OctoHub"
+
+[domains]
+canonical = "octohub.example.com"
+additional = ["octohub.127.0.0.1.nip.io", "www.example.com"]
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+localized_routes = false
+
+[[sites]]
+id = "default"
+display_name = "OctoHub"
+brand_name = "OctoHub"
+canonical_domain = "octohub.example.com"
+additional_domains = ["octohub.127.0.0.1.nip.io", "www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+
+[theme]
+active = "octohub"
+template_namespaces = ["customer-app", "octohub"]
+asset_roots = ["theme/assets"]
+
+[auth]
+mode = "extend"
+package = "octohub-auth"
+
+[modules]
+enabled = ["admin", "cms", "media", "octohub-showcase"]
+
+[[extensions]]
+id = "octohub-community-pulse"
+package_version = "0.1.0"
+artifact_sha256 = "ef2b0bc15aa0baf178df23d3671bf0a2914c618e394f985441e27a5fdd7c89d7"
+customer_app_id = "octohub"
+
+[[extensions.handlers]]
+id = "community-pulse"
+grants = []
+
+[[extensions]]
+id = "octohub-actions-scheduler"
+package_version = "0.1.0"
+artifact_sha256 = "eadcc0e65bf8059fa9411be20e885a976d415e7747e505125c2f15ef662e333f"
+customer_app_id = "octohub"
+
+[[extensions.handlers]]
+id = "nightly-refresh"
+grants = []

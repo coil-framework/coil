@@ -1,0 +1,13 @@
+[content_model]
+name = "landing_page"
+kind = "page"
+description = "Landing page layout with hero image"
+
+[fields.title]
+type = "text"
+localized = true
+required = true
+
+[fields.hero_image]
+type = "asset"
+required = false

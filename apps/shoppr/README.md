@@ -129,18 +129,18 @@ The checked-in linked plugin in this workspace is:
 
 Shoppr also demonstrates three sites under one customer app boundary:
 
-- `harbor-uk`
+- `shoppr-uk`
   - flagship UK storefront
   - host: `uk.127.0.0.1.nip.io`
   - default locale: `en-GB`
-- `harbor-us`
-  - events-led US site
-  - host: `us.127.0.0.1.nip.io`
-  - default locale: `en-US`
-- `harbor-de`
-  - DE assortment with localized merchandising
-  - host: `de.127.0.0.1.nip.io`
-  - default locale: `de-DE`
+- `shoppr-fr`
+  - French editorial storefront
+  - host: `fr.127.0.0.1.nip.io`
+  - default locale: `fr-FR`
+- `shoppr-pl`
+  - Polish assortment with localized merchandising
+  - host: `pl.127.0.0.1.nip.io`
+  - default locale: `pl-PL`
 
 Those `*.127.0.0.1.nip.io` hosts resolve to localhost automatically, so the three-site demo works
 without editing your hosts file.
@@ -200,8 +200,8 @@ Then open:
 If you want to exercise the three-site demo explicitly, open these real local hosts:
 
 - `http://uk.127.0.0.1.nip.io:8080/en-GB/shop`
-- `http://us.127.0.0.1.nip.io:8080/en-US/events`
-- `http://de.127.0.0.1.nip.io:8080/de-DE/shop/products/harbor-scarf`
+- `http://fr.127.0.0.1.nip.io:8080/fr-FR/shop`
+- `http://pl.127.0.0.1.nip.io:8080/pl-PL/shop/products/harbor-scarf`
 
 The `__dev` page gives you one-click local login shortcuts for the checked-in customer and admin
 paths. This is the local bootstrap mechanism for authenticated walkthroughs; Shoppr does not
@@ -221,10 +221,10 @@ That is the bootstrap job creating the local object-store bucket and making publ
 
 The `app` container now runs Shoppr's own lifecycle command:
 
-1. Harbor builds and validates the customer runtime from `platform.dev.toml`
-2. Harbor applies pending executable migrations through the customer binary
-3. Harbor publishes theme assets through the same customer runtime build path
-4. Harbor starts the storefront/admin server
+1. Shoppr builds and validates the customer runtime from `platform.dev.toml`
+2. Shoppr applies pending executable migrations through the customer binary
+3. Shoppr publishes theme assets through the same customer runtime build path
+4. Shoppr starts the storefront/admin server
 
 You can run the same end-to-end lifecycle directly from the customer workspace:
 

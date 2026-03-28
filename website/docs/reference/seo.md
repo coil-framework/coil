@@ -2,52 +2,30 @@
 title: SEO
 ---
 
-This page documents the concrete SEO surface Davenda supports today.
+Davenda SEO is runtime-owned metadata built from route, site, and locale context.
 
-## What Is This?
+## Start With The Output
 
-Davenda’s SEO model is the combination of:
+On a normal public page, Davenda can inject markup like this into the document head:
 
-- canonical host selection
-- localized route-aware canonical and alternate URLs
-- head metadata injection
-- robots policy
-- Open Graph metadata
-- JSON-LD emission
+```html
+<meta name="description" content="..." />
+<link rel="canonical" href="https://gitly.example.com/fr/explore" />
+<meta name="robots" content="index,follow" />
+<link rel="alternate" hreflang="en-GB" href="https://gitly.example.com/explore" />
+<link rel="alternate" hreflang="fr-FR" href="https://gitly.example.com/fr/explore" />
+<meta property="og:title" content="..." />
+<script type="application/ld+json">...</script>
+```
 
-It is runtime-owned. Templates should not guess at it by string concatenation.
+That is the right mental model:
 
-## Why Does It Exist?
+- templates own visible structure
+- the runtime owns the search-facing metadata envelope
 
-SEO correctness depends on the same inputs as routing and rendering:
+## What Is Configured?
 
-- route name
-- route params
-- site
-- locale
-- publication state
-
-If canonical URLs, alternates, and metadata are composed manually in templates, they drift quickly.
-
-## When Should I Use It?
-
-Use the SEO model whenever a page is:
-
-- public
-- localized
-- served on a canonical host
-- intended to be indexed or shared
-
-That includes storefront, editorial, product, and event pages.
-
-## Which Exact Files And Settings Are Involved?
-
-Customer-facing config:
-
-- `platform.toml`
-- `platform.dev.toml`
-
-Current runtime knobs:
+Current checked-in SEO config looks like this:
 
 ```toml
 [seo]
@@ -55,18 +33,18 @@ canonical_host = "gitly.example.com"
 emit_json_ld = true
 ```
 
-Runtime implementation:
+And it works together with i18n config such as:
 
-- `crates/davenda-runtime/src/render/seo.rs`
-- `crates/davenda-runtime/src/http/routing/model.rs`
-- `crates/davenda-runtime/src/render/model.rs`
+```toml
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+fallback_locale = "en-GB"
+localized_routes = true
+```
 
-Checked-in examples:
-
-- `apps/shoppr/platform.toml`
-- `apps/shoppr/platform.dev.toml`
-- `apps/gitly/platform.toml`
-- `apps/gitly/platform.dev.toml`
+Because canonical and alternate URLs are route- and locale-aware, SEO cannot be treated as a
+completely separate subsystem.
 
 ## Field Reference
 
@@ -74,43 +52,41 @@ Checked-in examples:
 
 - Required: yes in current checked-in platform configs
 - Type: host string
-- Meaning: default canonical host when the runtime builds absolute URLs
+- Meaning: default canonical host for absolute URL generation
 
-Interaction with sites:
+Interaction:
 
 - site-specific canonical hosts override the app-level default when a site is resolved
 
 ### `emit_json_ld`
 
-- Required: no, but explicitly set in the checked-in demos
+- Required: no
 - Type: boolean
-- Meaning: whether the runtime should inject built-in JSON-LD page metadata
+- Meaning: whether the runtime should emit built-in JSON-LD page metadata
 
-## What Is Automatic?
+## What Is Automatic Today?
 
-Davenda currently generates these things automatically at the document boundary:
+Davenda currently generates these pieces automatically at the document boundary:
 
 - meta description
 - canonical URL
 - robots meta
 - alternate `hreflang` links
 - Open Graph title, description, and type
-- baseline JSON-LD page node when enabled
+- baseline JSON-LD page nodes when enabled
 
-This is implemented in `crates/davenda-runtime/src/render/seo.rs`.
+Important practical behavior:
 
-Important behavior:
+- if the page already has `</head>`, the runtime injects before it
+- if the page has no `<head>`, the runtime creates one
 
-- if `</head>` exists, metadata is injected before it
-- if there is no `<head>`, the runtime creates one before `<body>`
-- if there is no `<body>`, the runtime prepends a `<head>` block
+This is why templates do not need to re-implement head assembly page by page.
 
 ## What Is Customizable?
 
-Davenda’s render layer can also merge route- or handler-provided metadata into the automatic
-baseline.
+The runtime can merge route- or handler-provided metadata into the automatic baseline.
 
-Current supported metadata extensions include:
+Current custom inputs include:
 
 - explicit title
 - explicit description
@@ -119,100 +95,74 @@ Current supported metadata extensions include:
 - extra robots directives
 - extra JSON-LD nodes
 
-That means the right extension point is typed metadata from runtime code, not hand-built head markup
-inside page templates.
+The extension point is typed metadata from runtime code, not hand-built strings in templates.
 
-## Canonical URLs
+## Canonical And Alternate URL Logic
 
-Davenda builds canonical URLs from:
+Davenda builds canonical and alternate URLs from:
 
 - resolved site
 - site canonical host
 - route name
 - route params
-- locale policy
-
-In multi-site apps, canonical host follows the matched site.
-
-In localized routes, canonical and alternate URLs follow the active locale model.
-
-Practical rule:
-
-- never hardcode canonical links in templates unless you are deliberately overriding runtime output
-
-## Alternate Locale URLs
-
-Davenda only emits alternate locale URLs for routes that are actually localized.
-
-That behavior comes from:
-
 - route locale policy
-- site-supported locales
-- the current resolved site
+- supported locales for that site
 
-This is why SEO and i18n must be documented together.
+So for a localized route:
 
-## Worked Example
+1. the site resolves from the request host
+2. the locale resolves from the route and site policy
+3. the runtime emits the canonical URL for that exact route/site/locale
+4. the runtime emits alternates only for equivalent localized routes
 
-Gitly config:
-
-```toml
-[i18n]
-default_locale = "en-GB"
-supported_locales = ["en-GB", "fr-FR", "de-DE"]
-fallback_locale = "en-GB"
-localized_routes = true
-
-[seo]
-canonical_host = "gitly.example.com"
-emit_json_ld = true
-```
-
-What the runtime does on a localized page:
-
-1. resolve the active site from the host
-2. resolve the locale from the localized route
-3. build the canonical URL for that site and locale
-4. emit alternate `hreflang` URLs for the supported locales on that site
-5. inject title, description, robots, Open Graph, and JSON-LD
+That is why hardcoding canonical links in templates is almost always the wrong move.
 
 ## JSON-LD
 
-Current baseline behavior:
+Current behavior:
 
 - if `emit_json_ld = true`, the runtime emits a page-level JSON-LD node automatically
-- extra JSON-LD nodes can be added through typed metadata
+- extra JSON-LD nodes can be appended through typed metadata
 
-Use this for:
+This is the correct place for:
 
 - page schema
 - product schema
 - event schema
-- other structured nodes supplied by runtime code
-
-Do not build large JSON strings directly in templates unless there is no better typed path yet.
+- structured metadata that belongs to the route, not to incidental template layout
 
 ## Common Mistakes
 
 ### Building canonical URLs by string concatenation
 
-Use site-aware route generation instead.
+Use runtime site-aware route generation instead.
 
-### Forgetting locale and site in metadata reasoning
+### Forgetting site and locale when reasoning about metadata
 
-That is how wrong-host and wrong-language metadata leaks into production.
+That is the fastest way to produce wrong-host or wrong-language head output.
 
-### Treating draft or private content like public indexed content
+### Treating private or draft content like public indexed content
 
-SEO output should follow publication state.
+SEO output should follow actual publication state.
 
-### Re-implementing `<head>` generation in every template
+### Rebuilding `<head>` behavior inside every template
 
-That defeats the whole point of runtime-owned metadata.
+That defeats the whole runtime-owned metadata model.
+
+## Supporting Implementation And Repo Examples
+
+Concrete supporting files:
+
+- `apps/shoppr/platform.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/gitly/platform.toml`
+- `apps/gitly/platform.dev.toml`
+- `crates/davenda-runtime/src/render/seo.rs`
+- `crates/davenda-runtime/src/http/routing/model.rs`
+- `crates/davenda-runtime/src/render/model.rs`
 
 ## What Should I Read Next?
 
 - [Internationalization](./internationalization.md)
-- [Template Language](./template-language.md)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
 - [SEO And Discoverability](../core-concepts/seo-and-discoverability.md)
-- `crates/davenda-runtime/src/render/seo.rs`

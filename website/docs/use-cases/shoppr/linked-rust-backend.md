@@ -4,7 +4,32 @@ title: Linked Rust Backend
 
 Shoppr is the main example of first-party customer logic compiled directly into the customer app.
 
-This page shows which files to read and what each layer is responsible for.
+This page explains the pattern first and then points to the Shoppr implementation.
+
+## The Smallest Useful Plugin
+
+The core idea is simpler than the full repo shape:
+
+```rust
+impl CustomerBackendPlugin for ShopprBackend {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new("shoppr-backend", "Shoppr Linked Backend", "0.1.0")
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        let hooks = Arc::new(*self);
+        registry.register_checkout_hooks(hooks.clone())?;
+        registry.register_verified_webhook_hooks(hooks)?;
+        Ok(())
+    }
+}
+```
+
+That snippet is the boundary that matters:
+
+- the customer plugin identifies itself
+- it explicitly registers supported hooks
+- the runtime does not discover customer code by magic
 
 ## The Two Backend Layers
 
@@ -22,8 +47,6 @@ If you are building your own app, this is a strong pattern to copy.
 
 ## What The Davenda-Facing Plugin Does
 
-Read `apps/shoppr/crates/shoppr-backend/src/lib.rs`.
-
 That crate:
 
 - defines the linked plugin descriptor
@@ -34,8 +57,6 @@ That crate:
 This is the seam between Davenda and customer code.
 
 ## What The Customer Domain Library Does
-
-Read `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`.
 
 That crate contains the customer logic itself, such as:
 
@@ -50,11 +71,12 @@ This is important because it shows the right separation:
 
 ## Where The Plugin Is Wired Into The App
 
-The plugin becomes live in `apps/shoppr/crates/shoppr-app/src/lib.rs`.
+The customer app then injects the plugin explicitly:
 
-Look for the customer plugin vector:
-
-- `vec![Box::new(shoppr_backend::plugin())]`
+```rust
+let customer_plugins: Vec<Box<dyn CustomerBackendPlugin>> =
+    vec![Box::new(shoppr_backend::plugin())];
+```
 
 That is the customer-root composition moment. The plugin is not discovered by magic or loaded by a
 global registry. The customer app chooses it explicitly.
@@ -90,6 +112,15 @@ Copy this structure:
 3. explicit plugin injection from the customer composition root
 
 Do not start with a sidecar if the boundary is not operationally real.
+
+## Full Implementation
+
+If you want the complete Shoppr implementation after learning the pattern:
+
+- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
+- `apps/shoppr/crates/shoppr-app/src/lib.rs`
+- `apps/shoppr/crates/shoppr-bin/src/main.rs`
 
 ## Read Next
 

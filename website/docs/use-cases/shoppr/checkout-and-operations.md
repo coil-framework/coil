@@ -2,52 +2,121 @@
 title: Checkout And Operations
 ---
 
-This guide uses Shoppr to show how Davenda ties together checkout, account continuity, admin
-surfaces, and operator workflows in one customer app.
+This page is about Davenda’s checkout and operator model first, with Shoppr as a concrete example.
 
-## The Public Checkout Files
+Use it when you want to answer:
 
-Read these templates in order:
+- where the public checkout contract comes from
+- where payment-provider boundaries live
+- how account continuity and operator visibility fit into the same app
+- which files to copy when building a real store
 
-1. `apps/shoppr/templates/commerce/cart.html`
-2. `apps/shoppr/templates/commerce/checkout.html`
-3. `apps/shoppr/templates/commerce/checkout-confirmation.html`
+## The Core Pattern
 
-That sequence shows the public flow from basket review into payment handoff and confirmation.
+Davenda keeps the commerce lifecycle split across four layers:
 
-## Where The Checkout Contract Comes From
+1. a reusable route and handler contract from the commerce module
+2. customer templates for cart, checkout, confirmation, account, and admin surfaces
+3. customer-owned payment-provider configuration
+4. customer-owned policy in linked Rust where the store needs custom decisions
 
-The route contract comes from the commerce module manifest in
-`crates/davenda-commerce/src/module/platform/manifest.rs`.
+That is the right mental model to keep while reading Shoppr. The demo is evidence of the pattern,
+not the pattern itself.
 
-That module contributes:
+## Canonical Commerce Route Contract
 
-- `/cart`
-- `/checkout`
-- `/checkout/start`
-- `/checkout/complete`
-- `/checkout/confirmation`
-- `/webhooks/commerce/payment-provider`
+The route contract comes from `crates/davenda-commerce/src/module/platform/manifest.rs`.
 
-Shoppr then supplies the product-specific templates and customer hook behavior.
+The important part is that the module contributes named surfaces like:
 
-## Stripe Handoff In Practice
+```rust
+"/cart"
+"/checkout"
+"/checkout/start"
+"/checkout/complete"
+"/checkout/confirmation"
+"/webhooks/commerce/payment-provider"
+```
 
-Shoppr enables the Stripe provider module in:
+That snippet matters because it shows the reusable platform boundary:
 
-- `apps/shoppr/app.toml`
-- `apps/shoppr/platform.dev.toml`
+- cart and checkout are module-owned route contracts
+- the provider webhook is part of the same commerce lifecycle
+- the customer app does not need to invent the route vocabulary first
 
-And configures it in `platform.dev.toml` under:
+Shoppr then supplies the implementation-facing pieces around that contract.
 
-- `[modules."commerce-payments-stripe"]`
+## Canonical Provider Configuration Shape
 
-This is a useful example because it shows the separation between:
+The customer app keeps payment-provider configuration in platform config, not inside templates.
 
-- base commerce checkout
-- provider-specific handoff and webhook config
+Shoppr’s local example in `apps/shoppr/platform.dev.toml` uses:
 
-## Account Continuity After Checkout
+```toml
+[modules."commerce-payments-stripe"]
+provider = "stripe"
+checkout_mode = "hosted-checkout"
+publishable_key = { kind = "env", var = "STRIPE_PUBLISHABLE_KEY" }
+webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
+```
+
+That is the pattern to copy:
+
+- provider identity and mode stay in config
+- secrets stay as env-backed secret refs
+- the public checkout template does not become the source of payment truth
+
+## Canonical Customer Lifecycle Commands
+
+The customer binary should own the app lifecycle for developers and operators.
+
+Shoppr’s binary entrypoint in `apps/shoppr/crates/shoppr-bin/src/main.rs` exposes:
+
+```rust
+enum Command {
+    Describe,
+    Validate,
+    Assets { command: AssetsCommand },
+    Migrate { command: MigrateCommand },
+    Serve { bind: Option<String> },
+    Up { bind: Option<String> },
+    LinkedBackend { command: LinkedBackendCommand },
+}
+```
+
+This is the right operational shape:
+
+- the root platform CLI still exists for global operator workflows
+- the customer app owns the app-specific lifecycle a new developer actually runs
+
+## What The Customer App Still Owns
+
+The customer app owns the human product surfaces around the reusable module contract.
+
+For Shoppr, that means:
+
+- cart and checkout templates
+- confirmation and account continuity
+- order-support and admin pages
+- any custom review or webhook policy in linked Rust
+
+## Shoppr As The Supporting Example
+
+### Public checkout
+
+Shoppr’s public checkout templates live in:
+
+- `apps/shoppr/templates/commerce/cart.html`
+- `apps/shoppr/templates/commerce/checkout.html`
+- `apps/shoppr/templates/commerce/checkout-confirmation.html`
+
+Those are useful because they show the public flow without confusing the source of truth:
+
+- cart is still an SSR surface
+- checkout explains hosted-provider handoff honestly
+- confirmation does not overclaim settlement or membership activation
+
+### Account continuity
 
 The post-checkout customer story continues in:
 
@@ -63,32 +132,16 @@ These files matter because they keep the app honest about what happens after pro
 - order history is part of the account flow
 - membership activation is a follow-on lifecycle, not just a marketing claim
 
-## Where First-Party Policy Lives
+### First-party policy
 
-Shoppr's first-party store logic lives in linked Rust:
+Shoppr’s linked Rust boundary lives in:
 
 - `apps/shoppr/crates/shoppr-backend/src/lib.rs`
 - `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
 
-That is where checkout review and verified-webhook behavior are owned.
+This is where customer-specific order review, loyalty, CRM, and verified-webhook decisions belong.
 
-If you are building your own store, this is the boundary to study for:
-
-- customer-specific order review
-- loyalty rules
-- CRM routing
-- webhook follow-up
-
-## Where Bounded Extensions Live
-
-Shoppr also keeps a bounded WASM path in:
-
-- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
-
-That gives you one app that shows both extension models without confusing them.
-
-## Operator And Support Surfaces
+### Operator surfaces
 
 Day-one store operations are visible in:
 
@@ -98,44 +151,40 @@ Day-one store operations are visible in:
 - `apps/shoppr/templates/commerce/order-detail.html`
 - `apps/shoppr/templates/commerce/catalog-admin.html`
 
-These pages show the operator side of the same store:
+These pages show the operator side of the same lifecycle:
 
 - order queue and detail
-- refund and fulfillment flow
-- catalog copy and visibility management
+- refund and fulfillment visibility
+- catalog copy and visibility changes
 - audit and admin shell
 
-That is a strong Davenda lesson: the customer app owns the operator story too.
+## Practical Rules To Copy
 
-## Lifecycle And Runtime Touchpoints
+- let the commerce module define the core route contract
+- keep provider selection and secrets in config
+- keep public checkout templates honest about settlement and return flow
+- keep account continuity in the same customer app
+- put customer-specific review and webhook policy in linked Rust
+- make operator pages part of the same product, not an afterthought
 
-Shoppr's customer-owned lifecycle is visible in:
+## Full Implementation Pointers
 
+If you want the full Shoppr implementation after reading the pattern:
+
+- `apps/shoppr/templates/commerce/cart.html`
+- `apps/shoppr/templates/commerce/checkout.html`
+- `apps/shoppr/templates/commerce/checkout-confirmation.html`
+- `apps/shoppr/templates/pages/account.html`
+- `apps/shoppr/templates/account/dashboard.html`
+- `apps/shoppr/templates/account/orders.html`
+- `apps/shoppr/templates/memberships/account.html`
+- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
 - `apps/shoppr/crates/shoppr-app/src/lib.rs`
 - `apps/shoppr/crates/shoppr-bin/src/main.rs`
-- `apps/shoppr/platform.dev.toml`
-
-That layer owns:
-
-- manifest and config loading
-- auth package loading
-- official module resolution
-- linked plugin registration
-- extension package loading
-- validate, migrate, assets, serve, and up commands
-
-## Adapt This For Your Store
-
-If you are using Shoppr as a starting point, keep these patterns:
-
-- public cart and checkout flow in templates
-- provider config in a separate payment module block
-- post-checkout truthfulness in account templates
-- linked Rust for first-party policy
-- operator pages in the same customer app
 
 ## Read Next
 
 - [Linked Rust Backend](./linked-rust-backend.md)
-- [WASM Extensions](./wasm-extensions.md)
+- [Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work.md)
 - [Commerce Module Reference](../../reference/modules/commerce.md)

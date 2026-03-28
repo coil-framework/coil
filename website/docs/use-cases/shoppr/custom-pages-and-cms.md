@@ -18,22 +18,28 @@ Real commerce apps need more than product routes. They also need:
 Davenda keeps those inside the same customer app boundary instead of pushing them into a separate
 tooling story.
 
-## The Main CMS Files
+## The Main CMS Pattern
 
-Read these files together:
+The CMS story is easier to understand from one content-type definition and one route family than
+from a file list.
 
-- `apps/shoppr/templates/cms/page.html`
-- `apps/shoppr/templates/cms/pages.html`
-- `apps/shoppr/templates/cms/preview.html`
-- `apps/shoppr/templates/cms/navigation.html`
-- `apps/shoppr/templates/cms/redirects.html`
-- `apps/shoppr/content/page-types/home.toml`
-- `apps/shoppr/content/page-types/landing_page.toml`
+For example, a customer app can define a landing page type and then render it through the CMS page
+surface:
 
-Those files show both sides of the CMS surface:
+```toml
+name = "landing_page"
+label = "Landing page"
+```
 
-- public rendering
-- operator inventory and publication workflow
+That gives the product team:
+
+- a named content type
+- a public page route
+- preview and publish workflow
+- navigation and redirect management in the same app
+
+The important lesson is that content types, templates, navigation, preview, and redirects are one
+product system, not four unrelated tools.
 
 ## Where The CMS Routes Come From
 
@@ -101,6 +107,18 @@ Then adapt:
 - page-type vocabulary
 - editorial review steps
 - campaign-specific landing page templates
+
+## Full Implementation
+
+If you want the full Shoppr CMS implementation after learning the pattern:
+
+- `apps/shoppr/templates/cms/page.html`
+- `apps/shoppr/templates/cms/pages.html`
+- `apps/shoppr/templates/cms/preview.html`
+- `apps/shoppr/templates/cms/navigation.html`
+- `apps/shoppr/templates/cms/redirects.html`
+- `apps/shoppr/content/page-types/home.toml`
+- `apps/shoppr/content/page-types/landing_page.toml`
 
 ## Read Next
 

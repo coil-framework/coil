@@ -2,161 +2,163 @@
 title: Theme Asset Delivery
 ---
 
-Davenda treats theme assets as publishable runtime artifacts, not loose files the browser reads
-directly from your repository.
+Davenda theme assets are published artifacts with a manifest-backed delivery plan, not raw files
+that templates reference directly forever.
 
-That distinction is why Shoppr and Gitly can use hashed CSS and JavaScript assets in local and
-production builds without changing template structure.
+## Start With The Template Call Site
 
-## What This Page Covers
+A normal template should look like this:
 
-Use this page when you need to know:
+```html
+<link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+<script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+```
 
-- where theme assets live
-- how they are hashed and published
-- how they are resolved in templates
-- when to use your own domain versus a CDN or object-store host
+Annotated:
 
-## Source Files Versus Published Assets
+- the literal `href` and `src` are readable development fallbacks
+- `asset('theme/assets/...')` is the real contract
+- the runtime replaces the logical path with the current published URL
 
-The customer app keeps human-edited assets in the theme:
+That one example explains the whole subsystem better than a list of crates does.
 
-- `apps/shoppr/theme/assets/`
-- `apps/gitly/theme/assets/`
+## What Problem Is This Solving?
 
-Those source files are not the final URLs browsers should request.
+Asset delivery needs to satisfy all of these at once:
 
-Davenda publishes them into managed storage and serves them through the runtime's asset-delivery
-contract. The published object typically has:
+- customer apps should use stable logical asset names
+- production should serve hashed assets
+- local and production templates should not diverge
+- the runtime should know which published URL belongs to which logical asset
 
-- a hashed filename
-- a content-type preserved from the source asset
-- stable cache semantics
-- a logical relationship back to the theme asset path
+That is why Davenda uses:
 
-## How Templates Should Reference Assets
+- asset roots in the app manifest
+- publication plans
+- hashed artifact paths
+- an active asset manifest during rendering
 
-Always use the asset helper exposed by the template layer.
+## How Publication Starts
 
-Do not hard-code:
+Customer apps opt assets into publication with `[theme].asset_roots`:
 
-- `site.css`
-- raw object-store bucket URLs
-- guessed hashed filenames
+```toml
+[theme]
+asset_roots = ["theme/assets"]
+```
 
-That rule matters because the publish step owns:
+That tells Davenda where the logical asset tree begins.
 
-- hashing
-- storage location
-- MIME type
-- public URL generation
+## How The Delivery Flow Works
 
-## The Shoppr And Gitly Pattern
+The current delivery flow is:
 
-The canonical examples are:
+1. the customer app declares asset roots
+2. those files are turned into deployment artifacts
+3. each artifact gets a hashed path and fingerprint
+4. publication produces an active asset manifest
+5. request rendering injects logical-path to public-URL mappings into the template model
+6. `asset('...')` resolves through that manifest
 
-- `apps/shoppr/templates/layouts/base.html`
-- `apps/gitly/templates/layouts/base.html`
+The important design choice is step 5: templates do not need to know the hash.
 
-Those layouts reference the logical theme assets and let Davenda resolve the published URLs.
+## What The Runtime Actually Injects
 
-That is the supported pattern for:
+At render time, the runtime loops through the active asset manifest and adds asset-path bindings to
+the `RenderModel`.
 
-- CSS
-- JavaScript
-- images shipped with the theme
-- favicons and manifest files
+Conceptually, it is doing this:
 
-## Local Development
+```rust
+model = model.with_asset_path("theme/assets/site.css", "https://cdn.example.com/...hashed.css")?;
+```
 
-In local development, the runtime still resolves published assets rather than pretending the
-browser can read files from disk.
+That is why template code stays small and stable while the published URL can change on every build.
 
-That is deliberate. Local should be close enough to production to catch real mistakes such as:
+## What Delivery Targets Exist?
 
-- missing publish steps
-- broken MIME types
-- bad asset helper usage
-- object-store configuration errors
+Davenda’s asset model includes these target shapes:
 
-## Production Serving Options
+- `Cdn`
+- `SignedObject`
+- `AppProxy`
+- `LocalPath`
 
-You have two normal production options.
+That is the general asset capability.
 
-### Same-Domain Asset Serving
+For theme assets specifically, the currently checked-in publication flow is effectively CDN/object
+store first. In other words:
 
-Use the main application domain for both HTML and published assets when:
+- theme publication expects a `cdn_base_url`
+- the checked-in demos publish public theme assets as CDN-style URLs
 
-- you want the simplest deployment
-- you do not yet need edge caching beyond the app boundary
-- you want cookies, CSP, and observability to stay straightforward
+That is an implementation fact the docs should state plainly.
 
-This is a perfectly valid production shape.
+## Local Example
 
-### CDN Or Dedicated Asset Host
+If you picture the flow with one CSS file, it looks like this:
 
-Use `cdn_base_url` or an equivalent dedicated asset host when:
+```text
+logical asset path:
+  theme/assets/site.css
 
-- you want edge caching for large global traffic
-- you need stronger cache isolation between HTML and assets
-- your operations model already includes a CDN
+published artifact path:
+  theme/assets/site.<fingerprint>.css
 
-You do not need a CDN to run Davenda correctly. It is an optimisation and topology choice, not a
-mandatory platform requirement.
+render-time resolved URL:
+  http://localhost:9002/gitly/theme/assets/site.<fingerprint>.css
+```
 
-## Object Store And Public Reachability
+The template still only says:
 
-Davenda stores published assets in managed object storage, but customer templates should still
-think in terms of the runtime delivery contract.
+```html
+dv:href="asset('theme/assets/site.css')"
+```
 
-In practice that means:
+## What Config Is Involved?
 
-- object storage is part of the platform plumbing
-- the public URL may be same-domain, CDN-fronted, or object-store-backed
-- templates should not care which one is active
+App-level:
 
-If the object store is exposed directly in local development, that is a delivery detail, not the
-authoring model.
+- `[theme].asset_roots`
 
-## MIME Types
+Runtime-level:
 
-Davenda preserves source content types when publishing assets.
+- `[assets].publish_manifest = true`
+- `[assets].cdn_base_url = "..."`
 
-That matters because browsers will reject CSS and JavaScript if the asset store serves them as
-generic binary blobs. If you see browser errors about unsupported stylesheet or script MIME types,
-check the publication path first.
+Practical consequence:
 
-## Cache Behaviour
-
-Hashed assets are designed for long-lived caching because the content hash changes when the file
-changes.
-
-Typical operational pattern:
-
-- HTML remains more dynamic
-- assets remain aggressively cacheable
-- a new publish creates new URLs rather than mutating old ones in place
-
-## Concrete Files To Read
-
-Start here:
-
-- `apps/shoppr/theme/assets/`
-- `apps/gitly/theme/assets/`
-- `apps/shoppr/platform.toml`
-- `apps/shoppr/platform.dev.toml`
-- `crates/davenda-cli/src/cli/app.rs`
-- `crates/davenda-runtime/src/server/backend.rs`
+- if you remove `cdn_base_url` today without changing the implementation, theme publication breaks
 
 ## Common Mistakes
 
-- Hard-coding MinIO, S3, or bucket URLs in templates.
-- Referencing unhashed source filenames directly from HTML.
-- Assuming `cdn_base_url` is required for production.
-- Treating local asset serving as a separate product surface from production.
+### Assuming `asset('...')` means “served by the app process”
 
-## Read Next
+It means “resolve this logical asset through the current publication manifest.”
+
+### Hardcoding `/theme/assets/...` as the final production URL
+
+That defeats hashing and manifest resolution.
+
+### Treating theme assets as an afterthought compared to managed assets
+
+Theme assets are already part of the deployment contract.
+
+## Supporting Implementation And Repo Examples
+
+Concrete supporting files:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/gitly/app.toml`
+- `apps/gitly/platform.dev.toml`
+- `crates/davenda-assets/src/release.rs`
+- `crates/davenda-assets/src/delivery.rs`
+- `crates/davenda-runtime/src/storage/host.rs`
+- `crates/davenda-runtime/src/render/model.rs`
+
+## What Should I Read Next?
 
 - [Theme Structure](./theme-structure.md)
-- [Platform Config](./platform-config.md)
-- [Asset Publication And CDN Delivery](../operations/asset-publication-and-cdn-delivery.md)
+- [Template Models](./template-models.md)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)

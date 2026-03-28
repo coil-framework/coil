@@ -2,230 +2,272 @@
 title: Linked Rust Hook APIs
 ---
 
-Linked Rust is Davenda's primary customization model for customer-owned backend logic.
+Linked Rust backends are the first-party customer extension model in Davenda.
 
-This page documents the public hook surface exposed by `davenda-customer-sdk`.
+Start with the smallest useful plugin shape:
 
-## What This Page Covers
+```rust
+use davenda_customer_sdk::{
+    CheckoutHooks, CustomerBackendPlugin, CustomerHookRegistry, PluginDescriptor,
+};
 
-Use this page when you want to know:
+struct ShopprBackend;
 
-- which traits a customer backend can implement
-- how plugins register themselves
-- which facades customer hooks receive
-- what the supported integration boundary looks like today
+impl CustomerBackendPlugin for ShopprBackend {
+    fn descriptor(&self) -> PluginDescriptor {
+        PluginDescriptor::new("shoppr-backend", "Shoppr Linked Backend", "0.1.0")
+    }
 
-For the architectural rationale, read [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md).
-For a complete working example, read [Shoppr Linked Rust Backend](../use-cases/shoppr/linked-rust-backend.md).
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) {
+        registry.register_checkout(Box::new(ShopprCheckoutHooks));
+    }
+}
+```
 
-## Where The Public SDK Lives
+That is the model:
 
-The stable surface is provided by:
+- the customer binary links a plugin
+- the plugin registers explicit hooks
+- the runtime invokes those hooks through stable SDK traits and facades
 
-- `crates/davenda-customer-sdk/src/lib.rs`
-- `crates/davenda-customer-sdk/src/registry.rs`
-- `crates/davenda-customer-sdk/src/hooks.rs`
-- `crates/davenda-customer-sdk/src/facade.rs`
+Use this page when you want to answer:
 
-Customer apps should depend on this SDK instead of importing arbitrary runtime internals.
+- how a customer plugin registers hooks
+- which hook kinds exist today
+- which facades hooks can call
+- where Shoppr and Gitly demonstrate the pattern
 
-## Plugin Registration
+## The Core Plugin Contract
 
-Every linked backend starts by implementing `CustomerBackendPlugin`.
+The top-level trait is `CustomerBackendPlugin`.
 
-Core methods:
+Each plugin provides:
 
 - `descriptor()`
-  - identifies the plugin with id, name, and version
-- `register()`
-  - registers one or more hook implementations with the runtime
+  - id, display name, version, docs URL
+- `register(...)`
+  - hook registration against a `CustomerHookRegistry`
 
-The runtime builder accepts linked plugins through:
+That is the stable boundary a customer crate should target.
 
-- `register_customer_plugin(...)`
-- `with_customer_plugin(...)`
+## How To Think About Linked Rust
 
-The Shoppr and Gitly customer binaries use this pattern directly.
+Linked Rust is for first-party product policy, not for generic "run arbitrary code."
 
-## Hook Registry
+Good linked Rust use cases:
 
-The runtime exposes a `CustomerHookRegistry` during plugin registration.
+- checkout review rules
+- CMS publish validation
+- verified webhook handling
+- customer-specific audit or CRM routing
 
-Current supported registration points are:
+Bad linked Rust use cases:
 
-- checkout hooks
-- CMS publish hooks
-- verified webhook hooks
-- verified webhook asset hooks
+- replacing core services
+- bypassing runtime policy through private internals
+- re-implementing official modules in customer code
 
-These are intentionally explicit. A plugin declares exactly which hook families it participates in.
+## Registered Hook Kinds
 
-## Hook Traits
+The registry currently supports four hook families:
 
-### `CheckoutHooks`
+- `Checkout`
+- `CmsPagePublish`
+- `VerifiedWebhook`
+- `VerifiedWebhookAssets`
 
-Entry point:
+Those hook kinds are exposed as `RegisteredHookKind` in
+`crates/davenda-customer-sdk/src/registry.rs`.
 
-- `review_order(...) -> Result<OrderReviewDecision, BackendError>`
+## Checkout Hooks
 
-Use it for:
+The checkout hook trait lives in `crates/davenda-customer-sdk/src/hooks.rs`:
 
-- order review policy
-- loyalty or membership gating
-- metadata enrichment before order acceptance
+- `CheckoutHooks::review_order(...)`
 
-Facades available:
+This is the first hook to read if you are building customer-specific pricing, membership, fraud,
+or CRM routing logic.
+
+Concrete examples:
+
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
+- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
+
+These show how Shoppr:
+
+- inspects the draft order
+- adds order notes through `CommerceFacade`
+- returns approve, reject, or adjust decisions
+
+Minimal mental model for checkout hooks:
+
+1. runtime builds an order draft
+2. hook receives the draft through the SDK
+3. hook uses stable facades if needed
+4. hook returns a bounded decision
+
+That is much safer than letting customer code reach directly into runtime request internals.
+
+## CMS Publish Hooks
+
+The CMS hook trait is:
+
+- `CmsHooks::validate_page_publish(...)`
+
+Gitly is the clearer example here:
+
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
+
+Gitly uses this hook to keep its README-style content honest by requiring accessibility guidance in
+published content.
+
+That is a good example of linked Rust doing first-party product policy, not generic platform work.
+
+## Verified Webhook Hooks
+
+Verified webhooks are the hook family that runs after the runtime has already authenticated and
+normalized inbound webhook data.
+
+The traits are:
+
+- `VerifiedWebhookHooks::handle_verified_webhook(...)`
+- `VerifiedWebhookAssetHooks::handle_verified_webhook(...)`
+
+These hooks matter because they combine multiple host facades safely:
+
+- outbound HTTP
+- jobs
+- repositories
+- assets
+- audit
+
+The strongest current runtime coverage for these hooks lives in:
+
+These hooks are where multiple facades come together:
+
+- repository access
+- jobs
+- audit
+- outbound HTTP
+- managed assets
+
+That makes them the best example of "customer-owned logic through stable runtime contracts."
+
+## Available Facades
+
+The facade traits live in `crates/davenda-customer-sdk/src/facade.rs`.
+
+Current families:
 
 - `CommerceFacade`
-- `AuthFacade`
-- `AuditFacade`
-
-### `CmsHooks`
-
-Entry point:
-
-- `validate_page_publish(...) -> Result<CmsPublishDecision, BackendError>`
-
-Use it for:
-
-- editorial policy
-- custom publish gates
-- content validation and rewrite flows
-
-Facades available:
-
-- `RepositoryFacade`
-- `AuditFacade`
-
-### `VerifiedWebhookHooks`
-
-Entry point:
-
-- `handle_verified_webhook(...) -> Result<WebhookHandlingResult, BackendError>`
-
-Use it for:
-
-- reacting to verified payment or integration webhooks
-- enqueueing follow-up jobs
-- updating repository-backed records
-
-Facades available:
-
-- `OutboundHttpFacade`
+  - product lookup
+  - add order note
 - `JobsFacade`
+  - enqueue runtime jobs
 - `RepositoryFacade`
+  - read and write stable repository surfaces
+- `AuthFacade`
+  - capability checks and denial explanations
 - `AuditFacade`
-
-### `VerifiedWebhookAssetHooks`
-
-Entry point:
-
-- `handle_verified_webhook(...)` with asset publication access
-
-Use it when verified-webhook processing must also publish or inspect managed assets.
-
-Additional facade:
-
+  - operator or hook audit records
+- `OutboundHttpFacade`
+  - approved integration HTTP only
 - `AssetsFacade`
+  - publish and inspect managed assets
 
-## Facades
+Simple example:
 
-The public facades are the supported way for customer code to interact with the platform.
+```rust
+let product = commerce.product("harbor-cap").await?;
+audit.record("checkout.reviewed", "customer draft inspected").await?;
+jobs.enqueue("crm.sync.contact", payload).await?;
+```
 
-### `CommerceFacade`
+The exact facade methods vary by family, but the pattern stays the same:
 
-Current responsibilities:
+- customer code uses typed SDK services
+- the runtime decides how those services are actually implemented
 
-- inspect products
-- add order notes
-
-### `JobsFacade`
-
-Current responsibility:
-
-- enqueue runtime jobs
-
-### `RepositoryFacade`
-
-Current responsibilities:
-
-- read repository records
-- write repository records
-
-The SDK also provides `RepositoryFacadeExt` helpers for common typed records such as:
+The extension traits in `RepositoryFacadeExt` are also worth reading because they show the current
+stable repository surfaces directly:
 
 - CMS pages
 - CMS navigation
 - CMS redirects
-- catalogue products
-- catalogue collections
-- orders
+- commerce catalog product and collection
+- commerce order lookup by id or payment reference
 
-### `AuthFacade`
+## What A Good Hook API Feels Like
 
-Current responsibilities:
+You should be able to explain linked Rust hooks in one sentence:
 
-- capability checks
-- denial explanations
+"Customer-owned Rust implements explicit hook traits and talks to Davenda only through stable SDK facades."
 
-### `AuditFacade`
+If a customization needs private runtime types or deep internal crates, it is crossing the wrong boundary.
 
-Current responsibility:
+## Try It Locally
 
-- record audit entries
+Useful commands:
 
-### `OutboundHttpFacade`
+```bash
+cargo run -p shoppr -- describe
+cargo run -p shoppr -- linked-backend describe
+cargo run -p shoppr -- linked-backend demo
+```
 
-Current responsibility:
+## Constraints
 
-- send outbound HTTP requests through the runtime boundary
+- Linked Rust is first-party only.
+  - it is compiled into the customer binary
+  - it is not runtime-installed like WASM
+- Hooks must use the facades the runtime exposes.
+  - they do not get arbitrary process internals
+- The hook registry is explicit.
+  - if a plugin does not register a hook, the runtime will not discover it magically
 
-### `AssetsFacade`
+## When To Use Linked Rust Instead Of WASM
 
-Current responsibilities:
+Use linked Rust when the logic is:
 
-- publish managed assets
-- inspect managed assets
+- customer-owned
+- first-party
+- tightly tied to product policy
+- likely to evolve with the customer app workspace
 
-## What Linked Rust Can Do That WASM Should Not
+Use WASM when the logic is:
 
-Linked Rust is the right path when you need:
+- runtime-installed
+- bounded
+- grant-scoped
+- more operationally swappable
 
-- richer typing
-- first-party build participation
-- tighter integration with customer-owned policy
-- broader public facades than a runtime-installed extension should receive
+## Full Implementation
 
-If the code should be installable by third parties at runtime, that is exactly when you should not
-use this surface.
+Core SDK boundary:
 
-## Canonical Examples
+- `crates/davenda-customer-sdk/src/registry.rs`
+- `crates/davenda-customer-sdk/src/hooks.rs`
+- `crates/davenda-customer-sdk/src/facade.rs`
 
-Read these end to end:
+Canonical Shoppr implementation:
 
 - `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
 - `apps/shoppr/crates/shoppr-backend/src/lib.rs`
 - `apps/shoppr/crates/shoppr-app/src/lib.rs`
+- `apps/shoppr/crates/shoppr-bin/src/main.rs`
+
+Canonical Gitly implementation:
+
 - `apps/gitly/crates/gitly-backend/src/lib.rs`
 - `apps/gitly/crates/gitly-app/src/lib.rs`
+- `apps/gitly/crates/gitly-bin/src/main.rs`
 
-They show:
+Runtime coverage:
 
-- plugin descriptor registration
-- hook registration
-- typed hook implementation
-- customer binary composition
-
-## Common Mistakes
-
-- Importing runtime internals instead of the customer SDK.
-- Treating linked Rust as a separate sidecar API.
-- Putting one plugin id behind multiple unrelated behaviours without a clear boundary.
-- Using linked Rust for reusable marketplace-style extensions that should remain runtime-installed.
+- `crates/davenda-runtime/src/tests/server.rs`
 
 ## Read Next
 
 - [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
+- [WASM Host APIs](./wasm-host-apis.md)
 - [Shoppr Linked Rust Backend](../use-cases/shoppr/linked-rust-backend.md)
-- [Jobs And Schedulers](../operations/jobs-and-schedulers.md)
-- [Observability](../operations/observability.md)

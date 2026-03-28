@@ -9,15 +9,37 @@ Davenda has two different extension models on purpose:
 
 If you blur them together, the security and operability story gets weaker quickly.
 
+Start with the simplest decision rule:
+
+- if the logic is part of the customer's product and release cycle, use linked Rust
+- if the logic should stay runtime-installed and explicitly grant-scoped, use WASM
+
+Concrete contrast:
+
+```rust
+// linked Rust: compiled into the customer binary
+registry.register_checkout(Box::new(ShopprCheckoutHooks));
+```
+
+```toml
+# WASM: installed at runtime through app.toml + package.toml
+[[extensions]]
+id = "shoppr-waitlist-tools"
+package_version = "0.1.0"
+artifact_sha256 = "..."
+customer_app_id = "shoppr"
+```
+
+That is the whole distinction:
+
+- linked Rust is part of the app
+- WASM is an installed guest package
+
 ## What Linked Customer Rust Is
 
 Linked customer Rust is compiled into the customer workspace and shipped with the app binary.
 
 Concrete examples:
-
-- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
-- `apps/gitly/crates/gitly-backend/src/lib.rs`
 
 That path is for:
 
@@ -33,10 +55,6 @@ runtime.
 
 Concrete examples:
 
-- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-- `apps/gitly/extensions/gitly-community-pulse/package.toml`
-- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
-
 That path is for:
 
 - bounded runtime-installed behavior
@@ -47,27 +65,11 @@ That path is for:
 
 ### Linked Rust
 
-Linked Rust is loaded by the customer composition root.
-
-Shoppr does it in `apps/shoppr/crates/shoppr-app/src/lib.rs` by creating:
-
-- `vec![Box::new(shoppr_backend::plugin())]`
-
-Gitly does the same in `apps/gitly/crates/gitly-app/src/lib.rs`.
+Linked Rust is registered by the customer composition root and compiled into the binary.
 
 ### WASM
 
-WASM packages are:
-
-1. declared in `app.toml`
-2. described by `package.toml`
-3. compiled or loaded by the customer app bootstrap code
-4. installed into explicit extension slots
-
-See:
-
-- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
-- `apps/gitly/crates/gitly-app/src/extensions.rs`
+WASM is declared in `app.toml`, described by `package.toml`, and installed into explicit extension points at runtime.
 
 ## Instance Model And Lifecycle
 
@@ -93,6 +95,22 @@ That means:
 - the host validates explicit handlers and grants
 - the extension runs only through declared slots
 
+## Quick Comparison
+
+Linked Rust:
+
+- trusted customer code
+- richer typed SDK facades
+- compile-time linked
+- best for product policy
+
+WASM:
+
+- bounded guest code
+- explicit host API and grants
+- runtime-installed model
+- best for smaller, swappable integrations
+
 ## What Each Model Can Access
 
 ### Linked Rust can use
@@ -113,28 +131,11 @@ surface.
 
 ### Linked Rust
 
-Package linked code as part of the customer workspace:
-
-- customer app crate
-- customer backend crate
-- optional domain library crate
-
-Shoppr shows this clearly in:
-
-- `apps/shoppr/Cargo.toml`
-- `apps/shoppr/crates/shoppr-backend/Cargo.toml`
-- `apps/shoppr/backend/shoppr-loyalty-backend/Cargo.toml`
+Package linked code as part of the customer workspace.
 
 ### WASM
 
-Package runtime-installed behavior with:
-
-- `package.toml`
-- one or more handlers
-- a built artifact
-- a pinned checksum in `app.toml`
-
-Gitly's checked-in packages are the clearest current examples.
+Package runtime-installed behavior with a package manifest, handlers, built artifact, and a pinned checksum in `app.toml`.
 
 ## When To Choose Which
 
@@ -150,11 +151,54 @@ Choose WASM when:
 - you want explicit host grants
 - you want the runtime-installed package model
 
+## A Good Heuristic
+
+If the behavior needs:
+
+- customer-specific checkout policy
+- customer-specific webhook logic
+- customer-specific CMS publish rules
+
+use linked Rust.
+
+If the behavior needs:
+
+- a render slot
+- a narrow API handler
+- a small scheduled job
+- an explicit install/uninstall model
+
+use WASM.
+
 ## Common Mistakes
 
 - Putting first-party business rules into WASM just because it feels “more pluggable.”
 - Using linked Rust for behavior that really needs a harder trust boundary.
 - Treating WASM as a second unrestricted backend instead of a host-governed extension model.
+
+## Full Implementation
+
+Linked Rust examples:
+
+- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
+- `apps/shoppr/crates/shoppr-app/src/lib.rs`
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+
+WASM examples:
+
+- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
+- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
+- `apps/gitly/crates/gitly-app/src/extensions.rs`
+
+Workspace packaging examples:
+
+- `apps/shoppr/Cargo.toml`
+- `apps/shoppr/crates/shoppr-backend/Cargo.toml`
+- `apps/shoppr/backend/shoppr-loyalty-backend/Cargo.toml`
 
 ## Read Next
 

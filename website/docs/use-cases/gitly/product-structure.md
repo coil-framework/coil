@@ -2,14 +2,131 @@
 title: Product Structure
 ---
 
-Gitly demonstrates how to build a non-commerce product shell in Davenda without fighting the
-platform.
+This page is about how to structure a non-commerce Davenda product, with Gitly as the example.
 
-## The Files That Define The Product Shape
+Use it when you want to answer:
 
-Start with:
+- where customer-owned routes belong
+- how templates map to product vocabulary
+- where linked Rust should supply non-commerce data
+
+## The Core Pattern
+
+For a non-commerce app, keep the product structure split across:
+
+1. a customer app crate that defines the route vocabulary
+2. templates that match the real product nouns
+3. linked Rust that shapes product data
+4. only the modules that genuinely help
+
+Gitly is useful because it keeps that split very visible.
+
+## Canonical Route Vocabulary Pattern
+
+A customer app should own the product’s route nouns directly. Gitly’s composition root in
+`apps/gitly/crates/gitly-app/src/lib.rs` is the concrete example.
+
+The product routes it mounts are shaped around repository software, not storefront pages:
+
+```text
+/
+/explore
+/:owner/:repo
+/:owner/:repo/issues
+/:owner/:repo/pulls
+/:owner/:repo/actions
+/orgs/:org
+/:user
+/search
+```
+
+That is the key lesson:
+
+- the platform should not force commerce-shaped routes
+- the customer app should define the product vocabulary directly
+
+## Canonical Template Mapping Pattern
+
+Once the route vocabulary exists, templates should mirror that vocabulary one-for-one.
+
+Gitly’s template tree under `apps/gitly/templates/gitly/` does exactly that:
+
+- `home.html`
+- `explore.html`
+- `repository.html`
+- `issues.html`
+- `pulls.html`
+- `actions.html`
+- `organization.html`
+- `profile.html`
+- `search.html`
+
+This is the pattern to copy for any Davenda app:
+
+- name templates after real product surfaces
+- keep them product-first, not framework-first
+
+## Canonical Linked-Data Pattern
+
+A non-commerce app still needs product-shaped data. Gitly uses linked Rust for that in
+`apps/gitly/crates/gitly-backend/src/lib.rs`.
+
+The backend supplies:
+
+- repository fixtures
+- pull request fixtures
+- workflow fixtures
+- organization fixtures
+- user fixtures
+- API payload builders
+
+That is the right boundary for product-shaped data that belongs to one customer app but is too rich
+for static templates alone.
+
+## Gitly As The Supporting Example
+
+### Customer-owned routes
+
+Read:
 
 - `apps/gitly/crates/gitly-app/src/lib.rs`
+
+This file is the strongest example in the repo of Davenda hosting a product that is not shaped like
+catalog, cart, checkout, and account.
+
+### Templates
+
+Read:
+
+- `apps/gitly/templates/gitly/home.html`
+- `apps/gitly/templates/gitly/repository.html`
+- `apps/gitly/templates/gitly/actions.html`
+
+These are enough to see:
+
+- landing shell
+- dense product detail shell
+- background-work/status surface
+
+### Product data
+
+Read:
+
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
+
+This is where the demo keeps repository, organization, workflow, and user data shaping.
+
+## Practical Rules To Copy
+
+- define your route vocabulary in the customer app crate
+- keep template names aligned to product nouns
+- let linked Rust provide product-shaped data and policy
+- only enable modules that support the product instead of forcing a broad stack
+
+## Full Implementation Pointers
+
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
 - `apps/gitly/templates/gitly/home.html`
 - `apps/gitly/templates/gitly/explore.html`
 - `apps/gitly/templates/gitly/repository.html`
@@ -19,70 +136,6 @@ Start with:
 - `apps/gitly/templates/gitly/organization.html`
 - `apps/gitly/templates/gitly/profile.html`
 - `apps/gitly/templates/gitly/search.html`
-
-That list shows the most important Gitly idea: the customer app owns the product vocabulary.
-
-## Customer-Owned Routes, Not Store Routes
-
-Gitly mounts routes such as:
-
-- `/`
-- `/explore`
-- repository pages
-- issues pages
-- pull request pages
-- actions pages
-- organization pages
-- profile pages
-- search pages
-
-Those routes are assembled by the customer app in `apps/gitly/crates/gitly-app/src/lib.rs`.
-
-This is the cleanest repo example of Davenda hosting a product that is not shaped like a storefront.
-
-## What Each Template Teaches
-
-- `home.html`
-  - landing page plus API-driven summary surfaces
-- `repository.html`
-  - dense product shell for repository data
-- `issues.html`
-  - issue-tracker style listing
-- `pulls.html`
-  - review-centric table and summary layout
-- `actions.html`
-  - scheduled-task and workflow demo surface
-- `organization.html`
-  - organization landing page
-- `profile.html`
-  - user identity and activity surface
-- `search.html`
-  - application-style search experience
-
-Each template shows that Davenda's HTML-first model still works for non-commerce UIs.
-
-## Where The Data Comes From
-
-Gitly's linked backend in `apps/gitly/crates/gitly-backend/src/lib.rs` provides:
-
-- repository fixtures
-- pull request fixtures
-- workflow fixtures
-- organization fixtures
-- user fixtures
-- API payload builders
-
-That gives the customer app a product-shaped data source without forcing it through commerce or CMS
-abstractions.
-
-## Adapt This For Your Own Product
-
-If you are building a non-commerce app, copy these ideas from Gitly:
-
-- define product-specific routes in the customer app
-- let templates match the real product vocabulary
-- use linked Rust for product-shaped data and policy
-- use official modules only where they genuinely help
 
 ## Read Next
 

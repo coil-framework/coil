@@ -2,9 +2,43 @@
 title: Custom Auth Schema Guidance
 ---
 
-Custom auth schemas are supported by design, but they need to be done with discipline.
+Custom auth schemas are supported by design, but the safe path is narrower than "write whatever policy graph you want."
 
-This page explains the safe path.
+Start with the smallest useful customization:
+
+```toml
+# package.toml
+name = "shoppr-auth"
+version = "0.1.0"
+mode = "extend"
+storage_schema_version = 1
+model_version = 1
+capability_binding_version = 1
+imports = ["platform-default-auth"]
+```
+
+```text
+# model.auth
+type product
+  relations
+    merchandiser: user | group#member
+  permissions
+    featured_edit = merchandiser
+```
+
+```toml
+# capabilities.toml
+[bindings."catalog.featured.edit"]
+resource_type = "product"
+permission = "featured_edit"
+```
+
+That is a good first custom schema because it:
+
+- changes one business rule
+- keeps first-party capability names stable
+- preserves the default package as the base
+- is easy to validate and explain
 
 ## When You Should Use This Page
 
@@ -76,23 +110,6 @@ permission = "featured_edit"
 ```
 
 This is the safest custom-schema shape because it preserves first-party capability contracts while adding customer semantics.
-
-## Exact Files Involved
-
-For a customer app, the normal file set is:
-
-- `apps/<app>/app.toml`
-- `apps/<app>/platform.toml`
-- `apps/<app>/platform.dev.toml`
-- `apps/<app>/auth/<package>/package.toml`
-- `apps/<app>/auth/<package>/model.auth`
-- `apps/<app>/auth/<package>/capabilities.toml`
-
-Those files work together:
-
-- `app.toml` declares intent
-- platform config selects the runtime package
-- the auth package defines the semantics
 
 ## When Full Replacement Is Justified
 
@@ -182,6 +199,16 @@ The operational rule is simple:
 
 If the grant path is surprising, use auth explain tooling rather than guessing from relation names.
 
+### 7. Stop if the change starts to sprawl
+
+If you find yourself needing:
+
+- many renamed first-party permissions
+- many replaced base relations
+- a new organization model across most resources
+
+you are no longer doing a small extension. Re-evaluate whether you are planning a real replacement package.
+
 ## How To Keep A Custom Schema Safe
 
 Rules that matter:
@@ -201,6 +228,30 @@ Good first custom schemas are:
 - specific to one business rule
 - easy to explain
 - easy to remove if the requirement changes
+
+## What Not To Do
+
+Bad pattern:
+
+```text
+type page
+  relations
+    custom_role_a: user
+    custom_role_b: user
+    custom_role_c: user
+  permissions
+    publish = custom_role_a
+    edit = custom_role_b
+    read = custom_role_c
+```
+
+Why this is a poor first customization:
+
+- it throws away the default model too early
+- it introduces local names with no clear capability story
+- it increases migration and explain complexity immediately
+
+Prefer small additions over broad rewrites.
 
 ## What To Customize First
 
@@ -223,16 +274,6 @@ Bad first customizations:
 - Forgetting that installed modules still need their published capability contracts satisfied.
 - Assuming design-level replaceability means every runtime loader path already supports arbitrary custom schemas today.
 
-## Repo Example
-
-The canonical checked-in example is:
-
-- `apps/shoppr/auth/shoppr-auth/package.toml`
-- `apps/shoppr/auth/shoppr-auth/model.auth`
-- `apps/shoppr/auth/shoppr-auth/capabilities.toml`
-
-That package adds one merchandising-specific capability while preserving the default package as the base.
-
 ## Decision Rule
 
 If you can express the requirement by:
@@ -245,6 +286,17 @@ If you can express the requirement by:
 use `extend`.
 
 If the deployment needs a genuinely different organization model across the whole app, then plan a full replacement and treat it as a major auth change, not a small customization.
+
+## Full Implementation
+
+The canonical checked-in example is:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/auth/shoppr-auth/package.toml`
+- `apps/shoppr/auth/shoppr-auth/model.auth`
+- `apps/shoppr/auth/shoppr-auth/capabilities.toml`
 
 ## Read Next
 

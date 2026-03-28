@@ -2,80 +2,13 @@
 title: Accessibility As A Platform Contract
 ---
 
-This page explains what “accessibility as a platform contract” means in practical Davenda terms.
+In Davenda, accessibility is part of the rendering contract, not a late design cleanup pass.
 
-## What Is This?
+## Start With The Practical Standard
 
-Davenda treats accessibility as a shared contract across:
+A good Davenda page should already make sense before any enhancement script runs.
 
-- runtime rendering
-- official module surfaces
-- customer templates
-- customer theme assets
-- progressively enhanced interactions
-
-This is broader than “check contrast before launch.”
-
-## Why Does It Live At The Platform Level?
-
-Davenda controls enough of the application model that it can either help or harm accessibility very
-quickly.
-
-The framework influences:
-
-- document structure
-- locale metadata
-- form rendering
-- navigation shells
-- fragment updates
-- first-render HTML
-
-So accessibility cannot be left entirely to late theme review.
-
-## When Should Developers Think About It?
-
-From the first template.
-
-Do not wait until the visual design is “done.” In Davenda, the semantics are already visible early:
-
-- page shells
-- nav bars
-- forms
-- tables
-- status messaging
-- account and checkout flows
-
-## What Davenda Validates Today
-
-This is the honest answer:
-
-Davenda does **not** currently run a full automatic accessibility validator over customer templates.
-
-What the platform does give you today is:
-
-- server-rendered HTML-first output
-- request-driven locale values so `lang` can be correct
-- ordinary semantic HTML templates instead of opaque view bytecode
-- module and customer surfaces that can be reviewed directly in checked-in HTML
-
-What remains app responsibility:
-
-- heading order
-- contrast
-- focus states
-- live-region usage
-- keyboard handling in customer JS
-
-## Practical Markup Examples
-
-### Navigation and skip links
-
-Gitly demonstrates the right baseline shape in files such as:
-
-- `apps/gitly/templates/gitly/home.html`
-- `apps/gitly/templates/gitly/explore.html`
-
-Pattern:
+A minimal public shell should look like this:
 
 ```html
 <a class="skip-link" href="#main">Skip to content</a>
@@ -83,123 +16,150 @@ Pattern:
 <main id="main">...</main>
 ```
 
-Why this matters:
+That tiny snippet carries most of the point:
 
-- repeated navigation becomes skippable
-- landmarks are explicit
-- screen-reader orientation improves immediately
+- navigation is a real landmark
+- repeated page furniture is skippable
+- the primary content target is explicit
+
+Accessibility is therefore visible in the template itself, not only in a testing report.
+
+## Why Is This A Platform Concern?
+
+Davenda influences:
+
+- document structure
+- locale metadata
+- forms
+- navigation shells
+- fragment updates
+- the baseline HTML that ships before JavaScript enhancement
+
+Because the framework controls so much of that path, it has a real responsibility to make the
+accessible path the normal path.
+
+## What Davenda Helps With Today
+
+Current practical advantages:
+
+- HTML-first rendering
+- request-driven locale values so `<html lang>` can be correct
+- module and customer surfaces expressed as reviewable HTML
+- progressive enhancement layered on top instead of replacing the baseline page
+
+Current honest limitation:
+
+- Davenda does not currently run a full automatic accessibility validator over every customer
+  template
+
+So the platform helps strongly, but the customer app still has to execute well.
+
+## Forms, Tables, And Status Messages
 
 ### Forms
 
-Use real form controls and labels. Gitly’s search forms and Shoppr’s cart and checkout templates are
-the best checked-in patterns:
+A Davenda form should remain a real form:
 
-- `apps/gitly/templates/gitly/search.html`
-- `apps/shoppr/templates/commerce/cart.html`
-- `apps/shoppr/templates/commerce/checkout.html`
+```html
+<form method="get" action="/search">
+  <span class="sr-only">Search</span>
+  <input type="search" name="q" />
+  <button type="submit">Search</button>
+</form>
+```
 
-Baseline rule:
+What this teaches:
 
-- forms must remain usable without JavaScript
+- placeholder text is not the only label
+- the control works before JS
+- semantics are visible in the template
 
 ### Tables
 
-Gitly’s issues and pulls pages show the correct baseline:
-
-- real `<table>`
-- real `<caption>`
-- real `<th scope="col">`
-
-See:
-
-- `apps/gitly/templates/gitly/issues.html`
-- `apps/gitly/templates/gitly/pulls.html`
-
-### Status and live feedback
-
-Gitly’s API fallback card shows the minimal correct live-status shape:
+A real data table should still be a real table:
 
 ```html
-<aside role="status" aria-live="polite">...</aside>
+<table>
+  <caption>Open issues</caption>
+  <thead>
+    <tr>
+      <th scope="col">Issue</th>
+      <th scope="col">Owner</th>
+    </tr>
+  </thead>
+</table>
 ```
 
-See:
+### Status feedback
 
-- `apps/gitly/templates/gitly/home.html`
+A meaningful update should expose status semantics:
 
-## Accessibility And Progressive Enhancement
+```html
+<aside role="status" aria-live="polite">API hydration failed.</aside>
+```
 
-Progressive enhancement is where many otherwise good server-rendered apps regress.
+This matters especially for fragment or enhancement flows.
 
-In Davenda, a good enhancement path means:
+## Progressive Enhancement Is Part Of Accessibility
+
+An HTML-first product can still regress badly after enhancement.
+
+For enhanced flows, the standard is:
 
 - the base page already works
 - focus remains stable or moves intentionally
-- important changes expose status feedback
-- pointer-only interaction is not required
+- important updates expose status feedback
+- interaction does not become pointer-only
 
-This matters especially for:
+This is why cart updates, checkout progress, and account panels still need accessibility review even
+if the initial page render looks correct.
 
-- cart updates
-- checkout progress
-- account or admin panels
-- search and language controls
+## What Still Belongs To The Customer App?
 
-## Accessibility And Themes
+Davenda does not remove customer responsibility for:
 
-The theme can easily undo good semantics.
+- heading hierarchy
+- contrast
+- visible focus treatment
+- label quality
+- theme-level accessibility
+- custom JS interactions
 
-Customer theme review should cover:
+A customer app can still break accessibility through a bad theme or bad enhancement choices. The
+framework’s job is to make that a deliberate mistake, not the default path.
 
-- visible focus rings
-- contrast in light, dark, and system mode
-- reduced-motion handling
-- state not conveyed only by color
-
-Gitly is the canonical checked-in example for reviewing these concerns because it ships:
-
-- language switcher
-- theme switcher
-- skip link
-- screen-reader-only labels
-
-across multiple pages under `apps/gitly/templates/gitly/`.
-
-## What Remains The App’s Responsibility?
-
-Customer apps still own:
-
-- semantic page structure
-- customer-specific labels and descriptions
-- accessible dialogs and drawers if they add them
-- JS interaction patterns
-- theme-level visual accessibility
-
-Davenda makes the right path possible and normal. It does not absolve the customer app from using
-that path well.
-
-## Constraints And Common Mistakes
+## Common Mistakes
 
 ### Treating admin as exempt
 
 Internal tools still need accessible forms, tables, and navigation.
 
-### Removing focus styles in the design pass
+### Removing focus styles in the theme
 
-That instantly breaks keyboard usability.
+That breaks keyboard usability immediately.
 
 ### Using placeholders as labels
 
-Search and checkout controls still need real labels.
+Search, checkout, and admin controls still need real labeling.
 
-### Assuming first render passing means fragment updates are also accessible
+### Assuming fragment updates are accessible because the first render is
 
 Partial updates need their own review.
+
+## Supporting Implementation And Repo Examples
+
+Concrete supporting files:
+
+- `apps/gitly/templates/gitly/home.html`
+- `apps/gitly/templates/gitly/explore.html`
+- `apps/gitly/templates/gitly/search.html`
+- `apps/gitly/templates/gitly/issues.html`
+- `apps/gitly/templates/gitly/pulls.html`
+- `apps/shoppr/templates/commerce/cart.html`
+- `apps/shoppr/templates/commerce/checkout.html`
 
 ## What Should I Read Next?
 
 - [Accessibility](../reference/accessibility.md)
 - [Themes, Rendering, And Assets](./themes-rendering-and-assets.md)
-- [Request And Render Lifecycle](./request-and-render-lifecycle.md)
-- `apps/gitly/templates/gitly/`
-- `apps/shoppr/templates/commerce/`
+- [Template Language](../reference/template-language.md)

@@ -127,7 +127,7 @@ In Zanzibar-style terms:
 
 Davenda adds a stable capability layer on top so official modules do not couple themselves to one relation graph.
 
-## Exact Files Involved
+## Full Implementation
 
 The Zanzibar-inspired engine and package boundary show up in these repo areas:
 
@@ -135,8 +135,6 @@ The Zanzibar-inspired engine and package boundary show up in these repo areas:
 - `apps/shoppr/auth/shoppr-auth/package.toml`
 - `apps/shoppr/auth/shoppr-auth/model.auth`
 - `apps/shoppr/auth/shoppr-auth/capabilities.toml`
-
-Read those together. Looking at only one of them usually gives the wrong picture.
 
 ## Why This Matters For Customer Apps
 

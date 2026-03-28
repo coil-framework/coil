@@ -2,311 +2,215 @@
 title: Template Models
 ---
 
-Davenda templates render against typed models, not an unstructured bag of JSON.
+Davenda templates render against a typed `RenderModel`, not an unstructured JSON blob.
+
+## Start With A Model And Its Template
+
+Imagine runtime code shaping this model:
+
+```rust
+let model = RenderModel::new()
+    .with_value("locale", RenderValue::text("en-GB"))?
+    .with_object(
+        "site",
+        RenderModel::new()
+            .with_value("brandName", RenderValue::text("Shoppr"))?
+            .with_value("displayName", RenderValue::text("Shoppr UK"))?,
+    )?
+    .with_bool("hasFlashMessages", true)?
+    .with_list(
+        "flashMessages",
+        vec![
+            RenderModel::new()
+                .with_value("text", RenderValue::text("Order updated"))?
+                .with_value("level", RenderValue::text("info"))?,
+        ],
+    )?
+    .with_asset_path("theme/assets/site.css", "https://cdn.example.com/theme/assets/site.abc123.css")?;
+```
+
+And this template consuming it:
+
+```html
+<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
+  <head>
+    <link rel="stylesheet" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body>
+    <h1 dv:text="${site.brandName}">Brand</h1>
+    <section dv:if="${hasFlashMessages}">
+      <article dv:each="message : ${flashMessages}">
+        <p dv:text="${message.text}">Fallback</p>
+      </article>
+    </section>
+  </body>
+</html>
+```
 
-That is why the theme docs can talk about `product`, `cart`, `page`, or `site` as real concepts.
-Those names are not arbitrary. They are the public rendering surface exposed by core and the
-installed modules for the current route.
+That is the core contract:
 
-## What This Page Covers
+- runtime shapes typed values
+- templates read those values declaratively
 
-Use this page when you want to know:
+## What Types Exist?
 
-- which built-in template models exist today
-- what kind of data they expose
-- where those models come from
-- how to decide whether a value belongs in a built-in model, linked Rust hook, CMS record, or
-  extension
+The core types are:
+
+- `RenderModel`
+  - map of keys to values plus an asset-path map
+- `RenderValue::Text`
+- `RenderValue::TrustedHtml`
+- `RenderValue::Bool`
+- `RenderValue::List(Vec<RenderModel>)`
+- `RenderValue::Object(RenderModel)`
 
-For template syntax, read [Template Language](./template-language.md). For theme file structure,
-read [Theme Structure](./theme-structure.md).
+This matters because templates are not dynamically evaluating arbitrary JSON. They are reading a
+small, typed value model.
 
-## How Model Binding Works
+## How Templates Consume The Model
 
-At render time, Davenda resolves:
+These are the important rules:
 
-1. the request host, site, and locale
-2. the route and page handler
-3. the module-owned or customer-owned data for that route
-4. a typed render model
-5. the template that consumes that model
+- `${page.title}`
+  - reads nested object keys
+- `dv:if="${hasFlashMessages}"`
+  - expects a boolean
+- `dv:each="entry : ${auditEntries}"`
+  - expects a list of child models
+- `asset('theme/assets/site.css')`
+  - reads from the model’s asset-path map
 
-That means a template only sees the models that are valid for the current route.
+If you need a branch such as “show this only for the French site,” shape a boolean or object in Rust
+first. Do not try to invent that logic in the template.
 
-The consequence is important:
+## The Common Top-Level Request Model
 
-- templates stay predictable
-- module contracts remain typed
-- customer code extends behaviour through supported hooks and repositories instead of inventing
-  random top-level model names in HTML
+Davenda’s runtime request model usually starts with keys like:
 
-## Core Models Available Across Most Pages
+- `customer_app`
+- `route_name`
+- `path`
+- `locale`
+- `method`
+- `site`
+- `route_params`
+- `links`
+- `navigation`
+- `page`
+- `flashMessages`
 
-These models are part of the common render surface for most browser routes.
+That is why templates can usually stay simple: the runtime has already done the shaping work.
 
-### `site`
+## Lists, Nested Objects, And Booleans
 
-The current site or market being served.
+### Nested objects
 
-Typical values include:
+Use objects when a group of values belongs together:
 
-- site id
-- label
-- host and domain mapping
-- default locale
-- enabled locales
-- brand-facing metadata used in headers, footers, and SEO
+```html
+<span dv:text="${site.brandName}">Brand</span>
+<p dv:text="${page.summary}">Summary</p>
+```
 
-Use it for:
+### Booleans
 
-- site switchers
-- footer metadata
-- market-aware navigation
-- canonical host logic in head markup
+Use booleans for visibility and state:
 
-### `locale`
+```html
+<section dv:if="${hasFlashMessages}">...</section>
+<p dv:unless="${cartItems}">Your cart is empty.</p>
+```
 
-The resolved locale for the current request.
+### Lists
 
-Typical values include:
+Lists are always lists of child models, not raw primitives:
 
-- locale code
-- language tag
-- route prefix behaviour
-- fallback relationship to the site default
+```html
+<li dv:each="item : ${cartItems}">
+  <strong dv:text="${item.title}">Fallback</strong>
+</li>
+```
 
-Use it for:
+That keeps repeated structures explicit and typed.
 
-- language switchers
-- translated navigation
-- locale-aware alternate links
+## Trusted HTML
 
-### `route`
+`TrustedHtml` is the explicit escape hatch for pre-rendered markup.
 
-The resolved page route.
+Use it only when runtime code deliberately owns sanitization and structure. Everything else should
+stay as normal text.
 
-Typical values include:
+Practical rule:
 
-- public path
-- route kind
-- request parameters
-- page-level metadata assembled by the runtime
+- `RenderValue::text(...)` is normal
+- `RenderValue::trusted_html(...)` is exceptional
 
-Use it for:
+## Asset Paths In The Model
 
-- active navigation states
-- breadcrumbs
-- diagnostics while developing
+The asset helper works because `RenderModel` carries a separate asset-path map:
 
-### `seo`
+```rust
+model = model.with_asset_path(
+    "theme/assets/site.css",
+    "https://cdn.example.com/theme/assets/site.abc123.css",
+)?;
+```
 
-The resolved SEO metadata for the current page.
+Then templates read it like this:
 
-Typical values include:
+```html
+<link rel="stylesheet" dv:href="asset('theme/assets/site.css')" />
+```
 
-- title
-- description
-- canonical URL
-- alternate locale links
-- robots directives
-- Open Graph fields
-- JSON-LD blocks prepared by the runtime
+That is how templates stay readable while production still serves hashed assets.
 
-Use it in `<head>` layouts and structured data fragments. For the full SEO control surface, read
-[SEO](./seo.md).
+## Where Runtime Models Come From
 
-### `viewer`
+For request rendering, the main shaping code lives in the runtime render layer.
 
-The current browser principal as seen by the runtime.
+The runtime currently:
 
-Typical values include:
+- injects request-level keys such as `customer_app`, `route_name`, `path`, and `locale`
+- injects site and link objects
+- injects published asset URLs from the active manifest
+- adds route-specific data for storefront, account, admin, and other surfaces
 
-- anonymous vs signed-in state
-- account summary fields for account pages
-- session-scoped presentation state
-
-Use it for:
-
-- account nav
-- member-only UI branches
-- sign-in and sign-out affordances
-
-## Commerce Models
-
-When the commerce module owns the route, templates can receive commerce-specific models.
-
-### `product`
-
-Used on product detail pages.
-
-Typical fields include:
-
-- id or handle
-- SKU
-- title
-- summary
-- price and currency
-- imagery
-- badges
-- option summaries
-- product kind
-- collection membership
-- add-to-cart form inputs
-
-See Shoppr for a live example:
-
-- `apps/shoppr/templates/shoppr/product.html`
-- `apps/shoppr/templates/components/product-card.html`
-
-### `collection`
-
-Used on collection and catalogue listing pages.
-
-Typical fields include:
-
-- handle
-- title
-- summary
-- visible products
-- merchandising labels
-- site-specific availability
-
-### `cart`
-
-Used on cart routes.
-
-Typical fields include:
-
-- line items
-- quantity controls
-- totals
-- applied notes or metadata
-- checkout actions
-
-The cart model is where HTML-first interactions matter most. Davenda renders a complete form and
-then layers JavaScript on top for richer behaviour. See:
-
-- [Storefront Structure](../use-cases/shoppr/storefront-structure.md)
-- [Request And Render Lifecycle](../core-concepts/request-and-render-lifecycle.md)
-
-### `checkout`
-
-Used on checkout pages.
-
-Typical fields include:
-
-- order draft summary
-- contact and shipping fields
-- payment handoff state
-- validation errors
-- customer-hook decisions surfaced back into the form
-
-## CMS Models
-
-When the CMS module owns the route, templates can receive content-centric models.
-
-### `page`
-
-Used for CMS-backed content pages.
-
-Typical fields include:
-
-- title
-- slug
-- summary
-- body HTML
-- publication status
-- live path
-
-Use it for:
-
-- marketing pages
-- landing pages
-- help and policy pages
-
-See Shoppr:
-
-- `apps/shoppr/templates/shoppr/page.html`
-- `apps/shoppr/templates/pages/home.html`
-
-### `navigation`
-
-Used for shared navigation fragments.
-
-Typical fields include:
-
-- label
-- href
-- grouping
-- visibility rules contributed by the current site or locale
-
-## Membership And Event Models
-
-Installed modules extend the render surface with their own typed data.
-
-Examples include:
-
-- membership plans and entitlements
-- event listings and booking availability
-- account history and membership state
-
-Those shapes are intentionally contributed by the module layer rather than redefined inside the
-theme.
-
-## Admin Models
-
-Admin routes expose admin-specific models for:
-
-- queue and job state
-- CMS inventory
-- catalogue and order inspection
-- audit and operator surfaces
-
-Admin templates should treat these as typed operator-facing models, not as a copy of the public
-storefront models.
-
-## Can Customer Apps Add Their Own Models?
-
-Today the supported public model is:
-
-- core contributes common models
-- official modules contribute module models
-- customer apps shape the values that flow through those models by using linked Rust hooks,
-  repositories, CMS content, and extensions
-
-Customer apps should not treat the template language as an arbitrary view-model injection system.
-
-If you need new behaviour, start with one of these questions:
-
-1. Is this new data really content? Put it in CMS or repository records.
-2. Is this a policy decision? Put it in linked Rust hooks.
-3. Is this a bounded runtime-installed enhancement? Use a WASM extension.
-4. Is this reusable domain functionality? It may belong in an official module instead.
-
-## How To Discover The Right Model In Practice
-
-Use this workflow:
-
-1. Find the route in Shoppr or Gitly.
-2. Open the page template and its surrounding layout/fragments.
-3. Read the relevant use-case page to understand the route contract.
-4. Read the module reference page if the route is module-owned.
-5. Only then change the template.
-
-That sequence avoids a common mistake: changing HTML without understanding which typed model owns
-the route.
+This is the practical reason template-model docs matter: if the model is well-shaped, templates stay
+small.
 
 ## Common Mistakes
 
-- Assuming every page gets every model. Davenda binds models per route.
-- Treating `page` and `product` as generic names you can reuse for unrelated shapes.
-- Trying to invent arbitrary top-level template models instead of using supported hooks and
-  repositories.
-- Putting business logic in the template instead of shaping the model earlier in the request flow.
+### Treating the model like untyped JSON
 
-## Read Next
+Davenda’s model is intentionally typed. Use booleans, lists, objects, and trusted HTML for their
+real purposes.
+
+### Building asset URLs manually
+
+Use the asset-path map through `asset('...')`.
+
+### Pushing render-time decisions into templates
+
+Shape booleans and nested objects in runtime code first.
+
+### Passing raw HTML through plain text fields
+
+Use `TrustedHtml` only when the boundary is explicitly trusted.
+
+## Supporting Implementation And Repo Examples
+
+Concrete supporting files:
+
+- `crates/davenda-template/src/model/render.rs`
+- `crates/davenda-runtime/src/render/model.rs`
+- `apps/shoppr/templates/admin/audit.html`
+- `apps/shoppr/templates/pages/home.html`
+- `apps/gitly/templates/gitly/home.html`
+- `apps/gitly/templates/gitly/repository.html`
+
+## What Should I Read Next?
 
 - [Template Language](./template-language.md)
-- [Theme Structure](./theme-structure.md)
-- [Storefront Structure](../use-cases/shoppr/storefront-structure.md)
-- [Product Structure](../use-cases/gitly/product-structure.md)
+- [Theme Asset Delivery](./theme-asset-delivery.md)
+- [Internationalization](./internationalization.md)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)

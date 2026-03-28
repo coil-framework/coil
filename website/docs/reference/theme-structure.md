@@ -2,46 +2,50 @@
 title: Theme Structure
 ---
 
-This page documents the concrete theme and asset structure Davenda supports today.
+Davenda themes are customer-owned UI packages made of templates, published assets, and a small
+amount of manifest configuration.
 
-## What Is This?
+The easiest way to understand the structure is to start with a real shape, then map each part back
+to the framework contract.
 
-In Davenda, a theme is the customer-owned presentation layer made up of:
+## Start With A Working Shape
 
-- template namespaces
-- published asset roots
-- customer HTML templates
-- CSS, JavaScript, images, icons, and similar frontend assets
+```text
+customer-app/
+  app.toml
+  templates/
+    layouts/
+      base.html
+    pages/
+      home.html
+      account.html
+    components/
+      nav.html
+  theme/
+    tokens.toml
+    assets/
+      site.css
+      site.js
+      logo.svg
+```
 
-Themes live in the customer app, not in the runtime binary.
+What each part is doing:
 
-## Why Does It Exist?
+- `templates/`
+  - owns HTML structure, layout shells, fragments, and page composition
+- `theme/assets/`
+  - owns files that the asset pipeline publishes and templates reference through `asset(...)`
+- `theme/tokens.toml`
+  - optional customer convention for semantic design tokens
+- `app.toml`
+  - tells Davenda which template namespaces and asset roots belong to the active theme
 
-Davenda needs a stable way for customer apps to:
+The key point is that Davenda does not treat the theme as “just CSS.” The theme is the customer
+app’s presentation boundary.
 
-- own their document shell
-- restyle official module surfaces
-- publish hashed assets safely
-- keep frontend behavior inside the customer workspace
+## The Manifest Contract
 
-That is why theming is a manifest-level concept instead of “put some CSS somewhere and hope.”
-
-## When Should I Use It?
-
-You configure the theme whenever the customer app needs to:
-
-- declare which templates should win in namespace resolution
-- publish frontend assets
-- supply its own layouts, fragments, or visual shell
-
-If you are building a real customer app, you are using the theme system whether the visual design is
-minimal or highly branded.
-
-## How Do I Configure It?
-
-Theme settings live under `[theme]` in `app.toml`.
-
-Example from Shoppr:
+The framework-supported theme configuration lives under `[theme]` in `app.toml`:
 
 ```toml
 [theme]
@@ -50,14 +54,14 @@ template_namespaces = ["customer-app", "harbor"]
 asset_roots = ["theme/assets"]
 ```
 
-Example from Gitly:
+Annotated:
 
-```toml
-[theme]
-active = "gitly"
-template_namespaces = ["customer-app", "gitly"]
-asset_roots = ["theme/assets"]
-```
+- `active`
+  - stable theme id for the customer app
+- `template_namespaces`
+  - ordered namespace precedence for template lookup
+- `asset_roots`
+  - relative directories that Davenda publishes as theme assets
 
 ## Field Reference
 
@@ -68,14 +72,14 @@ asset_roots = ["theme/assets"]
 - Default: none
 - Allowed values: any valid theme id token
 
-What it means:
+Use it for:
 
-- the customer-facing theme identity for the app
+- naming the active customer theme profile
 
-Practical guidance:
+Do not use it for:
 
-- keep it stable
-- treat it like app-owned configuration, not a temporary folder alias
+- temporary folder aliases
+- environment-specific behavior
 
 ### `template_namespaces`
 
@@ -86,14 +90,14 @@ Practical guidance:
   - must not be empty
   - values must be unique
 
-What it means:
+Use it for:
 
-- ordered template lookup precedence for this customer app
+- deciding which templates win when multiple layers define the same template name
 
-Practical guidance:
+The practical rule is simple:
 
 - put the customer-owned namespace first
-- put lower-priority module or sample namespaces later
+- put lower-priority fallback namespaces later
 
 ### `asset_roots`
 
@@ -101,183 +105,134 @@ Practical guidance:
 - Type: array of relative paths
 - Default: empty array
 - Constraints:
-  - paths must be relative
+  - must be relative
   - no absolute paths
-  - no `..` traversal segments
+  - no `..` traversal
 
-What it means:
+Use it for:
 
-- which folders should be published through the theme asset pipeline
+- telling Davenda which folders should be published and exposed through `asset(...)`
 
-Practical guidance:
+For most apps, `["theme/assets"]` is enough.
 
-- keep it narrow
-- most customer apps only need `["theme/assets"]`
+## What Belongs In `templates/` Versus `theme/assets/`
 
-## Which Exact Files Are Involved?
+This is the split that developers most often blur.
 
-The important concrete files are:
+Put it in `templates/` when it is:
 
-- customer manifest: `app.toml`
-- customer templates: `templates/**/*.html`
-- theme assets: `theme/assets/**`
-- optional design-token file: `theme/tokens.toml`
-- runtime asset publication settings: `platform.toml` and `platform.dev.toml`
+- HTML structure
+- semantic landmarks
+- page composition
+- fragment composition
+- render-model bindings
 
-Checked-in examples:
+Put it in `theme/assets/` when it is:
 
-- `apps/shoppr/app.toml`
-- `apps/shoppr/theme/assets/site.css`
-- `apps/shoppr/theme/assets/site.js`
-- `apps/shoppr/theme/tokens.toml`
-- `apps/gitly/app.toml`
-- `apps/gitly/theme/assets/site.css`
-- `apps/gitly/theme/assets/site.js`
-- `apps/gitly/theme/tokens.toml`
+- CSS
+- enhancement JS
+- static images, icons, and fonts
 
-## Recommended Theme Tree
-
-```text
-customer-app/
-  app.toml
-  templates/
-    layouts/
-    pages/
-    components/
-    commerce/
-    account/
-    admin/
-  theme/
-    tokens.toml
-    assets/
-      site.css
-      site.js
-      logo.svg
-      images/
-      fonts/
-```
-
-What each area is for:
-
-- `templates/`
-  - HTML structure, layouts, fragments, and module-facing page markup
-- `theme/assets/`
-  - publishable frontend files
-- `theme/tokens.toml`
-  - optional but useful customer convention for semantic design tokens
-
-Important boundary:
-
-- Davenda supports the asset-root and namespace mechanics directly
-- a file like `theme/tokens.toml` is an app convention, not a magic runtime input
-
-## How Asset Publication Works
-
-Davenda expects templates to reference assets by logical path, not hardcoded final URLs.
-
-Typical template usage:
-
-```html
-<link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
-<script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
-```
-
-The flow is:
-
-1. the customer app declares `asset_roots`
-2. assets are published
-3. the runtime loads the asset manifest
-4. templates resolve logical asset paths to the published URL
-
-Why this matters:
-
-- hashed asset filenames work in production
-- templates stay readable
-- CDN and same-origin serving use the same logical asset names
+If you find yourself putting route logic or data-fetching decisions into `site.js`, the split has
+already broken down.
 
 ## Dark, Light, And System Mode
 
-Davenda does not impose a framework-global theme mode switch.
+Davenda does not provide a framework-global dark-mode switch.
 
-Today’s honest model is:
+The current framework contract is narrower:
 
-- the runtime publishes templates and assets
-- the customer app decides how light, dark, and system mode work
-- the theme should remain accessible in every mode
+- Davenda publishes templates and assets
+- the customer app decides how theme mode works
+- the result still has to remain accessible
 
-Gitly is the canonical checked-in example:
+The strongest checked-in pattern is a customer-owned control like this:
 
-- theme controls live in templates such as `apps/gitly/templates/gitly/home.html`
-- the translation and theme-switching behavior lives in `apps/gitly/theme/assets/site.js`
+```html
+<div class="theme-switcher" role="group" aria-labelledby="theme-switcher-label">
+  <span class="sr-only" id="theme-switcher-label">Theme</span>
+  <button type="button" data-theme-option="light">Light</button>
+  <button type="button" data-theme-option="dark">Dark</button>
+  <button type="button" data-theme-option="system">System</button>
+</div>
+```
 
-Recommended approach:
+What this teaches:
 
-- use semantic CSS variables
-- default to `prefers-color-scheme`
-- add explicit user controls only when the product benefits from them
-- keep the page usable before JavaScript applies persisted preferences
+- the server-rendered HTML already contains the control
+- the enhancement script can persist the preference later
+- semantics are visible in the template, not hidden in JS
 
-## Multi-Site And Theme Structure
+Recommended theme-mode guidance:
 
-Do not fork the theme tree per site unless the information architecture is genuinely different.
+- start from semantic CSS variables
+- respect `prefers-color-scheme`
+- keep explicit controls optional, not mandatory
+- verify focus, contrast, and reduced motion in every mode
 
-The common Davenda pattern is:
+## Multi-Site Themes
 
-- one theme tree
-- site-aware values from the render model
-- different branding, links, catalog visibility, and SEO per site
-
-Use these runtime values in templates instead of cloning entire themes:
+Most multi-site apps should keep one theme tree and branch on runtime values such as:
 
 - `site.id`
 - `site.displayName`
 - `site.brandName`
 - `locale`
-- `links.*`
 
-## Working Example
+That is usually better than cloning the entire theme per site.
 
-Shoppr shows the canonical commerce-oriented shape:
+A good multi-site template looks like this:
 
-- `apps/shoppr/app.toml`
-- `apps/shoppr/templates/`
-- `apps/shoppr/theme/assets/site.css`
-- `apps/shoppr/theme/assets/site.js`
-- `apps/shoppr/theme/tokens.toml`
+```html
+<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
+  <body>
+    <a class="brand" dv:attr="href=${links.home}">
+      <span dv:text="${site.brandName}">Brand</span>
+    </a>
+  </body>
+</html>
+```
 
-Gitly shows a non-commerce but still customer-root example:
-
-- `apps/gitly/app.toml`
-- `apps/gitly/templates/gitly/`
-- `apps/gitly/theme/assets/site.css`
-- `apps/gitly/theme/assets/site.js`
-
-Use both when deciding whether a file belongs in templates, assets, or linked customer Rust.
+This keeps one template tree while allowing site-aware branding and links.
 
 ## Common Mistakes
 
 ### Treating `theme/` as only a CSS folder
 
-The theme contract is wider: namespace precedence, asset publication, and customer-owned shell
-behavior all live here.
+The actual theme contract includes namespace precedence, published assets, and customer-owned shell
+behavior.
 
 ### Hardcoding final asset URLs
 
-That breaks hashed publication and environment portability immediately.
+Templates should use logical asset paths such as `asset('theme/assets/site.css')`, not guessed CDN
+paths.
 
-### Turning `site.js` into a SPA shell
+### Turning `site.js` into a second application runtime
 
-Use it for progressive enhancement, not for rebuilding the page model in the browser.
+Use enhancement JS to improve the HTML-first path, not replace it.
 
 ### Assuming `tokens.toml` is a framework-mandated schema
 
-It is useful, but today it is still a customer convention.
+It is useful and recommended, but today it is still a customer convention rather than a required
+runtime file.
+
+## Supporting Implementation And Repo Examples
+
+Concrete supporting files:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/theme/assets/site.css`
+- `apps/shoppr/theme/assets/site.js`
+- `apps/shoppr/theme/tokens.toml`
+- `apps/gitly/app.toml`
+- `apps/gitly/theme/assets/site.css`
+- `apps/gitly/theme/assets/site.js`
+- `crates/davenda-app/src/types/theme.rs`
+- `crates/davenda-app/src/manifest/document.rs`
 
 ## What Should I Read Next?
 
+- [Theme Asset Delivery](./theme-asset-delivery.md)
 - [Template Language](./template-language.md)
-- [Internationalization](./internationalization.md)
-- [Accessibility](./accessibility.md)
-- [SEO](./seo.md)
-- `apps/shoppr/theme/`
-- `apps/gitly/theme/`
+- [Template Models](./template-models.md)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)

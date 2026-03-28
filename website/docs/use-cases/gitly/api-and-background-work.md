@@ -2,81 +2,135 @@
 title: API And Background Work
 ---
 
-Gitly is the clearest non-commerce demo for two Davenda patterns:
+This page is about two reusable Davenda patterns:
 
-- API-style endpoints inside a customer app
-- bounded scheduled/background work through extensions and jobs
+- customer-owned API-style endpoints
+- bounded background work through explicit slots and jobs
 
-## API Routes In The Customer App
+Gitly is the example because it shows both patterns without commerce-specific noise.
 
-Read `apps/gitly/crates/gitly-app/src/lib.rs`.
+## The Core Pattern
 
-That file mounts API-shaped endpoints for Gitly's product shell, including repository, pull, org,
-user, and workflow data surfaces.
+For a product that needs some JSON surfaces and some deferred work:
 
-The linked backend in `apps/gitly/crates/gitly-backend/src/lib.rs` then provides the payload
-builders used by those routes:
+1. keep the main app server-rendered
+2. mount customer-owned API routes in the app crate
+3. use linked Rust for first-party payload shaping
+4. use explicit extension slots or jobs for bounded add-on behavior
 
-- `repo_api_payload()`
-- `pulls_api_payload()`
-- `workflow_api_payload()`
-- `organization_api_payload()`
-- `user_api_payload()`
+That is the model Gitly demonstrates.
 
-This is the practical lesson: Davenda can support API-style product surfaces without making the
-whole app API-first.
+## Canonical API Route Pattern
 
-## The Community Pulse Extension
+Gitly’s app crate in `apps/gitly/crates/gitly-app/src/lib.rs` mounts product-shaped endpoints, and
+the linked backend in `apps/gitly/crates/gitly-backend/src/lib.rs` supplies payload builders.
 
-Gitly's API extension example lives in:
+The useful thing to copy is the split, not the repo names:
+
+```text
+customer app crate
+  -> defines routes and route ownership
+linked backend crate
+  -> builds typed product payloads for those routes
+```
+
+In Gitly’s case, the product surfaces include repository, pull, org, user, workflow, and pulse
+data.
+
+## Canonical Background-Work Slot Pattern
+
+Gitly’s customer-owned showcase module declares a scheduled-job slot in
+`apps/gitly/crates/gitly-app/src/lib.rs`:
+
+```rust
+ExtensionSlotDescriptor::new(
+    ExtensionSlotKind::ScheduledJob,
+    "github.actions.refresh",
+    "Allows bounded third-party scheduled jobs to simulate GitHub Actions refresh cycles",
+)
+```
+
+This snippet matters because it shows the platform pattern clearly:
+
+- the customer app defines the product-specific job slot
+- the runtime-installed extension plugs into that slot
+- the platform still owns actual job execution and queueing
+
+## Canonical API Extension Pattern
+
+Gitly also declares an API slot in the same file:
+
+```rust
+ExtensionSlotDescriptor::new(
+    ExtensionSlotKind::Api,
+    "/api/github/pulse",
+    "Allows bounded third-party extensions to contribute GitHub-style community pulse API data",
+)
+```
+
+That is the cleanest non-commerce example of how to let runtime-installed packages contribute to an
+API-shaped product surface without handing them ownership of the whole app.
+
+## Gitly As The Supporting Example
+
+### Linked backend payloads
+
+Read:
+
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
+
+This file provides the payload builders Gitly routes use for:
+
+- repositories
+- pulls
+- workflows
+- organizations
+- users
+
+### API extension package
+
+Read:
 
 - `apps/gitly/extensions/gitly-community-pulse/package.toml`
-- `apps/gitly/extensions/gitly-community-pulse/gitly-community-pulse.wat`
+- `apps/gitly/crates/gitly-app/src/extensions.rs`
 
-The customer app loads it in `apps/gitly/crates/gitly-app/src/extensions.rs`.
+This pair shows:
 
-That package targets the API extension point and gives Gitly a bounded “community pulse” surface.
+- package metadata
+- API target binding
+- customer-app loader wiring
 
-## Scheduled Job Demo
+### Scheduled-job extension package
 
-Gitly's scheduled-job example lives in:
+Read:
 
 - `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
-- `apps/gitly/extensions/gitly-actions-scheduler/gitly-actions-scheduler.wat`
-
-The product surface that talks about it is:
-
 - `apps/gitly/templates/gitly/actions.html`
 
-This is intentionally a bounded demo. It shows the platform shape for scheduled work without
-pretending Gitly is a full CI system.
+This pair shows:
 
-## Where The Runtime Wiring Lives
+- scheduled-job target binding
+- user-visible page that explains the background-work surface honestly
 
-The two important files are:
+## Practical Rules To Copy
+
+- keep API routes customer-owned and product-specific
+- keep first-party payload shaping in linked Rust
+- define explicit extension or job slots in the app layer
+- keep the page shell server-rendered even if some surfaces hydrate from API endpoints
+
+## Full Implementation Pointers
 
 - `apps/gitly/crates/gitly-app/src/lib.rs`
 - `apps/gitly/crates/gitly-app/src/extensions.rs`
-
-Together they show:
-
-- which extension slots Gitly exposes
-- how installed packages are loaded
-- how the customer app keeps API and scheduled-job behavior explicit
-
-## Adapt This For Your Product
-
-Copy this approach when you need:
-
-- a small number of product-shaped JSON endpoints
-- bounded scheduled work that should stay behind explicit contracts
-- a non-commerce example of host APIs and extension slots
-
-Do not copy it as a reason to move your whole product into client-side hydration. Gitly works
-because the page shell stays server-rendered.
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
+- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+- `apps/gitly/templates/gitly/actions.html`
+- `apps/gitly/templates/gitly/home.html`
 
 ## Read Next
 
-- [Non-Commerce Product Shape](./non-commerce-product-shape.md)
+- [Extensions And Host APIs](./extensions-and-host-apis.md)
 - [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm.md)
 - [Ops Module Reference](../../reference/modules/ops.md)

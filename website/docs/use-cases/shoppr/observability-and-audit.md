@@ -1,74 +1,152 @@
 ---
-title: Observability And Audit
+title: Shoppr Observability And Audit
 ---
 
-Shoppr is the canonical example of how a customer app should use Davenda's operational surfaces
-rather than treating logs and audit as an afterthought.
+Shoppr is the best place in the repo to understand how Davenda surfaces operator trust signals in a
+real customer app.
 
-## What To Read In The Repo
+Use this page when you want to answer:
 
-Start with:
+- where metrics, tracing, and audit are enabled
+- which admin pages expose the resulting state
+- how linked customer hooks participate in audit
 
-- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
+## Start With Runtime Config
+
+Shoppr’s local observability settings live in `apps/shoppr/platform.dev.toml`.
+
+The relevant blocks are:
+
+- `[observability]`
+  - `metrics = true`
+  - `tracing = true`
+- `[jobs]`
+  - background-work backend
+- `[cache]`
+  - L1 and L2 cache setup
+
+That file is the operational contract. The templates are just the UI on top.
+
+## The Main Operator Surfaces
+
+Read these templates together:
+
+- `apps/shoppr/templates/admin/dashboard.html`
+- `apps/shoppr/templates/admin/audit.html`
+- `apps/shoppr/templates/commerce/orders.html`
+- `apps/shoppr/templates/commerce/order-detail.html`
+
+These pages are intentionally honest about what the app can and cannot yet do.
+
+## Audit Is A Real Runtime Surface
+
+The Shoppr audit page is not just placeholder copy anymore. The current template in
+`apps/shoppr/templates/admin/audit.html` expects:
+
+- `auditBackend`
+- `auditLocation`
+- `auditEntryCount`
+- `hasAuditEntries`
+- `auditEntries`
+
+Those are runtime-backed fields shaped in `crates/davenda-runtime/src/render/model.rs`.
+
+This is important because it means the product is teaching a real audit boundary:
+
+- who acted
+- what they did
+- what capability it mapped to
+- what resource changed
+- whether the action succeeded
+
+## Where Audit Records Come From
+
+There are two main sources in the current design:
+
+- native admin/operator actions
+- linked customer hook audit calls through `AuditFacade`
+
+The linked-customer audit facade lives in:
+
+- `crates/davenda-runtime/src/render/model.rs`
+- `crates/davenda-customer-sdk/src/facade.rs`
+
+The shared metadata audit persistence path lives in:
+
+- `crates/davenda-runtime/src/wasm/host/services/metadata/shared.rs`
+
+That means the same system can record:
+
+- CMS/admin actions
+- order operations
+- customer hook side effects
+
+## Shoppr Examples To Read
+
+### Admin audit UI
+
+Read:
+
+- `apps/shoppr/templates/admin/audit.html`
+
+This template is a good example because it teaches both states:
+
+- truthful empty state
+- real audit table once entries exist
+
+### Order operations
+
+Read:
+
+- `apps/shoppr/templates/commerce/orders.html`
+- `apps/shoppr/templates/commerce/order-detail.html`
+
+These templates show how audit and operator history matter in support work, not just in an abstract
+"audit subsystem."
+
+### Linked customer backend
+
+Read:
+
 - `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
-- `apps/shoppr/platform.toml`
-- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
 
-These files show where Shoppr:
+These files show where customer-owned Rust can add audit-aware logic without escaping the stable
+host boundary.
 
-- records customer-owned audit entries
-- uses verified webhook hooks
-- drives runtime services through linked Rust
-- keeps platform and app configuration aligned
+## Tests That Prove The Boundary
 
-## Concrete Audit Example
+The strongest runtime coverage lives in:
 
-Shoppr's linked Rust backend receives an `AuditFacade` in checkout and verified-webhook hooks.
+- `crates/davenda-runtime/src/tests/server.rs`
 
-That means customer-owned logic can do more than reject or approve a decision. It can also record
-why that decision happened.
+Relevant test areas in that file cover:
 
-This is the pattern to copy for:
+- diagnostics probe access control
+- metadata audit backend selection
+- verified webhook hook execution
+- linked customer asset and repository behavior
 
-- order review decisions
-- webhook acceptance or rejection
-- loyalty or entitlement policy checks
-- admin-side operator actions implemented through customer code
+If you want proof the observability boundary is real, not just documented, start there.
 
-## What The Developer Learns From Shoppr
+## What A New Developer Should Copy
 
-The key Davenda lesson is:
+From Shoppr, copy this pattern:
 
-- audit evidence is not a vague platform promise
-- it is a facade your customer-owned code can call directly
+1. enable observability in `platform.dev.toml`
+2. expose honest admin surfaces in templates
+3. shape runtime audit and operator fields in the render model
+4. let linked hooks record audit entries through the facade instead of inventing side channels
 
-If your store has a custom business rule, you should record evidence at the point where that rule
-executes.
+## Common Mistakes
 
-## Metrics And Runtime Signals
-
-Shoppr's runtime also uses the platform observability surface described in
-[Observability](../../operations/observability.md).
-
-Use Shoppr when you want to connect the abstract platform story to a commerce-shaped app:
-
-- checkout changes
-- order intake
-- webhook processing
-- asset publication
-- site and locale serving
-
-## Practical Workflow
-
-When adding a new customer rule in Shoppr:
-
-1. implement the hook in linked Rust
-2. record an audit entry when the rule accepts, rewrites, or rejects work
-3. make sure the decision is visible in the operator surfaces that depend on it
-4. document the rule in the store docs if it is part of the public app story
+- Do not describe an audit page as available if the template only has placeholder prose.
+- Do not let customer hooks write their own parallel audit log outside the stable facade.
+- Do not hide observability expectations only in operator docs.
+  - surface them in the customer app config and templates too
 
 ## Read Next
 
-- [Observability](../../operations/observability.md)
-- [Shoppr Linked Rust Backend](./linked-rust-backend.md)
 - [Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work.md)
+- [Shoppr Checkout And Operations](./checkout-and-operations.md)
+- [Environment Variables](../../reference/environment-variables.md)

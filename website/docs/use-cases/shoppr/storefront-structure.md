@@ -10,23 +10,27 @@ module data, not one platform-owned catalog widget.
 
 ## Start With The Route Shape
 
-Shoppr's public browse loop is split across these templates:
+The right mental model is a decision journey, not a bag of pages:
 
-- `apps/shoppr/templates/pages/home.html`
-- `apps/shoppr/templates/commerce/catalog.html`
-- `apps/shoppr/templates/commerce/collection-detail.html`
-- `apps/shoppr/templates/commerce/product-detail.html`
-- `apps/shoppr/templates/commerce/cart.html`
+```text
+home -> catalog -> collection -> product -> cart
+```
 
-That split is deliberate.
+Each step has a different job:
 
-- `home.html` owns the campaign-led landing page.
-- `catalog.html` is broad browse.
-- `collection-detail.html` narrows the customer into a merchandising context.
-- `product-detail.html` is the decision point.
-- `cart.html` keeps continuity into checkout.
+- home
+  - campaign entry and brand framing
+- catalog
+  - broad browse and discovery
+- collection
+  - merchandising context
+- product
+  - buying decision
+- cart
+  - continuity into checkout
 
-Davenda works best when the customer journey is explicit at this level.
+Davenda works best when the storefront is explicit at this level instead of hiding the whole browse
+loop behind one generic listing view.
 
 ## Where The Routes Come From
 
@@ -46,24 +50,29 @@ of a generic store.
 
 ## Layouts And Shared Shell
 
-Read these files together:
+The storefront shell should separate document chrome from route-specific markup.
 
-- `apps/shoppr/templates/layouts/base.html`
-- `apps/shoppr/templates/layouts/storefront.html`
-- `apps/shoppr/templates/navigation/primary.html`
-- `apps/shoppr/templates/components/hero.html`
+A good pattern looks like this:
 
-These files answer a practical question new teams often miss: where should repeated storefront
-structure live?
+```html
+<html xmlns:dv="https://davenda.dev" dv:attr="lang=${locale}">
+  <body>
+    <dv:include src="navigation/primary.html" />
+    <main>
+      <dv:slot />
+    </main>
+  </body>
+</html>
+```
 
-In Shoppr:
+Then individual route templates fill the slot.
 
-- the document shell and assets live in layouts
-- primary navigation lives in its own fragment
-- repeated promotional structure lives in a reusable component
-- page templates stay focused on their route-specific job
+That keeps:
 
-That keeps the page layer readable.
+- document shell in one place
+- navigation reusable
+- promotional fragments reusable
+- route templates focused on route work
 
 ## Home Page Structure
 
@@ -116,6 +125,21 @@ That is the pattern to copy:
 - make the markup correct first
 - add JavaScript as a progressive layer
 - keep the route and form structure server-rendered
+
+## Full Implementation
+
+If you want the complete Shoppr storefront after learning the structure:
+
+- `apps/shoppr/templates/pages/home.html`
+- `apps/shoppr/templates/commerce/catalog.html`
+- `apps/shoppr/templates/commerce/collection-detail.html`
+- `apps/shoppr/templates/commerce/product-detail.html`
+- `apps/shoppr/templates/commerce/cart.html`
+- `apps/shoppr/templates/layouts/base.html`
+- `apps/shoppr/templates/layouts/storefront.html`
+- `apps/shoppr/templates/navigation/primary.html`
+- `apps/shoppr/templates/components/hero.html`
+- `apps/shoppr/theme/assets/site.js`
 
 ## What To Copy Into Your Own App
 

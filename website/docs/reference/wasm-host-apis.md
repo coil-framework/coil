@@ -2,185 +2,248 @@
 title: WASM Host APIs
 ---
 
-Davenda's WASM extensions run against a bounded host API surface.
+Davenda’s WASM runtime is intentionally narrow. Packages do not get arbitrary process access.
 
-That boundary is the point of the model. A runtime-installed extension should be powerful enough to
-do useful work and constrained enough that customer apps can install it without turning the runtime
-into an untyped plugin free-for-all.
+Start with the key idea:
 
-## What This Page Covers
+```toml
+[[handlers]]
+id = "community-pulse"
+export = "exports.community_pulse"
+point = "api"
+target = "/api/github/pulse"
+grants = []
+```
 
-Use this page when you want to know:
+Even after a package declares a handler like that, it still does not get unrestricted host access.
 
-- what services a WASM extension can access
-- what it cannot access
-- how extension handlers interact with the host runtime
-- where to read the concrete host-service implementation
+Everything remains bounded by:
 
-## Where The Host Surface Lives
+- the extension point
+- the granted host capabilities
+- runtime config such as network policy
 
-The current host implementation lives in:
+Use this page when you want to answer:
 
-- `crates/davenda-runtime/src/wasm/host/mod.rs`
-- `crates/davenda-runtime/src/wasm/host/context.rs`
-- `crates/davenda-runtime/src/wasm/host/principal.rs`
-- `crates/davenda-runtime/src/wasm/host/services/`
+- what a WASM package can actually ask the host to do
+- how grants gate those calls
+- what the runtime already supports today
+- where the hardened host backends live
 
-The main service families exposed today are:
+## What The Host API Surface Is
 
-- HTTP
-- jobs
-- metadata
-- secrets
-- webhooks
+The simplest mental model is:
 
-## Execution Model
+1. package requests a host action
+2. installation grants or denies that action
+3. runtime host implementation enforces the decision
 
-A WASM extension is loaded by the runtime for a supported extension point.
+That split matters:
 
-At execution time the host provides:
+- `davenda-wasm` defines the contract and grant vocabulary
+- `davenda-runtime` provides the concrete host implementation
 
-- request and route context
-- current principal information
-- host services permitted for that extension point
-- typed input and typed output boundaries
+## Current Host Capability Families
 
-The extension does not become a second application runtime. It participates at a specific bounded
-hook point.
+The main grant families are defined by `HostCapabilityGrant` in
+`crates/davenda-wasm/src/grants.rs`.
 
-## HTTP Service
+Current families include:
 
-The HTTP host service lets an extension make outbound requests through a controlled runtime facade.
+- repository-style data read and write
+- auth inspection and tuple writes
+- storage read and write
+- render fragment access
+- metadata writes
+- cache hints
+- outbound HTTP by named integration
+- secret reads
+- job enqueue
 
-Implementation:
+If a package does not have the grant, the host should fail closed.
 
-- `crates/davenda-runtime/src/wasm/host/services/http/mod.rs`
+That is the main point of this model: a WASM package is not a second backend. It is a guest asking the host for a bounded operation.
+
+## Outbound HTTP
+
+The most important security boundary is outbound HTTP.
+
+The hardened backend lives in:
+
 - `crates/davenda-runtime/src/wasm/host/services/http/backend.rs`
-- `crates/davenda-runtime/src/wasm/host/services/http/offload.rs`
 
-Use it for:
+Important behaviors already implemented there:
 
-- calling partner APIs
-- enrichment lookups
-- background integration work
+- network can be disabled entirely through runtime config
+- extensions name an integration, not an arbitrary raw destination
+- the backend resolves integrations through an approved target map
+- `request.url` must match the approved endpoint
+- response size is capped
+- reserved headers such as `Host` and `Content-Length` are blocked
 
-Do not use it as an excuse to rebuild the whole customer backend in WASM.
+That is the same posture Davenda now uses for linked customer outbound HTTP too: approved
+integration targets, not unrestricted guest-controlled egress.
 
-## Jobs Service
+Minimal example:
 
-The jobs host service lets an extension enqueue background work through the platform queue.
+```text
+allowed integration: github_api -> https://api.github.com
+requested URL:       https://api.github.com/repos/acme/project
+result:              allowed
+```
 
-Implementation:
+```text
+allowed integration: github_api -> https://api.github.com
+requested URL:       https://evil.example.com/steal
+result:              denied
+```
 
-- `crates/davenda-runtime/src/wasm/host/services/jobs.rs`
+## Metadata And Durable Shared State
 
-Use it for:
+The runtime metadata backends live under:
 
-- follow-up work
-- asynchronous notifications
-- bounded scheduled or event-driven extension tasks
-
-## Metadata Service
-
-The metadata service exposes typed metadata storage and sequencing helpers used by extensions.
-
-Implementation:
-
-- `crates/davenda-runtime/src/wasm/host/services/metadata/mod.rs`
 - `crates/davenda-runtime/src/wasm/host/services/metadata/local.rs`
 - `crates/davenda-runtime/src/wasm/host/services/metadata/shared.rs`
-- `crates/davenda-runtime/src/wasm/host/services/metadata/sequence.rs`
 
-Use it for:
+These files are worth reading because they show two important host behaviors:
 
-- lightweight extension state
-- cross-invocation sequencing
-- host-managed metadata values
+- local single-node metadata and audit persistence
+- shared Postgres-backed metadata and audit persistence
 
-## Secrets Service
+The shared backend now also stores durable customer managed-asset records, which is the concrete
+example of a WASM/host-adjacent API becoming production-grade instead of request-local state.
 
-The secrets service lets extensions resolve approved secrets through the runtime instead of reading
-host environment variables directly.
+In practice, this means an extension can contribute durable metadata or managed assets without owning the storage backend itself.
 
-Implementation:
+## Storage And Managed Assets
 
-- `crates/davenda-runtime/src/wasm/host/services/secrets.rs`
+Asset publication and delivery planning are not implemented inside the WASM package itself.
 
-That keeps secret access explicit and host-mediated.
+Relevant files:
 
-## Webhook Services
+- `crates/davenda-runtime/src/storage/host.rs`
+- `crates/davenda-assets/src/delivery.rs`
+- `crates/davenda-assets/src/release.rs`
 
-The webhook host service handles extension participation in verified webhook flows.
+This means:
 
-Implementation:
+- the guest requests a bounded asset operation
+- the runtime plans storage according to configured policy
+- public delivery remains tied to the configured asset delivery model
 
-- `crates/davenda-runtime/src/wasm/host/services/webhooks/mod.rs`
-- `crates/davenda-runtime/src/wasm/host/services/webhooks/local.rs`
-- `crates/davenda-runtime/src/wasm/host/services/webhooks/shared.rs`
+That keeps storage policy enforceable at the platform layer instead of inside extension code.
 
-Use it for:
+## Jobs
 
-- accepted runtime-installed webhook enrichments
-- bounded processing that still fits inside extension trust limits
+WASM packages can target scheduled jobs and other background work, but only through explicit host
+contracts and installed handlers.
 
-## Context And Principal
+Concrete package example:
 
-The host also provides execution context and principal-aware information:
-
-- `crates/davenda-runtime/src/wasm/host/context.rs`
-- `crates/davenda-runtime/src/wasm/host/principal.rs`
-
-That is what lets the extension behave differently for:
-
-- current site
-- locale
-- operator versus anonymous user
-- current route and request context
-
-## What Extensions Cannot Do
-
-By design, runtime-installed WASM extensions should not assume they can:
-
-- import arbitrary internal Davenda crates
-- bypass auth and repository facades
-- read the raw database directly
-- become the primary customer-owned business logic layer
-
-If you need that level of power, use linked Rust instead.
-
-## Lifecycle Guidance
-
-Think about the lifecycle like this:
-
-1. package the extension
-2. build the `.wasm` artifact
-3. install it into the customer app
-4. runtime validates and loads it for supported extension points
-5. the extension executes against host APIs for each invocation
-
-The important constraint is that the runtime can add or remove an installed extension without
-recompiling the whole customer binary, which is exactly why this surface must stay narrower than
-linked Rust.
-
-## Shoppr And Gitly Examples
-
-Read these alongside this page:
-
-- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
-- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-- `apps/gitly/crates/gitly-app/src/extensions.rs`
 - `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
-- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+
+Concrete app loader:
+
+- `apps/gitly/crates/gitly-app/src/extensions.rs`
+
+The important boundary is that packages do not start their own scheduler. They plug into a host
+job system the customer app already composed.
+
+## Render Hooks
+
+Shoppr’s waitlist package is the clearest render-hook example:
+
+- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
+- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
+
+This is useful because it shows the smallest possible bounded extension:
+
+- one handler
+- one render hook target
+- no extra grants
+
+Use this pattern when you want "small injected behavior", not "customer-owned product policy".
+
+## Runtime Configuration That Affects Host APIs
+
+The demo apps expose the main knobs in `platform.dev.toml`:
+
+- `apps/shoppr/platform.dev.toml`
+- `apps/gitly/platform.dev.toml`
+
+Important settings:
+
+- `[wasm].directory`
+- `[wasm].default_time_limit_ms`
+- `[wasm].allow_network`
+
+If `allow_network = false`, outbound HTTP should fail closed even if a package is installed.
+
+That means runtime config remains authoritative over package intent.
+
+## What WASM Is Good For In Practice
+
+The checked-in demos use WASM for:
+
+- Shoppr: a bounded render-hook waitlist banner
+- Gitly: a bounded API payload contributor
+- Gitly: a bounded scheduled-job handler
+
+Those are good examples because they keep the extension model honest:
+
+- runtime-installed
+- hash-pinned
+- limited grants
+- no special-casing in the app templates
+
+## What A Good WASM Package Feels Like
+
+A good WASM package is:
+
+- small
+- explicit
+- easy to pin and review
+- easy to revoke
+- narrow in grants
+
+If a package needs broad host powers or deep product context, it probably belongs in linked customer Rust instead.
 
 ## Common Mistakes
 
-- Treating WASM as the default customization path for customer-owned logic.
-- Assuming extensions can access arbitrary runtime internals.
-- Shipping an artifact without documenting which host services it needs.
-- Forgetting that the trust boundary is the entire reason this model exists.
+- Do not use WASM as a substitute for first-party customer Rust.
+- Do not assume a package can reach the network without an approved integration mapping.
+- Do not request broad grants when the package only needs one narrow action.
+- Do not treat the host API as stable if you have not pinned `host_api_version`.
+
+## Full Implementation
+
+Contract and grant model:
+
+- `crates/davenda-wasm/src/manifest/manifests.rs`
+- `crates/davenda-wasm/src/grants.rs`
+
+Runtime host implementations:
+
+- `crates/davenda-runtime/src/wasm/host/services/`
+
+Concrete package examples:
+
+- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
+- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+
+Concrete app loaders:
+
+- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
+- `apps/gitly/crates/gitly-app/src/extensions.rs`
+
+Runtime settings examples:
+
+- `apps/shoppr/platform.dev.toml`
+- `apps/gitly/platform.dev.toml`
 
 ## Read Next
 
 - [Extension Package Format](./extension-package-format.md)
-- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
+- [Linked Rust Hook APIs](./linked-rust-hook-apis.md)
 - [Gitly Extensions And Host APIs](../use-cases/gitly/extensions-and-host-apis.md)

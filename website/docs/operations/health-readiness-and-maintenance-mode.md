@@ -7,7 +7,7 @@ questions.
 
 ## What Is This?
 
-This page explains the runtime's operator-facing service-state controls:
+This page explains the runtime's service-state controls:
 
 - `/health`
 - `/ready`
@@ -20,75 +20,89 @@ Without this separation, teams end up using one endpoint for everything:
 
 - "is the process alive?"
 - "is it safe to send traffic?"
-- "is the deployment intentionally in maintenance?"
+- "is the deployment intentionally blocking customer traffic?"
 
 Those are not the same question.
 
-## Health Versus Readiness
+## The Canonical Model
 
 ### `/health`
 
-Use `/health` to ask whether the runtime is alive and able to describe its current state.
+Use `/health` to answer:
+
+- is the runtime alive
+- what does it think its current dependency and maintenance state is
 
 ### `/ready`
 
-Use `/ready` to ask whether the runtime is actually ready for live traffic.
+Use `/ready` to answer:
 
-The checked-in Docker stacks already use `/ready` in healthchecks for the main app containers.
+- is this instance ready to receive traffic right now
 
-## Concrete Checked-In Examples
+### maintenance mode
 
-- `apps/shoppr/docker-compose.yml`
-- `apps/gitly/docker-compose.yml`
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/http.rs` for the optional sidecar `/health`
+Use maintenance mode to answer:
 
-## Maintenance Mode
+- should some or all traffic be deliberately blocked during deployment or incident handling
 
-Davenda has a real maintenance-mode concept in the runtime and observability model. It is not just
-an edge proxy convention.
+## How Operators Should Use Them
 
-Current runtime behavior includes:
+### During startup
 
-- maintenance state appearing in health output
-- request blocking for affected traffic
-- an operator bypass token/header path
+Wait for `/ready`, not just `/health`, before putting a node behind live traffic.
 
-That gives the platform a real maintenance contract even though the checked-in public apps do not
-yet ship a polished branded maintenance-page walkthrough in the public docs tree.
+### During deployment
 
-## Practical Operator Guidance Today
+Check both:
 
-Use maintenance mode when you need to reduce customer-facing churn during:
+- `/health` for broad service state
+- `/ready` for cutover safety
 
-- schema or release transitions
-- incident containment
-- controlled rollback
+### During incident containment
 
-Until the public app docs include a stronger end-to-end maintenance example, the practical safe
-posture is:
+Use maintenance mode when you need to stop customer-facing churn while keeping operator control and
+visibility.
 
-- use readiness and cutover controls first
-- enable maintenance intentionally when needed
-- reserve bypass behavior for operators
-- verify maintenance state through `/health`
+## Maintenance Mode In Practice
 
-## What To Check During A Rollout
+The practical runtime contract is:
+
+- health output should expose maintenance state
+- affected requests should fail in a predictable way
+- operator bypass should be explicit
+- maintenance should be deliberate, not accidental
+
+The important operator rule is to use maintenance as a controlled state, not as a substitute for
+readiness or deploy discipline.
+
+## A Practical Rollout Checklist
 
 Before cutover:
 
-- `/health` reports sane dependency state
+- `/health` is sane
 - `/ready` is passing
 - maintenance is not unexpectedly enabled
 
-During maintenance:
+If maintenance is intentionally enabled:
 
-- operators confirm which traffic is blocked
-- only approved bypass paths remain open
+- confirm which traffic is blocked
+- confirm bypass behavior is limited to the right operators
 
 After maintenance:
 
-- `/health` and `/ready` return to normal
-- critical journeys are reverified
+- verify `/health`
+- verify `/ready`
+- re-run critical journeys
+
+## Supporting Repo Examples
+
+The checked-in apps already prove these surfaces operationally:
+
+- main app containers use `/ready` in health checks
+- the optional Shoppr sidecar exposes `/health`
+- the runtime implements maintenance and bypass semantics
+
+Those examples support this page, but the operator model above is what matters first.
 
 ## Common Mistakes
 
@@ -96,13 +110,13 @@ After maintenance:
 
 That is what readiness is for.
 
-### Enabling maintenance without operator observability
+### Enabling maintenance without observability
 
 If you cannot see maintenance state from the service, it becomes guesswork.
 
-### Forgetting bypass discipline
+### Treating bypass as a convenience header
 
-Bypass should be explicit and limited to the right operators and workflows.
+Bypass should be narrow, explicit, and operationally controlled.
 
 ## What To Read Next
 

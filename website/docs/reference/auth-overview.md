@@ -2,12 +2,46 @@
 title: Auth
 ---
 
-Auth in Davenda is the boundary between:
+Auth in Davenda is the contract between:
 
 - the core relationship engine
 - the app-selected auth package
 - official module capability checks
 - customer-specific authorization semantics
+
+Start with this concrete example:
+
+```toml
+# app.toml
+[auth]
+mode = "extend"
+package = "shoppr-auth"
+```
+
+```text
+# model.auth
+type product
+  relations
+    merchandiser: user | group#member
+  permissions
+    featured_edit = merchandiser
+```
+
+```toml
+# capabilities.toml
+[bindings."catalog.featured.edit"]
+resource_type = "product"
+permission = "featured_edit"
+```
+
+That means:
+
+- the app selects an auth package
+- the package defines a schema rule
+- the package binds a stable capability to that rule
+- modules ask for `catalog.featured.edit`, not for `merchandiser` directly
+
+That is the whole Davenda auth model in miniature.
 
 Davenda auth has four layers:
 
@@ -39,19 +73,6 @@ Start here:
 4. [Custom Auth Schema Guidance](./custom-auth-schema.md)
    - read this if you need to extend or eventually replace the default model
 
-## Where To See This In The Repo
-
-The canonical checked-in app example is Shoppr:
-
-- `apps/shoppr/app.toml`
-- `apps/shoppr/platform.toml`
-- `apps/shoppr/platform.dev.toml`
-- `apps/shoppr/auth/shoppr-auth/package.toml`
-- `apps/shoppr/auth/shoppr-auth/model.auth`
-- `apps/shoppr/auth/shoppr-auth/capabilities.toml`
-
-That package demonstrates the preferred customer path today: extend the default package with one customer-specific capability.
-
 ## Practical Rule
 
 One rule matters throughout:
@@ -69,6 +90,34 @@ If you remember only one sequence, remember this one:
 3. the app selects the package
 4. modules ask for capabilities
 5. the active package decides how those capabilities are satisfied
+
+## What Lives Where
+
+Use this split:
+
+- core auth engine
+  - stores tuples
+  - executes checks
+  - explains decisions
+- auth package
+  - defines resource types, relations, permissions, and bindings
+- app config
+  - selects which package runs
+- official modules
+  - consume stable capabilities
+
+If a question is "who owns the meaning of this permission?", the answer is almost always "the auth package", not the module.
+
+## Full Implementation
+
+Canonical Shoppr example files:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/auth/shoppr-auth/package.toml`
+- `apps/shoppr/auth/shoppr-auth/model.auth`
+- `apps/shoppr/auth/shoppr-auth/capabilities.toml`
 
 ## Read Next
 

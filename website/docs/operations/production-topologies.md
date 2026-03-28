@@ -7,8 +7,7 @@ contract.
 
 ## What Is This?
 
-This page explains the practical production topologies a Davenda app can use and how the checked-in
-apps map to them.
+This page explains the practical production topologies a Davenda app can use.
 
 ## Why Does Topology Matter?
 
@@ -17,8 +16,8 @@ Topology determines:
 - how you cut traffic over
 - how assets are delivered
 - how workers run
-- how sidecars and integrations are separated
-- what failure domains operators need to reason about
+- how integrations are isolated
+- what failure domains operators must reason about
 
 ## Topology 1: Single Customer Binary
 
@@ -27,88 +26,88 @@ This is the cleanest model:
 - one customer binary
 - one app root
 - official modules linked into that binary
-- linked customer Rust compiled into the same binary
+- linked customer Rust compiled into the same process
 
-This is the default mental model for Davenda.
+Use it when:
+
+- the product is operationally one application
+- you do not need a separate process boundary for customer logic
+- you want the simplest deploy and rollback story
+
+This is the default Davenda mental model.
 
 ## Topology 2: Containerized Customer Runtime
 
-This is the practical deployment shape demonstrated by the checked-in apps.
+This is the same application model delivered as a container.
 
-Concrete examples:
+Use it when:
 
-- `apps/shoppr/docker-compose.yml`
-- `apps/gitly/docker-compose.yml`
+- you want immutable runtime images
+- you want cleaner local/staging/prod parity
+- you want infrastructure to treat the app as one deployable unit
 
-Benefits:
-
-- immutable runtime image
-- predictable dependency surface
-- easier local/staging/prod parity
+This is often the most practical first production shape.
 
 ## Topology 3: Customer Runtime Plus Sidecar
 
-Use this when a separate process boundary is genuinely useful.
+Use a sidecar only when there is a real reason for a process boundary, for example:
 
-Shoppr's optional loyalty backend is the canonical checked-in example:
+- an integration has different scaling needs
+- a different security posture is required
+- the integration surface is operationally separate
 
-- `apps/shoppr/backend/shoppr-loyalty-backend/`
-
-This is the right topology when you need a real process boundary for integration or HTTP concerns,
-not when you merely lack a first-party customization path.
+Do not introduce a sidecar just because the team is used to doing that in every stack.
 
 ## Topology 4: Shared Runtime Plus Workers
 
-If the product uses jobs heavily, treat worker execution as part of the topology, not as an
-implementation footnote.
+If the application uses jobs heavily, workers are part of the topology, not a postscript.
 
-The operator contract should still cover:
+You need to reason about:
 
 - worker identity
 - queue inspection
-- dead-letter recovery
-- rollout coordination with request-serving nodes
+- dead-letter handling
+- deploy and rollback coordination between serving nodes and workers
 
 ## Multi-Site Topology
 
-Shoppr demonstrates the important rule for multi-site deployments:
+For multi-site products, the Davenda model is:
 
 - one customer app
 - one deployment surface
 - multiple sites declared in config
 
-Do not clone the app into multiple hidden mini-apps unless there is a real product boundary that
-demands it.
+Do not rebuild multi-site as three cloned apps unless there is a real business and operational
+boundary that justifies it.
 
-## Same-Origin Versus CDN Asset Delivery
+## Asset Delivery Topology
 
-Topology also affects how assets are served.
+You also need to choose whether assets are:
 
-- same-origin delivery is simpler
-- CDN delivery scales and caches better
+- same-origin with the app
+- served from object storage or a CDN
 
-This should be chosen deliberately and reflected in `cdn_base_url`.
+That choice affects cutover, cache behavior, and rollback.
 
-## Current Checked-In Examples
+## Choosing Between Topologies
 
-### Shoppr
+Use this decision guide:
 
-Shows:
+- choose a single customer binary by default
+- choose containers when you want operational repeatability
+- add workers when background work is real
+- add sidecars only when the process boundary is operationally justified
+- add CDN delivery only when frontend caching and delivery needs justify it
 
-- multi-site customer app
-- customer binary
-- linked backend
-- optional sidecar
-- object-store-backed published assets
+## Supporting Repo Examples
 
-### Gitly
+The checked-in apps show useful supporting variants:
 
-Shows:
+- Shoppr: multi-site commerce app, linked backend, optional sidecar, asset publication
+- Gitly: single-site multilingual app, linked backend, runtime-installed extension examples
 
-- single-site multilingual customer app
-- customer binary
-- linked backend
-- runtime-installed WASM jobs and API extension examples
+Those examples prove the patterns, but the topology decision rules above should still stand even if
+the demo apps changed tomorrow.
 
 ## Common Mistakes
 
@@ -118,9 +117,9 @@ If a boundary is not operationally real, keep the code in the customer binary.
 
 ### Forgetting workers in topology design
 
-Background work is part of the production system, not a postscript.
+Background work is part of the production system, not an implementation detail.
 
-### Rebuilding multi-site as multiple cloned apps
+### Rebuilding multi-site as cloned apps
 
 Davenda's site model exists to avoid that drift.
 

@@ -10,86 +10,99 @@ troubleshooting, and ownership clear.
 
 ## What Is This?
 
-This page describes how to organize a serious Davenda codebase so that:
+This page explains how to lay out a serious Davenda codebase so that:
 
-- the customer binary is easy to find
-- app manifests and platform config do not get mixed together
+- the customer binary is obvious
+- product and operational inputs are not mixed together
 - linked customer Rust and bounded extensions stay distinct
-- operators can tell what changed in a release
+- release inputs are easy to identify
 
 ## Why Does This Matter?
 
-When a Davenda repo is organized badly, the failure mode is predictable:
+Bad structure causes predictable operational failures:
 
 - startup and composition logic become hard to trace
-- app identity and operational settings get mixed together
+- app identity and runtime topology get mixed together
 - customer-owned code starts looking like an undocumented plugin system
-- deploy and rollback steps stop matching the source tree
+- deploy and rollback steps stop matching the repository
 
-Good project structure is one of the cheapest ways to keep the platform understandable.
+Good structure is one of the cheapest ways to keep a Davenda app operable.
 
-## Recommended Top-Level Shape
+## The Canonical Shape
 
-A strong customer-root project should make these boundaries obvious:
+A healthy Davenda customer project usually has four clear areas:
 
-- customer workspace crates
-- app root files
-- per-environment config
-- auth package files
+1. a Rust workspace that owns the customer binary and customer-owned crates
+2. an app root that owns `app.toml`, templates, theme assets, auth files, and extensions
+3. per-environment runtime config such as `platform.dev.toml` and `platform.toml`
+4. deployment tooling such as container files and scripts
+
+That shape matters more than the exact folder names.
+
+## A Practical Layout
+
+This is a good starting point:
+
+```text
+customer-product/
+  Cargo.toml
+  crates/
+    product-bin/
+    product-app/
+    product-backend/
+  app.toml
+  platform.dev.toml
+  platform.toml
+  auth/
+  templates/
+  theme/
+  extensions/
+  docker-compose.yml
+  Dockerfile
+```
+
+What each area is for:
+
+- `product-bin/`: the composition root and operator-facing binary
+- `product-app/`: app/bootstrap logic and customer-specific runtime assembly
+- `product-backend/`: linked customer Rust behavior
+- `app.toml`: product composition and app identity
+- `platform*.toml`: environment-specific runtime topology
+- `auth/`: customer auth package files
+- `templates/` and `theme/`: frontend presentation
+- `extensions/`: bounded runtime-installed packages
+
+## What Belongs Where
+
+### Put this in the Rust workspace
+
+- binary composition
+- customer-specific backend logic
+- any shared customer support crates
+
+### Put this in the app root
+
+- app identity
+- site and locale structure
+- enabled modules
 - templates and theme assets
-- optional extension artifacts
-- deployment and local-development scripts
+- auth package files
+- extension package declarations
 
-The checked-in examples show two variants of that structure:
+### Put this in runtime config
 
-- `apps/shoppr/`
-- `apps/gitly/`
+- bind addresses
+- database, cache, jobs, and storage backends
+- TLS mode
+- observability settings
+- CDN and asset delivery settings
 
-## How Davenda Uses These Boundaries
+### Put this in secret storage
 
-In practice, a customer project usually splits into three layers.
-
-### 1. Customer workspace crates
-
-This is where the binary and customer-owned Rust logic live.
-
-Concrete examples:
-
-- `apps/shoppr/crates/shoppr-bin/`
-- `apps/shoppr/crates/shoppr-app/`
-- `apps/shoppr/crates/shoppr-backend/`
-- `apps/gitly/crates/gitly-bin/`
-- `apps/gitly/crates/gitly-app/`
-- `apps/gitly/crates/gitly-backend/`
-
-### 2. App root inputs
-
-This is where the runtime-facing application inputs live.
-
-Concrete examples:
-
-- `apps/shoppr/app.toml`
-- `apps/shoppr/platform.dev.toml`
-- `apps/shoppr/platform.toml`
-- `apps/shoppr/auth/shoppr-auth/`
-- `apps/shoppr/templates/`
-- `apps/shoppr/theme/`
-- `apps/shoppr/extensions/`
-
-The same pattern exists in Gitly under `apps/gitly/`.
-
-### 3. Deployment and maintainer tooling
-
-These files drive how the app runs locally or in containers.
-
-Concrete examples:
-
-- `apps/shoppr/docker-compose.yml`
-- `apps/shoppr/docker-compose.repo.yml`
-- `apps/shoppr/Dockerfile`
-- `apps/shoppr/Dockerfile.repo`
-- `apps/gitly/docker-compose.yml`
-- `apps/gitly/Dockerfile`
+- database URLs
+- provider API keys
+- webhook secrets
+- object-store credentials
 
 ## When To Use `davenda-all`
 
@@ -102,98 +115,96 @@ Use `davenda-all` when:
 Use narrower selective dependencies when:
 
 - you are building a specialized product shape
-- you want explicit control over what the binary links
-- you need to explain the linked runtime surface to another team
+- you want tighter control over what the binary links
+- you need a very explicit runtime surface for review or compliance
 
-The important rule is this: even when `davenda-all` is used, the customer binary still owns
-composition.
+Even when `davenda-all` is used, the customer binary still owns composition.
 
 ## How To Add A New Customer Crate
 
-For a new crate under a customer workspace:
+When adding a crate to a customer workspace:
 
-1. Add a directory under `crates/`.
-2. Add it to the customer workspace `Cargo.toml`.
-3. Decide whether it is:
-   - binary composition,
-   - app/bootstrap logic,
-   - customer backend logic,
-   - or a shared support crate.
-4. Wire it into the customer binary deliberately.
+1. decide whether it is binary composition, app/bootstrap logic, customer backend logic, or shared support code
+2. add it to the customer workspace manifest
+3. link it intentionally from the customer binary or app crate
+4. keep its responsibility narrow enough that another operator can tell why it exists
 
-Good examples to imitate:
+Good rule:
 
-- `apps/shoppr/crates/shoppr-app/`
-- `apps/gitly/crates/gitly-backend/`
+- if the crate owns product-specific behavior, it belongs in customer code
+- if the crate is becoming generic enough for many apps, reevaluate whether it wants to be an official module instead
 
 ## How To Add A Backend Crate
 
-If you are adding customer-specific backend behavior:
+If you need customer-specific backend behavior:
 
-1. Create a dedicated crate under `crates/`.
-2. Keep the stable integration surface explicit through the customer SDK.
-3. Register the backend from the customer binary or app composition crate.
-4. Keep the backend crate focused on customer behavior, not generic platform code.
+1. create a dedicated backend crate
+2. implement supported customer SDK hooks or facades there
+3. register it from the customer binary or app composition crate
+4. keep it separate from lower-trust runtime-installed extensions
 
-Concrete examples:
+If the code genuinely needs its own process boundary, use a sidecar or external integration on
+purpose. Do not create a fake service boundary by habit.
 
-- `apps/shoppr/crates/shoppr-backend/`
-- `apps/gitly/crates/gitly-backend/`
-
-If the code genuinely needs its own process boundary, use a sidecar or external integration
-instead of pretending it is still just linked backend logic.
-
-## How To Add An Extension Folder
+## How To Add An Extension Directory
 
 If you need bounded runtime-installed extensions:
 
-1. Create an extension directory under `extensions/`.
-2. Keep it separate from linked Rust crates.
-3. Declare and pin it from the customer app manifest.
-4. Treat it as a lower-trust or more replaceable boundary than linked customer Rust.
+1. create an `extensions/` area
+2. keep extension code separate from linked customer Rust
+3. declare and pin the extension from the app manifest
+4. treat it as a replaceable, lower-trust boundary
 
-Concrete examples:
+The important distinction is:
 
-- `apps/shoppr/extensions/shoppr-waitlist-tools/`
-- `apps/gitly/extensions/gitly-community-pulse/`
-- `apps/gitly/extensions/gitly-actions-scheduler/`
+- linked customer Rust is part of the app
+- runtime-installed extensions are explicitly bounded add-ons
 
-## Working Pattern For Multi-Site Apps
+## Multi-Site Project Organization
 
-For multi-site products, do not clone the app three times.
+For multi-site products, do not clone the application three times unless there is a real product
+boundary that requires it.
 
 The Davenda shape is:
 
 - one customer workspace
 - one app manifest
-- one shared deployment surface
-- site-specific behavior expressed in app and platform config
+- one deployment surface
+- site-specific behavior expressed in config and content
 
-Shoppr is the checked-in example of this model.
+That keeps rollout, auth, jobs, and operations coherent.
+
+## Supporting Repo Examples
+
+If you want concrete examples after reading the pattern:
+
+- Shoppr shows the multi-site commerce shape
+- Gitly shows the single-site non-commerce shape
+
+Those examples are useful because they prove the model, but they are not the primary teaching
+material for this page.
 
 ## Common Mistakes
 
-### Mixing product and operations files together
+### Mixing product and operational inputs
 
 `app.toml` and `platform.toml` should not become one ambiguous blob of settings.
 
-### Hiding the app in helper scripts
+### Hiding composition in scripts
 
-If the only way to understand how the app starts is to read shell scripts, the customer binary is
-too opaque.
+If the only way to understand startup is to read shell wrappers, the customer binary is too opaque.
 
-### Treating linked Rust and extensions as the same lane
+### Treating linked Rust and extensions as one lane
 
-Linked customer Rust is first-party application logic. Runtime-installed extensions are not.
+They exist for different trust and ownership models.
 
-### Letting local maintainer overrides become the public model
+### Letting local maintainer overrides become the public contract
 
-Repo-maintainer conveniences such as Shoppr's repo override compose file are useful, but they are
-not the customer-facing deployment contract.
+Repo-maintainer conveniences are useful, but they are not the supported customer deployment model.
 
 ## What To Read Next
 
-- [Build and deploy](build-and-deploy.md)
 - [Configuration and secrets](configuration-and-secrets.md)
 - [Production topologies](production-topologies.md)
+- [Build and deploy](build-and-deploy.md)
 - [Customer project layout](../getting-started/customer-project-layout.md)

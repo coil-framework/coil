@@ -13,7 +13,7 @@ This page explains:
 - what belongs in the app manifest
 - what belongs in `platform.dev.toml` and `platform.toml`
 - what belongs in secret storage or environment variables
-- how the checked-in apps use those boundaries
+- how to reason about a complete configuration set
 
 ## Why Does This Separation Exist?
 
@@ -30,66 +30,44 @@ That makes review harder, drift easier, and incident recovery slower.
 
 ### 1. Customer app manifest
 
-The app manifest describes product composition.
-
-Typical concerns:
+The app manifest describes product composition:
 
 - app identity
-- installed modules
-- site and locale policy
+- enabled modules
+- site and locale structure
 - theme settings
 - auth package identity
 - runtime-installed extension declarations
 
-Concrete files:
-
-- `apps/shoppr/app.toml`
-- `apps/gitly/app.toml`
-
 ### 2. Platform runtime config
 
-Platform config describes how the product is operated in a specific environment.
-
-Typical concerns:
+Platform config describes how the product is operated in a specific environment:
 
 - bind address
 - database, cache, jobs, and storage backends
 - TLS mode
 - observability settings
-- asset publication settings
-- payment provider wiring
-
-Concrete files:
-
-- `apps/shoppr/platform.dev.toml`
-- `apps/shoppr/platform.toml`
-- `apps/gitly/platform.dev.toml`
-- `apps/gitly/platform.toml`
+- asset delivery settings
+- module-specific operational config
 
 ### 3. Secrets
 
-Secrets provide sensitive runtime values.
+Secrets provide sensitive runtime values:
 
-Typical concerns:
-
-- database URL
-- object store credentials
+- database URLs
+- object-store credentials
 - payment API keys
 - webhook secrets
 - TLS provider credentials
 
-Concrete checked-in examples:
+## A Canonical Davenda Example
 
-- `apps/shoppr/.env.example`
-- `apps/gitly/.env.example`
-
-## A Concrete Davenda Config Example
-
-From Shoppr development config:
+This is the mental model you should start from:
 
 ```toml
 [database]
 url = { kind = "env", var = "DATABASE_URL" }
+schema = "public"
 
 [cache]
 l1 = "moka"
@@ -104,34 +82,14 @@ tracing = true
 
 [assets]
 publish_manifest = true
-cdn_base_url = "http://localhost:9000/shoppr"
+cdn_base_url = "https://cdn.example.com"
 ```
 
-That is the Davenda pattern:
+What this example demonstrates:
 
-- operational topology in platform config
-- secrets resolved through env bindings
-- site and module composition kept elsewhere
-
-## Full Development Example
-
-Shoppr's current development environment uses:
-
-- `platform.dev.toml` for local-safe server and cookie settings
-- `.env.example` for provider env var names
-- Docker Compose for Postgres, Redis, and object storage
-
-Key local secret variables in Shoppr:
-
-```dotenv
-STRIPE_PUBLISHABLE_KEY=pk_test_replace_me
-STRIPE_SECRET_KEY=sk_test_replace_me
-STRIPE_WEBHOOK_SECRET=whsec_replace_me
-HARBOR_BACKEND_WEBHOOK_SECRET=harbor-backend-dev-secret
-```
-
-Gitly shows a different kind of local config emphasis. Its `.env.example` is mostly local port and
-compose wiring because the checked-in app does not need the same payment secrets.
+- topology lives in platform config
+- sensitive values resolve from environment or secret storage
+- product structure does not live here unless it is truly operational
 
 ## How To Think About The Important Blocks
 
@@ -142,18 +100,18 @@ Use it for:
 - bind address
 - trusted proxies
 
-Do not use it for product identity or site configuration.
+Do not use it for product identity, site catalog policy, or theme behavior.
 
 ### `[database]`
 
 Use it for:
 
-- connection URL
+- connection URL reference
 - schema
-- connection pool sizing
+- pool sizing
 - statement timeouts
 
-The database URL itself should come from secret resolution.
+The secret value for the URL should still come from a secret source.
 
 ### `[storage]`
 
@@ -162,48 +120,53 @@ Use it for:
 - object store type
 - local root
 - deployment mode
-- the secret reference that resolves object store credentials
+- secret reference for credentials
 
 ### `[cache]`
 
 Use it for:
 
-- `l1` in-process caching
-- `l2` shared Redis or Valkey caching
+- `l1` in-process cache
+- `l2` shared cache such as Redis or Valkey
 
-This is an operational performance choice, not a template or app-manifest concern.
+This is an operational performance choice, not an app-manifest concern.
 
 ### `[i18n]` and `[[sites]]`
 
 Use them for:
 
-- default locale
-- supported locales
+- default and supported locales
 - route localization policy
-- host and canonical host mapping per site
+- host and canonical host mapping
 
-Shoppr demonstrates the multi-site version of this model. Gitly demonstrates the single-site but
-multi-locale version.
+These are runtime-facing because they affect routing and delivery, even though they are also part
+of product behavior.
 
 ### `[auth]`
 
 Use it for:
 
 - auth package identity
-- tenant or environment wiring relevant to the auth backend
+- auth backend wiring such as tenant id where applicable
 
-Do not place app-specific capability semantics here if they belong in the auth package files.
+Do not place app-specific capability semantics here if they belong in auth package files.
 
 ### `[modules]`
 
 Use it for:
 
-- enabling linked official modules
-- module-specific operational config blocks
+- enabled linked official modules
+- module-specific operational configuration
 
-Shoppr's Stripe configuration lives under:
+Example:
 
-- `[modules."commerce-payments-stripe"]`
+```toml
+[modules."commerce-payments-stripe"]
+provider = "stripe"
+checkout_mode = "hosted-checkout"
+publishable_key = { kind = "env", var = "STRIPE_PUBLISHABLE_KEY" }
+webhook_secret = { kind = "env", var = "STRIPE_WEBHOOK_SECRET" }
+```
 
 ### `[wasm]`
 
@@ -219,32 +182,30 @@ Use it for:
 
 - queue backend selection
 
-Current checked-in examples use Redis-backed jobs.
-
 ### `[observability]`
 
 Use it for:
 
-- enabling metrics
-- enabling tracing
+- metrics
+- tracing
 
 ### `[assets]`
 
 Use it for:
 
 - whether publication emits an asset manifest
-- where assets should be served from
+- the asset origin or CDN base URL
 
 ## Development Versus Production
 
-The development and production files do not need identical infrastructure, but they should preserve
-the same behavioral model.
+Development and production do not need identical infrastructure, but they should preserve the same
+behavioral model.
 
 Good differences:
 
-- cookie `secure = false` in development and `true` in production
-- local object-store/CDN URLs in development and real CDN URLs in production
-- local TLS mode of `external` in dev and real TLS mode in production
+- `secure = false` for dev cookies and `true` for production
+- local object-store/CDN URLs in development and real ones in production
+- local `tls.mode = "external"` in development and real TLS automation in production
 
 Bad differences:
 
@@ -253,13 +214,30 @@ Bad differences:
 - different auth package identity
 - different route graph
 
+## A Practical Local Secret Example
+
+For local development, a small `.env` can be enough:
+
+```dotenv
+DATABASE_URL=postgres://davenda:davenda@127.0.0.1:5432/davenda_app
+OBJECT_STORE_URL=...
+STRIPE_PUBLISHABLE_KEY=pk_test_replace_me
+STRIPE_SECRET_KEY=sk_test_replace_me
+STRIPE_WEBHOOK_SECRET=whsec_replace_me
+```
+
+The exact variable names vary by app and provider, but the rule stays the same:
+
+- committed config references the secret
+- the secret value arrives from the environment
+
 ## Secrets Handling Rules
 
 Prefer:
 
 - environment variables
 - deployment-time secret injection
-- explicit secret manager integration exposed through runtime env
+- a secret manager exposed through the runtime environment
 
 Avoid:
 
@@ -267,20 +245,29 @@ Avoid:
 - copying production secrets into local config files
 - embedding secrets in templates or frontend assets
 
+## Supporting Repo Examples
+
+After you understand the pattern, the checked-in apps are useful supporting examples:
+
+- Shoppr shows payment-provider and webhook-heavy config
+- Gitly shows a simpler non-commerce config shape
+
+Use those examples as proofs of the model, not as the primary teaching material.
+
 ## Common Mistakes
 
 ### Putting product behavior in `platform.toml`
 
-Product composition belongs in the app manifest, not in runtime env config.
+Product composition belongs in the app manifest unless it is genuinely an operational concern.
 
-### Putting credentials in the app manifest
+### Putting credentials in committed config
 
-Secret values belong in secret resolution, not in committed product files.
+Secrets belong in secret resolution, not in versioned product files.
 
 ### Making development config too fake
 
-Development config can be lighter than production, but it should still exercise the same
-behavioral integration boundaries.
+Development can be lighter than production, but it should still exercise the same integration
+boundaries.
 
 ## What To Read Next
 

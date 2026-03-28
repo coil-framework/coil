@@ -2,128 +2,165 @@
 title: Gitly Overview
 ---
 
-Gitly is the main non-commerce teaching app in the repo. It proves that Davenda can power a
-developer-product shell, not just a store.
+Gitly is a supporting example for a broader point: Davenda is a customer-app platform, not a
+storefront-only framework.
 
-Gitly is useful because it keeps the same customer-app model as Shoppr while changing the product
-shape completely.
+Use this page when you want to answer:
 
-## What Gitly Is Showing
+- what a non-commerce Davenda app looks like
+- which platform patterns survive when you remove catalog and checkout concerns
+- how to read the Gitly demo without treating it as the only valid app shape
 
-Gitly demonstrates all of these in one app:
+## The Core Pattern
 
-- customer-owned routes and templates
+Davenda customer apps keep the same structure regardless of product type:
+
+- `app.toml` declares the customer product contract
+- platform config wires runtime services and secrets
+- the customer app crate composes routes, modules, linked plugins, and extensions
+- the customer binary owns validate, migrate, assets, and serve/up
+
+Gitly matters because it proves that structure still works for a forge-style app.
+
+## Canonical Customer-App Contract
+
+The smallest useful thing to look at is the app manifest shape. Gitly’s `apps/gitly/app.toml`
+contains the canonical ingredients:
+
+```toml
+[app]
+name = "gitly"
+display_name = "Gitly"
+
+[modules]
+enabled = ["admin", "cms", "media", "gitly-showcase"]
+```
+
+That snippet shows the real lesson:
+
+- customer apps choose a product identity
+- they enable only the modules they need
+- they can add customer-owned product modules such as `gitly-showcase`
+
+This is a better first takeaway than "Gitly has repository pages."
+
+## Canonical Customer Binary Shape
+
+The lifecycle surface for a non-commerce app should look the same as it does for a store.
+
+Gitly’s binary in `apps/gitly/crates/gitly-bin/src/main.rs` exposes:
+
+```rust
+enum Command {
+    Describe,
+    Validate,
+    Assets { command: AssetsCommand },
+    Migrate { command: MigrateCommand },
+    Serve { bind: Option<String> },
+    Up { bind: Option<String> },
+    ExtensionChecksums,
+    LinkedBackend { command: LinkedBackendCommand },
+}
+```
+
+That is the real platform story:
+
+- customer apps own their lifecycle
+- the same verbs work for commerce and non-commerce products
+- linked backends and runtime-installed extensions remain first-class
+
+## What Gitly Adds On Top
+
+Gitly uses that platform shape to demonstrate:
+
+- customer-owned route vocabulary
 - linked Rust data shaping
 - API-style endpoints
 - theme switching
 - localized UI copy
 - scheduled-task demos
 - runtime-installed WASM
-- customer-owned lifecycle commands
 
-## Start With The App Contract
+The product is different. The platform contract is the same.
 
-Read these files first:
+## Gitly As The Supporting Example
 
-1. `apps/gitly/app.toml`
-2. `apps/gitly/platform.dev.toml`
-3. `apps/gitly/crates/gitly-app/src/lib.rs`
-4. `apps/gitly/crates/gitly-bin/src/main.rs`
+### Product contract and runtime config
 
-That sequence tells you:
+Read:
 
-- what Gitly claims to be
-- how the runtime is configured
-- how the customer composition root builds the product shell
-- how the customer binary owns validate, assets, migrate, serve, and up
+- `apps/gitly/app.toml`
+- `apps/gitly/platform.dev.toml`
 
-## What Gitly Enables
+These show:
 
-Gitly's enabled module set is narrow on purpose:
+- one-site non-commerce routing
+- locales and localized routes
+- a narrow module set
+- jobs, storage, cache, and asset config that look like any other Davenda app
 
-- `admin`
-- `cms`
-- `media`
-- `gitly-showcase`
+### Composition root
 
-That is one of the best lessons in the repo. Davenda does not need commerce to be coherent.
+Read:
 
-Gitly builds a non-commerce product by:
+- `apps/gitly/crates/gitly-app/src/lib.rs`
 
-- using a small official module set
-- adding customer-owned routes and templates
-- adding a customer-owned showcase module with extension slots
+This file demonstrates:
 
-## How The Workspace Is Structured
+- customer-owned route mounting
+- customer module registration
+- linked plugin registration
+- extension loading
 
-Important folders:
+### Product templates
 
-- `apps/gitly/crates/gitly-app`
-  - composition root and route registration
-- `apps/gitly/crates/gitly-backend`
-  - linked customer backend and API payload builders
-- `apps/gitly/crates/gitly-bin`
-  - customer binary lifecycle commands
-- `apps/gitly/extensions`
-  - runtime-installed API and scheduled-job packages
-- `apps/gitly/templates/gitly`
-  - product pages
-- `apps/gitly/theme`
-  - CSS, JS, and tokens
+Read:
 
-That is the same customer-root shape as Shoppr, but the product vocabulary is completely
-different.
+- `apps/gitly/templates/gitly/home.html`
+- `apps/gitly/templates/gitly/explore.html`
+- `apps/gitly/templates/gitly/repository.html`
+- `apps/gitly/templates/gitly/issues.html`
+- `apps/gitly/templates/gitly/pulls.html`
+- `apps/gitly/templates/gitly/actions.html`
+- `apps/gitly/templates/gitly/organization.html`
+- `apps/gitly/templates/gitly/profile.html`
+- `apps/gitly/templates/gitly/search.html`
 
-## The Product Surface
+These are supporting evidence that Davenda’s HTML-first model works for dense product shells too.
 
-The public Gitly templates live under `apps/gitly/templates/gitly/`:
+### Linked Rust and WASM
 
-- `home.html`
-- `explore.html`
-- `repository.html`
-- `issues.html`
-- `pulls.html`
-- `actions.html`
-- `organization.html`
-- `profile.html`
-- `search.html`
-
-These are the files to read when you want to see Davenda from a non-commerce lens.
-
-## Linked Rust And WASM In Gitly
-
-Gitly also demonstrates both extension models clearly.
-
-Linked Rust:
+Read:
 
 - `apps/gitly/crates/gitly-backend/src/lib.rs`
-
-WASM:
-
 - `apps/gitly/extensions/gitly-community-pulse/package.toml`
 - `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
 - `apps/gitly/crates/gitly-app/src/extensions.rs`
 
-This matters because Gitly shows the same platform extension story without any commerce framing.
+That set shows the same first-party-vs-bounded-extension split that Shoppr shows, but without
+commerce vocabulary dominating the example.
 
-## Why Gitly Matters
+## Practical Rules To Copy
 
-Use Gitly when you want to show a skeptical teammate that Davenda is not “only for stores.”
+- start from the customer-app contract, not from page mocks
+- keep the customer binary as the first operational surface
+- use customer-owned modules and routes to define product vocabulary
+- use linked Rust for first-party data and policy
+- use WASM for bounded installable behavior
 
-Gitly demonstrates:
+## Full Implementation Pointers
 
-- custom route vocabulary
-- app-style data presentation
-- localized product UI
-- a theme switcher
-- bounded background-work demos
-- API-style extension points
-
-without leaving the customer-root model.
+- `apps/gitly/app.toml`
+- `apps/gitly/platform.dev.toml`
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+- `apps/gitly/crates/gitly-bin/src/main.rs`
+- `apps/gitly/crates/gitly-backend/src/lib.rs`
+- `apps/gitly/templates/gitly/`
+- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
 
 ## Read Next
 
 - [Product Structure](./product-structure.md)
-- [Theming, Localization, And Accessibility](./theming-localization-and-accessibility.md)
 - [API And Background Work](./api-and-background-work.md)
-- [Non-Commerce Product Shape](./non-commerce-product-shape.md)
+- [Build And Deploy](./build-and-deploy.md)

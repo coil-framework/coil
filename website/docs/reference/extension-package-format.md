@@ -2,146 +2,294 @@
 title: Extension Package Format
 ---
 
-Davenda runtime-installed extensions are packaged as explicit customer-app artifacts.
+Davenda runtime-installed extensions are declared in two places:
 
-They are not discovered by scanning random `.wasm` files in the repository. A valid extension needs
-package metadata, a built artifact, and an installation path in the customer app.
+- the customer app manifest installs them
+- each extension package describes its own artifact, manifest, handlers, and grants
 
-## What This Page Covers
+Start with the minimal pair:
 
-Use this page when you want to know:
+```toml
+# app.toml
+[[extensions]]
+id = "shoppr-waitlist-tools"
+package_version = "0.1.0"
+artifact_sha256 = "a86d1a1646e818bf600653ba6cf3585162157517acf74d76c20ecba3328694dc"
+customer_app_id = "shoppr"
 
-- what files make up an extension package
-- how Shoppr and Gitly ship extensions
-- how an installed extension is identified and loaded
-- what belongs in package metadata versus the WASM binary
-
-For the extension execution model, read [WASM Host APIs](./wasm-host-apis.md). For deciding whether
-you should use WASM at all, read [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md).
-
-## Canonical Package Layout
-
-The checked-in examples live here:
-
-- `apps/shoppr/extensions/shoppr-waitlist-tools/`
-- `apps/gitly/extensions/gitly-actions-scheduler/`
-- `apps/gitly/extensions/gitly-community-pulse/`
-
-A practical layout looks like this:
-
-```text
-extensions/
-  gitly-actions-scheduler/
-    package.toml
-    src/
-      lib.rs
-  artifacts/
-    gitly-actions-scheduler.wasm
+[[extensions.handlers]]
+id = "home.waitlist.banner"
+grants = []
 ```
 
-The separation is intentional:
+```toml
+# package.toml
+[manifest]
+id = "shoppr-waitlist-tools"
+display_name = "Shoppr Waitlist Tools"
+version = "0.1.0"
+host_api_version = "1.0.0"
 
-- package source remains human-maintained
-- the built artifact is explicit
-- the customer app can pin checksums for installed artifacts
+[[handlers]]
+id = "home.waitlist.banner"
+export = "exports.home_waitlist_banner"
+point = "render-hook"
+target = "cms.page.render"
+grants = []
+```
 
-## `package.toml`
+That pair tells Davenda:
 
-`package.toml` is the package manifest for the extension.
+- which package is installed
+- which handler is activated
+- which artifact hash is expected
+- which host API contract the package expects
+- which grants are requested and approved
 
-It should declare enough identity and runtime information for the host to reason about the package
-as an installable unit.
+Use this page when you want to answer:
 
-At minimum, the package manifest should answer:
+- what goes in `package.toml`
+- what goes in `app.toml`
+- how handlers map to extension points
+- how grants are declared and installed
+- where Shoppr and Gitly provide concrete examples
 
-- what is this extension called?
-- which artifact belongs to it?
-- which runtime surface does it expect?
-- which handlers or hooks does it export?
+## The Two Files You Always Need
 
-See the live examples:
+### 1. The customer app install entry
 
-- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
-- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
-- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+Customer apps install extensions through `[[extensions]]` blocks in `app.toml`.
 
-## Built Artifacts
+Example from Gitly:
 
-The compiled `.wasm` file is the runtime payload.
+```toml
+[[extensions]]
+id = "gitly-community-pulse"
+package_version = "0.1.0"
+artifact_sha256 = "ef2b0bc15aa0baf178df23d3671bf0a2914c618e394f985441e27a5fdd7c89d7"
+customer_app_id = "gitly"
 
-Gitly demonstrates checked-in artifacts:
+[[extensions.handlers]]
+id = "community-pulse"
+grants = []
+```
 
-- `apps/gitly/extensions/artifacts/gitly-actions-scheduler.wasm`
-- `apps/gitly/extensions/artifacts/gitly-community-pulse.wasm`
+This file says:
 
-That pattern matters because installation and verification happen against a known artifact, not an
-implicit build output hidden in a target directory.
+- which package is installed
+- which artifact hash is expected
+- which customer app owns the installation
+- which handlers are activated
+- which grants the installation approves for each handler
 
-## Installation Into The Customer App
+### 2. The extension package manifest
 
-The customer app manifest and runtime build own extension installation.
+Each package has its own `package.toml` under the app’s `extensions/` directory.
 
-In practice, Shoppr and Gitly treat extensions as customer-app assets:
+The package manifest is the extension's own contract. The app manifest is the installation contract. You need both.
 
-- the app knows which extensions are installed
-- the build knows where the artifacts live
-- the runtime knows which handlers are available
+## What `package.toml` Contains
 
-That is a safer model than loading every `.wasm` file found on disk.
+Important top-level fields:
 
-## Checksums And Integrity
+- `publisher`
+  - human and operational provenance for the package
+- `artifact`
+  - relative path to the `.wasm` artifact
+- `artifact_sha256`
+  - content hash pinned by the installer
+- `source_wat`
+  - demo-only source hint used by the checked-in sample apps
+- `[manifest]`
+  - extension identity and contract versioning
+- `[[handlers]]`
+  - each exported handler inside the package
 
-Davenda expects runtime-installed extensions to be pinned to exact build artifacts.
+## Manifest Fields
 
-That means a healthy extension story includes:
+The manifest layer maps to `ExtensionManifest` in
+`crates/davenda-wasm/src/manifest/manifests.rs`.
 
-- a known artifact path
-- a known checksum or integrity summary
-- a deliberate install step when the artifact changes
+The main fields are:
 
-This is why demo drift was treated as a bug earlier when the checked-in extension checksum no longer
-matched the built artifact.
+- `id`
+  - package identity
+- `display_name`
+  - human-facing name
+- `version`
+  - package version
+- `host_api_version`
+  - the host API contract the package expects
 
-## What Belongs In WASM Versus The Package
+Gitly example:
 
-The package metadata should own:
+```toml
+[manifest]
+id = "gitly-actions-scheduler"
+display_name = "Gitly Actions Scheduler"
+version = "0.1.0"
+host_api_version = "1.0.0"
+```
 
-- extension identity
-- version
-- artifact mapping
-- install-time compatibility information
+This is the part that makes compatibility explicit. A package should not assume the host ABI by guesswork.
 
-The WASM binary should own:
+## Handler Fields
 
-- executable handler code
-- typed host calls
-- runtime behaviour
+Each `[[handlers]]` block maps to `HandlerManifest`.
 
-Do not encode deployment-specific assumptions into the artifact name alone.
+Important fields:
 
-## Distribution Model
+- `id`
+  - handler identity inside the package
+- `export`
+  - exported function name in the artifact
+- `point`
+  - extension point kind
+- `target`
+  - route, slot, or scheduled job target depending on point kind
+- `grants`
+  - requested host grants
 
-Today the practical distribution model is customer-controlled installation.
+Examples:
 
-That means:
+### Shoppr render hook
 
-- a customer chooses the package
-- the artifact is added to the customer app
-- the package is installed through the customer app's extension surface
+`apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
 
-Extensions are deliberately more constrained than linked Rust code because they are designed for
-runtime-installed third-party behaviour.
+```toml
+[[handlers]]
+id = "home.waitlist.banner"
+export = "exports.home_waitlist_banner"
+point = "render-hook"
+target = "cms.page.render"
+grants = []
+```
+
+### Gitly API handler
+
+`apps/gitly/extensions/gitly-community-pulse/package.toml`
+
+```toml
+[[handlers]]
+id = "community-pulse"
+export = "exports.community_pulse"
+point = "api"
+target = "/api/github/pulse"
+grants = []
+```
+
+### Gitly scheduled job
+
+`apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+
+```toml
+[[handlers]]
+id = "nightly-refresh"
+export = "exports.nightly_refresh"
+point = "scheduled-job"
+target = "github.actions.refresh"
+grants = []
+```
+
+## Installation Grants
+
+Packages request grants, but the customer app installation still decides which grants are actually
+approved for the activated handler.
+
+That boundary is enforced through:
+
+- `crates/davenda-wasm/src/grants.rs`
+- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
+- `apps/gitly/crates/gitly-app/src/extensions.rs`
+
+Current grant kinds include:
+
+- data read/write
+- auth checks and tuple writes
+- storage read/write
+- render fragment access
+- metadata write
+- cache hint write
+- outbound HTTP by named integration
+- secret read
+- job enqueue
+
+In the checked-in demo packages, the handlers intentionally use empty grant sets so the package
+format is easy to understand first.
+
+## How To Read The Format
+
+Read it in this order:
+
+1. installation block in `app.toml`
+2. package `[manifest]`
+3. `[[handlers]]`
+4. requested and approved grants
+
+That sequence tells you:
+
+- whether the package is installed
+- what the package claims to be
+- what code paths it exposes
+- what the runtime will actually let it do
+
+## Defaults And Constraints
+
+- The customer app must pin `artifact_sha256`.
+- The extension package `manifest.id` must match the installed `id`.
+- Each handler id must be valid and unique within the package.
+- `host_api_version` is required.
+- Resource limits are assigned from `ResourceLimits::baseline_for(...)` in the app loaders today.
+- Demo apps currently compile simple WAT examples into the runtime extension directory from
+  `apps/.../crates/*-app/src/extensions.rs`.
+
+## What A Good Extension Package Looks Like
+
+A good package is:
+
+- easy to identify
+- easy to pin
+- explicit about handlers
+- narrow in grants
+- tied to one bounded use case
+
+If a package starts looking like a replacement application backend, it is crossing the wrong boundary.
 
 ## Common Mistakes
 
-- Treating a raw `.wasm` file as a complete Davenda extension.
-- Skipping package metadata.
-- Letting the built artifact drift from the installed checksum.
-- Using WASM for customer-owned core business logic that really belongs in linked Rust.
+- Do not describe a handler in `package.toml` and forget to install it in `app.toml`.
+- Do not request grants in a package and assume they are active automatically.
+- Do not treat `target` as a free-form comment.
+  - it must match the semantics of the selected extension point
+- Do not use WASM for first-party customer logic that should be linked Rust.
+  - use [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md) to choose the boundary
+
+## Full Implementation
+
+Customer app install examples:
+
+- `apps/shoppr/app.toml`
+- `apps/gitly/app.toml`
+
+Package examples:
+
+- `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
+- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+
+Runtime model code:
+
+- `crates/davenda-wasm/src/manifest/package.rs`
+- `crates/davenda-wasm/src/manifest/manifests.rs`
+
+App loaders:
+
+- `apps/shoppr/crates/shoppr-app/src/extensions.rs`
+- `apps/gitly/crates/gitly-app/src/extensions.rs`
 
 ## Read Next
 
 - [WASM Host APIs](./wasm-host-apis.md)
 - [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
-- [Shoppr WASM Extensions](../use-cases/shoppr/wasm-extensions.md)
 - [Gitly Extensions And Host APIs](../use-cases/gitly/extensions-and-host-apis.md)
+- [Shoppr WASM Extensions](../use-cases/shoppr/wasm-extensions.md)

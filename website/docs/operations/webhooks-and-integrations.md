@@ -6,86 +6,98 @@ Davenda treats webhook ingress as an operational boundary, not just "some HTTP e
 
 ## What Is This?
 
-This page covers how to operate inbound webhook and external integration paths in Davenda.
+This page covers how to operate inbound webhooks and adjacent integration paths safely.
 
 ## Why Does This Matter?
 
 Webhook failures are rarely isolated:
 
-- retries can pile up
-- signatures can drift
-- releases can change payload assumptions
-- duplicate side effects can appear quickly
+- retries pile up
+- signatures drift
+- releases change payload assumptions
+- duplicate side effects appear quickly
 
-A safe integration story requires host-owned verification and operator-visible state.
+A safe integration story needs host-owned verification, idempotent handling, and operator-visible
+state.
 
-## Concrete Repo Examples
+## The Canonical Webhook Model
 
-### Shoppr payment provider callback
+Treat webhook ingress as a four-stage flow:
 
-Shoppr's public ecommerce flow includes the payment provider callback path:
+1. accept the request on a dedicated route
+2. verify the signature or shared secret before business logic runs
+3. normalize the payload into a known event shape
+4. record or route the result through the runtime and operator surfaces
 
-- `/webhooks/commerce/payment-provider`
-
-Relevant config:
-
-- `apps/shoppr/platform.dev.toml`
-- `apps/shoppr/platform.toml`
-- `STRIPE_WEBHOOK_SECRET` in `apps/shoppr/.env.example`
-
-### Shoppr sidecar CRM webhook example
-
-The optional Shoppr loyalty sidecar gives a second checked-in webhook example:
-
-- `POST http://localhost:8081/webhooks/crm/contact-updated`
-
-Relevant files:
-
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/http.rs`
-- `apps/shoppr/backend/README.md`
-- `HARBOR_BACKEND_WEBHOOK_SECRET` in `apps/shoppr/.env.example`
-
-## How To Test Locally
-
-For Stripe-style local forwarding, Shoppr already documents:
-
-```bash
-stripe listen --forward-to http://localhost:8080/webhooks/commerce/payment-provider
-```
-
-For the CRM sidecar example, the checked-in README documents a direct `curl` flow against
-`/webhooks/crm/contact-updated`.
+That keeps webhook handling from becoming a pile of ad hoc controller code.
 
 ## What Operators Should Verify
 
 Before trusting a webhook path in production, verify:
 
-- the endpoint is reachable
-- the right secret is configured
+- the endpoint is reachable from the provider
+- the correct secret is configured
 - signature or shared-secret verification is enabled
-- retries are understood
-- duplicate delivery is safe or rejected correctly
+- duplicate delivery is safe
 - downstream dependencies are healthy
+- retry behavior is understood
 
-## Linked Rust And Webhooks
+## A Practical Local Test Flow
 
-Shoppr also demonstrates verified webhook handling through linked customer Rust. That matters
-because it shows the first-party customer path without exposing unstable runtime internals.
+For provider callbacks, the minimal operator-safe test loop is:
 
-Current public example:
+1. run the app locally
+2. configure the local webhook secret
+3. forward provider traffic to the local callback route
+4. confirm verification succeeds
+5. confirm duplicate or invalid calls fail closed
 
-- `apps/shoppr/crates/shoppr-backend/`
+A representative command shape is:
+
+```bash
+stripe listen --forward-to http://localhost:8080/webhooks/commerce/payment-provider
+```
+
+You can apply the same pattern to non-Stripe providers: forward, verify, observe, and replay
+carefully.
+
+## Linked Rust And Webhook Handling
+
+If the webhook behavior is truly customer-owned product logic, linked customer Rust is the right
+place for the business rule.
+
+That still does not mean the webhook should bypass the host. The runtime should own ingress and
+verification before customer code handles the verified event.
+
+## Sidecars And External Integrations
+
+A separate process boundary can still be correct when:
+
+- a provider integration is operationally independent
+- the integration needs a different scaling or security posture
+- the boundary is genuinely external-facing
+
+Use that boundary intentionally, not because the framework lacks a first-party customization path.
+
+## Supporting Repo Examples
+
+The checked-in examples prove two useful variants:
+
+- Shoppr payment-provider callbacks through the main app runtime
+- Shoppr's optional CRM webhook sidecar with explicit shared-secret verification
+
+Those examples are worth reading after this page if you want concrete implementation detail, but
+the pattern above is the primary teaching model.
 
 ## Common Mistakes
 
-### Treating webhook handling as a pure app concern
+### Treating webhook handling as just another controller
 
-Ingress verification, retries, and operator visibility are operational concerns too.
+Ingress verification and replay safety are operational concerns, not just app code details.
 
-### Forgetting local secret parity
+### Testing only with unsigned local requests
 
-If the local secret path is undocumented, developers will end up "testing" with unsigned payloads
-that bypass the real behavior.
+That produces a fake green path and hides the real verification behavior.
 
 ### Ignoring duplicate delivery
 
@@ -94,5 +106,5 @@ A webhook system that cannot tolerate retries is not production-ready.
 ## What To Read Next
 
 - [Configuration and secrets](configuration-and-secrets.md)
-- [Troubleshooting](troubleshooting.md)
 - [Observability, monitoring, and audit](observability.md)
+- [Troubleshooting](troubleshooting.md)

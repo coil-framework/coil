@@ -17,19 +17,41 @@ If you want to understand how Davenda is meant to feel in a real ecommerce app, 
 
 ## What Shoppr Is
 
-The checked-in app lives under `apps/shoppr/`. Read these files first:
+Shoppr is a customer-root commerce app with one app contract, one runtime contract, and one
+customer-owned binary.
 
-1. `apps/shoppr/app.toml`
-2. `apps/shoppr/platform.dev.toml`
-3. `apps/shoppr/crates/shoppr-app/src/lib.rs`
-4. `apps/shoppr/crates/shoppr-bin/src/main.rs`
+The smallest useful picture looks like this:
 
-That sequence answers four different questions:
+```toml
+[app]
+name = "shoppr"
 
-- what the product is
-- how the local runtime is configured
-- how the customer runtime plan is composed
-- how the customer binary owns validate, migrate, assets, and serve commands
+[theme]
+active = "shoppr"
+
+[auth]
+mode = "extend"
+package = "shoppr-auth"
+
+[modules]
+enabled = [
+  "cms",
+  "media",
+  "commerce",
+  "commerce-payments-stripe",
+  "memberships",
+  "events",
+  "admin",
+  "ops",
+]
+```
+
+That single manifest fragment already tells a developer most of what matters:
+
+- this is one customer app, not a loose collection of module demos
+- the storefront, CMS, payments, memberships, events, and operator surfaces live together
+- the theme and auth package are part of the customer product boundary
+- the customer app chooses which official batteries are active
 
 ## What Shoppr Enables
 
@@ -78,6 +100,28 @@ Important folders:
 
 That structure is the first big lesson. Davenda customer apps are real products with their own
 workspace, not just a folder full of overrides.
+
+## The Canonical Bootstrap Pattern
+
+The runtime composition story is easier to understand from one small example than from a tour of the
+repo tree:
+
+```rust
+let manifest = workspace.load_manifest()?;
+let config = workspace.load_platform_config("platform.dev.toml")?;
+let modules = resolve_modules_from_config(&config)?;
+let customer_plugins: Vec<Box<dyn CustomerBackendPlugin>> =
+    vec![Box::new(shoppr_backend::plugin())];
+```
+
+That is the real Shoppr shape in miniature:
+
+- load the customer app contract
+- load the runtime contract
+- resolve official modules from config
+- add linked customer plugins explicitly
+
+Everything else in the workspace exists to support that boundary cleanly.
 
 ## What To Read In The App
 
@@ -164,6 +208,19 @@ WASM:
 
 Use Shoppr when you want to understand where first-party logic stops being “config” and becomes
 linked code or a bounded extension.
+
+## Full Implementation
+
+If you want the complete checked-in implementation after learning the pattern:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/crates/shoppr-app/src/lib.rs`
+- `apps/shoppr/crates/shoppr-bin/src/main.rs`
+- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
+- `apps/shoppr/templates/`
+- `apps/shoppr/extensions/`
 
 ## Adapt This For Your Store
 

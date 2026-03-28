@@ -2,202 +2,151 @@
 title: Environment Variables
 ---
 
-Davenda uses environment variables for runtime secrets, deployment-specific addresses, and selected
-operator controls.
+Davenda does not treat environment variables as a hidden side channel. The runtime reads them
+through explicit secret references in platform config and customer bootstrap scripts.
 
-This page gathers the environment variables that appear across the public runtime and demo apps.
+Use this page when you want to answer:
 
-## Core Runtime Variables
+- which env vars the demos actually need
+- where they are declared in config
+- which ones are platform-wide versus app-specific
 
-### `DAVENDA_CONFIG`
+## How Davenda Resolves Environment Secrets
 
-Purpose:
+The runtime resolver lives in `crates/davenda-runtime/src/server/backend.rs`.
 
-- selects the platform config path when the CLI or runtime cannot rely on discovery
+`EnvironmentSecretResolver` supports:
 
-Used by:
+- `SecretRef::Env { var }`
 
-- CLI argument parsing
-- customer-root bootstrap
+and intentionally rejects unavailable sources in the live runtime boundary.
 
-### `DAVENDA_BIND`
+This matters because the config files are the source of truth. The environment variable names are
+declared there, not guessed inside random helper code.
 
-Purpose:
+## Platform-Wide Variables You Will See Often
 
-- overrides the HTTP bind address for runtime serving
+These names appear across the checked-in demos and runtime tests:
 
-Used by:
+- `DAVENDA_CONFIG`
+  - config file path used by app entrypoints and container bootstrap
+- `DAVENDA_BIND`
+  - optional bind override used by runtime serve helpers
+- `DAVENDA_COOKIE_SECRET`
+  - session cookie secret
+- `DAVENDA_CSRF_SECRET`
+  - CSRF signing secret
+- `DATABASE_URL`
+  - database connection string
+- `REDIS_URL`
+  - Redis backend connection string
+- `OBJECT_STORE_URL`
+  - object-store credential/config payload
 
-- runtime `serve_from_env()` paths
-- `davenda-all`
+Concrete config references:
 
-### `DAVENDA_COOKIE_SECRET`
+- `apps/shoppr/platform.dev.toml`
+- `apps/gitly/platform.dev.toml`
 
-Purpose:
+## Shoppr-Specific Variables
 
-- session cookie signing and encryption secret
+Shoppr’s local template is `apps/shoppr/.env.example`.
 
-Required for:
+Current documented variables:
 
-- normal browser session handling
-
-### `DAVENDA_CSRF_SECRET`
-
-Purpose:
-
-- CSRF token protection secret
-
-Required for:
-
-- mutating browser flows and protected forms
-
-### `DAVENDA_SHARED_STATE_DIR`
-
-Purpose:
-
-- shared local state directory for runtime state that is not stored in the primary database
-
-## Database And Queue Variables
-
-### `DATABASE_URL`
-
-Purpose:
-
-- primary database connection string for distributed runtime state, data, and jobs coordination
-
-Used by:
-
-- platform database config
-- jobs inspection and ready/dead-letter commands
-- browser session backends that require distributed state
-
-### `REDIS_URL`
-
-Purpose:
-
-- Redis-backed distributed cache
-
-Required when:
-
-- platform config selects Redis cache
-
-### `VALKEY_URL`
-
-Purpose:
-
-- Valkey-backed distributed cache
-
-Required when:
-
-- platform config selects Valkey cache and `REDIS_URL` is not provided
-
-### `DAVENDA_SHARED_BACKEND_NAMESPACE`
-
-Purpose:
-
-- shared jobs backend namespace
-
-Used by:
-
-- jobs shared backend
-
-## Storage And Asset Variables
-
-### `OBJECT_STORE_URL`
-
-Purpose:
-
-- object-store connection secret used by Shoppr and Gitly platform configs
-
-Used by:
-
-- published theme assets
-- managed media
-- storage verification
-
-## TLS And Cutover Variables
-
-### `DAVENDA_TLS_MATERIAL_KEY`
-
-Purpose:
-
-- encrypts TLS certificate material managed by the platform
-
-### `DAVENDA_TLS_PREVIOUS_MATERIAL_KEYS`
-
-Purpose:
-
-- previous key material kept during rotation
-
-### `DAVENDA_TLS_STATE_DIR`
-
-Purpose:
-
-- testing and local TLS state directory override
-
-### `DAVENDA_CLOUDFLARE_API_BASE_URL`
-
-Purpose:
-
-- Cloudflare API base URL override for cutover testing or special control-plane setups
-
-### `DAVENDA_CUTOVER_CLOUDFLARE_SECRET`
-
-Purpose:
-
-- Cloudflare DNS switch credential fallback when not supplied through config secrets
-
-### `DAVENDA_CUTOVER_ALLOW_SYNTHETIC_SESSION`
-
-Purpose:
-
-- enables synthetic-session cutover probes where that mode is explicitly supported
-
-## WASM And Host Runtime Variables
-
-### `DAVENDA_WASM_HTTP_NO_FALLBACK`
-
-Purpose:
-
-- host testing and control over WASM HTTP fallback behaviour
-
-## Demo-Specific Variables
-
-### Shoppr
-
-- `HARBOR_BACKEND_BIND`
-- `HARBOR_BACKEND_BRAND`
+- `STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
 - `HARBOR_BACKEND_WEBHOOK_SECRET`
-- `HARBOR_SHOP_APP_ROOT`
-- `HARBOUR_SHOP_APP_ROOT`
 
-These exist because Shoppr evolved from the earlier Harbour naming and still carries a compatibility
-layer for app-root discovery and the side example backend.
+Where they are consumed:
 
-### Gitly
+- `apps/shoppr/platform.dev.toml`
+  - Stripe payment module config and WASM secret binding
+- `apps/shoppr/docker-compose.yml`
+  - local container wiring
+- `apps/shoppr/docker/entrypoint.sh`
+  - startup warnings and bootstrap flow
+- `apps/shoppr/backend/shoppr-loyalty-backend/src/main.rs`
+  - optional sidecar secrets and bind settings
 
-- `OCTOHUB_APP_ROOT`
+## Gitly-Specific Variables
 
-This remains the compatibility app-root variable for the renamed Gitly demo.
+Gitly’s local template is `apps/gitly/.env.example`.
 
-## How To Use This Page
+Current variables there are mostly host-port overrides:
 
-When you add a new environment variable to customer code or platform code:
+- `COMPOSE_PROJECT_NAME`
+- `OCTOHUB_HTTP_PORT`
+- `OCTOHUB_POSTGRES_PORT`
+- `OCTOHUB_REDIS_PORT`
+- `OCTOHUB_MINIO_PORT`
+- `OCTOHUB_MINIO_CONSOLE_PORT`
 
-1. add it to the config or runtime implementation
-2. document it here
-3. document its operational use in the relevant operations page
-4. add it to Shoppr or Gitly examples if it belongs in a canonical workflow
+Gitly’s runtime secrets are still declared in:
+
+- `apps/gitly/platform.dev.toml`
+- `apps/gitly/docker-compose.yml`
+
+The key operational vars remain:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `OBJECT_STORE_URL`
+- `DAVENDA_COOKIE_SECRET`
+- `DAVENDA_CSRF_SECRET`
+
+## `OBJECT_STORE_URL`
+
+This is the least obvious variable, so it is worth calling out directly.
+
+It is not a single bare URL. The demos use a structured object-store config payload, for example
+through Docker Compose values in:
+
+- `apps/shoppr/docker-compose.yml`
+- `apps/gitly/docker-compose.yml`
+
+The runtime then parses it through the storage/backend layer in:
+
+- `crates/davenda-runtime/src/server/backend.rs`
+
+## App Root Variables In Customer Workspaces
+
+The demo customer apps also support workspace-root discovery overrides:
+
+- Shoppr:
+  - `HARBOUR_SHOP_APP_ROOT`
+  - `HARBOR_SHOP_APP_ROOT`
+- Gitly:
+  - `OCTOHUB_APP_ROOT`
+
+Concrete files:
+
+- `apps/shoppr/crates/shoppr-app/src/lib.rs`
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+
+These exist to make the customer binaries usable from more than one launch context.
+
+## What To Put In `.env.example`
+
+The checked-in demos use a pragmatic split:
+
+- secrets or placeholders the developer is expected to override go in `.env.example`
+- env-backed secret names are still declared in `platform.dev.toml`
+- Docker Compose passes them through into the app container
+
+That is the pattern to copy for your own customer app.
 
 ## Common Mistakes
 
-- Putting product behaviour in environment variables instead of app or platform config.
-- Forgetting to rotate secrets like `DAVENDA_COOKIE_SECRET`, `DAVENDA_CSRF_SECRET`, or TLS
-  material keys.
-- Assuming `DATABASE_URL` is only for data and not also used by jobs and session surfaces.
+- Do not invent a variable name in code without declaring it in config.
+- Do not put app secrets only in README prose.
+- Do not assume `OBJECT_STORE_URL` is interchangeable with a plain S3 URL string.
+- Do not forget that the customer binary and container bootstrap may also rely on
+  `DAVENDA_CONFIG` or app-root overrides.
 
 ## Read Next
 
 - [Platform Config](./platform-config.md)
-- [Configuration And Secrets](../operations/configuration-and-secrets.md)
 - [CLI Commands](./cli-commands.md)
+- [Gitly Build And Deploy](../use-cases/gitly/build-and-deploy.md)

@@ -1,72 +1,178 @@
 ---
-title: Extensions And Host APIs
+title: Gitly Extensions And Host APIs
 ---
 
-Gitly is the clearest non-commerce demonstration of Davenda's runtime-installed WASM model.
+This page is about the platform extension model first, with Gitly as the supporting example.
 
-Use this page when you want to see the abstract extension docs tied to a real app.
+Use it when you want to answer:
 
-## Repo Areas To Read
+- how a customer app should expose extension slots
+- how runtime-installed packages bind to those slots
+- how to explain host APIs without making one demo app the whole story
 
-Start here:
+## The Core Pattern
+
+For runtime-installed extensions, keep the responsibilities split:
+
+1. the customer app defines named extension slots in product vocabulary
+2. the customer app installs packages explicitly in `app.toml`
+3. the package manifest binds handlers to those targets
+4. the runtime enforces grants and host-API boundaries
+
+Gitly demonstrates this especially well because it uses one API slot and one scheduled-job slot.
+
+## Canonical Extension Slot Pattern
+
+Gitly’s customer app module in `apps/gitly/crates/gitly-app/src/lib.rs` defines extension slots
+like this:
+
+```rust
+ExtensionSlotDescriptor::new(
+    ExtensionSlotKind::Api,
+    "/api/github/pulse",
+    "Allows bounded third-party extensions to contribute GitHub-style community pulse API data",
+)
+```
+
+and:
+
+```rust
+ExtensionSlotDescriptor::new(
+    ExtensionSlotKind::ScheduledJob,
+    "github.actions.refresh",
+    "Allows bounded third-party scheduled jobs to simulate GitHub Actions refresh cycles",
+)
+```
+
+These snippets are the most important part of the page because they show the real pattern:
+
+- the customer app owns the product slot names
+- extensions plug into explicit, app-defined targets
+
+## Canonical Install Pattern
+
+The customer app then installs packages in `app.toml`.
+
+Gitly’s `apps/gitly/app.toml` uses:
+
+```toml
+[[extensions]]
+id = "gitly-community-pulse"
+package_version = "0.1.0"
+artifact_sha256 = "..."
+customer_app_id = "gitly"
+```
+
+That is the right installation boundary:
+
+- explicit package id
+- explicit version
+- explicit artifact hash
+- explicit customer ownership
+
+## Canonical Package Binding Pattern
+
+The package itself binds handlers to extension points in `package.toml`.
+
+Gitly’s API package example:
+
+```toml
+[[handlers]]
+id = "community-pulse"
+export = "exports.community_pulse"
+point = "api"
+target = "/api/github/pulse"
+grants = []
+```
+
+Gitly’s scheduled-job example:
+
+```toml
+[[handlers]]
+id = "nightly-refresh"
+export = "exports.nightly_refresh"
+point = "scheduled-job"
+target = "github.actions.refresh"
+grants = []
+```
+
+Those snippets show the complete binding chain:
+
+- app defines slot
+- app installs package
+- package binds handler to slot target
+
+## Gitly As The Supporting Example
+
+### App-defined slots
+
+Read:
+
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+
+This is where Gitly defines the product’s extension vocabulary.
+
+### Package loading
+
+Read:
 
 - `apps/gitly/crates/gitly-app/src/extensions.rs`
-- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+
+This file shows the customer-app loader path:
+
+1. read installed extensions from `app.toml`
+2. load `extensions/<id>/package.toml`
+3. compile demo artifacts
+4. build `ExtensionPackage`
+5. attach installation data and grants
+
+### Installed packages
+
+Read:
+
 - `apps/gitly/extensions/gitly-community-pulse/package.toml`
-- `apps/gitly/extensions/artifacts/gitly-actions-scheduler.wasm`
-- `apps/gitly/extensions/artifacts/gitly-community-pulse.wasm`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
 
-## What Gitly Demonstrates
+### Product surfaces
 
-Gitly shows the right responsibilities for WASM:
+Read:
 
-- bounded runtime-installed behaviour
-- host-mediated metadata and background work
-- app-visible enhancements that do not need first-party compile-time access
+- `apps/gitly/templates/gitly/home.html`
+- `apps/gitly/templates/gitly/actions.html`
+- `apps/gitly/theme/assets/site.js`
 
-That is exactly the case where linked Rust would be the wrong default.
+These are the app-visible surfaces that make the extension contributions legible.
 
-## Why Gitly Is Better Than Shoppr For This Topic
+## Host API Boundary
 
-Shoppr proves the commerce story, but Gitly makes the extension boundary easier to see because the
-product is not dominated by checkout or catalogue concerns.
-
-Here the extensions are clearly:
-
-- product enrichments
-- scheduler-style helper behaviour
-- installable features the host can reason about explicitly
-
-## Host API Shape
-
-Gitly's extension runtime uses the same public host categories documented in
-[WASM Host APIs](../../reference/wasm-host-apis.md):
-
-- HTTP
-- jobs
-- metadata
-- secrets
-- webhooks where applicable
-
-The app-side extension loader in `apps/gitly/crates/gitly-app/src/extensions.rs` is the canonical
-place to see how the customer app wires installed artifacts into the runtime.
-
-## Practical Guidance
-
-Use the Gitly pattern when:
-
-- you want a third party to ship a runtime-installed feature
-- the feature should stay bounded to documented host APIs
-- the customer should be able to add or remove it without rebuilding core Davenda crates
-
-Do not use this pattern when:
-
-- the logic is customer-owned first-party policy
-- the feature needs linked Rust hook facades
-- the behaviour is central enough that it should compile into the product binary
-
-## Read Next
+The general host API and grant model is documented in:
 
 - [WASM Host APIs](../../reference/wasm-host-apis.md)
 - [Extension Package Format](../../reference/extension-package-format.md)
-- [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm.md)
+
+Gitly’s handlers use empty grant sets intentionally. That keeps the demo focused on slot design and
+package binding instead of grant complexity.
+
+## Practical Rules To Copy
+
+- define extension slots in the customer app before shipping packages
+- make slot names match real product vocabulary
+- install packages explicitly in `app.toml`
+- keep package targets and slot targets aligned exactly
+
+## Full Implementation Pointers
+
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+- `apps/gitly/crates/gitly-app/src/extensions.rs`
+- `apps/gitly/app.toml`
+- `apps/gitly/extensions/gitly-community-pulse/package.toml`
+- `apps/gitly/extensions/gitly-actions-scheduler/package.toml`
+- `apps/gitly/templates/gitly/home.html`
+- `apps/gitly/templates/gitly/actions.html`
+- `apps/gitly/theme/assets/site.js`
+
+## Read Next
+
+- [API And Background Work](./api-and-background-work.md)
+- [Build And Deploy](./build-and-deploy.md)
+- [Extension Package Format](../../reference/extension-package-format.md)

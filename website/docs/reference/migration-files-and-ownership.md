@@ -2,117 +2,141 @@
 title: Migration Files And Ownership
 ---
 
-Davenda treats migrations as part of the customer app contract, not as hidden framework magic.
+Davenda migrations are intentionally split by owner. That is what keeps module upgrades, auth
+validation, and customer-app changes from collapsing into one undocumented SQL pile.
 
-That means customer teams can add their own schema changes, but they should do so deliberately and
-with clear ownership boundaries.
+Use this page when you want to answer:
 
-## What This Page Covers
+- who owns which migration step
+- where those steps are declared
+- why customer-app migrations can be manual even when module migrations are executable
 
-Use this page when you need to know:
+## The Ownership Model
 
-- where migration files live
-- how customer-owned migrations fit alongside framework-owned ones
-- whether you can add your own tables
-- how to version migrations safely
+The low-level migration owner enum lives in `crates/davenda-data/src/migration.rs`.
 
-## The Basic Rule
+Current owners:
 
-Yes, customer apps can add their own tables and schema changes.
+- `Core`
+- `Module(String)`
+- `CustomerApp(String)`
+- `AuthPackage(String)`
 
-The important constraint is ownership:
+The higher-level app migration summary lives in `crates/davenda-app/src/migration.rs`.
 
-- framework-owned migrations should continue to own framework tables
-- auth packages own auth schema migrations
-- customer-owned crates or app packages should clearly own customer tables
+The customer-app-facing summary categories are:
 
-Do not casually edit framework migrations to add customer-specific storage.
+- `Module`
+- `AuthPackage`
+- `CustomerApp`
 
-## Canonical Example
+## What Each Owner Means
 
-Shoppr already shows one migration-owned surface in the auth package:
+### Module migrations
 
-- `apps/shoppr/auth/shoppr-auth/migrations/001_bootstrap.sql`
+These are executable migration steps shipped by official or customer-linked modules.
 
-That demonstrates the basic Davenda pattern:
+The runtime composes them through module manifests and migration plans before `migrate apply`.
 
-- migrations are checked in as ordinary files
-- numbering is explicit
-- ownership lives with the package that owns the schema
+### Auth package migrations
 
-## Where Customer Migrations Should Live
+Auth packages contribute validation and compatibility checks to the migration/release story.
 
-Use a location that makes ownership obvious.
+In the plan summary they appear as:
 
-Good patterns:
+- `auth:<package>`
 
-- a dedicated customer backend or app crate migration directory
-- an auth package migration directory when the migration belongs to auth
-- a module-owned migration directory when the schema belongs to a module
+That means "validate this auth package boundary before release", not "run arbitrary hidden SQL".
 
-Avoid:
+### Customer app migrations
 
-- sprinkling unrelated SQL files around the repo root
-- hiding customer schema behind framework-owned migration names
+These are the steps the customer app itself owns and must explain explicitly.
 
-## Numbering And Versioning
+That is why the demo customer binaries report `manual_customer_migration_entries`.
 
-Use explicit ordered migration names such as:
+## Where Migration Plans Are Built
 
-```text
-001_create_crm_contacts.sql
-002_add_membership_tier.sql
-003_backfill_waitlist_source.sql
-```
+The important files are:
 
-The rule is not the exact prefix width. The rule is that ordering must be obvious and deterministic.
+- `crates/davenda-data/src/migration.rs`
+  - executable migration steps and compiled batches
+- `crates/davenda-app/src/migration.rs`
+  - composed migration summaries for customer apps
+- `apps/shoppr/crates/shoppr-app/src/lib.rs`
+  - Shoppr workspace validation and apply flow
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+  - Gitly workspace validation and apply flow
 
-## What A Customer Table Might Look Like
+## Shoppr Example
 
-A customer backend might need a table for:
+Shoppr’s workspace binary is the clearest example because it reports both executable and manual
+customer-owned migration work.
 
-- CRM sync receipts
-- loyalty programme state
-- external integration mapping ids
-- warehouse-specific inventory import markers
+Read:
 
-Those are legitimate customer-owned data shapes and should not be forced into generic CMS or order
-tables if they are real backend concerns.
+- `apps/shoppr/crates/shoppr-app/src/lib.rs`
+- `apps/shoppr/crates/shoppr-bin/src/main.rs`
 
-## Operational Workflow
+Important behaviors:
 
-In practice:
+- `validate(...)` reports `manual_customer_migration_entries`
+- `migrate_apply(...)` builds the runtime bootstrap and applies executable steps
+- customer-owned manual entries are derived from the composed manifest and still surfaced to the
+  operator explicitly
 
-1. add the migration file
-2. run `migrate plan`
-3. review the plan
-4. apply in development with `migrate apply`
-5. include migration rollout in the release and cutover plan
+That is the right migration story for a real product: executable where possible, explicit where
+human ownership is still required.
 
-See [Build And Deploy](../operations/build-and-deploy.md) and
-[Database Migrations](../operations/database-migrations.md) for the operational flow.
+## Gitly Example
 
-## How This Relates To Linked Rust
+Gitly follows the same pattern:
 
-Linked Rust backends can absolutely depend on customer-owned tables.
+- `apps/gitly/crates/gitly-app/src/lib.rs`
+- `apps/gitly/crates/gitly-bin/src/main.rs`
 
-The right model is:
+This matters because Gitly proves migration ownership is not a commerce-only concept.
 
-- linked Rust owns the business logic
-- customer migrations own the extra schema it needs
+## Ordering Rules
 
-That is normal. The mistake would be pretending the backend needs no durable storage and then
-smuggling state through unrelated framework tables.
+The low-level ordering in `crates/davenda-data/src/migration.rs` is:
+
+1. core
+2. module
+3. auth package
+4. customer app
+
+The app-facing summary in `crates/davenda-app/src/migration.rs` keeps the relevant subset:
+
+1. module
+2. auth package
+3. customer app
+
+That ordering is deliberate. The more reusable or infrastructural owners run earlier; the most
+product-specific owner stays last.
+
+## What A Customer App Should Commit
+
+A customer app should commit:
+
+- module enablement in `app.toml`
+- customer migration declarations in the app manifest/composition layer
+- a customer binary that exposes validate and migrate commands
+
+Concrete demo binaries:
+
+- `apps/shoppr/crates/shoppr-bin/src/main.rs`
+- `apps/gitly/crates/gitly-bin/src/main.rs`
 
 ## Common Mistakes
 
-- Editing framework-owned migrations to add customer columns.
-- Using opaque migration names that hide intent.
-- Treating customer tables as forbidden when the backend genuinely needs them.
-- Forgetting to document which crate or package owns a migration set.
+- Do not hide customer-owned migration work inside ad hoc README notes only.
+- Do not treat auth-package validation as optional if the migration plan surfaces it.
+- Do not assume every migration step is executable SQL.
+  - some are explicit ownership checkpoints
+- Do not skip the customer binary lifecycle layer if you want a third-party developer story.
 
 ## Read Next
 
-- [Database Migrations](../operations/database-migrations.md)
-- [Linked Rust Hook APIs](./linked-rust-hook-apis.md)
-- [Build And Deploy](../operations/build-and-deploy.md)
+- [CLI Commands](./cli-commands.md)
+- [Composition And davenda-all](./composition.md)
+- [Shoppr Checkout And Operations](../use-cases/shoppr/checkout-and-operations.md)

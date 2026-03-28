@@ -186,7 +186,10 @@ fn new_project(command: NewCommand) -> Result<()> {
     let report = create_project(&root, &descriptor)?;
     println!("Created Coil project at {}", report.root.display());
     println!("Wrote {} managed files", report.files_written);
-    println!("Next: `cd {}` and run `cargo run -p {} -- validate`", root.display(), descriptor.bin_crate_package_name());
+    println!(
+        "Next: `cd {}` and run `docker compose up --build`",
+        root.display()
+    );
     Ok(())
 }
 
@@ -418,15 +421,7 @@ fn resolve_dependency_source(
                 repo_root: repo_root.display().to_string(),
             })
         }
-        None => {
-            if let Some(repo_root) = coil_path.or(detect_local_coil_repo()?) {
-                Ok(DependencySource::Path {
-                    repo_root: repo_root.display().to_string(),
-                })
-            } else {
-                Ok(DependencySource::CratesIo)
-            }
-        }
+        None => Ok(DependencySource::CratesIo),
     }
 }
 

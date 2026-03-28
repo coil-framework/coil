@@ -123,6 +123,9 @@ impl PlatformModule for GitlyShowcaseModule {
 
 impl GitlyWorkspace {
     pub fn default() -> Result<Self> {
+        if let Ok(app_root) = std::env::var("GITLY_APP_ROOT") {
+            return Self::at(app_root);
+        }
         if let Ok(app_root) = std::env::var("OCTOHUB_APP_ROOT") {
             return Self::at(app_root);
         }

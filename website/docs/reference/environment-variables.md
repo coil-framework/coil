@@ -77,11 +77,11 @@ Gitly’s local template is `apps/gitly/.env.example`.
 Current variables there are mostly host-port overrides:
 
 - `COMPOSE_PROJECT_NAME`
-- `OCTOHUB_HTTP_PORT`
-- `OCTOHUB_POSTGRES_PORT`
-- `OCTOHUB_REDIS_PORT`
-- `OCTOHUB_MINIO_PORT`
-- `OCTOHUB_MINIO_CONSOLE_PORT`
+- `GITLY_HTTP_PORT`
+- `GITLY_POSTGRES_PORT`
+- `GITLY_REDIS_PORT`
+- `GITLY_MINIO_PORT`
+- `GITLY_MINIO_CONSOLE_PORT`
 
 Gitly’s runtime secrets are still declared in:
 
@@ -118,7 +118,7 @@ The demo customer apps also support workspace-root discovery overrides:
   - `HARBOUR_SHOP_APP_ROOT`
   - `HARBOR_SHOP_APP_ROOT`
 - Gitly:
-  - `OCTOHUB_APP_ROOT`
+  - `GITLY_APP_ROOT`
 
 Concrete files:
 

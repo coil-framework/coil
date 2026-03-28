@@ -1,4 +1,4 @@
-const OCTOHUB = (() => {
+const GITLY = (() => {
   const translations = {
     "en-GB": {
       brand: "Gitly",
@@ -654,4 +654,4 @@ const OCTOHUB = (() => {
   return { boot };
 })();
 
-window.addEventListener("DOMContentLoaded", OCTOHUB.boot);
+window.addEventListener("DOMContentLoaded", GITLY.boot);

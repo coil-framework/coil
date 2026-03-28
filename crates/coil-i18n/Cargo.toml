@@ -6,9 +6,10 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/coil-framework/coil"
-homepage = "https://coil-framework.github.io/coil/"
-documentation = "https://coil-framework.github.io/coil/"
+homepage = "https://coil.rs"
+documentation = "https://coil.rs/docs"
 description = "Internationalisation primitives for the Coil framework."
+readme = "README.md"
 [dependencies]
 toml = "0.8"
 

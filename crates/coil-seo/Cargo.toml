@@ -6,8 +6,9 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/coil-framework/coil"
-homepage = "https://coil-framework.github.io/coil/"
-documentation = "https://coil-framework.github.io/coil/"
+homepage = "https://coil.rs"
+documentation = "https://coil.rs/docs"
 description = "SEO primitives for the Coil framework."
+readme = "README.md"
 [dependencies]
 coil-i18n = { version = "0.1.0", path = "../coil-i18n" }

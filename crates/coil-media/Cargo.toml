@@ -6,9 +6,10 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/coil-framework/coil"
-homepage = "https://coil-framework.github.io/coil/"
-documentation = "https://coil-framework.github.io/coil/"
+homepage = "https://coil.rs"
+documentation = "https://coil.rs/docs"
 description = "Media management capabilities for the Coil framework."
+readme = "README.md"
 [dependencies]
 coil-assets = { version = "0.1.0", path = "../coil-assets" }
 coil-auth = { version = "0.1.0", path = "../coil-auth" }

@@ -96,6 +96,90 @@ The flow is similar, but the render model carries commerce-specific state:
 
 That model is prepared in Rust first, and only then rendered through the template engine. This is why the template language can stay intentionally constrained.
 
+Here is the concrete binding path the docs should make explicit.
+
+The commerce module contributes the page surface and template:
+
+```rust
+HttpSurfaceContribution::page(
+    "commerce.product-detail",
+    HttpSurfaceArea::Public,
+    "/shop/products/{product_slug}",
+    "commerce/product-detail",
+)
+.localized()
+```
+
+The runtime then assembles the common request model and appends route-specific keys for that route:
+
+```rust
+let mut model = RenderModel::new()
+    .with_value("route_name", RenderValue::text(execution.route.route_name.clone()))?
+    .with_value("locale", RenderValue::text(execution.locale.clone()))?
+    .with_object("site", site_model(self, execution)?)?
+    .with_object("links", links_model(self, execution)?)?
+    .with_object("page", page_model_for_route(execution, template_name, fragment_id))?;
+
+// later for commerce.product-detail
+model = model
+    .with_bool("hasProduct", true)?
+    .with_object("product", fixture.product_for(slug))?
+    .with_list("productCards", product_cards)?;
+```
+
+And the product-detail template consumes those exact keys:
+
+```html
+<section class="product-page__hero" dv:if="${hasProduct}">
+  <h1 dv:text="${product.name}">Harbor Cap</h1>
+  <p class="product-page__price" dv:text="${product.price}">GBP 29</p>
+  <a class="button" dv:attr="href=${links.cart}">Review cart</a>
+</section>
+```
+
+This is the actual lifecycle contract:
+
+- the route picks the template name
+- the runtime shapes the render model
+- the template reads only the shaped keys
+
+The template is not discovering data on its own. The runtime has already decided the page contract.
+
+## Gitly Custom Route Example
+
+Gitly demonstrates the customer-owned side of the same story.
+
+Its app crate adds routes and maps them to template names directly:
+
+```rust
+for (route, template) in gitly_page_routes() {
+    let route_name = route.name.clone();
+    ensure_route(runtime, route)?;
+    ensure_handler(runtime, HandlerDefinition::page(route_name, template)?)?;
+}
+```
+
+With route definitions like:
+
+```rust
+("repo", "/octocorp/platform-ui", "gitly/repository")
+```
+
+So the customer-owned part is explicit:
+
+- Gitly defines the route
+- Gitly defines the template name
+- the runtime still performs the render step
+
+Important current limitation:
+
+- Gitly clearly demonstrates custom route-to-template mapping
+- Gitly does **not** currently demonstrate a separate customer-app-owned server-side `RenderModel`
+  builder for those custom routes
+
+That is why Shoppr is currently the stronger server-side render-model example, while Gitly is the
+stronger customer-owned route-mapping example.
+
 ## Stateful Action Example: Cart Update
 
 Now look at a state-changing request:
@@ -163,6 +247,15 @@ Site, locale, auth, and module composition all affect rendering. It is not just 
 
 Davenda keeps templates deliberately constrained. Complex state should be prepared in Rust render models, not improvised inside the template engine.
 
+### Assuming a template file alone defines the page contract
+
+The page contract actually comes from both:
+
+- the handler choosing the template name
+- the runtime shaping the `RenderModel`
+
+If either side is missing, the template will feel disconnected.
+
 ### Treating form actions as second-class behavior
 
 In Davenda, stateful form flows are part of the primary model, especially for storefronts, account areas, and admin surfaces.
@@ -174,6 +267,7 @@ If you think only in terms of route path strings, multi-site behaviour will feel
 ## Read Next
 
 - [Sites, locales, and markets](sites-locales-and-markets.md)
+- [Template Models](../reference/template-models.md)
 - [Theme structure](../reference/theme-structure.md)
 - [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
 - [Reference overview](../reference/overview.md)

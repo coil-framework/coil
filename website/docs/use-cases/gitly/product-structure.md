@@ -45,6 +45,26 @@ That is the key lesson:
 - the platform should not force commerce-shaped routes
 - the customer app should define the product vocabulary directly
 
+The important concrete detail is that Gitly also maps those routes to templates in the same app
+crate:
+
+```rust
+for (route, template) in gitly_page_routes() {
+    let route_name = route.name.clone();
+    ensure_route(runtime, route)?;
+    ensure_handler(runtime, HandlerDefinition::page(route_name, template)?)?;
+}
+```
+
+With entries such as:
+
+```rust
+("repo", "/octocorp/platform-ui", "gitly/repository")
+```
+
+That is the real template tie-in. The template is not discovered by filename convention alone. The
+customer app chooses it.
+
 ## Canonical Template Mapping Pattern
 
 Once the route vocabulary exists, templates should mirror that vocabulary one-for-one.
@@ -83,38 +103,43 @@ The backend supplies:
 That is the right boundary for product-shaped data that belongs to one customer app but is too rich
 for static templates alone.
 
+## What Gitly Demonstrates Today, And What It Does Not
+
+Gitly is a good example of:
+
+- customer-owned route vocabulary
+- customer-owned route-to-template mapping
+- linked Rust for domain fixtures and policy
+- custom JSON endpoints and runtime-installed WASM surfaces
+
+Gitly is **not** yet the strongest example of a customer-owned server-side `RenderModel` builder
+for those custom routes.
+
+Today its repository, profile, and actions pages lean more heavily on:
+
+- static HTML structure
+- `data-*` attributes
+- client-side localization and enhancement
+- separate custom JSON endpoints for GitHub-style API payloads
+
+So if you want to understand "how does a route get tied to a template?" Gitly is a strong example.
+If you want to understand "where does the server-side page model get shaped?" Shoppr is currently
+the stronger example.
+
 ## Gitly As The Supporting Example
 
 ### Customer-owned routes
 
-Read:
+Full implementation:
 
 - `apps/gitly/crates/gitly-app/src/lib.rs`
-
-This file is the strongest example in the repo of Davenda hosting a product that is not shaped like
-catalog, cart, checkout, and account.
-
-### Templates
-
-Read:
-
 - `apps/gitly/templates/gitly/home.html`
 - `apps/gitly/templates/gitly/repository.html`
 - `apps/gitly/templates/gitly/actions.html`
-
-These are enough to see:
-
-- landing shell
-- dense product detail shell
-- background-work/status surface
-
-### Product data
-
-Read:
-
 - `apps/gitly/crates/gitly-backend/src/lib.rs`
+- `apps/gitly/theme/assets/site.js`
 
-This is where the demo keeps repository, organization, workflow, and user data shaping.
+Use those after reading this page, not instead of reading this page.
 
 ## Practical Rules To Copy
 

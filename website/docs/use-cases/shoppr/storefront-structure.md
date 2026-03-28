@@ -104,6 +104,31 @@ It keeps together:
 This is a good Davenda page to copy structurally because it stays HTML-first even when the theme
 adds richer behavior.
 
+## How The Product Template Gets Its Model
+
+This is the part that often feels disconnected if you only read the template.
+
+In Shoppr, the product-detail page is not a free-floating HTML file. The binding path is:
+
+1. the commerce module contributes route `commerce.product-detail`
+2. that route is wired to template `commerce/product-detail`
+3. the runtime adds the shared request keys and then appends `product`, `productCards`,
+   `hasProduct`, and related fields for that route
+4. `apps/shoppr/templates/commerce/product-detail.html` consumes those fields directly
+
+The important consequence is that this markup:
+
+```html
+<h1 dv:text="${product.name}">Harbor Cap</h1>
+<p class="product-page__price" dv:text="${product.price}">GBP 29</p>
+<p dv:text="${product.summary}">Product summary</p>
+```
+
+only works because the runtime has already shaped a `product` object for `commerce.product-detail`.
+
+That object is not being invented inside the template. It is supplied by the runtime render-model
+binding for that route.
+
 ## Progressive Enhancement Layer
 
 The interaction layer lives in:
@@ -140,6 +165,11 @@ If you want the complete Shoppr storefront after learning the structure:
 - `apps/shoppr/templates/navigation/primary.html`
 - `apps/shoppr/templates/components/hero.html`
 - `apps/shoppr/theme/assets/site.js`
+
+The route and model side of the same page lives here:
+
+- `crates/davenda-commerce/src/module/platform/manifest.rs`
+- `crates/davenda-runtime/src/render/model.rs`
 
 ## What To Copy Into Your Own App
 

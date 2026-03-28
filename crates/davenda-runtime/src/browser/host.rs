@@ -285,8 +285,26 @@ impl BrowserHost {
             });
         };
 
-        let (principal_id, refreshed_cookie) =
-            self.touch_active_session(&session_id, cookie_secret, now)?;
+        let (session_id, principal_id, refreshed_cookie) =
+            match self.touch_active_session(&session_id, cookie_secret, now) {
+                Ok((principal_id, refreshed_cookie)) => {
+                    (session_id, principal_id, refreshed_cookie)
+                }
+                Err(
+                    RuntimeBrowserError::UnknownSession { .. }
+                    | RuntimeBrowserError::ExpiredSession { .. }
+                    | RuntimeBrowserError::RevokedSession { .. },
+                ) if resolved_from_cookie => {
+                    let issued =
+                        self.issue_session(SessionIssueRequest::new(), cookie_secret, now)?;
+                    (
+                        issued.record.session_id.clone(),
+                        issued.record.principal_id.clone(),
+                        issued.set_cookie_header,
+                    )
+                }
+                Err(error) => return Err(error),
+            };
         response_cookies.push(refreshed_cookie);
 
         Ok(ResolvedBrowserRequest {

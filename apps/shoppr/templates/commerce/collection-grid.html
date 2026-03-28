@@ -1,10 +1,10 @@
 <section class="collection-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
   <header class="collection-grid__header">
-    <p class="collection-grid__eyebrow">Collections</p>
-    <h2>Start with the collection that matches intent</h2>
+    <p class="collection-grid__eyebrow">Campaign edits</p>
+    <h2>Shop the campaign first, then narrow into the product decision.</h2>
     <p class="collection-grid__intro">
-      Each collection is a customer-facing landing page that narrows the browse path before
-      product detail and cart.
+      Collections are the merchandising layer. They set the mood, hold the campaign copy, and keep
+      the customer inside the right assortment before the product page takes over.
     </p>
   </header>
   <div class="collection-grid__list" dv:if="${hasCatalogSections}">
@@ -16,32 +16,32 @@
         </a>
       </h3>
       <p dv:text="${section.summary}">
-        Start here for the collection promise, then open a product page for price, quantity, and
-        cart actions.
+        Start here for the campaign promise, then open a product page for price, sizing, quantity,
+        and cart actions.
       </p>
       <a class="button" href="/shop/collections/featured" dv:href="${section.url}">
-        View collection
+        Open edit
       </a>
     </article>
   </div>
   <div class="collection-grid__list" dv:unless="${hasCatalogSections}">
     <article class="catalog-section collection-grid__item">
-      <p class="catalog-section__eyebrow">Featured</p>
+      <p class="catalog-section__eyebrow">New season</p>
       <h3>Featured</h3>
-      <p>Start with the broad Shoppr edit before narrowing into individual product detail pages.</p>
-      <a class="button" href="/en-GB/shop/collections/featured">View collection</a>
+      <p>Start with the campaign edit before narrowing into individual product detail pages.</p>
+      <a class="button" href="/en-GB/shop/collections/featured">Open edit</a>
     </article>
     <article class="catalog-section collection-grid__item">
-      <p class="catalog-section__eyebrow">Memberships</p>
+      <p class="catalog-section__eyebrow">Loyalty</p>
       <h3>Memberships</h3>
       <p>Lead customers directly into recurring products and their account-linked benefits.</p>
-      <a class="button" href="/en-GB/shop/collections/memberships">View collection</a>
+      <a class="button" href="/en-GB/shop/collections/memberships">Open edit</a>
     </article>
     <article class="catalog-section collection-grid__item">
-      <p class="catalog-section__eyebrow">Events</p>
+      <p class="catalog-section__eyebrow">City edit</p>
       <h3>Events</h3>
-      <p>Use a tighter event-focused collection when the customer is shopping for attendance or passes.</p>
-      <a class="button" href="/en-GB/shop/collections/events">View collection</a>
+      <p>Use a tighter event-focused edit when the customer is shopping for attendance or passes.</p>
+      <a class="button" href="/en-GB/shop/collections/events">Open edit</a>
     </article>
   </div>
 </section>

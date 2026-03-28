@@ -1,10 +1,10 @@
 <section class="product-grid" xmlns:dv="https://davenda.dev" dv:fragment="grid">
   <header class="product-grid__header">
-    <p class="product-grid__eyebrow">Products</p>
-    <h2>Jump straight to a product when the customer already knows the item</h2>
+    <p class="product-grid__eyebrow">Product cards</p>
+    <h2>Jump straight to a product when the customer already knows the silhouette.</h2>
     <p>
-      Product detail is where customers confirm the item, quantity, and price before the cart
-      handoff.
+      Product detail is where customers confirm the item, price, size, quantity, and market before
+      handing off into the cart.
     </p>
   </header>
 
@@ -40,7 +40,7 @@
           <div class="product-card__meta">
             <span class="product-card__price" dv:text="${product.price}">GBP 28</span>
             <a class="button" href="/shop/products/harbor-cap" dv:href="${product.url}">
-              View product
+              View look
             </a>
             <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
               <input
@@ -68,7 +68,7 @@
         </p>
         <div class="product-card__meta">
           <span class="product-card__price">GBP 29</span>
-          <a class="button" href="/en-GB/shop/products/harbor-cap">View product</a>
+          <a class="button" href="/en-GB/shop/products/harbor-cap">View look</a>
           <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
             <input type="hidden" name="product_slug" value="harbor-cap" />
             <input type="hidden" name="quantity" value="1" />
@@ -86,7 +86,7 @@
         </p>
         <div class="product-card__meta">
           <span class="product-card__price">GBP 100</span>
-          <a class="button" href="/en-GB/shop/products/gold-membership">View product</a>
+          <a class="button" href="/en-GB/shop/products/gold-membership">View look</a>
           <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
             <input type="hidden" name="product_slug" value="gold-membership" />
             <input type="hidden" name="quantity" value="1" />

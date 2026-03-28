@@ -56,7 +56,7 @@ l2 = "redis"
 
 [i18n]
 default_locale = "en-GB"
-supported_locales = ["en-GB", "fr-FR", "de-DE", "en-US"]
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 fallback_locale = "en-GB"
 localized_routes = true
 
@@ -65,31 +65,31 @@ canonical_host = "uk.127.0.0.1.nip.io"
 emit_json_ld = true
 
 [[sites]]
-id = "harbor-uk"
+id = "shoppr-uk"
 display_name = "Shoppr UK"
 brand_name = "Shoppr"
 canonical_host = "uk.127.0.0.1.nip.io"
 hosts = ["shop.example.com", "www.example.com"]
 default_locale = "en-GB"
-supported_locales = ["en-GB", "fr-FR"]
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
 [[sites]]
-id = "harbor-us"
-display_name = "Shoppr US"
-brand_name = "Harbor Events"
-canonical_host = "us.127.0.0.1.nip.io"
-hosts = ["us-store.127.0.0.1.nip.io"]
-default_locale = "en-US"
-supported_locales = ["en-US"]
+id = "shoppr-fr"
+display_name = "Shoppr France"
+brand_name = "Shoppr Paris"
+canonical_host = "fr.127.0.0.1.nip.io"
+hosts = ["fr-store.127.0.0.1.nip.io"]
+default_locale = "fr-FR"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
 [[sites]]
-id = "harbor-de"
-display_name = "Shoppr DE"
-brand_name = "Harbor Europa"
-canonical_host = "de.127.0.0.1.nip.io"
-hosts = ["de-store.127.0.0.1.nip.io"]
-default_locale = "de-DE"
-supported_locales = ["de-DE", "en-GB"]
+id = "shoppr-pl"
+display_name = "Shoppr Polska"
+brand_name = "Shoppr Studio"
+canonical_host = "pl.127.0.0.1.nip.io"
+hosts = ["pl-store.127.0.0.1.nip.io"]
+default_locale = "pl-PL"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 
 [auth]
 package = "shoppr-auth"

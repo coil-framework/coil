@@ -9,16 +9,40 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title dv:text="${page.title}">Collection</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="harbor">
+  <body class="shoppr-shell">
     <header class="site-header">
-      <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <div class="site-header__utility">
+        <p>Collection pages are campaign landings, not generic archive lists.</p>
+        <div class="site-header__utility-links">
+          <a href="/__dev">Dev Tools</a>
+          <a href="/admin">Admin</a>
+          <a href="/account">Account</a>
+        </div>
+      </div>
+      <div class="site-header__main">
+        <a href="/" class="brand" dv:attr="href=${links.home}">
+          <span class="brand__mark">S</span>
+          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+        </a>
+        <nav dv:replace="~{navigation/primary}"></nav>
+      </div>
+      <div class="site-header__panels">
+        <div class="switcher-panel" id="market-panel" hidden="hidden"></div>
+        <div class="switcher-panel" id="locale-panel" hidden="hidden"></div>
+      </div>
     </header>
     <main class="site-main collections-page">
       <section class="collections-page__intro" dv:if="${hasCollection}">
-        <p class="collections-page__eyebrow">Collection</p>
+        <p class="collections-page__eyebrow">Campaign edit</p>
         <p>
           <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
           <span>/</span>
@@ -28,12 +52,12 @@
         </p>
         <h1 dv:text="${collection.title}">Featured</h1>
         <p dv:text="${collection.summary}">
-          A tighter edit that moves the customer from collection context into product detail and
-          cart without bouncing through unrelated catalog pages.
+          A tighter edit that moves the customer from campaign context into product detail and cart
+          without bouncing through unrelated categories.
         </p>
         <div class="checkout-actions">
           <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
-            All collections
+            All edits
           </a>
           <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
             Review cart
@@ -43,7 +67,7 @@
 
       <section class="catalog-assurance" dv:if="${hasCollection}">
         <article>
-          <h2>Browse the products in this collection</h2>
+          <h2>Browse the products in this edit.</h2>
           <p>
             The next click from this page should be product detail. Open a product when the
             customer needs to confirm price, quantity, or collection context before adding to cart.
@@ -94,7 +118,7 @@
                 <div class="product-card__meta">
                   <span class="product-card__price" dv:text="${product.price}">GBP 29</span>
                   <a class="button" href="/shop/products/harbor-cap" dv:href="${product.url}">
-                    View product
+                    View look
                   </a>
                   <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
                     <input
@@ -135,7 +159,16 @@
       <div dv:replace="~{commerce/storefront-journey :: journey}" dv:if="${hasCollection}"></div>
     </main>
     <footer class="site-footer">
-      <small>Shoppr</small>
+      <div>
+        <p class="site-footer__eyebrow">Collection shell</p>
+        <strong>Shoppr</strong>
+        <p>Every collection page keeps the same navigation, footer, and developer affordances as the rest of the storefront.</p>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Inspect</p>
+        <a href="/admin">Admin</a>
+        <a href="/__dev">Dev Tools</a>
+      </div>
     </footer>
   </body>
 </html>

@@ -9,28 +9,68 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title dv:text="${pageTitle}">Shoppr</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      rel="stylesheet"
+    />
     <link
       rel="stylesheet"
       href="/theme/assets/site.css"
       dv:href="asset('theme/assets/site.css')"
     />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body>
-    <header>
-      <img
-        src="/theme/assets/logo.svg"
-        dv:src="asset('theme/assets/logo.svg')"
-        alt="Shoppr"
-        width="48"
-        height="48"
-      />
-      <nav dv:replace="~{navigation/primary}"></nav>
+  <body class="shoppr-shell">
+    <header class="site-header">
+      <div class="site-header__utility">
+        <p>Shoppr Studio. One brand, three markets, localized routes, interactive storefront.</p>
+        <div class="site-header__utility-links">
+          <a href="/__dev">Dev Tools</a>
+          <a href="/admin">Admin</a>
+          <a href="/account">Account</a>
+        </div>
+      </div>
+      <div class="site-header__main">
+        <a href="/" class="brand" dv:attr="href=${links.home}">
+          <span class="brand__mark">S</span>
+          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+        </a>
+        <nav dv:replace="~{navigation/primary}"></nav>
+      </div>
+      <div class="site-header__panels">
+        <div class="switcher-panel" id="market-panel" hidden="hidden"></div>
+        <div class="switcher-panel" id="locale-panel" hidden="hidden"></div>
+      </div>
     </header>
     <main dv:slot="content">
       <section>Content goes here.</section>
     </main>
-    <footer>
-      <small>Shoppr</small>
+    <footer class="site-footer">
+      <div>
+        <p class="site-footer__eyebrow">Developer footer</p>
+        <strong>Shoppr</strong>
+        <p>Retail starter showing multi-site, multi-locale, customer-linked Rust, and third-party WASM.</p>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Inspect</p>
+        <a href="/admin">Admin</a>
+        <a href="/__dev">Dev login</a>
+        <a href="/account">Account</a>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Commerce</p>
+        <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Catalog</a>
+        <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+        <a href="/cart" dv:attr="href=${links.cart}">Cart</a>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Platform</p>
+        <a href="/admin/catalog">Catalog admin</a>
+        <a href="/admin/orders">Orders</a>
+        <a href="/admin/pages">CMS</a>
+      </div>
     </footer>
   </body>
 </html>

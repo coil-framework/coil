@@ -1,11 +1,33 @@
 <nav class="primary-nav" xmlns:dv="https://davenda.dev" dv:fragment="primary">
-  <a
-    class="primary-nav__link"
-    href="/"
-    dv:each="item : ${navigation.primary}"
-    dv:attr="href=${item.href}"
-    dv:text="${item.label}"
-  >
-    Navigation item
-  </a>
+  <div class="primary-nav__links">
+    <a
+      class="primary-nav__link"
+      href="/"
+      dv:each="item : ${navigation.primary}"
+      dv:attr="href=${item.href}"
+      dv:text="${item.label}"
+    >
+      Navigation item
+    </a>
+  </div>
+  <div class="primary-nav__actions">
+    <button
+      class="primary-nav__button"
+      type="button"
+      data-panel-toggle="market-panel"
+      aria-expanded="false"
+      aria-controls="market-panel"
+    >
+      Market
+    </button>
+    <button
+      class="primary-nav__button"
+      type="button"
+      data-panel-toggle="locale-panel"
+      aria-expanded="false"
+      aria-controls="locale-panel"
+    >
+      Language
+    </button>
+  </div>
 </nav>

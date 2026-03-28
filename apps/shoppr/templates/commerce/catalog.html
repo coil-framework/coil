@@ -8,47 +8,73 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title dv:text="${pageTitle}">Shop Harbor</title>
+    <title dv:text="${pageTitle}">Shoppr</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="harbor">
+  <body class="shoppr-shell">
     <header class="site-header">
-      <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <div class="site-header__utility">
+        <p>Catalog pages stay luxurious and merchandised while keeping the route graph obvious.</p>
+        <div class="site-header__utility-links">
+          <a href="/__dev">Dev Tools</a>
+          <a href="/admin">Admin</a>
+          <a href="/account">Account</a>
+        </div>
+      </div>
+      <div class="site-header__main">
+        <a href="/" class="brand" dv:attr="href=${links.home}">
+          <span class="brand__mark">S</span>
+          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+        </a>
+        <nav dv:replace="~{navigation/primary}"></nav>
+      </div>
+      <div class="site-header__panels">
+        <div class="switcher-panel" id="market-panel" hidden="hidden"></div>
+        <div class="switcher-panel" id="locale-panel" hidden="hidden"></div>
+      </div>
     </header>
     <main class="site-main">
-      <section class="catalog-hero hero">
-        <div class="hero-content">
+      <section
+        class="catalog-hero"
+        style="--catalog-hero-image:url('https://unsplash.com/photos/clothing-store-interior-with-racks-of-apparel-a-_PeeYVfQk/download?force=true&amp;w=1600&amp;q=80')"
+      >
+        <div class="catalog-hero__scrim">
           <p class="hero-eyebrow">Storefront catalog</p>
-          <h1>Start with a collection, finish with a confirmed order.</h1>
+          <h1>Start in campaign edits. Finish with a cart that feels immediate.</h1>
           <p>
-            Shoppr now has a single customer-facing browse loop: collections narrow the edit,
-            product detail confirms price and quantity, and cart carries the basket into checkout.
+            Shoppr’s catalog is built to look like a real premium retailer: strong imagery,
+            persuasive collection pages, fast product cards, and a checkout handoff that stays in the same public journey.
           </p>
           <div class="checkout-actions">
             <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
-              Browse collections
+              Browse edits
             </a>
             <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
               Review cart
             </a>
           </div>
-        </div>
       </section>
 
       <section class="catalog-assurance">
         <article>
-          <h2>Choose the route that matches intent</h2>
+          <h2>Choose the route that matches intent.</h2>
           <p>
-            Campaign traffic should land in collections first. Customers who already know the item
-            they want can jump straight into product detail and add to cart from there.
+            Campaign traffic should land in collection edits first. Customers who already know the
+            item they want can jump straight into product detail and add to cart from there.
           </p>
         </article>
         <article>
-          <h2>Keep the basket moving</h2>
+          <h2>Keep the basket moving.</h2>
           <p>
-            Every browse surface should make the next step obvious: open a collection, inspect a
-            product, then move to cart without leaving the public storefront.
+            Every browse surface should make the next step obvious: open an edit, inspect a
+            product, then move to cart without leaving the storefront shell.
           </p>
         </article>
       </section>
@@ -59,8 +85,8 @@
         <article>
           <h2>Prefer to shop by product?</h2>
           <p>
-            Open a product page when the customer already knows what they want. Product detail
-            keeps price, quantity, collection context, and the cart handoff on one screen.
+            Open a product page when the customer already knows the silhouette. Product detail keeps
+            price, quantity, collection context, and the cart handoff on one screen.
           </p>
         </article>
       </section>
@@ -70,15 +96,15 @@
 
       <section class="catalog-assurance">
         <article>
-          <h2>Keep the storefront loop coherent</h2>
+          <h2>Keep the storefront loop coherent.</h2>
           <p>
             The shortest path for a real customer is collection list to collection detail to
-            product detail to cart. Keep those pages prominent and keep the calls to action
+            product detail to cart. Keep those pages prominent and the calls to action
             obvious.
           </p>
           <div class="checkout-actions">
             <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
-              Browse all collections
+              Browse all edits
             </a>
             <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
               Review cart
@@ -88,7 +114,23 @@
       </section>
     </main>
     <footer class="site-footer">
-      <small>Shoppr</small>
+      <div>
+        <p class="site-footer__eyebrow">Catalog shell</p>
+        <strong>Shoppr</strong>
+        <p>Collections, product cards, and cart flows share the same shell so the demo feels like one cohesive product.</p>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Explore</p>
+        <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+        <a href="/cart">Cart</a>
+        <a href="/account">Account</a>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Inspect</p>
+        <a href="/admin">Admin</a>
+        <a href="/__dev">Dev Tools</a>
+        <a href="/admin/catalog">Catalog admin</a>
+      </div>
     </footer>
   </body>
 </html>

@@ -3990,7 +3990,7 @@ fn product_model_for_locale(
         .with_value("addToCartUrl", RenderValue::text("/cart/items"))?
         .with_value(
             "imageUrl",
-            RenderValue::text(theme_asset_url(plan, "theme/assets/logo.svg")),
+            RenderValue::text(storefront_product_image_url(product.handle.as_str(), plan)),
         )?
         .with_value("imageAlt", RenderValue::text(product.title.as_str()))?
         .with_value(
@@ -4008,6 +4008,31 @@ fn product_model_for_locale(
             "collectionName",
             RenderValue::text(product.collection_name.as_str()),
         )
+}
+
+fn storefront_product_image_url(handle: &str, plan: Option<&RuntimePlan>) -> String {
+    let remote = match handle {
+        "harbor-cap" => Some(
+            "https://unsplash.com/photos/a-rack-of-shirts-and-pants-hanging-on-a-clothes-rack-1pT3rOWL_hI/download?force=true&w=1200&q=80",
+        ),
+        "gold-membership" => Some(
+            "https://unsplash.com/photos/woman-in-colorful-outfit-and-fur-coat-DxSHu4GI0Ao/download?force=true&w=1200&q=80",
+        ),
+        "tasting-pass" => Some(
+            "https://unsplash.com/photos/people-browsing-clothing-racks-in-a-well-lit-store-oOAYziRlpMw/download?force=true&w=1200&q=80",
+        ),
+        "harbor-scarf" => Some(
+            "https://unsplash.com/photos/woman-wearing-gray-coat-CKxpOhAoSRg/download?force=true&w=1200&q=80",
+        ),
+        "brooklyn-night-pass" => Some(
+            "https://unsplash.com/photos/modern-luxury-store-interior-with-display-shelves-and-seating-8YDqTT5jNXI/download?force=true&w=1200&q=80",
+        ),
+        _ => None,
+    };
+
+    remote
+        .map(str::to_string)
+        .unwrap_or_else(|| theme_asset_url(plan, "theme/assets/logo.svg"))
 }
 
 fn theme_asset_url(plan: Option<&RuntimePlan>, logical_path: &str) -> String {

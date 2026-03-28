@@ -9,91 +9,146 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title dv:text="${pageTitle}">Shoppr</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="harbor">
+  <body class="shoppr-shell">
     <header class="site-header">
-      <a href="/" class="brand" dv:attr="href=${links.home}" dv:text="${site.brandName}">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <div class="site-header__utility">
+        <p>Shoppr mirrors the pace and polish of a modern fashion flagship while still exposing Davenda’s modular surface.</p>
+        <div class="site-header__utility-links">
+          <a href="/__dev">Dev Tools</a>
+          <a href="/admin">Admin</a>
+          <a href="/account">Account</a>
+        </div>
+      </div>
+      <div class="site-header__main">
+        <a href="/" class="brand" dv:attr="href=${links.home}">
+          <span class="brand__mark">S</span>
+          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+        </a>
+        <nav dv:replace="~{navigation/primary}"></nav>
+      </div>
+      <div class="site-header__panels">
+        <div class="switcher-panel" id="market-panel" hidden="hidden"></div>
+        <div class="switcher-panel" id="locale-panel" hidden="hidden"></div>
+      </div>
     </header>
     <main class="site-main">
       <section class="home-page">
-        <div dv:replace="~{components/hero}"></div>
+        <section class="home-hero" data-carousel="hero">
+          <div class="home-hero__track">
+            <article
+              class="home-hero__slide is-active"
+              data-carousel-slide="slide"
+              style="--hero-image:url('https://unsplash.com/photos/woman-in-white-dress-choosing-coat-from-fur-coats-oyLU7C-2kRE/download?force=true&amp;w=1600&amp;q=80')"
+            >
+              <div class="home-hero__content">
+                <p class="home-hero__eyebrow" dv:text="${site.displayName}">Shoppr UK</p>
+                <h1>Quiet luxury, fast routes, and the full storefront loop in one starter.</h1>
+                <p>
+                  Shoppr is now a fashion-first demo: immersive campaigns, catalog depth, interactive
+                  product detail, and visible market and language switching across one customer app.
+                </p>
+                <div class="checkout-actions">
+                  <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop new arrivals</a>
+                  <a class="button button--secondary" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+                    Browse collections
+                  </a>
+                </div>
+              </div>
+            </article>
+            <article
+              class="home-hero__slide"
+              data-carousel-slide="slide"
+              style="--hero-image:url('https://unsplash.com/photos/woman-in-colorful-outfit-and-fur-coat-DxSHu4GI0Ao/download?force=true&amp;w=1600&amp;q=80')"
+            >
+              <div class="home-hero__content">
+                <p class="home-hero__eyebrow">Interactive layering</p>
+                <h1>Static-first pages with motion, panels, galleries, and commerce actions layered on.</h1>
+                <p>
+                  The demo keeps the HTML-first contract intact while showing the richer interaction
+                  layer real customers expect from a premium multi-region storefront.
+                </p>
+                <div class="checkout-actions">
+                  <a class="button" href="/cart" dv:attr="href=${links.cart}">Open cart</a>
+                  <a class="button button--secondary" href="/account">Explore account</a>
+                </div>
+              </div>
+            </article>
+          </div>
+          <div class="home-hero__controls" aria-label="Campaign carousel controls">
+            <button type="button" class="carousel-control" data-carousel-prev="prev" aria-label="Previous campaign">Prev</button>
+            <button type="button" class="carousel-control" data-carousel-next="next" aria-label="Next campaign">Next</button>
+          </div>
+        </section>
+
+        <section class="editorial-rail">
+          <article class="editorial-card editorial-card--image" style="--card-image:url('https://unsplash.com/photos/a-storefront-with-clothes-displayed-inside-Sd_vsr_eA5U/download?force=true&amp;w=1200&amp;q=80')">
+            <div class="editorial-card__content">
+              <p class="editorial-card__eyebrow">Store view</p>
+              <h2>Three markets, one brand system.</h2>
+              <p>Run UK, France, and Poland from one customer workspace while keeping inventory and stories market-aware.</p>
+            </div>
+          </article>
+          <article class="editorial-card">
+            <p class="editorial-card__eyebrow">Developer-visible</p>
+            <h2>Every polished page still exposes the platform underneath.</h2>
+            <p>Admin, account, dev login, CMS, and linked backend affordances stay easy to discover from the public shell.</p>
+            <a class="button button--secondary" href="/admin">Open admin</a>
+          </article>
+        </section>
+
+        <section class="market-showcase">
+          <header class="market-showcase__header">
+            <p class="collection-grid__eyebrow">Multi-site demo</p>
+            <h2>One customer app, three Shoppr markets.</h2>
+            <p>Each market keeps its own host, default locale, assortment emphasis, and merchandising mood while sharing the same core application.</p>
+          </header>
+          <div class="market-showcase__grid">
+            <article class="market-card">
+              <p class="market-card__eyebrow">shoppr-uk</p>
+              <h3>UK flagship storefront</h3>
+              <p>Lead with new arrivals, sharp product detail, and the full path from browse to checkout.</p>
+              <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">Open UK shop</a>
+            </article>
+            <article class="market-card">
+              <p class="market-card__eyebrow">shoppr-fr</p>
+              <h3>France city edit</h3>
+              <p>Give the Paris market a tighter campaign voice and an event-led edit without forking the app.</p>
+              <a class="button" href="/fr-FR/events">Open France edit</a>
+            </article>
+            <article class="market-card">
+              <p class="market-card__eyebrow">shoppr-pl</p>
+              <h3>Poland cold-weather edit</h3>
+              <p>Show a different winter assortment and localized Polish routes on the same shared platform.</p>
+              <a class="button" href="/pl-PL/shop/products/harbor-scarf">Open Poland product</a>
+            </article>
+          </div>
+        </section>
+
         <div dv:replace="~{commerce/collection-grid :: grid}"></div>
         <div dv:replace="~{commerce/product-grid :: grid}"></div>
+
         <section class="catalog-sections">
           <article class="catalog-section">
-            <p class="catalog-section__eyebrow">Three-site demo</p>
-            <h2>One customer app, three Harbor sites</h2>
-            <p>
-              Shoppr now demonstrates three market-specific sites on one customer app
-              boundary: a UK flagship storefront, a US events-led site, and a DE assortment with
-              localized merchandising and memberships.
-            </p>
-            <div class="admin-card-grid">
-              <article class="admin-card">
-                <p class="admin-panel__eyebrow">harbor-uk</p>
-                <h3>UK flagship storefront</h3>
-                <p>
-                  Lead with the full catalog and featured collections for the main UK browse,
-                  membership, and checkout journey.
-                </p>
-                <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
-                  Open shop route
-                </a>
-              </article>
-              <article class="admin-card">
-                <p class="admin-panel__eyebrow">harbor-us</p>
-                <h3>US events site</h3>
-                <p>
-                  Start from events and event-linked product drops, including the US-only Brooklyn
-                  Night Pass assortment.
-                </p>
-                <a class="button" href="/en-US/events">
-                  Open US events route
-                </a>
-              </article>
-              <article class="admin-card">
-                <p class="admin-panel__eyebrow">harbor-de</p>
-                <h3>DE localized assortment</h3>
-                <p>
-                  Surface the DE-only scarf and German-language storefront path without cloning the
-                  whole app into a separate deployment.
-                </p>
-                <a class="button" href="/de-DE/shop/products/harbor-scarf">
-                  Open DE product
-                </a>
-              </article>
-            </div>
+            <p class="catalog-section__eyebrow">Layered interactivity</p>
+            <h2>The storefront stays HTML-first while behaving like a modern flagship.</h2>
+            <p>Carousel controls, market and locale switchers, product accordions, and gallery states are layered on rather than replacing the base render contract.</p>
           </article>
           <article class="catalog-section">
-            <p class="catalog-section__eyebrow">Start here</p>
-            <h2>New to Shoppr?</h2>
-            <p>
-              Begin with the catalog to see the current storefront edit, then use collection pages
-              to narrow toward the basket you want to build.
-            </p>
+            <p class="catalog-section__eyebrow">Developer shortcuts</p>
+            <h2>Nothing important is hidden.</h2>
+            <p>Public pages link cleanly into account, cart, admin, and local dev tools so developers can evaluate the whole app boundary from first run.</p>
             <div class="checkout-actions">
-              <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">Open catalog</a>
-              <a
-                class="button button--secondary"
-                href="/en-GB/shop/collections"
-                dv:attr="href=${links.collections}"
-              >
-                Browse collections
-              </a>
-            </div>
-          </article>
-          <article class="catalog-section">
-            <p class="catalog-section__eyebrow">Already buying?</p>
-            <h2>Keep the journey short</h2>
-            <p>
-              Product cards can move directly into cart or checkout, and account pages pick the
-              journey back up after confirmation.
-            </p>
-            <div class="checkout-actions">
-              <a class="button" href="/cart">Review cart</a>
-              <a class="button button--secondary" href="/account">Open account</a>
+              <a class="button" href="/__dev">Open dev tools</a>
+              <a class="button button--secondary" href="/admin">Open admin</a>
             </div>
           </article>
         </section>
@@ -101,7 +156,29 @@
       </section>
     </main>
     <footer class="site-footer">
-      <small dv:text="${site.displayName}">Shoppr</small>
+      <div>
+        <p class="site-footer__eyebrow">Shoppr</p>
+        <strong dv:text="${site.displayName}">Shoppr UK</strong>
+        <p>Fashion-led Davenda starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries.</p>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Explore</p>
+        <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Catalog</a>
+        <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+        <a href="/cart">Cart</a>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Inspect</p>
+        <a href="/account">Account</a>
+        <a href="/admin">Admin</a>
+        <a href="/__dev">Dev Tools</a>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Platform</p>
+        <a href="/admin/catalog">Catalog admin</a>
+        <a href="/admin/orders">Orders</a>
+        <a href="/admin/pages">CMS</a>
+      </div>
     </footer>
   </body>
 </html>

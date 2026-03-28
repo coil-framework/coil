@@ -9,12 +9,36 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title dv:text="${pageTitle}">Product detail</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="harbor">
+  <body class="shoppr-shell">
     <header class="site-header">
-      <a href="/" class="brand">Shoppr</a>
-      <nav dv:replace="~{navigation/primary}"></nav>
+      <div class="site-header__utility">
+        <p>Product detail demonstrates the linked interaction layer: gallery, accordions, market switching, and add-to-cart.</p>
+        <div class="site-header__utility-links">
+          <a href="/__dev">Dev Tools</a>
+          <a href="/admin">Admin</a>
+          <a href="/account">Account</a>
+        </div>
+      </div>
+      <div class="site-header__main">
+        <a href="/" class="brand" dv:attr="href=${links.home}">
+          <span class="brand__mark">S</span>
+          <span class="brand__wordmark" dv:text="${site.brandName}">Shoppr</span>
+        </a>
+        <nav dv:replace="~{navigation/primary}"></nav>
+      </div>
+      <div class="site-header__panels">
+        <div class="switcher-panel" id="market-panel" hidden="hidden"></div>
+        <div class="switcher-panel" id="locale-panel" hidden="hidden"></div>
+      </div>
     </header>
     <main class="site-main product-page">
       <section class="product-page__hero">
@@ -118,7 +142,17 @@
       <div dv:replace="~{commerce/product-grid :: grid}"></div>
     </main>
     <footer class="site-footer">
-      <small>Shoppr</small>
+      <div>
+        <p class="site-footer__eyebrow">Product shell</p>
+        <strong>Shoppr</strong>
+        <p>Use this page as the base for customer-specific product storytelling and interactive merchandising.</p>
+      </div>
+      <div>
+        <p class="site-footer__eyebrow">Inspect</p>
+        <a href="/cart">Cart</a>
+        <a href="/admin">Admin</a>
+        <a href="/__dev">Dev Tools</a>
+      </div>
     </footer>
   </body>
 </html>

@@ -97,7 +97,7 @@ fn temp_workspace_without_theme_assets() -> TempAppRoot {
 }
 
 #[test]
-fn harbor_manifest_declares_three_sites_with_distinct_market_hosts() {
+fn shoppr_manifest_declares_three_sites_with_distinct_market_hosts() {
     let workspace = ShopprWorkspace::default().unwrap();
     let manifest = workspace.load_manifest().unwrap();
     let sites = manifest
@@ -115,15 +115,15 @@ fn harbor_manifest_declares_three_sites_with_distinct_market_hosts() {
     assert_eq!(
         sites,
         vec![
-            ("harbor-uk", "uk.127.0.0.1.nip.io", "en-GB"),
-            ("harbor-us", "us.127.0.0.1.nip.io", "en-US"),
-            ("harbor-de", "de.127.0.0.1.nip.io", "de-DE"),
+            ("shoppr-uk", "uk.127.0.0.1.nip.io", "en-GB"),
+            ("shoppr-fr", "fr.127.0.0.1.nip.io", "fr-FR"),
+            ("shoppr-pl", "pl.127.0.0.1.nip.io", "pl-PL"),
         ]
     );
 }
 
 #[test]
-fn harbor_home_page_surfaces_three_site_demo_cards() {
+fn shoppr_home_page_surfaces_three_market_demo_cards() {
     let _env_lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let _object_store = set_env_var(
         "OBJECT_STORE_URL",
@@ -184,17 +184,17 @@ signed_url_ttl_secs = 900
         body
     });
 
-    assert!(body.contains("One customer app, three Harbor sites"), "{body}");
+    assert!(body.contains("One customer app, three Shoppr markets"), "{body}");
     assert!(body.contains("UK flagship storefront"), "{body}");
-    assert!(body.contains("US events site"), "{body}");
-    assert!(body.contains("DE localized assortment"), "{body}");
+    assert!(body.contains("France city edit"), "{body}");
+    assert!(body.contains("Poland cold-weather edit"), "{body}");
     assert!(body.contains("/en-GB/shop"), "{body}");
-    assert!(body.contains("/en-US/events"), "{body}");
-    assert!(body.contains("/de-DE/shop/products/harbor-scarf"), "{body}");
+    assert!(body.contains("/fr-FR/events"), "{body}");
+    assert!(body.contains("/pl-PL/shop/products/harbor-scarf"), "{body}");
 }
 
 #[test]
-fn harbor_three_sites_map_to_distinct_market_routes() {
+fn shoppr_three_sites_map_to_distinct_market_routes() {
     let _env_lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let _object_store = set_env_var(
         "OBJECT_STORE_URL",
@@ -221,47 +221,47 @@ signed_url_ttl_secs = 900
 
     assert!(
         catalog
-            .visible_collection_for_site(Some("harbor-uk"), "memberships")
+            .visible_collection_for_site(Some("shoppr-uk"), "memberships")
             .is_some()
     );
     assert!(
         catalog
-            .visible_collection_for_site(Some("harbor-us"), "memberships")
+            .visible_collection_for_site(Some("shoppr-fr"), "memberships")
             .is_none()
     );
     assert!(
         catalog
-            .visible_collection_for_site(Some("harbor-us"), "events")
+            .visible_collection_for_site(Some("shoppr-fr"), "events")
             .is_some()
     );
     assert!(
         catalog
-            .visible_product_for_site(Some("harbor-us"), "brooklyn-night-pass")
+            .visible_product_for_site(Some("shoppr-fr"), "brooklyn-night-pass")
             .is_some()
     );
     assert!(
         catalog
-            .visible_product_for_site(Some("harbor-uk"), "brooklyn-night-pass")
+            .visible_product_for_site(Some("shoppr-uk"), "brooklyn-night-pass")
             .is_none()
     );
     assert!(
         catalog
-            .visible_product_for_site(Some("harbor-de"), "harbor-scarf")
+            .visible_product_for_site(Some("shoppr-pl"), "harbor-scarf")
             .is_some()
     );
     assert!(
         catalog
-            .visible_product_for_site(Some("harbor-us"), "harbor-scarf")
+            .visible_product_for_site(Some("shoppr-fr"), "harbor-scarf")
             .is_none()
     );
     assert!(
         catalog
-            .product_by_sku_or_handle_for_site(Some("harbor-uk"), "membership-gold")
+            .product_by_sku_or_handle_for_site(Some("shoppr-uk"), "membership-gold")
             .is_some()
     );
     assert!(
         catalog
-            .product_by_sku_or_handle_for_site(Some("harbor-us"), "membership-gold")
+            .product_by_sku_or_handle_for_site(Some("shoppr-fr"), "membership-gold")
             .is_none()
     );
 }

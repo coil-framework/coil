@@ -1,0 +1,59 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Shop collections'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${page.title}">Shop collections</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main collections-page">
+      <section class="collections-page__intro">
+        <p class="collections-page__eyebrow">Collections</p>
+        <p>
+          <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+          <span>/</span>
+          <span>Collections</span>
+        </p>
+        <h1 dv:text="${page.title}">Shop Collections</h1>
+        <p dv:text="${page.summary}">
+          Choose a collection first, then move into product detail and cart from a tighter,
+          easier-to-shop edit.
+        </p>
+        <div class="checkout-actions">
+          <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">Browse full catalog</a>
+          <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+            Review cart
+          </a>
+        </div>
+      </section>
+
+      <div dv:replace="~{commerce/collection-grid :: grid}"></div>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>What changes on collection detail</h2>
+          <p>
+            Each collection page narrows the customer to the products in that edit, so the next
+            click is product detail instead of a generic catalog jump.
+          </p>
+        </article>
+      </section>
+
+      <div dv:replace="~{commerce/product-grid :: grid}"></div>
+      <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,125 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Memberships'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Memberships</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main memberships-page">
+      <section class="memberships-page__intro">
+        <p class="memberships-page__eyebrow">Account access</p>
+        <h1>Memberships</h1>
+        <p dv:text="${account.stateSummary}">
+          This page gives customers a direct answer to what they have, when it renews, and what
+          support or priority access comes with it.
+        </p>
+        <p dv:if="${account.hasPrincipal}">
+          Signed in as <strong dv:text="${customer.displayName}">Member Live</strong>.
+        </p>
+        <p dv:unless="${account.hasPrincipal}">
+          This membership view currently follows the browser session you are using right now.
+        </p>
+        <p dv:if="${account.hasLatestOrder}">
+          Latest order
+          <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+          is
+          <span dv:text="${account.latestOrderStatus}">Paid</span>.
+        </p>
+        <p dv:if="${account.hasLatestOrder}">
+          After returning from the payment provider, this page can keep that order in
+          <strong>Pending Payment</strong>
+          until settlement updates the same browser session.
+        </p>
+        <div dv:if="${account.hasCustomerEmail}">
+          <p dv:if="${account.hasPrincipal}">
+            Signed in as <strong dv:text="${customer.email}">member@example.com</strong>.
+          </p>
+          <p dv:unless="${account.hasPrincipal}">
+            Receipt email on this browser session:
+            <strong dv:text="${customer.email}">member@example.com</strong>.
+          </p>
+        </div>
+      </section>
+      <nav class="account-page__nav" dv:replace="~{account/nav :: nav}"></nav>
+
+      <section class="memberships-page__summary" dv:if="${account.hasMembership}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Current tier</p>
+          <h2 dv:text="${membershipSummary.tierName}">Harbor Circle</h2>
+          <p dv:text="${membershipSummary.status}">Active</p>
+          <p dv:text="${membershipSummary.renewalText}">
+            Renewing on 18 April with early-access reservations.
+          </p>
+          <a class="button" href="/account/orders">View order history</a>
+        </article>
+      </section>
+
+      <section class="memberships-page__summary" dv:if="${account.hasPendingMembershipOrder}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Current tier</p>
+          <h2>Pending activation</h2>
+          <p>
+            Your latest order
+            <strong dv:text="${account.latestOrderReference}">ORD-10042</strong>
+            is
+            <span dv:text="${account.latestOrderStatus}">Pending Payment</span>.
+            Membership access only appears here after a qualifying membership purchase is captured
+            for this account view. After a Stripe return, check order history for the latest
+            payment state, then return here once this browser session shows the order as captured.
+          </p>
+          <a class="button button--secondary" href="/account/orders">
+            View order history
+          </a>
+        </article>
+      </section>
+
+      <section class="memberships-page__summary" dv:if="${account.needsMembershipPurchase}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Current tier</p>
+          <h2>Membership not active yet</h2>
+          <p dv:text="${account.membershipEmptyText}">
+            Join to unlock early access, subscriber-only bundles, and concierge support.
+          </p>
+          <a
+            class="button"
+            href="/en-GB/shop/collections/memberships"
+            dv:attr="href=${account.membershipCtaUrl}"
+          >
+            Explore memberships
+          </a>
+        </article>
+      </section>
+
+      <section class="memberships-page__summary" dv:if="${account.hasLatestOrder}">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Latest order</p>
+          <h2 dv:text="${account.latestOrderReference}">ORD-10042</h2>
+          <p>
+            Status
+            <strong dv:text="${account.latestOrderStatus}">Paid</strong>
+          </p>
+          <p dv:text="${account.stateSummary}">
+            Order and membership state are drawn from the live storefront session.
+          </p>
+          <a class="button button--secondary" href="/account/orders">Review order history</a>
+        </article>
+      </section>
+
+      <div dv:replace="~{account/summary-panels :: panels}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

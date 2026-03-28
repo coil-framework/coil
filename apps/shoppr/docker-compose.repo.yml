@@ -1,0 +1,10 @@
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: apps/shoppr/Dockerfile.repo
+
+  harbor-backend-example:
+    build:
+      context: ../..
+      dockerfile: apps/shoppr/backend/shoppr-loyalty-backend/Dockerfile.repo

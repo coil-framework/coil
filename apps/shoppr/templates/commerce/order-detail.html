@@ -1,0 +1,247 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle=${page.title}"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Order Detail</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Commerce support</p>
+        <h1 dv:text="${page.title}">Order detail</h1>
+        <p dv:text="${page.summary}">
+          Support and finance detail for a specific order.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
+        </p>
+      </section>
+
+      <section class="storefront-flash" dv:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" dv:text="${message.level}">info</p>
+          <p dv:text="${message.text}">Order support update</p>
+        </article>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasRefundErrors}">
+        <p class="admin-panel__eyebrow">Refund request</p>
+        <h2>Review the refund request</h2>
+        <p dv:text="${refundErrorSummary}">
+          Review the refund request before issuing another order change.
+        </p>
+        <ul class="flash-list">
+          <li dv:each="error : ${refundErrors}" dv:text="${error.message}">Refund error</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasSelectedOrder}">
+        <p class="admin-panel__eyebrow">Order overview</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Reference</h2>
+            <p><strong dv:text="${selectedOrder.reference}">ORD-10042</strong></p>
+            <p>Status <span dv:text="${selectedOrder.status}">Paid</span></p>
+            <p>Payment <span dv:text="${selectedOrder.paymentStatus}">Captured</span></p>
+          </article>
+          <article class="admin-card">
+            <h2>Customer</h2>
+            <p dv:if="${selectedOrder.hasCheckoutEmail}">
+              Receipt email <strong dv:text="${selectedOrder.checkoutEmail}">member@example.com</strong>
+            </p>
+            <p dv:unless="${selectedOrder.hasCheckoutEmail}">Receipt email has not been captured yet.</p>
+            <p dv:if="${selectedOrder.hasPrincipalId}">
+              Principal <code dv:text="${selectedOrder.principalId}">member-live</code>
+            </p>
+            <p>
+              Session <code dv:text="${selectedOrder.sessionId}">session-live</code>
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Finance</h2>
+            <p>Total <strong dv:text="${selectedOrder.total}">£89.00</strong></p>
+            <p>Refunded <span dv:text="${selectedOrder.refundedTotal}">£0.00</span></p>
+            <p>Remaining <span dv:text="${selectedOrder.refundableTotal}">£89.00</span></p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasSelectedOrder}">
+        <p class="admin-panel__eyebrow">Payment</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Payment trace</h2>
+            <p dv:text="${selectedOrder.paymentSummary}">
+              Card ending 4242, reference PAY-50001
+            </p>
+            <p dv:if="${selectedOrder.hasPaymentReference}">
+              Provider reference
+              <code dv:text="${selectedOrder.paymentReference}">PAY-50001</code>
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Refund action</h2>
+            <p dv:text="${selectedOrder.refundActionSummary}">
+              Issue a full remaining refund from the checked-in order state.
+            </p>
+            <form action="/admin/orders/refund" method="post">
+              <input type="hidden" name="order_id" dv:attr="value=${selectedOrder.orderId}" />
+              <label>
+                Refund reason
+                <input type="text" name="reason" dv:attr="value=${selectedOrder.refundReason}" />
+              </label>
+              <p dv:if="${selectedOrder.hasRefundReasonError}" dv:text="${selectedOrder.refundReasonError}">
+                Refund reason is required.
+              </p>
+              <button type="submit" class="button" dv:if="${selectedOrder.canRefund}">Issue refund</button>
+              <button type="submit" class="button" dv:unless="${selectedOrder.canRefund}" disabled="disabled">
+                Refund unavailable
+              </button>
+            </form>
+          </article>
+          <article class="admin-card">
+            <h2>Fulfillment action</h2>
+            <p dv:text="${selectedOrder.fulfillmentActionSummary}">
+              Mark the order fulfilled after packing or dispatch so the support queue reflects the completed shipment.
+            </p>
+            <form action="/admin/orders/fulfill" method="post">
+              <input type="hidden" name="order_id" dv:attr="value=${selectedOrder.orderId}" />
+              <button type="submit" class="button" dv:if="${selectedOrder.canFulfill}">Mark fulfilled</button>
+              <button type="submit" class="button" dv:unless="${selectedOrder.canFulfill}" disabled="disabled">
+                Fulfillment unavailable
+              </button>
+            </form>
+          </article>
+          <article class="admin-card" dv:if="${selectedOrder.hasCustomerReview}">
+            <h2>Linked customer backend</h2>
+            <p>
+              Review status
+              <strong dv:text="${selectedOrder.customerReview.status}">Approved</strong>
+            </p>
+            <p dv:text="${selectedOrder.customerReview.summary}">
+              The linked Harbor backend approved this order without extra handling.
+            </p>
+            <p>
+              Decision code
+              <code dv:text="${selectedOrder.customerReview.code}">approved</code>
+            </p>
+            <p dv:if="${selectedOrder.customerReview.hasAssignedQueue}">
+              Assigned queue
+              <strong dv:text="${selectedOrder.customerReview.assignedQueue}">vip-fulfilment</strong>
+            </p>
+            <p dv:if="${selectedOrder.customerReview.hasServiceLevel}">
+              Service level
+              <strong dv:text="${selectedOrder.customerReview.serviceLevel}">priority</strong>
+            </p>
+            <div dv:if="${selectedOrder.customerReview.hasMetadata}">
+              <p>Adjustment metadata</p>
+              <ul>
+                <li dv:each="entry : ${selectedOrder.customerReview.metadataEntries}">
+                  <code dv:text="${entry.key}">assigned_queue</code>:
+                  <span dv:text="${entry.value}">vip-fulfilment</span>
+                </li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasSelectedOrder}">
+        <p class="admin-panel__eyebrow">Line items</p>
+        <table class="admin-table" dv:if="${selectedOrder.hasLineItems}">
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">SKU</th>
+              <th scope="col">Quantity</th>
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="line : ${selectedOrder.lineItems}">
+              <td>
+                <strong dv:text="${line.title}">Gold Membership</strong>
+                <div dv:text="${line.variantTitle}">Annual</div>
+                <div dv:if="${line.hasEntitlementKey}">
+                  <code dv:text="${line.entitlementKey}">membership.gold</code>
+                </div>
+              </td>
+              <td dv:text="${line.sku}">membership-gold</td>
+              <td dv:text="${line.quantity}">1</td>
+              <td dv:text="${line.total}">£89.00</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasSelectedOrder}">
+        <p class="admin-panel__eyebrow">Refund history</p>
+        <div dv:if="${selectedOrder.hasRefunds}">
+          <article class="admin-card" dv:each="refund : ${selectedOrder.refunds}">
+            <h2>
+              <span dv:text="${refund.refundId}">RFD-07001</span>
+              <span dv:text="${refund.amount}">£89.00</span>
+            </h2>
+            <p dv:text="${refund.reason}">customer_support</p>
+          </article>
+        </div>
+        <p dv:unless="${selectedOrder.hasRefunds}">
+          No refunds have been recorded for this order yet.
+        </p>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasMissingOrder}">
+        <p class="admin-panel__eyebrow">Order detail</p>
+        <h2>Order not found</h2>
+        <p>The requested order could not be loaded from the checked-in storefront state.</p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Recent orders</p>
+        <table class="admin-table" dv:if="${hasRecentOrders}">
+          <thead>
+            <tr>
+              <th scope="col">Order</th>
+              <th scope="col">Status</th>
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="order : ${recentOrders}">
+              <td>
+                <a href="/admin/orders/ORD-10042" dv:attr="href=${order.detailHref}">
+                  <strong dv:text="${order.reference}">ORD-10042</strong>
+                </a>
+              </td>
+              <td dv:text="${order.status}">Paid</td>
+              <td dv:text="${order.total}">£89.00</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <div class="admin-page__actions">
+        <a class="button button--secondary" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+          Back to orders
+        </a>
+        <a class="button button--secondary" href="/admin" dv:attr="href=${links.adminDashboard}">
+          Back to dashboard
+        </a>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

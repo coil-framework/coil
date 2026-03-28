@@ -1,7 +1,7 @@
 run_id = "wordpress-events"
 source_system = "wordpress"
 snapshot_at = "2026-03-19T00:00:00Z"
-customer_app_id = "harbor-shop"
+customer_app_id = "shoppr"
 modules = ["cms", "events", "media"]
 locale = "en-GB"
 site = "main"
@@ -10,8 +10,8 @@ publication_mode = "stage_validated"
 asset_storage_default = "public_upload"
 
 [target]
-app_manifest = "../apps/harbor-shop/app.toml"
-platform_config = "../apps/harbor-shop/platform.toml"
+app_manifest = "../apps/shoppr/app.toml"
+platform_config = "../apps/shoppr/platform.toml"
 expected_modules = ["cms", "media", "events", "admin", "ops"]
 
 [source]

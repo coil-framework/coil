@@ -1,4 +1,4 @@
-# Harbor Shop Cutover Runbook
+# Shoppr Cutover Runbook
 
 1. Freeze legacy writes.
 2. Run the final staged import package.

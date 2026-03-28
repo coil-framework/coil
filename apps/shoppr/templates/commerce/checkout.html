@@ -1,0 +1,222 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Checkout'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Checkout</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main checkout-page">
+      <section class="checkout-page__intro">
+        <p class="checkout-page__eyebrow">Checkout</p>
+        <h1>Review your order before the Stripe handoff.</h1>
+        <p>
+          Shoppr records the order details here, then hands the customer off to Stripe
+          Checkout for payment collection.
+        </p>
+        <p>
+          After Stripe sends the browser back, Shoppr keeps the order visible while the signed
+          Stripe webhook settles the final payment state.
+        </p>
+        <ol class="checkout-list">
+          <li>Confirm the receipt email and order summary.</li>
+          <li>Place the order to open the Stripe Checkout handoff.</li>
+          <li>Return to order status while Shoppr waits for the signed provider result.</li>
+        </ol>
+      </section>
+      <section class="storefront-flash" dv:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" dv:text="${message.level}">error</p>
+          <p dv:text="${message.text}">The checkout submission needs another look.</p>
+        </article>
+      </section>
+      <section class="storefront-errors" dv:if="${checkout.hasErrors}">
+        <article class="storefront-errors__summary">
+          <h2>Checkout details need attention</h2>
+          <p dv:text="${checkout.errorSummary}">
+            Review the highlighted checkout fields and try again.
+          </p>
+          <ul class="storefront-errors__list">
+            <li dv:each="error : ${checkout.errors}" dv:text="${error.message}">
+              Update the highlighted field and try again.
+            </li>
+          </ul>
+        </article>
+      </section>
+
+      <div class="checkout-page__grid">
+        <section class="checkout-card">
+          <h2>Contact</h2>
+          <p dv:if="${checkout.hasCheckoutEmail}" dv:text="${checkout.checkoutEmail}">hello@example.com</p>
+          <p dv:unless="${checkout.hasCheckoutEmail}">Guests can continue with email confirmation and order tracking.</p>
+
+          <h2>Delivery</h2>
+          <ul class="checkout-list">
+            <li>Standard dispatch in 2-4 working days</li>
+            <li>Collection notes supported for market-day pickup</li>
+            <li>Gift messaging preserved on the order summary</li>
+          </ul>
+
+          <h2>Payment</h2>
+          <p>
+            This screen prepares the hosted Stripe Checkout handoff. Final payment confirmation is
+            still resolved by the signed Stripe webhook after the hosted session completes.
+          </p>
+          <div class="checkout-provider">
+            <p>
+              <strong dv:text="${checkout.providerLabel}">Stripe hosted checkout</strong>
+            </p>
+            <p dv:text="${checkout.providerSummary}">
+              This checkout reserves the order in Davenda, then redirects to Stripe Checkout for
+              payment collection.
+            </p>
+            <p>
+              Intent
+              <strong dv:text="${checkout.paymentReference}">PAYMENT-PENDING</strong>
+              is
+              <span dv:text="${checkout.paymentStatusLabel}">Ready for payment</span>.
+            </p>
+            <p>
+              Shoppr keeps this payment reference and local order state visible so the return
+              screen and account history can reconcile the final Stripe result after Stripe sends
+              the customer back.
+            </p>
+            <p>
+              If confirmation fails, the basket is restored so another checkout attempt can start
+              from the cart.
+            </p>
+          </div>
+        </section>
+
+        <aside class="checkout-card">
+          <h2>Order summary</h2>
+          <ul class="checkout-summary" dv:if="${hasLineItems}">
+            <li dv:each="item : ${lineItems}">
+              <span dv:text="${item.title}">Harbor pantry set</span>
+              <span dv:text="${item.quantity}">1</span>
+              <strong dv:text="${item.total}">GBP 48</strong>
+            </li>
+          </ul>
+          <div class="checkout-card__empty" dv:unless="${hasLineItems}">
+            <p>No items are in checkout for this browser session yet.</p>
+            <p>Return to the cart or keep browsing to add products before placing an order.</p>
+          </div>
+
+          <div class="checkout-totals">
+            <p><span>Subtotal</span><strong dv:text="${orderSummary.subtotal}">GBP 70</strong></p>
+            <p><span>Delivery</span><strong dv:text="${orderSummary.shipping}">GBP 6</strong></p>
+            <p><span>Total</span><strong dv:text="${orderSummary.total}">GBP 76</strong></p>
+          </div>
+
+          <div class="checkout-actions" dv:if="${hasLineItems}">
+            <a class="button button--secondary" href="/cart">Return to cart</a>
+            <form class="commerce-form checkout-form" action="/checkout/complete" method="post">
+              <div class="checkout-form__grid">
+                <label class="commerce-form__field">
+                  <span>Receipt email</span>
+                  <input
+                    type="email"
+                    name="checkout_email"
+                    value="hello@example.com"
+                    dv:attr="value=${checkout.checkoutEmail}"
+                  />
+                  <small class="commerce-form__error" dv:if="${checkout.hasCheckoutEmailError}" dv:text="${checkout.checkoutEmailError}">
+                    Enter the email address for order confirmation.
+                  </small>
+                </label>
+                <label class="commerce-form__field">
+                  <span>Customer session</span>
+                  <input
+                    type="text"
+                    value="Harbor Customer"
+                    readonly="readonly"
+                    dv:attr="value=${customer.displayName}"
+                  />
+                </label>
+                <section class="commerce-form__field checkout-form__field--wide">
+                  <span>Stripe handoff</span>
+                  <p>
+                    Method
+                    <strong dv:text="${checkout.paymentMethodLabel}">Card</strong>
+                  </p>
+                  <p>
+                    Reference
+                    <strong dv:text="${checkout.paymentReference}">PAYMENT-PENDING</strong>
+                  </p>
+                  <p>
+                    Local status
+                    <strong dv:text="${checkout.paymentStatusLabel}">Ready for payment</strong>
+                  </p>
+                  <p dv:if="${checkout.hasPaymentLast4}">
+                    Last confirmed card ending
+                    <strong dv:text="${checkout.paymentLast4}">4242</strong>.
+                  </p>
+                  <p>
+                    Place the order to continue into the Stripe-backed confirmation flow. Harbor
+                    Shop then returns you to the status page for this same browser session.
+                  </p>
+                  <small class="commerce-form__error" dv:if="${checkout.hasPaymentMethodError}" dv:text="${checkout.paymentMethodError}">
+                    Choose or confirm a payment method before placing the order.
+                  </small>
+                  <small class="commerce-form__error" dv:if="${checkout.hasPaymentLast4Error}" dv:text="${checkout.paymentLast4Error}">
+                    Enter the final 4 digits for the payment card.
+                  </small>
+                </section>
+                <input
+                  type="hidden"
+                  name="payment_method"
+                  value="card"
+                  dv:attr="value=${checkout.paymentMethod}"
+                />
+                <input
+                  type="hidden"
+                  name="checkout_intent"
+                  value="PAYMENT-PENDING"
+                  dv:attr="value=${checkout.checkoutIntent}"
+                />
+              </div>
+              <p class="commerce-form__error" dv:if="${checkout.hasCheckoutIntentError}" dv:text="${checkout.checkoutIntentError}">
+                Refresh checkout and try again before placing the order.
+              </p>
+              <label class="commerce-form__checkbox" dv:if="${checkout.termsAccepted}">
+                <input type="checkbox" name="terms_accepted" value="yes" checked="checked" />
+                <span>I have reviewed the basket, receipt details, and the Stripe handoff summary.</span>
+              </label>
+              <label class="commerce-form__checkbox" dv:unless="${checkout.termsAccepted}">
+                <input type="checkbox" name="terms_accepted" value="yes" />
+                <span>I have reviewed the basket, receipt details, and the Stripe handoff summary.</span>
+              </label>
+              <p class="commerce-form__error" dv:if="${checkout.hasTermsAcceptedError}" dv:text="${checkout.termsAcceptedError}">
+                Review the basket and confirm the final total before placing the order.
+              </p>
+              <p class="checkout-form__consent">
+                Placing the order keeps this browser on Shoppr while Stripe confirmation
+                completes against the payment reference above.
+              </p>
+              <button class="button" type="submit" dv:text="${checkout.submitLabel}">Place order</button>
+            </form>
+          </div>
+          <div class="checkout-actions" dv:unless="${hasLineItems}">
+            <a class="button button--secondary" href="/cart">Return to cart</a>
+            <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Continue shopping
+            </a>
+          </div>
+        </aside>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

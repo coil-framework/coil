@@ -1,0 +1,56 @@
+<!doctype html>
+<html xmlns:dv="https://davenda.dev" lang="en-GB" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gitly</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" dv:src="asset('theme/assets/site.js')" defer="defer"></script>
+  </head>
+  <body data-route="explore">
+    <a class="skip-link" href="#main" data-i18n-control="skip">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" data-route-link="home" href="/"><span class="brand__mark" aria-hidden="true">O</span><span data-brand="brand">Gitly</span></a>
+      <nav class="topnav" aria-label="Primary navigation" data-i18n-aria-label="primaryNavigation">
+        <a data-route-link="home" data-i18n-nav="home" href="/">Home</a>
+        <a data-route-link="explore" data-i18n-nav="explore" href="/explore">Explore</a>
+        <a data-route-link="repo" data-i18n-nav="repo" href="/octocorp/platform-ui">Repository</a>
+        <a data-route-link="pulls" data-i18n-nav="pulls" href="/octocorp/platform-ui/pulls">Pull requests</a>
+        <a data-route-link="actions" data-i18n-nav="actions" href="/octocorp/platform-ui/actions">Actions</a>
+        <a data-route-link="org" data-i18n-nav="org" href="/orgs/octocorp">Organization</a>
+        <a data-route-link="profile" data-i18n-nav="profile" href="/alexmariner">Profile</a>
+      </nav>
+      <div class="toolbar">
+        <form class="search search-form" method="get" action="/search" data-search-form="true"><span class="sr-only" data-i18n-control="search">Search</span><input data-search="search" type="search" name="q" placeholder="Search repositories, users, docs, and workflows" /><button type="submit" data-i18n-control="searchSubmit">Search</button></form>
+        <nav class="language-switcher" aria-labelledby="language-switcher-label"><span class="sr-only" id="language-switcher-label" data-i18n-control="language">Language</span><a data-language-link="en-GB" href="/" lang="en-GB" hreflang="en-GB">EN</a><a data-language-link="fr-FR" href="/fr" lang="fr-FR" hreflang="fr-FR">FR</a><a data-language-link="de-DE" href="/de" lang="de-DE" hreflang="de-DE">DE</a></nav>
+        <div class="theme-switcher" role="group" aria-labelledby="theme-switcher-label"><span class="sr-only" id="theme-switcher-label" data-i18n-control="theme">Theme</span><button type="button" data-theme-option="light" data-i18n-control="light">Light</button><button type="button" data-theme-option="dark" data-i18n-control="dark">Dark</button><button type="button" data-theme-option="system" data-i18n-control="system">System</button></div>
+      </div>
+    </header>
+    <main id="main" class="shell">
+      <section class="section-head">
+        <h1 data-i18n="explore.title">Explore repositories and teams</h1>
+        <p data-i18n="explore.summary">Trending demo surfaces show how Davenda can present developer products, docs, and automation under one customer app.</p>
+      </section>
+      <section class="page-grid">
+        <article class="list-card">
+          <h2 data-i18n="explore.trending">Trending this week</h2>
+          <ul class="repo-list">
+            <li><strong>octocorp/platform-ui</strong><br /><span class="muted" data-i18n="explore.item1">Accessible repository shell and multilingual frontend demo.</span></li>
+            <li><strong>octocorp/docs-portal</strong><br /><span class="muted" data-i18n="explore.item2">Markdown import, CMS publishing, and policy hooks in one workspace.</span></li>
+            <li><strong>octocorp/status-board</strong><br /><span class="muted" data-i18n="explore.item3">Operational dashboards layered over the same customer-root runtime.</span></li>
+          </ul>
+        </article>
+        <aside class="summary-card">
+          <h2 data-i18n="explore.events">Modular highlights</h2>
+          <ul class="sidebar-list">
+            <li data-i18n="explore.highlight1">Customer-owned Rust backend policies</li>
+            <li data-i18n="explore.highlight2">Custom GitHub-style API endpoints</li>
+            <li data-i18n="explore.highlight3">Runtime-installed WASM API and scheduler demo</li>
+            <li data-i18n="explore.highlight4">Accessible theme and language switching</li>
+          </ul>
+        </aside>
+      </section>
+    </main>
+    <footer class="footer"><small data-footer="footer">Gitly is a customer-root Davenda demo showing CMS, custom API surfaces, linked Rust hooks, and runtime-installed WASM.</small></footer>
+  </body>
+</html>

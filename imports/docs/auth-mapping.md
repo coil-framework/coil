@@ -1,4 +1,4 @@
-# Harbor Shop Auth Mapping
+# Shoppr Auth Mapping
 
 - `administrator` -> `cms.page.publish`, `asset.publish`, `events.booking.manage`
 - `editor` -> `cms.page.publish`, `asset.publish`

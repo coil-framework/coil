@@ -28,7 +28,7 @@ access_key_id = "runtime-access"
 secret_access_key = "runtime-secret"
 signed_url_ttl_secs = 900
 "#;
-const PAYMENT_WEBHOOK_SECRET: &str = "harbor-shop-webhook-secret";
+const PAYMENT_WEBHOOK_SECRET: &str = "shoppr-webhook-secret";
 const STRIPE_SECRET_KEY: &str = "sk_test_runtime_placeholder";
 
 type HmacSha256 = Hmac<Sha256>;
@@ -313,8 +313,8 @@ impl CheckoutHooks for RejectMembershipCheckoutHooks {
 impl CustomerBackendPlugin for RejectMembershipCheckoutPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-checkout-policy",
-            "Harbor Shop Checkout Policy",
+            "shoppr-checkout-policy",
+            "Shoppr Checkout Policy",
             "0.1.0",
         )
     }
@@ -429,7 +429,7 @@ impl CmsHooks for RewriteCmsWorkspacePublishHooks {
 
 impl CustomerBackendPlugin for RejectCmsPublishPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
-        CustomerPluginDescriptor::new("harbor-shop-cms-policy", "Harbor Shop CMS Policy", "0.1.0")
+        CustomerPluginDescriptor::new("shoppr-cms-policy", "Shoppr CMS Policy", "0.1.0")
     }
 
     fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
@@ -440,8 +440,8 @@ impl CustomerBackendPlugin for RejectCmsPublishPlugin {
 impl CustomerBackendPlugin for RewriteCmsPublishPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-cms-publish-rewriter",
-            "Harbor Shop CMS Publish Rewriter",
+            "shoppr-cms-publish-rewriter",
+            "Shoppr CMS Publish Rewriter",
             "0.1.0",
         )
     }
@@ -454,8 +454,8 @@ impl CustomerBackendPlugin for RewriteCmsPublishPlugin {
 impl CustomerBackendPlugin for RewriteCmsWorkspacePublishPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-cms-workspace-rewriter",
-            "Harbor Shop CMS Workspace Rewriter",
+            "shoppr-cms-workspace-rewriter",
+            "Shoppr CMS Workspace Rewriter",
             "0.1.0",
         )
     }
@@ -723,8 +723,8 @@ impl VerifiedWebhookHooks for RejectVerifiedWebhookPlugin {
 impl CustomerBackendPlugin for RejectVerifiedWebhookPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-verified-webhook-rejector",
-            "Harbor Shop Verified Webhook Rejector",
+            "shoppr-verified-webhook-rejector",
+            "Shoppr Verified Webhook Rejector",
             "0.1.0",
         )
     }
@@ -779,8 +779,8 @@ impl VerifiedWebhookHooks for RecordingWebhookOrderRepositoryPlugin {
 impl CustomerBackendPlugin for RecordingWebhookOrderRepositoryPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-webhook-order-reader",
-            "Harbor Shop Webhook Order Reader",
+            "shoppr-webhook-order-reader",
+            "Shoppr Webhook Order Reader",
             "0.1.0",
         )
     }
@@ -871,8 +871,8 @@ impl VerifiedWebhookHooks for RecordingWebhookCatalogRepositoryPlugin {
 impl CustomerBackendPlugin for RecordingWebhookCatalogRepositoryPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-webhook-catalog-repository",
-            "Harbor Shop Webhook Catalog Repository",
+            "shoppr-webhook-catalog-repository",
+            "Shoppr Webhook Catalog Repository",
             "0.1.0",
         )
     }
@@ -916,8 +916,8 @@ impl CheckoutHooks for RecordingCheckoutLineMetadataPlugin {
 impl CustomerBackendPlugin for RecordingCheckoutLineMetadataPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-checkout-line-metadata-recorder",
-            "Harbor Shop Checkout Line Metadata Recorder",
+            "shoppr-checkout-line-metadata-recorder",
+            "Shoppr Checkout Line Metadata Recorder",
             "0.1.0",
         )
     }
@@ -932,8 +932,8 @@ impl CustomerBackendPlugin for RecordingCheckoutLineMetadataPlugin {
 impl CustomerBackendPlugin for RecordingVerifiedWebhookPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-verified-webhooks",
-            "Harbor Shop Verified Webhooks",
+            "shoppr-verified-webhooks",
+            "Shoppr Verified Webhooks",
             "0.1.0",
         )
     }
@@ -948,8 +948,8 @@ impl CustomerBackendPlugin for RecordingVerifiedWebhookPlugin {
 impl CustomerBackendPlugin for RecordingVerifiedWebhookAssetPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-verified-webhook-assets",
-            "Harbor Shop Verified Webhook Assets",
+            "shoppr-verified-webhook-assets",
+            "Shoppr Verified Webhook Assets",
             "0.1.0",
         )
     }
@@ -964,8 +964,8 @@ impl CustomerBackendPlugin for RecordingVerifiedWebhookAssetPlugin {
 impl CustomerBackendPlugin for InspectingVerifiedWebhookAssetPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-verified-webhook-asset-inspector",
-            "Harbor Shop Verified Webhook Asset Inspector",
+            "shoppr-verified-webhook-asset-inspector",
+            "Shoppr Verified Webhook Asset Inspector",
             "0.1.0",
         )
     }
@@ -980,8 +980,8 @@ impl CustomerBackendPlugin for InspectingVerifiedWebhookAssetPlugin {
 impl CustomerBackendPlugin for WritingThenInspectingVerifiedWebhookAssetPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "harbor-shop-verified-webhook-asset-write-inspect",
-            "Harbor Shop Verified Webhook Asset Write And Inspect",
+            "shoppr-verified-webhook-asset-write-inspect",
+            "Shoppr Verified Webhook Asset Write And Inspect",
             "0.1.0",
         )
     }
@@ -1241,7 +1241,7 @@ fn unique_app_name(label: &str) -> String {
 }
 
 fn checked_in_harbor_shop_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/shoppr")
 }
 
 #[tokio::test]
@@ -1504,12 +1504,12 @@ async fn server_router_allows_diagnostics_probe_for_admin_audit_read_access() {
 
 #[tokio::test]
 async fn server_router_bootstraps_development_admin_session_from_dev_route() {
-    let app_name = unique_app_name("harbor-shop-runtime-dev-login");
+    let app_name = unique_app_name("shoppr-runtime-dev-login");
     let template_root = checked_in_harbor_shop_root();
     let mut config = checked_in_harbor_shop_config(&app_name);
     config.app.environment = davenda_config::Environment::Development;
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
@@ -1566,7 +1566,7 @@ async fn server_router_bootstraps_development_admin_session_from_dev_route() {
     )
     .unwrap();
     assert_eq!(admin_status, StatusCode::OK, "{admin_body}");
-    assert!(admin_body.contains("Harbor Shop Admin"), "{admin_body}");
+    assert!(admin_body.contains("Shoppr Admin"), "{admin_body}");
     assert!(admin_body.contains("dev-admin"), "{admin_body}");
 }
 
@@ -2301,15 +2301,15 @@ async fn server_host_renders_page_templates_as_html() {
 
 #[tokio::test]
 async fn server_host_loads_customer_storefront_templates_from_template_roots() {
-    let config = config_with_app_name("harbor-shop-runtime-storefront");
+    let config = config_with_app_name("shoppr-runtime-storefront");
     let template_root = unique_temp_template_root("storefront-pages");
     write_template_file(
         &template_root,
         "templates/pages/home.html",
         r#"<!doctype html>
-<html xmlns:dv="https://davenda.dev" dv:with="pageTitle='Harbor Shop'">
+<html xmlns:dv="https://davenda.dev" dv:with="pageTitle='Shoppr'">
   <head>
-    <title dv:text="${pageTitle}">Harbor Shop</title>
+    <title dv:text="${pageTitle}">Shoppr</title>
   </head>
   <body>
     <header>
@@ -2383,7 +2383,7 @@ async fn server_host_loads_customer_storefront_templates_from_template_roots() {
 
 #[tokio::test]
 async fn server_host_loads_customer_account_templates_from_template_roots() {
-    let config = config_with_app_name("harbor-shop-runtime-account");
+    let config = config_with_app_name("shoppr-runtime-account");
     let template_root = unique_temp_template_root("account-pages");
     write_template_file(
         &template_root,
@@ -2475,7 +2475,7 @@ async fn server_host_loads_customer_account_templates_from_template_roots() {
 
 #[tokio::test]
 async fn server_host_renders_checkout_confirmation_and_account_history_from_sample_order() {
-    let app_name = unique_app_name("harbor-shop-runtime-order-flow");
+    let app_name = unique_app_name("shoppr-runtime-order-flow");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("order-flow-pages");
     write_template_file(
@@ -2870,7 +2870,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
 
 #[tokio::test]
 async fn server_host_bootstraps_guest_storefront_session_and_injects_live_state() {
-    let app_name = unique_app_name("harbor-shop-runtime-storefront-state");
+    let app_name = unique_app_name("shoppr-runtime-storefront-state");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("storefront-state-pages");
     write_template_file(
@@ -2946,7 +2946,7 @@ async fn server_host_bootstraps_guest_storefront_session_and_injects_live_state(
 
 #[tokio::test]
 async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_flow() {
-    let app_name = unique_app_name("harbor-shop-runtime-native-storefront");
+    let app_name = unique_app_name("shoppr-runtime-native-storefront");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("native-storefront-flow");
     write_template_file(
@@ -3289,7 +3289,7 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
 
 #[tokio::test]
 async fn server_host_rejects_checkout_completion_without_payment_details() {
-    let app_name = unique_app_name("harbor-shop-runtime-checkout-payment-required");
+    let app_name = unique_app_name("shoppr-runtime-checkout-payment-required");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("native-storefront-payment-required");
     write_template_file(
@@ -3518,7 +3518,7 @@ async fn server_host_rejects_checkout_completion_without_payment_details() {
 
 #[tokio::test]
 async fn server_host_rejects_checkout_completion_without_reserved_payment_intent() {
-    let app_name = unique_app_name("harbor-shop-runtime-checkout-intent-required");
+    let app_name = unique_app_name("shoppr-runtime-checkout-intent-required");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("native-storefront-intent-required");
     write_template_file(
@@ -3744,7 +3744,7 @@ async fn server_host_rejects_checkout_completion_without_reserved_payment_intent
 
 #[tokio::test]
 async fn server_host_redirects_cart_validation_failures_back_to_cart_with_repopulated_lines() {
-    let app_name = unique_app_name("harbor-shop-runtime-cart-validation-prg");
+    let app_name = unique_app_name("shoppr-runtime-cart-validation-prg");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("native-storefront-cart-validation");
     write_template_file(
@@ -3883,7 +3883,7 @@ async fn server_host_redirects_cart_validation_failures_back_to_cart_with_repopu
 
 #[tokio::test]
 async fn server_host_renders_checkout_form_defaults_for_active_checkout() {
-    let app_name = unique_app_name("harbor-shop-runtime-checkout-defaults");
+    let app_name = unique_app_name("shoppr-runtime-checkout-defaults");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("native-storefront-checkout-defaults");
     write_template_file(
@@ -3961,7 +3961,7 @@ async fn server_host_renders_checkout_form_defaults_for_active_checkout() {
 
 #[tokio::test]
 async fn server_host_rejects_payment_webhooks_with_invalid_signatures() {
-    let app_name = unique_app_name("harbor-shop-runtime-invalid-payment-webhook");
+    let app_name = unique_app_name("shoppr-runtime-invalid-payment-webhook");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
@@ -4014,7 +4014,7 @@ async fn server_host_rejects_payment_webhooks_with_invalid_signatures() {
 
 #[tokio::test]
 async fn server_host_rejects_native_stripe_webhooks_with_invalid_stripe_signatures() {
-    let app_name = unique_app_name("harbor-shop-runtime-invalid-native-stripe-webhook");
+    let app_name = unique_app_name("shoppr-runtime-invalid-native-stripe-webhook");
     let config = with_stripe_payment_provider(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -4078,7 +4078,7 @@ async fn server_host_rejects_native_stripe_webhooks_with_invalid_stripe_signatur
 
 #[tokio::test]
 async fn server_host_rejects_native_stripe_webhooks_with_stale_timestamps() {
-    let app_name = unique_app_name("harbor-shop-runtime-stale-native-stripe-webhook");
+    let app_name = unique_app_name("shoppr-runtime-stale-native-stripe-webhook");
     let config = with_stripe_payment_provider(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -4149,7 +4149,7 @@ async fn server_host_rejects_native_stripe_webhooks_with_stale_timestamps() {
 
 #[tokio::test]
 async fn server_host_rejects_payment_webhooks_for_an_unconfigured_provider() {
-    let app_name = unique_app_name("harbor-shop-runtime-payment-provider-mismatch");
+    let app_name = unique_app_name("shoppr-runtime-payment-provider-mismatch");
     let config = with_stripe_payment_provider(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -4208,7 +4208,7 @@ async fn server_host_rejects_payment_webhooks_for_an_unconfigured_provider() {
 
 #[tokio::test]
 async fn server_host_restores_checkout_after_payment_failure_webhook() {
-    let app_name = unique_app_name("harbor-shop-runtime-payment-failure-recovery");
+    let app_name = unique_app_name("shoppr-runtime-payment-failure-recovery");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -4363,7 +4363,7 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
 
 #[tokio::test]
 async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
-    let app_name = unique_app_name("harbor-shop-runtime-stripe-checkout-contract");
+    let app_name = unique_app_name("shoppr-runtime-stripe-checkout-contract");
     let mut config = checked_in_harbor_shop_config(&app_name);
     config.auth.package = "platform-default-auth".to_string();
     let template_root = unique_temp_template_root("stripe-checkout-contract");
@@ -4628,7 +4628,7 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
 
 #[tokio::test]
 async fn server_host_ignores_regressive_payment_failure_after_capture() {
-    let app_name = unique_app_name("harbor-shop-runtime-payment-regression");
+    let app_name = unique_app_name("shoppr-runtime-payment-regression");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -4762,7 +4762,7 @@ async fn server_host_ignores_regressive_payment_failure_after_capture() {
 
 #[tokio::test]
 async fn server_host_accepts_checkout_completion_with_card_last4_only() {
-    let app_name = unique_app_name("harbor-shop-runtime-checkout-card-last4");
+    let app_name = unique_app_name("shoppr-runtime-checkout-card-last4");
     let config = config_with_app_name(&app_name);
     let template_root = unique_temp_template_root("native-storefront-card-last4");
     write_template_file(
@@ -4958,7 +4958,7 @@ async fn server_host_accepts_checkout_completion_with_card_last4_only() {
 
 #[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow() {
-    let app_name = unique_app_name("harbor-shop-runtime-checked-in-storefront");
+    let app_name = unique_app_name("shoppr-runtime-checked-in-storefront");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -5249,7 +5249,7 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
 
 #[tokio::test]
 async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sign_in() {
-    let app_name = unique_app_name("harbor-shop-runtime-account-entry");
+    let app_name = unique_app_name("shoppr-runtime-account-entry");
     let config = config_with_app_name(&app_name);
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -5399,7 +5399,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
 
 #[tokio::test]
 async fn server_host_can_end_a_checked_in_harbor_shop_account_session() {
-    let app_name = unique_app_name("harbor-shop-runtime-account-session-end");
+    let app_name = unique_app_name("shoppr-runtime-account-session-end");
     let config = config_with_app_name(&app_name);
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -5512,7 +5512,7 @@ async fn server_host_can_end_a_checked_in_harbor_shop_account_session() {
 
 #[tokio::test]
 async fn server_host_renders_checked_in_harbor_shop_catalog_collection_and_product_routes() {
-    let app_name = unique_app_name("harbor-shop-runtime-catalog-routes");
+    let app_name = unique_app_name("shoppr-runtime-catalog-routes");
     let config = config_with_app_name(&app_name);
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -5657,7 +5657,7 @@ async fn server_host_renders_checked_in_harbor_shop_catalog_collection_and_produ
 
 #[test]
 fn runtime_plan_registers_checked_in_harbor_shop_root_route_from_customer_home_template() {
-    let app_name = unique_app_name("harbor-shop-runtime-root-route");
+    let app_name = unique_app_name("shoppr-runtime-root-route");
     let config = config_with_app_name(&app_name);
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -5686,7 +5686,7 @@ fn runtime_plan_registers_checked_in_harbor_shop_root_route_from_customer_home_t
 
 #[tokio::test]
 async fn server_host_injects_hidden_csrf_inputs_into_checked_in_storefront_forms() {
-    let app_name = unique_app_name("harbor-shop-runtime-storefront-form-csrf");
+    let app_name = unique_app_name("shoppr-runtime-storefront-form-csrf");
     let config = config_with_app_name(&app_name);
     let template_root = checked_in_harbor_shop_root();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
@@ -5849,12 +5849,12 @@ async fn server_host_injects_hidden_csrf_inputs_into_checked_in_storefront_forms
 
 #[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journey() {
-    let app_name = unique_app_name("harbor-shop-runtime-customer-operator-journey");
+    let app_name = unique_app_name("shoppr-runtime-customer-operator-journey");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));
     let template_root = checked_in_harbor_shop_root();
     let mut config = config;
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
@@ -5914,7 +5914,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
             .to_vec(),
     )
     .unwrap();
-    assert_eq!(home_body.contains("Harbor Shop"), true, "{home_body}");
+    assert_eq!(home_body.contains("Shoppr"), true, "{home_body}");
     assert!(home_body.contains("/en-GB/shop/collections"), "{home_body}");
     assert!(home_body.contains("/account"), "{home_body}");
 
@@ -6253,7 +6253,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
             .to_vec(),
     )
     .unwrap();
-    assert!(admin_body.contains("Harbor Shop Admin"), "{admin_body}");
+    assert!(admin_body.contains("Shoppr Admin"), "{admin_body}");
     assert!(admin_body.contains("operator review"), "{admin_body}");
 
     let admin_orders_response = server
@@ -6301,11 +6301,11 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
 
 #[tokio::test]
 async fn server_host_runs_sdk_checkout_hooks_before_stripe_handoff() {
-    let app_name = unique_app_name("harbor-shop-runtime-checkout-hooks");
+    let app_name = unique_app_name("shoppr-runtime-checkout-hooks");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .register_customer_plugin(RejectMembershipCheckoutPlugin)
@@ -6500,11 +6500,11 @@ async fn server_host_runs_sdk_checkout_hooks_before_stripe_handoff() {
 
 #[tokio::test]
 async fn server_host_preserves_checkout_line_metadata_for_live_customer_hooks() {
-    let app_name = unique_app_name("harbor-shop-runtime-checkout-line-metadata");
+    let app_name = unique_app_name("shoppr-runtime-checkout-line-metadata");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let calls = Arc::new(Mutex::new(Vec::new()));
     let plan = RuntimeBuilder::new(config, auth_package)
@@ -6679,11 +6679,11 @@ async fn server_host_preserves_checkout_line_metadata_for_live_customer_hooks() 
 
 #[tokio::test]
 async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flow() {
-    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-hooks");
+    let app_name = unique_app_name("shoppr-runtime-verified-webhook-hooks");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let calls = Arc::new(Mutex::new(Vec::new()));
     let plan = RuntimeBuilder::new(config, auth_package)
@@ -6906,11 +6906,11 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
 
 #[tokio::test]
 async fn server_host_accepts_native_stripe_webhooks_and_exposes_raw_json_to_customer_hooks() {
-    let app_name = unique_app_name("harbor-shop-runtime-native-stripe-webhook-hooks");
+    let app_name = unique_app_name("shoppr-runtime-native-stripe-webhook-hooks");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let calls = Arc::new(Mutex::new(Vec::new()));
     let plan = RuntimeBuilder::new(config, auth_package)
@@ -7047,11 +7047,11 @@ async fn server_host_accepts_native_stripe_webhooks_and_exposes_raw_json_to_cust
 
 #[tokio::test]
 async fn server_host_rejects_replayed_native_stripe_webhook_deliveries_across_server_reopen() {
-    let app_name = unique_app_name("harbor-shop-runtime-native-stripe-webhook-replay");
+    let app_name = unique_app_name("shoppr-runtime-native-stripe-webhook-replay");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let calls = Arc::new(Mutex::new(Vec::new()));
     let plan = RuntimeBuilder::new(config, auth_package)
@@ -7199,7 +7199,7 @@ async fn server_host_rejects_replayed_native_stripe_webhook_deliveries_across_se
 
 #[tokio::test]
 async fn server_host_rejects_replayed_generic_verified_webhooks_across_server_reopen() {
-    let app_name = unique_app_name("harbor-shop-runtime-generic-webhook-replay");
+    let app_name = unique_app_name("shoppr-runtime-generic-webhook-replay");
     let config = with_payment_webhook_secret(config_with_app_name(&app_name));
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(CommerceModule::new())
@@ -7331,11 +7331,11 @@ async fn server_host_rejects_replayed_generic_verified_webhooks_across_server_re
 
 #[tokio::test]
 async fn server_host_exposes_persisted_commerce_orders_to_verified_webhook_hooks() {
-    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-orders");
+    let app_name = unique_app_name("shoppr-runtime-verified-webhook-orders");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let reads = Arc::new(Mutex::new(Vec::new()));
     let plan = RuntimeBuilder::new(config, auth_package)
@@ -7527,11 +7527,11 @@ async fn server_host_exposes_persisted_commerce_orders_to_verified_webhook_hooks
 
 #[tokio::test]
 async fn server_host_exposes_typed_catalog_repository_access_to_verified_webhook_hooks() {
-    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-catalog");
+    let app_name = unique_app_name("shoppr-runtime-verified-webhook-catalog");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let mutations = Arc::new(Mutex::new(Vec::new()));
     let plan = RuntimeBuilder::new(config, auth_package)
@@ -7784,15 +7784,15 @@ async fn server_host_exposes_typed_catalog_repository_access_to_verified_webhook
 
 #[tokio::test]
 async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payment_webhook_flow() {
-    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-assets");
+    let app_name = unique_app_name("shoppr-runtime-verified-webhook-assets");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
     let object_store_server = ObjectStoreTestServer::spawn();
     let object_store_secret = object_store_secret(object_store_server.endpoint());
     config.app.environment = Environment::Development;
     config.storage.deployment = StorageDeployment::SingleNode;
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let writes = Arc::new(Mutex::new(Vec::new()));
     let plan = RuntimeBuilder::new(config, auth_package)
@@ -8014,7 +8014,7 @@ async fn server_host_runs_asset_capable_sdk_verified_webhook_hooks_in_live_payme
 
 #[tokio::test]
 async fn server_host_persists_linked_customer_managed_assets_across_requests() {
-    let app_name = unique_app_name("harbor-shop-runtime-persisted-verified-webhook-assets");
+    let app_name = unique_app_name("shoppr-runtime-persisted-verified-webhook-assets");
     let object_store_server = ObjectStoreTestServer::spawn();
     let object_store_secret = object_store_secret(object_store_server.endpoint());
     let template_root = checked_in_harbor_shop_root();
@@ -8022,8 +8022,8 @@ async fn server_host_persists_linked_customer_managed_assets_across_requests() {
     let mut config = checked_in_harbor_shop_config(&app_name);
     config.app.environment = Environment::Development;
     config.storage.deployment = StorageDeployment::SingleNode;
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let writes = Arc::new(Mutex::new(Vec::new()));
     let inspected = Arc::new(Mutex::new(Vec::new()));
@@ -8150,11 +8150,11 @@ async fn server_host_persists_linked_customer_managed_assets_across_requests() {
 
 #[tokio::test]
 async fn server_host_rejects_payment_webhook_mutation_when_sdk_hook_rejects_it() {
-    let app_name = unique_app_name("harbor-shop-runtime-verified-webhook-rejection");
+    let app_name = unique_app_name("shoppr-runtime-verified-webhook-rejection");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .register_customer_plugin(RejectVerifiedWebhookPlugin)
@@ -8247,11 +8247,11 @@ async fn server_host_rejects_payment_webhook_mutation_when_sdk_hook_rejects_it()
 
 #[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and_webhook() {
-    let app_name = unique_app_name("harbor-shop-runtime-stripe-handoff");
+    let app_name = unique_app_name("shoppr-runtime-stripe-handoff");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
@@ -8650,11 +8650,11 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
 
 #[tokio::test]
 async fn server_host_reconciles_paid_stripe_checkout_session_on_provider_return() {
-    let app_name = unique_app_name("harbor-shop-runtime-stripe-session-return");
+    let app_name = unique_app_name("shoppr-runtime-stripe-session-return");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
@@ -8869,12 +8869,12 @@ async fn server_host_reconciles_paid_stripe_checkout_session_on_provider_return(
 #[tokio::test]
 async fn server_host_completes_checked_in_harbor_shop_local_checkout_stub_with_placeholder_stripe_key()
  {
-    let app_name = unique_app_name("harbor-shop-runtime-local-checkout-stub");
+    let app_name = unique_app_name("shoppr-runtime-local-checkout-stub");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
     config.app.environment = davenda_config::Environment::Development;
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
@@ -9052,11 +9052,11 @@ async fn server_host_completes_checked_in_harbor_shop_local_checkout_stub_with_p
 #[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliation_requires_signed_webhook()
  {
-    let app_name = unique_app_name("harbor-shop-runtime-stripe-reconciliation");
+    let app_name = unique_app_name("shoppr-runtime-stripe-reconciliation");
     let mut config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
@@ -9477,12 +9477,12 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_reconciliat
 
 #[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
-    let app_name = unique_app_name("harbor-shop-runtime-french-customer-journey");
+    let app_name = unique_app_name("shoppr-runtime-french-customer-journey");
     let config = config_with_app_name(&app_name);
     let template_root = checked_in_harbor_shop_root();
     let mut config = config;
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_route(RouteDefinition::new("home", HttpMethod::Get, "/").unwrap())
@@ -9776,9 +9776,9 @@ async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
 #[tokio::test]
 async fn server_host_renders_honest_checked_in_harbor_shop_events_surfaces() {
     let template_root = checked_in_harbor_shop_root();
-    let mut config = config_with_app_name("harbor-shop");
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let mut config = config_with_app_name("shoppr");
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(EventsModule::new())
@@ -9855,7 +9855,7 @@ async fn server_host_renders_honest_checked_in_harbor_shop_events_surfaces() {
     );
     assert!(
         event_detail_body
-            .contains("Event records are not published in the checked-in Harbor Shop sample yet"),
+            .contains("Event records are not published in the checked-in Shoppr sample yet"),
         "{event_detail_body}"
     );
     assert!(
@@ -10315,9 +10315,9 @@ async fn server_host_executes_admin_widget_extensions_during_live_requests() {
 #[tokio::test]
 async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
     let template_root = checked_in_harbor_shop_root();
-    let mut config = config_with_app_name(&unique_app_name("harbor-shop-runtime-admin-surfaces"));
-    config.auth.package = "harbor-auth".to_string();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let mut config = config_with_app_name(&unique_app_name("shoppr-runtime-admin-surfaces"));
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -10353,7 +10353,7 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
         .unwrap();
 
     for (route, expected) in [
-        ("/admin", "Harbor Shop Admin"),
+        ("/admin", "Shoppr Admin"),
         ("/admin/audit", "Audit Log"),
         ("/admin/orders", "Orders"),
         ("/admin/catalog/products", "Catalog Administration"),
@@ -10440,10 +10440,10 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
 
 #[tokio::test]
 async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_workflow() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-draft-publish");
+    let app_name = unique_app_name("shoppr-runtime-cms-draft-publish");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -10512,7 +10512,7 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
         )
         .append_pair(
             "page_body_html",
-            "<p>Customers can review pending activation immediately after checkout.</p><p>Publishing from Harbor Shop admin makes this page live for the storefront.</p>",
+            "<p>Customers can review pending activation immediately after checkout.</p><p>Publishing from Shoppr admin makes this page live for the storefront.</p>",
         )
         .finish();
     let draft_response = server
@@ -10644,7 +10644,7 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
     );
     assert!(
         live_page_body
-            .contains("Publishing from Harbor Shop admin makes this page live for the storefront."),
+            .contains("Publishing from Shoppr admin makes this page live for the storefront."),
         "{live_page_body}"
     );
 
@@ -10679,10 +10679,10 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
 
 #[tokio::test]
 async fn server_host_allows_linked_cms_hooks_to_rewrite_the_draft_before_publish() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-rewrite-publish");
+    let app_name = unique_app_name("shoppr-runtime-cms-rewrite-publish");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .register_customer_plugin(RewriteCmsPublishPlugin)
@@ -10795,10 +10795,10 @@ async fn server_host_allows_linked_cms_hooks_to_rewrite_the_draft_before_publish
 
 #[tokio::test]
 async fn server_host_runs_sdk_cms_publish_hooks_before_live_publish() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-hooks");
+    let app_name = unique_app_name("shoppr-runtime-cms-hooks");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .register_customer_plugin(RejectCmsPublishPlugin)
@@ -10984,10 +10984,10 @@ async fn server_host_runs_sdk_cms_publish_hooks_before_live_publish() {
 
 #[tokio::test]
 async fn server_host_creates_and_publishes_new_checked_in_harbor_shop_cms_page() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-new-page");
+    let app_name = unique_app_name("shoppr-runtime-cms-new-page");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -11187,10 +11187,10 @@ async fn server_host_creates_and_publishes_new_checked_in_harbor_shop_cms_page()
 
 #[tokio::test]
 async fn server_host_allows_linked_cms_hooks_to_update_navigation_and_redirects_before_publish() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-workspace-hook");
+    let app_name = unique_app_name("shoppr-runtime-cms-workspace-hook");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -11362,10 +11362,10 @@ async fn server_host_allows_linked_cms_hooks_to_update_navigation_and_redirects_
 
 #[tokio::test]
 async fn server_host_renders_checked_in_harbor_shop_cms_preview_for_saved_draft() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-preview");
+    let app_name = unique_app_name("shoppr-runtime-cms-preview");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -11484,10 +11484,10 @@ async fn server_host_renders_checked_in_harbor_shop_cms_preview_for_saved_draft(
 
 #[tokio::test]
 async fn server_host_updates_checked_in_harbor_shop_navigation_from_cms_admin() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-navigation");
+    let app_name = unique_app_name("shoppr-runtime-cms-navigation");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -11630,10 +11630,10 @@ async fn server_host_updates_checked_in_harbor_shop_navigation_from_cms_admin() 
 
 #[tokio::test]
 async fn server_host_applies_checked_in_harbor_shop_redirect_rules_from_cms_admin() {
-    let app_name = unique_app_name("harbor-shop-runtime-cms-redirects");
+    let app_name = unique_app_name("shoppr-runtime-cms-redirects");
     let config = checked_in_harbor_shop_config(&app_name);
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -11769,11 +11769,11 @@ async fn server_host_applies_checked_in_harbor_shop_redirect_rules_from_cms_admi
 
 #[tokio::test]
 async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface() {
-    let app_name = unique_app_name("harbor-shop-runtime-admin-catalog-update");
+    let app_name = unique_app_name("shoppr-runtime-admin-catalog-update");
     let mut config = config_with_app_name(&app_name);
-    config.auth.package = "harbor-auth".to_string();
+    config.auth.package = "shoppr-auth".to_string();
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -11843,7 +11843,7 @@ async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface()
         .append_pair("product_title", "Dockside Cap")
         .append_pair(
             "product_summary",
-            "Updated from Harbor Shop admin to prove live merchandising changes.",
+            "Updated from Shoppr admin to prove live merchandising changes.",
         )
         .append_pair("product_price", "31.00")
         .append_pair("product_collection_handle", "featured")
@@ -11902,7 +11902,7 @@ async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface()
     );
     assert!(
         updated_admin_body
-            .contains("Updated from Harbor Shop admin to prove live merchandising changes."),
+            .contains("Updated from Shoppr admin to prove live merchandising changes."),
         "{updated_admin_body}"
     );
     assert!(
@@ -11935,7 +11935,7 @@ async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface()
     );
     assert!(
         product_page_body
-            .contains("Updated from Harbor Shop admin to prove live merchandising changes."),
+            .contains("Updated from Shoppr admin to prove live merchandising changes."),
         "{product_page_body}"
     );
     assert!(product_page_body.contains("£31.00"), "{product_page_body}");
@@ -11950,7 +11950,7 @@ async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface()
         .append_pair("collection_label", "Live catalog")
         .append_pair(
             "collection_summary",
-            "Updated collection copy from the checked-in Harbor Shop admin route.",
+            "Updated collection copy from the checked-in Shoppr admin route.",
         )
         .append_pair("collection_visible", "yes")
         .finish();
@@ -11994,7 +11994,7 @@ async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface()
     );
     assert!(
         collection_page_body
-            .contains("Updated collection copy from the checked-in Harbor Shop admin route."),
+            .contains("Updated collection copy from the checked-in Shoppr admin route."),
         "{collection_page_body}"
     );
 
@@ -12086,11 +12086,11 @@ async fn server_host_updates_checked_in_harbor_shop_catalog_from_admin_surface()
 
 #[tokio::test]
 async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_shop_storefront() {
-    let app_name = unique_app_name("harbor-shop-runtime-admin-catalog-visibility");
+    let app_name = unique_app_name("shoppr-runtime-admin-catalog-visibility");
     let mut config = config_with_app_name(&app_name);
-    config.auth.package = "harbor-auth".to_string();
+    config.auth.package = "shoppr-auth".to_string();
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -12265,7 +12265,7 @@ async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_sh
         .append_pair("collection_label", "Dormant")
         .append_pair(
             "collection_summary",
-            "Temporarily removed from the live Harbor Shop browse path.",
+            "Temporarily removed from the live Shoppr browse path.",
         )
         .finish();
     let collection_response = server
@@ -12335,11 +12335,11 @@ async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_sh
 
 #[tokio::test]
 async fn server_host_renders_live_completed_orders_on_checked_in_admin_orders_surface() {
-    let app_name = unique_app_name("harbor-shop-runtime-admin-live-orders");
+    let app_name = unique_app_name("shoppr-runtime-admin-live-orders");
     let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
-    config.auth.package = "harbor-auth".to_string();
+    config.auth.package = "shoppr-auth".to_string();
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -12458,11 +12458,11 @@ async fn server_host_renders_live_completed_orders_on_checked_in_admin_orders_su
 
 #[tokio::test]
 async fn server_host_supports_checked_in_harbor_shop_order_detail_and_refund_flow() {
-    let app_name = unique_app_name("harbor-shop-runtime-admin-order-detail-refund");
+    let app_name = unique_app_name("shoppr-runtime-admin-order-detail-refund");
     let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
-    config.auth.package = "harbor-auth".to_string();
+    config.auth.package = "shoppr-auth".to_string();
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -12688,11 +12688,11 @@ async fn server_host_supports_checked_in_harbor_shop_order_detail_and_refund_flo
 
 #[tokio::test]
 async fn server_host_supports_checked_in_harbor_shop_order_fulfillment_flow() {
-    let app_name = unique_app_name("harbor-shop-runtime-admin-order-detail-fulfill");
+    let app_name = unique_app_name("shoppr-runtime-admin-order-detail-fulfill");
     let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
-    config.auth.package = "harbor-auth".to_string();
+    config.auth.package = "shoppr-auth".to_string();
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -12902,11 +12902,11 @@ async fn server_host_supports_checked_in_harbor_shop_order_fulfillment_flow() {
 
 #[tokio::test]
 async fn server_host_replays_refund_validation_errors_on_checked_in_order_detail() {
-    let app_name = unique_app_name("harbor-shop-runtime-admin-order-refund-validation");
+    let app_name = unique_app_name("shoppr-runtime-admin-order-refund-validation");
     let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
-    config.auth.package = "harbor-auth".to_string();
+    config.auth.package = "shoppr-auth".to_string();
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())
@@ -13094,11 +13094,11 @@ async fn server_host_replays_refund_validation_errors_on_checked_in_order_detail
 
 #[tokio::test]
 async fn server_host_explains_pending_payment_refund_block_on_order_detail() {
-    let app_name = unique_app_name("harbor-shop-runtime-admin-order-refund-block");
+    let app_name = unique_app_name("shoppr-runtime-admin-order-refund-block");
     let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
-    config.auth.package = "harbor-auth".to_string();
+    config.auth.package = "shoppr-auth".to_string();
     let template_root = checked_in_harbor_shop_root();
-    let auth_package = davenda_auth::load_auth_model_package_at("harbor-auth", &template_root)
+    let auth_package = davenda_auth::load_auth_model_package_at("shoppr-auth", &template_root)
         .expect("checked-in harbor auth package should load");
     let plan = RuntimeBuilder::new(config, auth_package)
         .with_module(AdminModule::new())

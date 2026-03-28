@@ -52,7 +52,7 @@ l2 = "redis"
 [[sites]]
 id = "uk"
 display_name = "United Kingdom"
-brand_name = "Harbor Shop"
+brand_name = "Shoppr"
 canonical_host = "shop.example.com"
 hosts = ["shop.example.com", "www.example.com"]
 default_locale = "en-GB"

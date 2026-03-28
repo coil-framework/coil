@@ -1,0 +1,28 @@
+[package]
+name = "gitly-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+davenda-all.workspace = true
+davenda-app.workspace = true
+davenda-auth.workspace = true
+davenda-config.workspace = true
+davenda-core.workspace = true
+davenda-customer-sdk.workspace = true
+davenda-data.workspace = true
+davenda-runtime.workspace = true
+davenda-wasm.workspace = true
+hex = "0.4"
+gitly-backend = { path = "../gitly-backend" }
+serde.workspace = true
+sha2 = "0.10"
+tokio.workspace = true
+toml = "0.8"
+wat = "1"
+
+[dev-dependencies]
+axum = "0.8"

@@ -171,10 +171,10 @@ fn checked_in_customer_auth_package_loads_real_manifest_bindings_and_schema_exte
         .join("..")
         .join("..")
         .join("apps")
-        .join("harbor-shop");
-    let package = load_auth_model_package_at("harbor-auth", &app_root).unwrap();
+        .join("shoppr");
+    let package = load_auth_model_package_at("shoppr-auth", &app_root).unwrap();
 
-    assert_eq!(package.manifest().name, "harbor-auth");
+    assert_eq!(package.manifest().name, "shoppr-auth");
     assert_eq!(package.manifest().mode, PackageMode::Extend);
     assert_eq!(
         package.manifest().imports,

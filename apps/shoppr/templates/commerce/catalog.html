@@ -1,0 +1,94 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Shop Harbor'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Shop Harbor</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main">
+      <section class="catalog-hero hero">
+        <div class="hero-content">
+          <p class="hero-eyebrow">Storefront catalog</p>
+          <h1>Start with a collection, finish with a confirmed order.</h1>
+          <p>
+            Shoppr now has a single customer-facing browse loop: collections narrow the edit,
+            product detail confirms price and quantity, and cart carries the basket into checkout.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+              Browse collections
+            </a>
+            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+              Review cart
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>Choose the route that matches intent</h2>
+          <p>
+            Campaign traffic should land in collections first. Customers who already know the item
+            they want can jump straight into product detail and add to cart from there.
+          </p>
+        </article>
+        <article>
+          <h2>Keep the basket moving</h2>
+          <p>
+            Every browse surface should make the next step obvious: open a collection, inspect a
+            product, then move to cart without leaving the public storefront.
+          </p>
+        </article>
+      </section>
+
+      <div dv:replace="~{commerce/collection-grid :: grid}"></div>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>Prefer to shop by product?</h2>
+          <p>
+            Open a product page when the customer already knows what they want. Product detail
+            keeps price, quantity, collection context, and the cart handoff on one screen.
+          </p>
+        </article>
+      </section>
+
+      <div dv:replace="~{commerce/product-grid :: grid}"></div>
+      <div dv:replace="~{commerce/storefront-journey :: journey}"></div>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>Keep the storefront loop coherent</h2>
+          <p>
+            The shortest path for a real customer is collection list to collection detail to
+            product detail to cart. Keep those pages prominent and keep the calls to action
+            obvious.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+              Browse all collections
+            </a>
+            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+              Review cart
+            </a>
+          </div>
+        </article>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

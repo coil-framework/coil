@@ -1240,7 +1240,7 @@ fn discover_default_config_path() -> Option<PathBuf> {
         PathBuf::from("config/davenda.toml"),
         PathBuf::from("platform.toml"),
         PathBuf::from("config/platform.toml"),
-        PathBuf::from("apps/harbor-shop/platform.toml"),
+        PathBuf::from("apps/shoppr/platform.toml"),
     ]
     .into_iter()
     .find(|path| path.is_file())

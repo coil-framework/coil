@@ -20,7 +20,7 @@ It does not reimplement cache, storage, TLS, auth execution, or module internals
 ## Reference Layout
 
 ```text
-apps/harbor-shop/
+apps/shoppr/
   app.toml
   templates/
     layouts/
@@ -32,7 +32,7 @@ apps/harbor-shop/
   content/
     page-types/
   auth/
-    harbor-auth/
+    shoppr-auth/
       package.toml
       model.auth
       capabilities.toml
@@ -58,7 +58,7 @@ That module set is enough for a content-led storefront without committing to the
 
 ```toml
 [app]
-name = "harbor-shop"
+name = "shoppr"
 
 [modules]
 enabled = ["cms-pages", "media-library", "commerce-catalog", "admin-shell", "admin-content"]

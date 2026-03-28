@@ -1,0 +1,13 @@
+[content_model]
+name = "home"
+kind = "page"
+description = "Landing page content for Gitly"
+
+[fields.title]
+type = "text"
+localized = true
+required = true
+
+[fields.hero_image]
+type = "asset"
+required = false

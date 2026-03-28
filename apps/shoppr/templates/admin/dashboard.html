@@ -1,0 +1,245 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Shoppr Admin'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Shoppr Admin</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operator dashboard</p>
+        <h1 dv:text="${page.title}">Shoppr Admin</h1>
+        <p dv:text="${page.summary}">
+          Operator overview for catalog, orders, and content.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Principal id
+          <code dv:text="${operator.principalId}">operator-live-1</code>
+          is using the current admin session.
+        </p>
+        <p dv:unless="${operator.hasPrincipal}">
+          This operator view is using the current browser session.
+        </p>
+        <p>
+          Use this dashboard as the day-one control room: manage live catalog copy, review
+          store-wide orders, publish content changes, and confirm which back-office gaps still
+          depend on runtime diagnostics rather than persisted operator systems.
+        </p>
+      </section>
+
+      <section class="admin-metrics">
+        <article class="admin-metric">
+          <p class="admin-metric__label">Catalog products</p>
+          <strong dv:text="${catalogCount}">3</strong>
+        </article>
+        <article class="admin-metric">
+          <p class="admin-metric__label">Recent orders</p>
+          <strong dv:text="${orderCount}">2</strong>
+        </article>
+        <article class="admin-metric">
+          <p class="admin-metric__label">Content routes</p>
+          <strong dv:text="${contentCount}">6</strong>
+        </article>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Day-one tasks</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Review storefront orders</h2>
+            <p>
+              Check whether checkout is producing a visible order queue with the same reference,
+              status, and total that customers see in the storefront account area.
+            </p>
+            <a class="button" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+              Open orders
+            </a>
+          </article>
+          <article class="admin-card">
+            <h2>Manage live catalog copy</h2>
+            <p>
+              Update product titles, summaries, prices, and collection placement from the admin
+              catalog screen, then verify the same browse loop customers will use.
+            </p>
+            <a class="button" href="/admin/catalog/products" dv:attr="href=${links.adminCatalog}">
+              Open catalog
+            </a>
+          </article>
+          <article class="admin-card">
+            <h2>Check content inventory</h2>
+            <p>
+              Review the live route set, navigation, and redirect readiness before traffic or
+              migration cutover.
+            </p>
+            <a class="button" href="/admin/pages" dv:attr="href=${links.adminPages}">
+              Open content
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Three-site demo</p>
+        <h2>Host-to-journey mapping</h2>
+        <p>
+          Shoppr now demonstrates three sites under the same customer app boundary: a UK
+          flagship store, a US events-led surface, and a DE assortment with localized
+          merchandising and memberships.
+        </p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h3>harbor-uk</h3>
+            <p>
+              Validate the main browse loop from catalog to collection to product detail to cart on
+              the UK storefront host.
+            </p>
+            <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Open shop route
+            </a>
+          </article>
+          <article class="admin-card">
+            <h3>harbor-us</h3>
+            <p>
+              Validate the US events journey and the site-specific event inventory without routing
+              traffic through the UK catalog first.
+            </p>
+            <a class="button" href="/en-US/events">
+              Open US events route
+            </a>
+          </article>
+          <article class="admin-card">
+            <h3>harbor-de</h3>
+            <p>
+              Validate the DE-specific assortment and localized merchandising path, including
+              products that are not visible on the other sites.
+            </p>
+            <a class="button" href="/de-DE/shop/products/harbor-scarf">
+              Open DE product
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Launch sign-off</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Browse and merchandising</h2>
+            <p>
+              Use the catalog screen to save live merchandising copy, then confirm the updated
+              products and collections are linked to the exact storefront routes customers browse.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Order support baseline</h2>
+            <p>
+              Use the orders screen to confirm that the store can prove reference, status, and
+              total for completed checkout output before launch support starts.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Cutover content checks</h2>
+            <p>
+              Use pages, navigation, and redirects to confirm that live routes are present and
+              legacy URL protection is accounted for before traffic switch.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Linked customer backend</p>
+        <h2>Workspace-owned Rust hook path</h2>
+        <p>
+          Shoppr ships a linked Rust backend crate through the customer workspace itself. The
+          running store exposes that linked plugin metadata directly in the runtime render model,
+          so this admin view can show exactly which first-party customer hooks are compiled into
+          the app.
+        </p>
+        <p>
+          This is the primary first-party Rust customization path for Shoppr. The optional
+          sidecar and WASM paths still exist, but they are secondary and bounded.
+        </p>
+        <p>
+          From the Shoppr workspace itself, run
+          <code>cargo run -p shoppr -- linked-backend demo</code> to execute the checked-in
+          linked backend rules without the optional sidecar.
+        </p>
+        <div class="admin-card-grid" dv:if="${hasLinkedCustomerPlugins}">
+          <article class="admin-card" dv:each="plugin : ${linkedCustomerPlugins}">
+            <h3 dv:text="${plugin.displayName}">Shoppr Linked Backend</h3>
+            <p>
+              Plugin id:
+              <code dv:text="${plugin.id}">shoppr-backend</code>
+            </p>
+            <p>
+              Version:
+              <strong dv:text="${plugin.version}">0.1.0</strong>
+            </p>
+            <p>
+              Registered hooks:
+              <span dv:text="${plugin.hooksSummary}">checkout, verified-webhook</span>
+            </p>
+          </article>
+        </div>
+        <p dv:unless="${hasLinkedCustomerPlugins}">
+          No linked customer plugins are registered in the current runtime plan.
+        </p>
+      </section>
+
+      <section class="admin-panels">
+        <article class="admin-panel" dv:each="panel : ${adminPanels}">
+          <p class="admin-panel__eyebrow" dv:text="${panel.label}">Inspect products and collections</p>
+          <h2 dv:text="${panel.title}">Catalog</h2>
+          <p dv:text="${panel.summary}">
+            Products and collections represented in the sample app.
+          </p>
+          <a class="button button--secondary" href="/admin/catalog/products" dv:attr="href=${panel.href}">
+            Open panel
+          </a>
+        </article>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operator route set</p>
+        <p>
+          These routes now cover live catalog copy management plus order and content operations.
+          They still stop short of payment capture controls, inventory management, and broader CMS
+          revision workflows, but the checked-in back office now records operator audit history for
+          the live actions it does support.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/orders" dv:attr="href=${links.adminOrders}">
+            Orders
+          </a>
+          <a class="button button--secondary" href="/admin/catalog/products" dv:attr="href=${links.adminCatalog}">
+            Catalog
+          </a>
+          <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+            Pages
+          </a>
+          <a class="button button--secondary" href="/admin/audit" dv:attr="href=${links.adminAudit}">
+            Audit
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

@@ -556,7 +556,7 @@ fn usage() -> String {
         "  platform tls renew --config config/platform.toml --certificate cert-live --replacement cert-next --dry-run",
         "  platform storage inspect --config config/platform.toml",
         "  platform storage verify --config config/platform.toml --policy",
-        "  platform assets publish --config apps/harbor-shop/platform.toml --dry-run",
+        "  platform assets publish --config apps/shoppr/platform.toml --dry-run",
         "  platform import run imports/wordpress-events.toml",
         "  platform import run imports/wordpress-events.toml --dry-run",
         "  platform import cutover imports/wordpress-events.toml",
@@ -12776,7 +12776,7 @@ enabled = ["cms"]
         let root = std::env::temp_dir().join(format!("davenda-cli-workflow-{suffix}"));
         let config_dir = root.join("config");
         let app_root = root.join("apps").join("showcase-events");
-        let auth_root = app_root.join("auth").join("harbor-auth");
+        let auth_root = app_root.join("auth").join("shoppr-auth");
         let templates_root = app_root.join("templates").join("pages");
 
         fs::create_dir_all(&config_dir).unwrap();
@@ -12799,7 +12799,7 @@ enabled = ["cms"]
         .unwrap();
         fs::write(
             auth_root.join("package.toml"),
-            "name = \"harbor-auth\"\nversion = \"0.1.0\"\nmode = \"extend\"\nstorage_schema_version = 1\nmodel_version = 1\ncapability_binding_version = 1\nimports = [\"platform-default-auth\"]\n",
+            "name = \"shoppr-auth\"\nversion = \"0.1.0\"\nmode = \"extend\"\nstorage_schema_version = 1\nmodel_version = 1\ncapability_binding_version = 1\nimports = [\"platform-default-auth\"]\n",
         )
         .unwrap();
         fs::write(
@@ -13690,7 +13690,7 @@ source_path = "fixtures/media.json"
 
     fn harbor_shop_platform_config() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../apps/harbor-shop/platform.toml")
+            .join("../../apps/shoppr/platform.toml")
             .canonicalize()
             .expect("sample customer app config exists")
     }
@@ -13947,7 +13947,7 @@ expect = true
         let config_path = customer_app_fixture();
         let configured = fs::read_to_string(&config_path).unwrap().replace(
             "package = \"platform-default-auth\"",
-            "package = \"harbor-auth\"",
+            "package = \"shoppr-auth\"",
         );
         fs::write(&config_path, configured).unwrap();
         let app_manifest_path = config_path
@@ -13960,7 +13960,7 @@ expect = true
             .join("app.toml");
         let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
             "package = \"platform-default-auth\"",
-            "package = \"harbor-auth\"",
+            "package = \"shoppr-auth\"",
         );
         fs::write(&app_manifest_path, app_manifest).unwrap();
 
@@ -13974,7 +13974,7 @@ expect = true
         .unwrap();
 
         assert!(rendered.contains("auth package inspect"));
-        assert!(rendered.contains("harbor-auth"));
+        assert!(rendered.contains("shoppr-auth"));
         assert!(rendered.contains("runtime_source"));
         assert!(rendered.contains("loaded auth package implementation"));
     }
@@ -14040,7 +14040,7 @@ expect = true
             .replace("explain_api = false", "explain_api = true")
             .replace(
                 "package = \"platform-default-auth\"",
-                "package = \"harbor-auth\"",
+                "package = \"shoppr-auth\"",
             );
         fs::write(&config_path, enabled_config).unwrap();
         let app_manifest_path = config_path
@@ -14053,7 +14053,7 @@ expect = true
             .join("app.toml");
         let app_manifest = fs::read_to_string(&app_manifest_path).unwrap().replace(
             "package = \"platform-default-auth\"",
-            "package = \"harbor-auth\"",
+            "package = \"shoppr-auth\"",
         );
         fs::write(&app_manifest_path, app_manifest).unwrap();
 
@@ -17375,7 +17375,7 @@ expect = true
         let (updates, persisted) = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )
@@ -17385,7 +17385,7 @@ expect = true
         assert_eq!(persisted["table"], "auth_tuples");
         assert_eq!(persisted["principal_id"], "alice");
         assert_eq!(persisted["site_id"], "main");
-        assert_eq!(persisted["storefront_id"], "harbor-shop");
+        assert_eq!(persisted["storefront_id"], "shoppr");
         assert_eq!(persisted["writes"], 2);
         assert_eq!(
             persisted["mapped_capabilities"]["administrator"],
@@ -17425,7 +17425,7 @@ expect = true
         let (updates, persisted) = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )
@@ -17454,7 +17454,7 @@ expect = true
         let auth_package = configured_auth_model_package("platform-default-auth");
 
         let (updates, persisted) =
-            user_import_updates(&staged, None, "harbor-shop", &auth_package, &auth_mapping)
+            user_import_updates(&staged, None, "shoppr", &auth_package, &auth_mapping)
                 .unwrap();
 
         assert_eq!(updates.len(), 2);
@@ -17466,7 +17466,7 @@ expect = true
         );
         assert!(
             updates.contains(&DefaultTupleUpdate::Write(DefaultTuple::new(
-                Entity::storefront("harbor-shop"),
+                Entity::storefront("shoppr"),
                 Relation::Member,
                 DefaultSubject::userset(Entity::group("legacy-role:customer"), Relation::Member),
             )))
@@ -17488,7 +17488,7 @@ expect = true
         let (updates, persisted) = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )
@@ -17526,7 +17526,7 @@ expect = true
         let (updates, persisted) = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )
@@ -17552,7 +17552,7 @@ expect = true
         let error = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )
@@ -17573,7 +17573,7 @@ expect = true
             test_import_auth_mapping("- `editor` -> `cms.page.publish`, `asset.publish`\n");
         let auth_package = configured_auth_model_package("platform-default-auth");
 
-        let error = user_import_updates(&staged, None, "harbor-shop", &auth_package, &auth_mapping)
+        let error = user_import_updates(&staged, None, "shoppr", &auth_package, &auth_mapping)
             .unwrap_err();
 
         assert!(error.to_string().contains("non-empty `site`"));
@@ -17592,7 +17592,7 @@ expect = true
         let error = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )
@@ -17614,7 +17614,7 @@ expect = true
         let error = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )
@@ -17636,7 +17636,7 @@ expect = true
         let error = user_import_updates(
             &staged,
             Some("main"),
-            "harbor-shop",
+            "shoppr",
             &auth_package,
             &auth_mapping,
         )

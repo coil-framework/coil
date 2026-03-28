@@ -165,12 +165,12 @@ fn events_list_template() -> &'static str {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Events · Harbor Shop</title>
+    <title>Events · Shoppr</title>
     <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
   </head>
   <body class="harbor events">
     <header class="site-header">
-      <a href="/" class="brand">Harbor Shop</a>
+      <a href="/" class="brand">Shoppr</a>
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main">
@@ -226,12 +226,12 @@ fn events_detail_template() -> &'static str {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Event detail · Harbor Shop</title>
+    <title>Event detail · Shoppr</title>
     <link rel="stylesheet" href="/theme/assets/site.css" dv:href="@{theme/assets/site.css}" />
   </head>
   <body class="harbor events">
     <header class="site-header">
-      <a href="/" class="brand">Harbor Shop</a>
+      <a href="/" class="brand">Shoppr</a>
       <nav dv:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main">
@@ -240,7 +240,7 @@ fn events_detail_template() -> &'static str {
           <p class="catalog-section__eyebrow">Event detail</p>
           <h1 dv:text="${route_params.event_slug}">spring-tasting</h1>
           <p>
-            Event records are not published in the checked-in Harbor Shop sample yet, so this
+            Event records are not published in the checked-in Shoppr sample yet, so this
             route shows the real customer entry point without pretending there is catalog data
             behind it.
           </p>

@@ -144,19 +144,19 @@ mod tests {
             .unwrap()
             .as_nanos();
         let temp_root = std::env::temp_dir().join(format!("davenda-cli-customer-app-{unique}"));
-        let app_root = temp_root.join("apps").join("harbor-shop");
+        let app_root = temp_root.join("apps").join("shoppr");
         fs::create_dir_all(&app_root).unwrap();
-        fs::write(app_root.join("app.toml"), "id = \"harbor-shop\"\n").unwrap();
+        fs::write(app_root.join("app.toml"), "id = \"shoppr\"\n").unwrap();
         fs::write(
             app_root.join("platform.dev.toml"),
-            "[app]\nname = \"harbor-shop\"\n",
+            "[app]\nname = \"shoppr\"\n",
         )
         .unwrap();
 
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&app_root).unwrap();
         let resolved =
-            resolve_customer_app_root(Path::new("platform.dev.toml"), "harbor-shop").unwrap();
+            resolve_customer_app_root(Path::new("platform.dev.toml"), "shoppr").unwrap();
         std::env::set_current_dir(original_dir).unwrap();
         let expected = app_root.canonicalize().unwrap();
         let _ = fs::remove_dir_all(&temp_root);

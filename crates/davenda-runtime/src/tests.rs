@@ -222,7 +222,7 @@ fn config_with_sites() -> PlatformConfig {
     );
     PlatformConfig::from_toml_str(&config.replace(
         "\n[auth]\npackage = \"platform-default-auth\"\nexplain_api = false\ntenant_id = 101\n",
-        "\n[[sites]]\nid = \"shop\"\ndisplay_name = \"Harbor Shop\"\nbrand_name = \"Harbor\"\ncanonical_host = \"shop.example.com\"\nhosts = [\"www.example.com\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"fr-FR\"]\n\n[[sites]]\nid = \"tickets\"\ndisplay_name = \"Harbor Tickets\"\ncanonical_host = \"tickets.example.com\"\nhosts = [\"tickets-alt.example.com\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"de-DE\"]\n\n[auth]\npackage = \"platform-default-auth\"\nexplain_api = false\ntenant_id = 101\n",
+        "\n[[sites]]\nid = \"shop\"\ndisplay_name = \"Shoppr\"\nbrand_name = \"Harbor\"\ncanonical_host = \"shop.example.com\"\nhosts = [\"www.example.com\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"fr-FR\"]\n\n[[sites]]\nid = \"tickets\"\ndisplay_name = \"Harbor Tickets\"\ncanonical_host = \"tickets.example.com\"\nhosts = [\"tickets-alt.example.com\"]\ndefault_locale = \"en-GB\"\nsupported_locales = [\"en-GB\", \"de-DE\"]\n\n[auth]\npackage = \"platform-default-auth\"\nexplain_api = false\ntenant_id = 101\n",
     ))
     .unwrap()
 }
@@ -1700,7 +1700,7 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
                 handle: "featured".to_string(),
                 title: "Harbor Essentials".to_string(),
                 label: "Live catalog".to_string(),
-                summary: "Everyday storefront staples for the checked-in Harbor Shop.".to_string(),
+                summary: "Everyday storefront staples for the checked-in Shoppr.".to_string(),
                 is_visible: false,
             },
             100,
@@ -1724,7 +1724,7 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
             &crate::storefront::StorefrontCatalogProductUpdate {
                 handle: "harbor-cap".to_string(),
                 title: "Dockside Cap".to_string(),
-                summary: "Updated live from the Harbor Shop admin workflow.".to_string(),
+                summary: "Updated live from the Shoppr admin workflow.".to_string(),
                 price_minor: 3_100,
                 collection_handle: "memberships".to_string(),
                 is_visible: false,
@@ -1736,7 +1736,7 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
     assert_eq!(product.title, "Dockside Cap");
     assert_eq!(
         product.summary,
-        "Updated live from the Harbor Shop admin workflow."
+        "Updated live from the Shoppr admin workflow."
     );
     assert_eq!(product.price_minor, 3_100);
     assert_eq!(product.collection_handle, "memberships");
@@ -1760,7 +1760,7 @@ fn storefront_state_store_persists_catalog_overrides_across_reopen() {
     assert_eq!(product.title, "Dockside Cap");
     assert_eq!(
         product.summary,
-        "Updated live from the Harbor Shop admin workflow."
+        "Updated live from the Shoppr admin workflow."
     );
     assert_eq!(product.price_minor, 3_100);
     assert_eq!(product.collection_handle, "memberships");

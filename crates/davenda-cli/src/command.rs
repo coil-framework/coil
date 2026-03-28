@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn baseline_commands_include_jobs_dead_letters() {
-        let commands = baseline_commands("harbor-shop").unwrap();
+        let commands = baseline_commands("shoppr").unwrap();
         assert!(commands.iter().any(|descriptor| {
             descriptor.path == vec!["jobs".to_string(), "dead-letters".to_string()]
         }));
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn baseline_commands_include_jobs_ready() {
-        let commands = baseline_commands("harbor-shop").unwrap();
+        let commands = baseline_commands("shoppr").unwrap();
         assert!(commands.iter().any(|descriptor| {
             descriptor.path == vec!["jobs".to_string(), "ready".to_string()]
         }));
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn baseline_commands_include_jobs_run() {
-        let commands = baseline_commands("harbor-shop").unwrap();
+        let commands = baseline_commands("shoppr").unwrap();
         let run = commands
             .iter()
             .find(|descriptor| descriptor.path == vec!["jobs".to_string(), "run".to_string()])
@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn baseline_commands_include_module_enable_and_disable() {
-        let commands = baseline_commands("harbor-shop").unwrap();
+        let commands = baseline_commands("shoppr").unwrap();
         let install = commands
             .iter()
             .find(|descriptor| descriptor.path == vec!["module".to_string(), "install".to_string()])
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn baseline_commands_include_jobs_retry() {
-        let commands = baseline_commands("harbor-shop").unwrap();
+        let commands = baseline_commands("shoppr").unwrap();
         let retry = commands
             .iter()
             .find(|descriptor| descriptor.path == vec!["jobs".to_string(), "retry".to_string()])
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn baseline_commands_include_jobs_in_flight() {
-        let commands = baseline_commands("harbor-shop").unwrap();
+        let commands = baseline_commands("shoppr").unwrap();
         assert!(commands.iter().any(|descriptor| {
             descriptor.path == vec!["jobs".to_string(), "in-flight".to_string()]
         }));
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn baseline_commands_include_jobs_promote() {
-        let commands = baseline_commands("harbor-shop").unwrap();
+        let commands = baseline_commands("shoppr").unwrap();
         let promote = commands
             .iter()
             .find(|descriptor| descriptor.path == vec!["jobs".to_string(), "promote".to_string()])

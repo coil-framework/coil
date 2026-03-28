@@ -1,4 +1,4 @@
-# Harbor Shop Extraction Spec
+# Shoppr Extraction Spec
 
 - Source database snapshot: `fixtures/wordpress-events/source/db.sql.gz`
 - Source uploads root: `fixtures/wordpress-events/source/uploads`

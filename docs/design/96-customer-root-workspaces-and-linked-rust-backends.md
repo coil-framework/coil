@@ -108,15 +108,15 @@ store behavior.
 A customer store should look roughly like this:
 
 ```text
-harbor-shop/
+shoppr/
   Cargo.toml
   Cargo.lock
   crates/
-    harbor-shop-app/
-    harbor-shop-backend/
-    harbor-shop-bin/
+    shoppr-app/
+    shoppr-backend/
+    shoppr-bin/
   apps/
-    harbor-shop/
+    shoppr/
       app.toml
       platform.toml
       templates/
@@ -127,10 +127,10 @@ harbor-shop/
 
 In that layout:
 
-- `harbor-shop-bin` is the executable composition root
-- `harbor-shop-app` owns app composition helpers, install policy, and product-level config glue
-- `harbor-shop-backend` owns customer-specific Rust logic and hook implementations
-- `apps/harbor-shop/` still owns the customer manifest, templates, theme assets, auth package, and
+- `shoppr-bin` is the executable composition root
+- `shoppr-app` owns app composition helpers, install policy, and product-level config glue
+- `shoppr-backend` owns customer-specific Rust logic and hook implementations
+- `apps/shoppr/` still owns the customer manifest, templates, theme assets, auth package, and
   extension packages
 - Davenda crates are normal dependencies declared in the customer workspace manifest
 
@@ -264,14 +264,14 @@ They are still appropriate when:
 
 They are not the default answer for normal customer-owned Rust logic.
 
-## Harbor Shop as the Reference Example
+## Shoppr as the Reference Example
 
-Harbor Shop should eventually demonstrate both supported customization paths:
+Shoppr should eventually demonstrate both supported customization paths:
 
 - a linked customer-owned Rust backend crate implementing Davenda hook traits
 - a bounded WASM extension installed through the normal extension packaging path
 
-That split is intentional. Harbor Shop should show third-party developers and customer teams the
+That split is intentional. Shoppr should show third-party developers and customer teams the
 difference between:
 
 - first-party customer code that participates in the build
@@ -294,7 +294,7 @@ presented as the primary future model.
 
 - Davenda must now own a stable customer SDK surface rather than relying on ad hoc internal access
 - the bootstrap and registration model must become more explicit
-- Harbor Shop and local development workflows will need to move from "embedded example app inside
+- Shoppr and local development workflows will need to move from "embedded example app inside
   the Davenda repo" toward "reference customer workspace that consumes Davenda"
 - some existing docs that describe WASM as the default customer-extension path need to be read in
   light of this decision and updated over time

@@ -43,7 +43,7 @@ fn manifest_plans_importers_in_dependency_order() {
         ImportRunId::new("wordpress-cutover").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_module("cms")
@@ -96,10 +96,10 @@ fn manifest_plans_importers_in_dependency_order() {
 #[test]
 fn manifest_validate_at_rejects_missing_referenced_paths_and_cutover_contracts() {
     let root = unique_dir("manifest-validate-at");
-    write_text(root.join("app.toml"), "[app]\nname = \"harbor-shop\"\n");
+    write_text(root.join("app.toml"), "[app]\nname = \"shoppr\"\n");
     write_text(
         root.join("platform.toml"),
-        "[app]\nname = \"harbor-shop\"\n",
+        "[app]\nname = \"shoppr\"\n",
     );
     write_text(root.join("pages.json"), "[]");
     write_text(root.join("capability-map.md"), "capability map");
@@ -112,7 +112,7 @@ fn manifest_validate_at_rejects_missing_referenced_paths_and_cutover_contracts()
         ImportRunId::new("wordpress-cutover").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_target(ImportTarget::new("app.toml", "platform.toml").unwrap())
@@ -161,12 +161,12 @@ fn manifest_plan_preserves_target_source_and_cutover_metadata_in_reports() {
 run_id = "wordpress-events"
 source_system = "wordpress"
 snapshot_at = "2026-03-19T00:00:00Z"
-customer_app_id = "harbor-shop"
+customer_app_id = "shoppr"
 modules = ["cms", "events"]
 
 [target]
-app_manifest = "../apps/harbor-shop/app.toml"
-platform_config = "../apps/harbor-shop/platform.toml"
+app_manifest = "../apps/shoppr/app.toml"
+platform_config = "../apps/shoppr/platform.toml"
 expected_modules = ["cms", "events"]
 
 [source]
@@ -241,7 +241,7 @@ source_path = "fixtures/pages.json"
 fn import_auth_mapping_parses_markdown_role_capabilities() {
     let mapping = ImportAuthMapping::from_markdown_str(
         r#"
-# Harbor Shop Auth Mapping
+# Shoppr Auth Mapping
 
 - `administrator` -> `cms.page.publish`, `asset.publish`, `events.booking.manage`
 - `customer` -> `checkout.session.create`
@@ -298,7 +298,7 @@ fn import_manifest_load_auth_mapping_reads_declared_artifact() {
         ImportRunId::new("wordpress-cutover").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_migration_artifacts(
@@ -326,7 +326,7 @@ fn import_manifest_load_auth_mapping_requires_declared_artifact() {
         ImportRunId::new("wordpress-cutover").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap();
 
@@ -349,7 +349,7 @@ fn manifest_rejects_cycles_and_unknown_dependencies() {
         ImportRunId::new("bad-import").unwrap(),
         SourceSystemId::new("legacy").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -377,7 +377,7 @@ fn manifest_rejects_cycles_and_unknown_dependencies() {
         ImportRunId::new("cyclic-import").unwrap(),
         SourceSystemId::new("legacy").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -477,7 +477,7 @@ fn import_execution_stages_media_then_pages_with_resolved_asset_references() {
         ImportRunId::new("wordpress-cutover").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_locale("en-GB")
@@ -564,7 +564,7 @@ fn import_execution_skips_unchanged_records_and_updates_changed_ones() {
         ImportRunId::new("wordpress-pages").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -642,7 +642,7 @@ fn strict_validation_stops_invalid_records_and_permissive_mode_stages_exceptions
         ImportRunId::new("strict-pages").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(importer.clone());
@@ -660,7 +660,7 @@ fn strict_validation_stops_invalid_records_and_permissive_mode_stages_exceptions
         ImportRunId::new("permissive-pages").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(importer);
@@ -698,7 +698,7 @@ fn publish_validated_user_imports_normalize_principal_ids_and_legacy_roles() {
         ImportRunId::new("wordpress-users").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_site("main")
@@ -787,7 +787,7 @@ fn publish_validated_membership_imports_resolve_tiers_and_user_links() {
         ImportRunId::new("wordpress-memberships").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -890,7 +890,7 @@ fn user_import_records_require_a_principal_identifier() {
         ImportRunId::new("wordpress-users").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -919,7 +919,7 @@ fn import_execution_requires_source_paths_and_well_formed_source_batches() {
         ImportRunId::new("missing-source").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -946,7 +946,7 @@ fn import_execution_requires_source_paths_and_well_formed_source_batches() {
         ImportRunId::new("bad-source").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -989,7 +989,7 @@ fn strict_validation_rejects_pages_with_unresolved_media_references() {
         ImportRunId::new("missing-media").unwrap(),
         SourceSystemId::new("wordpress").unwrap(),
         "2026-03-19T00:00:00Z",
-        "harbor-shop",
+        "shoppr",
     )
     .unwrap()
     .with_importer(
@@ -1057,7 +1057,7 @@ fn manifest_document_loads_toml_into_a_typed_manifest_with_sources_and_mapping()
 run_id = "wordpress-events"
 source_system = "wordpress"
 snapshot_at = "2026-03-19T00:00:00Z"
-customer_app_id = "harbor-shop"
+customer_app_id = "shoppr"
 modules = ["cms", "events"]
 locale = "en"
 site = "main"
@@ -1066,8 +1066,8 @@ publication_mode = "stage_validated"
 asset_storage_default = "public_upload"
 
 [target]
-app_manifest = "../apps/harbor-shop/app.toml"
-platform_config = "../apps/harbor-shop/platform.toml"
+app_manifest = "../apps/shoppr/app.toml"
+platform_config = "../apps/shoppr/platform.toml"
 expected_modules = ["cms", "events"]
 
 [source]
@@ -1145,7 +1145,7 @@ dependencies = ["pages"]
     assert_eq!(manifest.importers.len(), 2);
     assert_eq!(
         manifest.target.as_ref().unwrap().app_manifest,
-        "../apps/harbor-shop/app.toml".to_string()
+        "../apps/shoppr/app.toml".to_string()
     );
     assert_eq!(manifest.source.as_ref().unwrap().inputs.len(), 1);
     assert_eq!(
@@ -1197,7 +1197,7 @@ fn manifest_document_reads_from_disk() {
 run_id = "wordpress-pages"
 source_system = "wordpress"
 snapshot_at = "2026-03-19T00:00:00Z"
-customer_app_id = "harbor-shop"
+customer_app_id = "shoppr"
 
 [[importers]]
 id = "pages"
@@ -1250,7 +1250,7 @@ fn cutover_execution_journal_round_trips_and_reports_prepared_steps() {
     let run_id = ImportRunId::new("wordpress-cutover").unwrap();
     let mut journal = CutoverExecutionJournal::new(
         &run_id,
-        "harbor-shop",
+        "shoppr",
         vec![
             CutoverStepRecord::new("final.import", "Final import").unwrap(),
             CutoverStepRecord::new("cutover.readiness", "Readiness check").unwrap(),
@@ -1269,7 +1269,7 @@ fn cutover_execution_journal_round_trips_and_reports_prepared_steps() {
     let loaded = CutoverExecutionJournal::load(
         &journal_path,
         &run_id,
-        "harbor-shop",
+        "shoppr",
         vec![CutoverStepRecord::new("storage.verify", "Storage verification").unwrap()],
     )
     .unwrap();
@@ -1286,7 +1286,7 @@ fn cutover_execution_journal_records_rolled_back_state() {
     let run_id = ImportRunId::new("wordpress-cutover").unwrap();
     let mut journal = CutoverExecutionJournal::new(
         &run_id,
-        "harbor-shop",
+        "shoppr",
         vec![CutoverStepRecord::new("rollback.executed", "Rollback").unwrap()],
     );
 
@@ -1315,7 +1315,7 @@ fn cutover_execution_journal_persists_switch_execution_metadata() {
     let run_id = ImportRunId::new("wordpress-cutover").unwrap();
     let mut journal = CutoverExecutionJournal::new(
         &run_id,
-        "harbor-shop",
+        "shoppr",
         vec![CutoverStepRecord::new("switch.confirmed", "Switch").unwrap()],
     );
 
@@ -1358,7 +1358,7 @@ fn cutover_execution_journal_persists_non_dns_switch_targets() {
     let run_id = ImportRunId::new("wordpress-cutover").unwrap();
     let mut journal = CutoverExecutionJournal::new(
         &run_id,
-        "harbor-shop",
+        "shoppr",
         vec![CutoverStepRecord::new("switch.confirmed", "Switch").unwrap()],
     );
 

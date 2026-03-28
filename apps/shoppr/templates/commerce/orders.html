@@ -1,0 +1,176 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Orders'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Orders</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Commerce operations</p>
+        <h1 dv:text="${page.title}">Orders</h1>
+        <p dv:text="${page.summary}">
+          Operator order queue and payment history.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Signed in as <strong dv:text="${operator.displayName}">Current Operator</strong>.
+        </p>
+        <p dv:if="${operator.hasPrincipal}">
+          Principal id <code dv:text="${operator.principalId}">operator-live-1</code>.
+        </p>
+        <p>
+          This queue is store-wide. Use it to confirm payment state, review checkout email and
+          totals, and move into the per-order support detail view before escalating a checkout
+          case.
+        </p>
+      </section>
+
+      <section class="storefront-flash" dv:if="${hasFlashMessages}">
+        <article class="storefront-flash__message" dv:each="message : ${flashMessages}">
+          <p class="storefront-flash__eyebrow" dv:text="${message.level}">info</p>
+          <p dv:text="${message.text}">Order support update</p>
+        </article>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total visible orders</h2>
+            <p>
+              <strong dv:text="${orderStats.total}">0</strong>
+              orders are currently visible to support.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Pending confirmation</h2>
+            <p>
+              <strong dv:text="${orderStats.pending}">0</strong>
+              orders are still awaiting payment confirmation or operator follow-up.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Refunded orders</h2>
+            <p>
+              <strong dv:text="${orderStats.refunded}">0</strong>
+              orders have already moved through the refund workflow.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operator guidance</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Support first</h2>
+            <p>
+              Start in the detail view for customer email, payment reference, line items, and
+              refund eligibility. That keeps escalations anchored to one order record.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Pending Payment is not failure</h2>
+            <p>
+              After a Stripe return, compare the customer account view and provider callback window
+              before treating Pending Payment as a failed checkout.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Refund boundary</h2>
+            <p>
+              The checked-in workflow supports full remaining refunds from order detail. Use deeper
+              provider diagnostics if reconciliation disagrees with this local order state.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasRecentOrders}">
+        <p class="admin-panel__eyebrow">Recent orders</p>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Order</th>
+              <th scope="col">Status</th>
+              <th scope="col">Payment</th>
+              <th scope="col">Customer</th>
+              <th scope="col">Total</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr dv:each="order : ${recentOrders}">
+              <td>
+                <strong dv:text="${order.reference}">ORD-10042</strong>
+              </td>
+              <td dv:text="${order.status}">Paid</td>
+              <td dv:text="${order.paymentStatus}">Captured</td>
+              <td>
+                <span dv:if="${order.hasCustomerEmail}" dv:text="${order.customerEmail}">
+                  member@example.com
+                </span>
+                <span dv:unless="${order.hasCustomerEmail}">Receipt email pending</span>
+              </td>
+              <td dv:text="${order.total}">£0.00</td>
+              <td>
+                <a
+                  class="button button--secondary"
+                  href="/admin/orders/ORD-10042"
+                  dv:attr="href=${order.detailHref}"
+                >
+                  View details
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin" dv:attr="href=${links.adminDashboard}">
+            Back to dashboard
+          </a>
+          <a class="button button--secondary" href="/account/orders" dv:attr="href=${links.orders}">
+            Open storefront order history
+          </a>
+          <a class="button button--secondary" href="/shop" dv:attr="href=${links.catalog}">
+            Open storefront catalog
+          </a>
+        </div>
+      </section>
+
+      <section class="admin-panel" dv:unless="${hasRecentOrders}">
+        <p class="admin-panel__eyebrow">Recent orders</p>
+        <h2>No completed orders yet</h2>
+        <p dv:text="${ordersEmptyText}">
+          No completed orders have been captured in the checked-in sample app yet.
+        </p>
+        <p>
+          Use the storefront checkout flow to generate the first supportable order, then return
+          here to confirm that the order queue and payment handoff are visible to operators.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button" href="/shop" dv:attr="href=${links.catalog}">
+            Open storefront
+          </a>
+          <a class="button button--secondary" href="/admin" dv:attr="href=${links.adminDashboard}">
+            Back to dashboard
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

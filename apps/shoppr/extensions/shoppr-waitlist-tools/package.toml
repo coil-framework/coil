@@ -1,0 +1,17 @@
+publisher = "harbor-marketplace"
+artifact = "shoppr-waitlist-tools/shoppr-waitlist-tools.wasm"
+artifact_sha256 = "a86d1a1646e818bf600653ba6cf3585162157517acf74d76c20ecba3328694dc"
+source_wat = "shoppr-waitlist-tools.wat"
+
+[manifest]
+id = "shoppr-waitlist-tools"
+display_name = "Shoppr Waitlist Tools"
+version = "0.1.0"
+host_api_version = "1.0.0"
+
+[[handlers]]
+id = "home.waitlist.banner"
+export = "exports.home_waitlist_banner"
+point = "render-hook"
+target = "cms.page.render"
+grants = []

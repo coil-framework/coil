@@ -689,7 +689,7 @@ mod tests {
         write_file(
             &path,
             r#"<!doctype html>
-<html xmlns:dv="https://davenda.dev" dv:with="pageTitle='Harbor Shop'">
+<html xmlns:dv="https://davenda.dev" dv:with="pageTitle='Shoppr'">
   <head>
     <title dv:text="${pageTitle}">Fallback</title>
     <link rel="stylesheet" href="/theme/assets/site.css" dv:href="${asset('theme/assets/site.css')}" />

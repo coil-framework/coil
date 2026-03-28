@@ -2,9 +2,9 @@
   {
     "source_key": "wp:post:home",
     "checksum": "page-home-v1",
-    "title": "Harbor Shop Home",
+    "title": "Shoppr Home",
     "slug": "home",
-    "body_html": "<p>Welcome to Harbor Shop.</p>",
+    "body_html": "<p>Welcome to Shoppr.</p>",
     "canonical_path": "/en-GB/home",
     "media_references": ["wp:media:hero"]
   }

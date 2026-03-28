@@ -29,7 +29,7 @@ impl CheckoutHooks for ExampleCheckoutHooks {
 
 impl CustomerBackendPlugin for ExampleCheckoutPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
-        CustomerPluginDescriptor::new("harbor-shop-backend", "Harbor Shop Backend", "0.1.0")
+        CustomerPluginDescriptor::new("shoppr-backend", "Shoppr Backend", "0.1.0")
     }
 
     fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
@@ -43,7 +43,7 @@ struct DuplicateCustomerPlugin;
 
 impl CustomerBackendPlugin for DuplicateCustomerPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
-        CustomerPluginDescriptor::new("harbor-shop-backend", "Harbor Shop Backend", "0.1.1")
+        CustomerPluginDescriptor::new("shoppr-backend", "Shoppr Backend", "0.1.1")
     }
 
     fn register(&self, _registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
@@ -191,11 +191,11 @@ fn runtime_builder_registers_linked_customer_plugins_through_sdk_hooks() {
     assert_eq!(plan.linked_customer_plugins.len(), 1);
     assert_eq!(
         plan.linked_customer_plugins[0].plugin_id,
-        "harbor-shop-backend"
+        "shoppr-backend"
     );
     assert_eq!(
         plan.linked_customer_plugins[0].display_name,
-        "Harbor Shop Backend"
+        "Shoppr Backend"
     );
     assert_eq!(plan.linked_customer_plugins[0].version, "0.1.0");
     assert_eq!(
@@ -216,7 +216,7 @@ fn runtime_builder_rejects_duplicate_linked_customer_plugins() {
     assert!(matches!(
         error,
         RuntimeBuildError::DuplicateCustomerPlugin { plugin_id }
-            if plugin_id == "harbor-shop-backend"
+            if plugin_id == "shoppr-backend"
     ));
 }
 
@@ -268,7 +268,7 @@ fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
     assert_eq!(plan.linked_customer_plugins.len(), 1);
     assert_eq!(
         plan.linked_customer_plugins[0].plugin_id,
-        "harbor-shop-backend"
+        "shoppr-backend"
     );
     assert!(html.contains("customer-root-runtime"), "{html}");
 }
@@ -320,7 +320,7 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
         VALID_CONFIG
             .replace(
                 "package = \"platform-default-auth\"",
-                "package = \"harbor-auth\"",
+                "package = \"shoppr-auth\"",
             )
             .replace(
                 "enabled = [\"cms-pages\", \"admin-shell\"]",
@@ -328,10 +328,10 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
             ),
     )
     .unwrap();
-    write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
+    write_customer_root_manifest(&customer_root, "shoppr-auth", &["cms"]);
     let harbor_auth =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
-    copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/shoppr/auth/shoppr-auth");
+    copy_directory(&harbor_auth, &customer_root.join("auth/shoppr-auth"));
 
     let plan = customer_root_runtime_from_paths(&customer_root, "platform.toml")
         .unwrap()
@@ -354,7 +354,7 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
 
     fs::remove_dir_all(&customer_root).unwrap();
 
-    assert_eq!(plan.auth_package_name, "harbor-auth");
+    assert_eq!(plan.auth_package_name, "shoppr-auth");
     assert!(html.contains("bootstrapped-from-paths"), "{html}");
 }
 
@@ -374,7 +374,7 @@ fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
         VALID_CONFIG
             .replace(
                 "package = \"platform-default-auth\"",
-                "package = \"harbor-auth\"",
+                "package = \"shoppr-auth\"",
             )
             .replace(
                 "enabled = [\"cms-pages\", \"admin-shell\"]",
@@ -382,17 +382,17 @@ fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
             ),
     )
     .unwrap();
-    write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
+    write_customer_root_manifest(&customer_root, "shoppr-auth", &["cms"]);
     let harbor_auth =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
-    copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/shoppr/auth/shoppr-auth");
+    copy_directory(&harbor_auth, &customer_root.join("auth/shoppr-auth"));
 
     let inputs =
         customer_root_bootstrap_inputs_from_paths(&customer_root, "platform.toml").unwrap();
 
     fs::remove_dir_all(&customer_root).unwrap();
 
-    assert_eq!(inputs.auth_package_name, "harbor-auth");
+    assert_eq!(inputs.auth_package_name, "shoppr-auth");
     assert_eq!(inputs.config.app.name, "showcase-events");
     assert!(inputs.config_path.ends_with("platform.toml"));
 }
@@ -453,7 +453,7 @@ fn direct_builder_bootstraps_customer_root_from_paths() {
         VALID_CONFIG
             .replace(
                 "package = \"platform-default-auth\"",
-                "package = \"harbor-auth\"",
+                "package = \"shoppr-auth\"",
             )
             .replace(
                 "enabled = [\"cms-pages\", \"admin-shell\"]",
@@ -461,10 +461,10 @@ fn direct_builder_bootstraps_customer_root_from_paths() {
             ),
     )
     .unwrap();
-    write_customer_root_manifest(&customer_root, "harbor-auth", &["cms"]);
+    write_customer_root_manifest(&customer_root, "shoppr-auth", &["cms"]);
     let harbor_auth =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/harbor-shop/auth/harbor-auth");
-    copy_directory(&harbor_auth, &customer_root.join("auth/harbor-auth"));
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/shoppr/auth/shoppr-auth");
+    copy_directory(&harbor_auth, &customer_root.join("auth/shoppr-auth"));
 
     let plan = Builder::new()
         .register_module(davenda_cms::CmsModule::new())
@@ -475,7 +475,7 @@ fn direct_builder_bootstraps_customer_root_from_paths() {
     fs::remove_dir_all(&customer_root).unwrap();
 
     assert!(plan.modules.iter().any(|module| module.name == "cms"));
-    assert_eq!(plan.auth_package_name, "harbor-auth");
+    assert_eq!(plan.auth_package_name, "shoppr-auth");
     assert_eq!(plan.linked_customer_plugins.len(), 1);
 }
 

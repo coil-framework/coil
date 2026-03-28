@@ -121,7 +121,7 @@ The customer SDK must therefore expose site identity as a stable first-party fie
 ### Positive
 
 - customers can model UK, US, AU, DE style storefronts inside one customer app
-- Harbor Shop and similar examples can demonstrate host-selected multi-site behavior cleanly
+- Shoppr and similar examples can demonstrate host-selected multi-site behavior cleanly
 - locale remains focused on translation and formatting
 - SEO and canonical host generation stay coherent
 - customer-linked Rust hooks can apply site-aware business rules without separate services
@@ -143,9 +143,9 @@ This decision does not, by itself, require:
 
 Those can be layered later if needed.
 
-## Harbor Shop Demonstration Requirements
+## Shoppr Demonstration Requirements
 
-Harbor Shop must demonstrate at least three sites inside one customer workspace.
+Shoppr must demonstrate at least three sites inside one customer workspace.
 
 The demo must show:
 

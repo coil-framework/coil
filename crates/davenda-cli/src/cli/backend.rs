@@ -263,7 +263,7 @@ publish_manifest = false
         let root = std::env::temp_dir().join(format!("davenda-cli-auth-backend-{suffix}"));
         let config_dir = root.join("config");
         let app_root = root.join("apps").join("showcase-events");
-        let auth_root = app_root.join("auth").join("harbor-auth");
+        let auth_root = app_root.join("auth").join("shoppr-auth");
 
         fs::create_dir_all(&config_dir).unwrap();
         fs::create_dir_all(&auth_root).unwrap();
@@ -273,7 +273,7 @@ publish_manifest = false
                 .replace("explain_api = true", "explain_api = false")
                 .replace(
                     "package = \"platform-default-auth\"",
-                    "package = \"harbor-auth\"",
+                    "package = \"shoppr-auth\"",
                 ),
         )
         .unwrap();
@@ -297,7 +297,7 @@ asset_roots = []
 
 [auth]
 mode = "extend"
-package = "harbor-auth"
+package = "shoppr-auth"
 
 [modules]
 enabled = ["cms"]
@@ -306,7 +306,7 @@ enabled = ["cms"]
         .unwrap();
         fs::write(
             auth_root.join("package.toml"),
-            "name = \"harbor-auth\"\nversion = \"0.1.0\"\nmode = \"extend\"\nstorage_schema_version = 1\nmodel_version = 1\ncapability_binding_version = 1\nimports = [\"platform-default-auth\"]\n",
+            "name = \"shoppr-auth\"\nversion = \"0.1.0\"\nmode = \"extend\"\nstorage_schema_version = 1\nmodel_version = 1\ncapability_binding_version = 1\nimports = [\"platform-default-auth\"]\n",
         )
         .unwrap();
         fs::write(
@@ -375,7 +375,7 @@ enabled = ["cms"]
         let package =
             resolve_deployment_configured_auth_package_selection(&config_path, &config).unwrap();
 
-        assert_eq!(package.manifest().name, "harbor-auth");
+        assert_eq!(package.manifest().name, "shoppr-auth");
         assert_eq!(
             package
                 .package()
@@ -395,7 +395,7 @@ enabled = ["cms"]
         );
 
         let backend = LiveAuthExplainBackend::from_config_path(&config_path).unwrap();
-        assert!(format!("{backend:?}").contains("harbor-auth"));
+        assert!(format!("{backend:?}").contains("shoppr-auth"));
     }
 
     #[test]

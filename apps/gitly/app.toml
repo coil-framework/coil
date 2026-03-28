@@ -1,0 +1,54 @@
+[app]
+name = "gitly"
+display_name = "Gitly"
+
+[domains]
+canonical = "gitly.example.com"
+additional = ["gitly.127.0.0.1.nip.io", "www.example.com"]
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+localized_routes = true
+
+[[sites]]
+id = "default"
+display_name = "Gitly"
+brand_name = "Gitly"
+canonical_domain = "gitly.example.com"
+additional_domains = ["gitly.127.0.0.1.nip.io", "www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+localized_routes = true
+
+[theme]
+active = "gitly"
+template_namespaces = ["customer-app", "gitly"]
+asset_roots = ["theme/assets"]
+
+[auth]
+mode = "extend"
+package = "gitly-auth"
+
+[modules]
+enabled = ["admin", "cms", "media", "gitly-showcase"]
+
+[[extensions]]
+id = "gitly-community-pulse"
+package_version = "0.1.0"
+artifact_sha256 = "ef2b0bc15aa0baf178df23d3671bf0a2914c618e394f985441e27a5fdd7c89d7"
+customer_app_id = "gitly"
+
+[[extensions.handlers]]
+id = "community-pulse"
+grants = []
+
+[[extensions]]
+id = "gitly-actions-scheduler"
+package_version = "0.1.0"
+artifact_sha256 = "eadcc0e65bf8059fa9411be20e885a976d415e7747e505125c2f15ef662e333f"
+customer_app_id = "gitly"
+
+[[extensions.handlers]]
+id = "nightly-refresh"
+grants = []

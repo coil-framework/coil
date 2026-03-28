@@ -26,11 +26,11 @@ async fn serve_dev_home() -> Html<&'static str> {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Harbor Shop Local Dev</title>
+    <title>Shoppr Local Dev</title>
   </head>
   <body>
     <main>
-      <h1>Harbor Shop Local Dev</h1>
+      <h1>Shoppr Local Dev</h1>
       <p>Use these shortcuts to enter the checked-in customer and operator journeys locally.</p>
       <ul>
         <li><a href="/__dev/login/customer?next=/account">Sign in as sample customer</a></li>

@@ -1,0 +1,17 @@
+publisher = "gitly-demo"
+artifact = "artifacts/gitly-actions-scheduler.wasm"
+artifact_sha256 = "eadcc0e65bf8059fa9411be20e885a976d415e7747e505125c2f15ef662e333f"
+source_wat = "gitly-actions-scheduler.wat"
+
+[manifest]
+id = "gitly-actions-scheduler"
+display_name = "Gitly Actions Scheduler"
+version = "0.1.0"
+host_api_version = "1.0.0"
+
+[[handlers]]
+id = "nightly-refresh"
+export = "exports.nightly_refresh"
+point = "scheduled-job"
+target = "github.actions.refresh"
+grants = []

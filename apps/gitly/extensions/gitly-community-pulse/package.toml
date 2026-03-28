@@ -1,0 +1,17 @@
+publisher = "gitly-demo"
+artifact = "artifacts/gitly-community-pulse.wasm"
+artifact_sha256 = "ef2b0bc15aa0baf178df23d3671bf0a2914c618e394f985441e27a5fdd7c89d7"
+source_wat = "gitly-community-pulse.wat"
+
+[manifest]
+id = "gitly-community-pulse"
+display_name = "Gitly Community Pulse"
+version = "0.1.0"
+host_api_version = "1.0.0"
+
+[[handlers]]
+id = "community-pulse"
+export = "exports.community_pulse"
+point = "api"
+target = "/api/github/pulse"
+grants = []

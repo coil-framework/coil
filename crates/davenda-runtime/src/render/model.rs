@@ -590,7 +590,7 @@ fn page_model_for_route(
     template_name: &str,
     fragment_id: Option<&str>,
 ) -> RenderModel {
-    let brand_name = execution.brand_name.as_deref().unwrap_or("Harbor Shop");
+    let brand_name = execution.brand_name.as_deref().unwrap_or("Shoppr");
     let title = match execution.route.route_name.as_str() {
         "home" => brand_name.to_string(),
         "commerce.catalog" => format!("Shop {brand_name}"),
@@ -1915,7 +1915,7 @@ fn admin_audit_history(
         return Ok(AdminAuditHistoryView {
             entries: Vec::new(),
             empty_text:
-                "Start the checked-in Harbor Shop runtime before expecting persisted operator audit history."
+                "Start the checked-in Shoppr runtime before expecting persisted operator audit history."
                     .to_string(),
             backend: "unavailable".to_string(),
             location: "runtime not started".to_string(),
@@ -1973,7 +1973,7 @@ fn admin_audit_history(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(AdminAuditHistoryView {
         empty_text: format!(
-            "Audit backend `{}` at `{}` is live, but no privileged admin actions have been captured yet for this Harbor Shop runtime.",
+            "Audit backend `{}` at `{}` is live, but no privileged admin actions have been captured yet for this Shoppr runtime.",
             snapshot.backend.as_str(),
             snapshot.location
         ),
@@ -2115,7 +2115,7 @@ fn admin_panels(
             "Review live route inventory",
             "/admin/pages",
             &format!(
-                "{} content routes are represented in the checked-in Harbor Shop sample app.",
+                "{} content routes are represented in the checked-in Shoppr sample app.",
                 content_pages.len()
             ),
         )?,
@@ -2141,7 +2141,7 @@ fn content_pages(locale: &str) -> Result<Vec<RenderModel>, TemplateModelError> {
             "Home",
             "/",
             "public",
-            "The landing page for the Harbor Shop storefront.",
+            "The landing page for the Shoppr storefront.",
         )?,
         content_page(
             "Catalog",
@@ -2433,7 +2433,7 @@ fn cms_live_page_model(
         .with_value(
             "summary",
             RenderValue::text(
-                "This CMS page is not published yet. Use the Harbor Shop admin workflow to publish it before linking customers to this path.",
+                "This CMS page is not published yet. Use the Shoppr admin workflow to publish it before linking customers to this path.",
             ),
         )?
         .with_value(
@@ -4545,7 +4545,7 @@ cdn_base_url = "https://cdn.example.com"
                     ("service_level", "priority"),
                     (
                         "tags",
-                        "customer-app:harbor-shop,queue:vip-fulfilment,service-level:priority",
+                        "customer-app:shoppr,queue:vip-fulfilment,service-level:priority",
                     ),
                 ]),
             ))

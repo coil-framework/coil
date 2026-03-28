@@ -1,0 +1,30 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:fragment="shell"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Shoppr</title>
+    <link
+      rel="stylesheet"
+      href="/theme/assets/site.css"
+      dv:href="asset('theme/assets/site.css')"
+    />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand" dv:attr="href=${links.home}" dv:text="${site.brandName}">Shoppr</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main" dv:slot="content">
+      <section>Content goes here.</section>
+    </main>
+    <footer class="site-footer">
+      <small dv:text="${site.displayName}">Shoppr</small>
+    </footer>
+  </body>
+</html>

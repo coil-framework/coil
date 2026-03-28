@@ -225,7 +225,7 @@ fn theme_workspace() -> TempDir {
         r#"<!doctype html>
 <html xmlns:dv="https://davenda.dev" dv:fragment="shell" dv:attr="lang=${locale}">
   <head>
-    <title dv:text="${pageTitle}">Harbor Shop</title>
+    <title dv:text="${pageTitle}">Shoppr</title>
   </head>
   <body>
     <main dv:slot="content">
@@ -253,8 +253,8 @@ fn auth() -> AuthStrategy {
 
 fn app() -> CustomerAppManifest {
     CustomerAppManifest::new(
-        CustomerAppId::new("harbor-shop").unwrap(),
-        "Harbor Shop",
+        CustomerAppId::new("shoppr").unwrap(),
+        "Shoppr",
         locale("en-GB"),
         vec![locale("en-GB"), locale("fr-FR")],
         theme(),
@@ -290,7 +290,7 @@ fn app() -> CustomerAppManifest {
             ContractVersion::new(1, 2, 3),
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             ExtensionInstallation::new(
-                "harbor-shop",
+                "shoppr",
                 vec![HandlerInstallation::new(
                     HandlerId::new("account.loyalty.widget").unwrap(),
                     HostGrantSet::from_grants([HostCapabilityGrant::RenderFragment {
@@ -314,8 +314,8 @@ fn manifest_parses_explicit_sites_and_composition_uses_the_first_site_as_primary
     let manifest = CustomerAppManifest::from_toml_str(
         r#"
 [app]
-name = "harbor-shop"
-display_name = "Harbor Shop"
+name = "shoppr"
+display_name = "Shoppr"
 
 [domains]
 canonical = "shop.example.com"
@@ -327,7 +327,7 @@ supported_locales = ["en-GB", "fr-FR"]
 
 [[sites]]
 id = "storefront"
-display_name = "Harbor Shop"
+display_name = "Shoppr"
 brand_name = "Harbor"
 canonical_domain = "shop.example.com"
 additional_domains = ["www.example.com"]
@@ -377,12 +377,12 @@ fn manifest_accepts_site_first_defaults_without_top_level_domains_or_i18n() {
     let manifest = CustomerAppManifest::from_toml_str(
         r#"
 [app]
-name = "harbor-shop"
-display_name = "Harbor Shop"
+name = "shoppr"
+display_name = "Shoppr"
 
 [[sites]]
 id = "storefront"
-display_name = "Harbor Shop"
+display_name = "Shoppr"
 canonical_domain = "shop.example.com"
 additional_domains = ["www.example.com"]
 default_locale = "en-GB"
@@ -896,7 +896,7 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
     let workspace = theme_workspace();
     let runtime = app()
         .build_runtime_plan_with_extensions_at(
-            runtime_config_with_environment("harbor-shop", "development"),
+            runtime_config_with_environment("shoppr", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()
@@ -910,9 +910,9 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
 
     assert_eq!(
         runtime.composition.app_id,
-        CustomerAppId::new("harbor-shop").unwrap()
+        CustomerAppId::new("shoppr").unwrap()
     );
-    assert_eq!(runtime.runtime.config.app.name, "harbor-shop");
+    assert_eq!(runtime.runtime.config.app.name, "shoppr");
     assert_eq!(runtime.runtime.modules.len(), 2);
     assert_eq!(runtime.migration_summary.entries().len(), 4);
     assert!(
@@ -932,7 +932,7 @@ fn customer_app_can_build_a_runtime_plan_from_selected_modules() {
             .iter()
             .any(|entry| matches!(
                 entry.owner,
-                MigrationPlanOwner::CustomerApp(ref app_id) if app_id == "harbor-shop"
+                MigrationPlanOwner::CustomerApp(ref app_id) if app_id == "shoppr"
             ))
     );
     let theme_publication = runtime
@@ -966,7 +966,7 @@ fn runtime_build_requires_pinned_extension_packages() {
     let workspace = theme_workspace();
     let error = app()
         .build_runtime_plan_at(
-            runtime_config_with_environment("harbor-shop", "development"),
+            runtime_config_with_environment("shoppr", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()
@@ -980,7 +980,7 @@ fn runtime_build_requires_pinned_extension_packages() {
     assert_eq!(
         error,
         AppModelError::ExtensionPackagesRequired {
-            app_id: "harbor-shop".to_string(),
+            app_id: "shoppr".to_string(),
         }
     );
 
@@ -990,7 +990,7 @@ fn runtime_build_requires_pinned_extension_packages() {
     let workspace = theme_workspace();
     let error = app()
         .build_runtime_plan_with_extensions_at(
-            runtime_config_with_environment("harbor-shop", "development"),
+            runtime_config_with_environment("shoppr", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()
@@ -1015,7 +1015,7 @@ fn runtime_build_requires_pinned_extension_packages() {
 
 #[test]
 fn runtime_build_rejects_config_module_drift_and_unexpected_runtime_modules() {
-    let mut drifted = runtime_config("harbor-shop");
+    let mut drifted = runtime_config("shoppr");
     drifted.modules.enabled.push("events".to_string());
 
     let workspace = theme_workspace();
@@ -1049,14 +1049,14 @@ fn runtime_build_rejects_config_module_drift_and_unexpected_runtime_modules() {
     assert_eq!(
         app()
             .build_runtime_plan_at(
-                runtime_config("harbor-shop"),
+                runtime_config("shoppr"),
                 DefaultAuthModelPackage::default(),
                 modules,
                 workspace.path(),
             )
             .unwrap_err(),
         AppModelError::UnexpectedRuntimeModules {
-            app_id: "harbor-shop".to_string(),
+            app_id: "shoppr".to_string(),
             modules: vec!["media".to_string()],
         }
     );
@@ -1072,7 +1072,7 @@ fn runtime_build_requires_customer_template_tree() {
 
     let error = app()
         .build_runtime_plan_at(
-            runtime_config("harbor-shop"),
+            runtime_config("shoppr"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()
@@ -1100,7 +1100,7 @@ fn release_doctor_reports_config_drift_and_unpinned_modules() {
     let composition = manifest
         .compose(&DefaultAuthModelPackage::default(), &module_manifests())
         .unwrap();
-    let report = composition.release_doctor(Some(&runtime_config("harbor-shop")));
+    let report = composition.release_doctor(Some(&runtime_config("shoppr")));
 
     assert!(
         report
@@ -1115,7 +1115,7 @@ fn release_doctor_reports_config_drift_and_unpinned_modules() {
             .any(|finding| finding.code == "module.ops.missing")
     );
 
-    let mut drifted = runtime_config("harbor-shop");
+    let mut drifted = runtime_config("shoppr");
     drifted.seo.canonical_host = "preview.example.com".to_string();
     let report = composition.release_doctor(Some(&drifted));
     assert!(
@@ -1133,7 +1133,7 @@ fn release_doctor_reports_config_drift_and_unpinned_modules() {
             &DefaultAuthModelPackage::default(),
             &module_manifests(),
             &[wrong_checksum],
-            Some(&runtime_config("harbor-shop")),
+            Some(&runtime_config("shoppr")),
         )
         .unwrap();
     assert!(
@@ -1152,7 +1152,7 @@ fn customer_app_reports_render_into_cli_surfaces() {
     let workspace = theme_workspace();
     let runtime = app()
         .build_runtime_plan_with_extensions_at(
-            runtime_config_with_environment("harbor-shop", "development"),
+            runtime_config_with_environment("shoppr", "development"),
             DefaultAuthModelPackage::default(),
             module_manifests()
                 .into_iter()

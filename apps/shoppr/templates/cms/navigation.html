@@ -1,0 +1,86 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Navigation'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Navigation</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Content operations</p>
+        <h1 dv:text="${page.title}">Navigation</h1>
+        <p dv:text="${page.summary}">Navigation trees and top-level route links.</p>
+        <p>
+          Saving this form updates the live primary navigation rendered in the Shoppr public
+          shell.
+        </p>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasFlashMessages}">
+        <ul class="flash-list">
+          <li dv:each="message : ${flashMessages}" dv:text="${message.text}">Saved.</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel" dv:if="${hasErrors}">
+        <h2>Navigation errors</h2>
+        <p dv:text="${errorSummary}">Update the navigation items and save again.</p>
+        <ul class="flash-list">
+          <li dv:each="error : ${errors}" dv:text="${error.message}">Error</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Primary navigation</p>
+        <form action="/admin/navigation/save" method="post">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">Label</th>
+                <th scope="col">Href</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr dv:each="item : ${navigationItems}">
+                <td>
+                  <input type="text" dv:attr="name=${item.labelField},value=${item.label}" />
+                </td>
+                <td>
+                  <input type="text" dv:attr="name=${item.hrefField},value=${item.href}" />
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <input type="text" name="new_nav_label" placeholder="New label" />
+                </td>
+                <td>
+                  <input type="text" name="new_nav_href" placeholder="/pages/visit-harbor" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="admin-page__actions">
+            <button class="button" type="submit">Save navigation</button>
+            <a class="button button--secondary" href="/admin/pages" dv:attr="href=${links.adminPages}">
+              Back to pages
+            </a>
+          </div>
+        </form>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

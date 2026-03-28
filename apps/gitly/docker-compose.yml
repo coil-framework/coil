@@ -1,0 +1,98 @@
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: apps/gitly/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DAVENDA_CONFIG: platform.dev.toml
+      DATABASE_URL: postgres://davenda:devpass@postgres:5432/davenda_gitly
+      REDIS_URL: redis://redis:6379
+      DAVENDA_COOKIE_SECRET: "01234567012345670123456701234567"
+      DAVENDA_CSRF_SECRET: "76543210765432107654321076543210"
+      OBJECT_STORE_URL: |-
+        endpoint_url="http://minio:9000"
+        bucket="gitly"
+        region="us-east-1"
+        access_key_id="minio"
+        secret_access_key="minio123"
+    ports:
+      - "${OCTOHUB_HTTP_PORT:-58080}:8080"
+    volumes:
+      - gitly-appdata:/app/.davenda
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: davenda
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: davenda_gitly
+    ports:
+      - "${OCTOHUB_POSTGRES_PORT:-55438}:5432"
+    volumes:
+      - gitly-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U davenda -d davenda_gitly"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    ports:
+      - "${OCTOHUB_REDIS_PORT:-56380}:6379"
+    volumes:
+      - gitly-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "${OCTOHUB_MINIO_PORT:-9002}:9000"
+      - "${OCTOHUB_MINIO_CONSOLE_PORT:-9003}:9001"
+    volumes:
+      - gitly-minio:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 minio minio123; do
+          sleep 1
+        done
+        mc mb --ignore-existing local/gitly
+        mc anonymous set download local/gitly
+    restart: "no"
+
+volumes:
+  gitly-appdata:
+  gitly-postgres:
+  gitly-redis:
+  gitly-minio:

@@ -1,0 +1,7 @@
+name = "shoppr-auth"
+version = "0.1.0"
+mode = "extend"
+storage_schema_version = 1
+model_version = 1
+capability_binding_version = 1
+imports = ["platform-default-auth"]

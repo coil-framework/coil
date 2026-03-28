@@ -90,7 +90,7 @@ mod tests {
 
     impl CustomerBackendPlugin for ExamplePlugin {
         fn descriptor(&self) -> CustomerPluginDescriptor {
-            CustomerPluginDescriptor::new("harbor-shop-backend", "Harbor Shop Backend", "0.1.0")
+            CustomerPluginDescriptor::new("shoppr-backend", "Shoppr Backend", "0.1.0")
         }
 
         fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {

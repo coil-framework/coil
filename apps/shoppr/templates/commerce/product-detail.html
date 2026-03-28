@@ -1,0 +1,178 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Product detail'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${page.title}">Product detail</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main product-page">
+      <section class="product-page__hero" dv:if="${hasProduct}">
+        <div class="product-page__media">
+          <img
+            src="/theme/assets/logo.svg"
+            dv:src="${product.imageUrl}"
+            alt="Product image"
+            dv:attr="alt=${product.imageAlt}"
+          />
+        </div>
+        <div class="product-page__details">
+          <p class="product-page__eyebrow">
+            <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+          </p>
+          <p>
+            <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+            <span>/</span>
+            <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+            <span>/</span>
+            <a
+              href="/shop/collections/featured"
+              dv:href="${product.collectionUrl}"
+              dv:text="${product.collectionName}"
+            >
+              Featured
+            </a>
+          </p>
+          <h1 dv:text="${product.name}">Harbor Cap</h1>
+          <p class="product-page__price" dv:text="${product.price}">GBP 29</p>
+          <p dv:text="${product.summary}">
+            Product detail is where the customer confirms the exact item before moving into the
+            cart or going straight to checkout.
+          </p>
+          <div class="product-page__actions">
+            <form class="commerce-form product-purchase-form" action="/cart/items" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="harbor-cap"
+                dv:attr="value=${product.slug}"
+              />
+              <input
+                type="hidden"
+                name="product_name"
+                value="Harbor Cap"
+                dv:attr="value=${product.name}"
+              />
+              <label class="commerce-form__field">
+                <span>Quantity</span>
+                <input type="number" name="quantity" min="1" value="1" />
+              </label>
+              <button class="button" type="submit">Add to cart</button>
+            </form>
+            <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="harbor-cap"
+                dv:attr="value=${product.slug}"
+              />
+              <input type="hidden" name="quantity" value="1" />
+              <button class="button button--secondary" type="submit">Buy now</button>
+            </form>
+          </div>
+          <div class="checkout-actions">
+            <a class="button button--secondary" href="/shop/collections/featured" dv:href="${product.collectionUrl}">
+              Back to collection
+            </a>
+            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+              Review cart
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="catalog-assurance" dv:if="${hasProduct}">
+        <article>
+          <h2>Next step: add to cart or keep browsing this collection</h2>
+          <p>
+            Customers should not have to hunt for the next action here. Keep the cart handoff and
+            the route back to the collection visible at the same time.
+          </p>
+        </article>
+      </section>
+
+      <section class="catalog-assurance" dv:unless="${hasProduct}">
+        <article>
+          <h1>This product is not currently available.</h1>
+          <p>
+            Shoppr has removed this item from the live storefront. Return to the current
+            catalog or collections view to keep shopping.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/en-GB/shop" dv:attr="href=${links.catalog}">
+              Open catalog
+            </a>
+            <a class="button button--secondary" href="/en-GB/shop/collections" dv:attr="href=${links.collections}">
+              Browse collections
+            </a>
+          </div>
+        </article>
+      </section>
+
+      <section class="product-grid" dv:if="${hasProductCards}">
+        <header class="product-grid__header">
+          <p class="product-grid__eyebrow">More from this collection</p>
+          <h2>Continue browsing nearby products</h2>
+          <p>
+            Related products keep the customer inside the same merchandising context without
+            throwing them back to the top of the catalog.
+          </p>
+        </header>
+        <ul class="product-grid__list">
+          <li class="product-grid__item" dv:each="related : ${productCards}">
+            <article class="product-card">
+              <a class="product-card__media" href="/shop/products/harbor-cap" dv:href="${related.url}">
+                <img
+                  src="/theme/assets/logo.svg"
+                  dv:src="${related.imageUrl}"
+                  alt="Related product"
+                  dv:attr="alt=${related.imageAlt}"
+                />
+              </a>
+              <div class="product-card__body">
+                <p class="product-card__eyebrow" dv:text="${related.collectionName}">Featured</p>
+                <h3>
+                  <a href="/shop/products/harbor-cap" dv:href="${related.url}" dv:text="${related.name}">
+                    Harbor Tote
+                  </a>
+                </h3>
+                <p class="product-card__summary" dv:text="${related.summary}">
+                  Another product detail route in the same browse loop.
+                </p>
+                <div class="product-card__meta">
+                  <span class="product-card__price" dv:text="${related.price}">GBP 29</span>
+                  <a class="button" href="/shop/products/harbor-cap" dv:href="${related.url}">
+                    View product
+                  </a>
+                  <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
+                    <input
+                      type="hidden"
+                      name="product_slug"
+                      value="harbor-cap"
+                      dv:attr="value=${related.slug}"
+                    />
+                    <input type="hidden" name="quantity" value="1" />
+                    <button class="button button--secondary" type="submit">Add to cart</button>
+                  </form>
+                </div>
+              </div>
+            </article>
+          </li>
+        </ul>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

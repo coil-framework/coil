@@ -1,5 +1,5 @@
 [app]
-name = "harbor-shop"
+name = "shoppr"
 environment = "production"
 
 [server]
@@ -55,7 +55,7 @@ emit_json_ld = true
 sitemap_enabled = true
 
 [auth]
-package = "harbor-auth"
+package = "shoppr-auth"
 explain_api = false
 tenant_id = 101
 

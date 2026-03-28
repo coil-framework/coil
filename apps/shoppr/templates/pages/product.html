@@ -1,0 +1,124 @@
+<!doctype html>
+<html
+  xmlns:dv="https://davenda.dev"
+  dv:with="pageTitle='Product detail'"
+  lang="en-GB"
+  dv:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title dv:text="${pageTitle}">Product detail</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" dv:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav dv:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main product-page">
+      <section class="product-page__hero">
+        <div class="product-page__media">
+          <img
+            src="/theme/assets/logo.svg"
+            dv:src="${product.imageUrl}"
+            alt="Product image"
+            dv:attr="alt=${product.imageAlt}"
+          />
+        </div>
+        <div class="product-page__details">
+          <p class="product-page__eyebrow">
+            <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+          </p>
+          <p>
+            <a href="/en-GB/shop" dv:attr="href=${links.catalog}">Shop</a>
+            <span>/</span>
+            <a href="/en-GB/shop/collections" dv:attr="href=${links.collections}">Collections</a>
+            <span>/</span>
+            <a
+              href="/shop/collections/featured"
+              dv:href="${product.collectionUrl}"
+              dv:text="${product.collectionName}"
+            >
+              Harbor pantry
+            </a>
+          </p>
+          <h1 dv:text="${product.name}">Harbor Cap</h1>
+          <p class="product-page__price" dv:text="${product.price}">GBP 29</p>
+          <p dv:text="${product.summary}">
+            Keep the item, quantity, and cart handoff together so this page can genuinely convert.
+          </p>
+          <div class="product-page__actions">
+            <form class="commerce-form product-purchase-form" action="/cart/items" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="harbor-cap"
+                dv:attr="value=${product.slug}"
+              />
+              <input
+                type="hidden"
+                name="product_name"
+                value="Harbor Cap"
+                dv:attr="value=${product.name}"
+              />
+              <label class="commerce-form__field">
+                <span>Quantity</span>
+                <input type="number" name="quantity" min="1" value="1" />
+              </label>
+              <button class="button" type="submit">Add to cart</button>
+            </form>
+            <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
+              <input
+                type="hidden"
+                name="product_slug"
+                value="harbor-cap"
+                dv:attr="value=${product.slug}"
+              />
+              <input type="hidden" name="quantity" value="1" />
+              <button class="button button--secondary" type="submit">Buy now</button>
+            </form>
+          </div>
+          <div class="checkout-actions">
+            <a class="button button--secondary" href="/shop/collections/featured" dv:href="${product.collectionUrl}">
+              Back to collection
+            </a>
+            <a class="button button--secondary" href="/cart" dv:attr="href=${links.cart}">
+              Review cart
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>Use product detail as the decision point</h2>
+          <p>
+            From here the customer should either add the item to cart, buy now, or step back into
+            the collection. Keep the page focused on the next action instead of generic filler.
+          </p>
+        </article>
+      </section>
+
+      <section class="catalog-assurance">
+        <article>
+          <h2>Need a different item first?</h2>
+          <p>
+            Step back into the collection when the customer wants to compare nearby products before
+            committing the basket.
+          </p>
+          <div class="checkout-actions">
+            <a class="button button--secondary" href="/shop/collections/featured" dv:href="${product.collectionUrl}">
+              Back to collection
+            </a>
+          </div>
+        </article>
+      </section>
+
+      <div dv:replace="~{commerce/product-grid :: grid}"></div>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

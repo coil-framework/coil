@@ -476,7 +476,7 @@ cdn_base_url = "https://cdn.example.com"
 fn checked_in_harbor_shop_declares_the_stripe_handoff_contract() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("apps/harbor-shop/platform.toml");
+        .join("apps/shoppr/platform.toml");
     let config = PlatformConfig::from_file(root).unwrap();
     let stripe = CommercePaymentsStripeConfig::from_platform_config(&config)
         .unwrap()

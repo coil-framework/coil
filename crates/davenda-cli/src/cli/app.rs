@@ -7519,19 +7519,7 @@ fn evaluate_import_cutover(
 }
 
 fn cutover_preflight_ready(plan: &CutoverPlan) -> bool {
-    plan.checks.iter().all(|check| {
-        if !check.required {
-            return true;
-        }
-        match check.id.as_str() {
-            "import.package"
-            | "target.runtime"
-            | "final.import.mode"
-            | "release.doctor"
-            | "auth.package.validate" => check.satisfied,
-            _ => true,
-        }
-    })
+    plan.is_ready()
 }
 
 fn cutover_steps(
@@ -15696,6 +15684,46 @@ expect = true
             "{}",
             error
         );
+    }
+
+    #[test]
+    fn cutover_preflight_requires_all_required_readiness_checks() {
+        let plan = CutoverPlan::new()
+            .with_check(
+                CutoverCheck::new("import.package", "import metadata is aligned", true, true)
+                    .unwrap(),
+            )
+            .with_check(
+                CutoverCheck::new(
+                    "storage.verify",
+                    "storage validation is green",
+                    true,
+                    false,
+                )
+                .unwrap(),
+            );
+
+        assert!(!cutover_preflight_ready(&plan));
+    }
+
+    #[test]
+    fn cutover_preflight_ignores_optional_unsatisfied_checks() {
+        let plan = CutoverPlan::new()
+            .with_check(
+                CutoverCheck::new("import.package", "import metadata is aligned", true, true)
+                    .unwrap(),
+            )
+            .with_check(
+                CutoverCheck::new(
+                    "observation.note",
+                    "optional operator note remains open",
+                    false,
+                    false,
+                )
+                .unwrap(),
+            );
+
+        assert!(cutover_preflight_ready(&plan));
     }
 
     #[test]

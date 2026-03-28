@@ -1,4 +1,6 @@
 use super::*;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn entity_converts_to_object() {
@@ -208,6 +210,56 @@ fn checked_in_customer_auth_package_loads_real_manifest_bindings_and_schema_exte
             .binding_for(Capability::CmsPageRead)
             .unwrap()
     );
+}
+
+#[test]
+fn file_backed_replace_auth_package_loads_schema_and_bindings() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let app_root = std::env::temp_dir().join(format!("davenda-auth-replace-{unique}"));
+    let package_root = app_root.join("auth").join("replace-auth");
+    fs::create_dir_all(&package_root).unwrap();
+    fs::write(
+        package_root.join("package.toml"),
+        "name = \"replace-auth\"\nversion = \"1.0.0\"\nmode = \"replace\"\nstorage_schema_version = 1\nmodel_version = 1\ncapability_binding_version = 1\nimports = []\n",
+    )
+    .unwrap();
+    fs::write(
+        package_root.join("model.auth"),
+        "type site\nrelations\n  owner: user\npermissions\n  manage = owner\n\ntype page\nrelations\n  owner: user\npermissions\n  publish = owner\n",
+    )
+    .unwrap();
+    fs::write(
+        package_root.join("capabilities.toml"),
+        "[bindings.\"cms.page.publish\"]\nresource_type = \"page\"\npermission = \"publish\"\n",
+    )
+    .unwrap();
+
+    let package = load_auth_model_package_at("replace-auth", &app_root).unwrap();
+
+    assert_eq!(package.manifest().mode, PackageMode::Replace);
+    assert!(package.schema().namespaces.contains_key("site"));
+    assert_eq!(
+        package
+            .schema()
+            .namespaces
+            .get("page")
+            .unwrap()
+            .rules
+            .get("publish"),
+        Some(&vec![RelationRule::Inherit("owner".into())])
+    );
+    assert_eq!(
+        package
+            .binding_for(Capability::CmsPagePublish)
+            .unwrap()
+            .relation,
+        Relation::Publish
+    );
+
+    let _ = fs::remove_dir_all(&app_root);
 }
 
 #[test]

@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use zanzibar::Schema;
+use zanzibar::{NamespaceConfig, Schema};
 
 use crate::{
     Capability, Namespace, Relation, RelationRule, default_capability_bindings, default_manifest,
@@ -48,10 +48,6 @@ pub enum AuthModelPackageLoadError {
     ManifestNameMismatch {
         expected: String,
         actual: String,
-    },
-    UnsupportedMode {
-        package: String,
-        mode: PackageMode,
     },
     MissingImportBase {
         package: String,
@@ -103,10 +99,6 @@ impl fmt::Display for AuthModelPackageLoadError {
             Self::ManifestNameMismatch { expected, actual } => write!(
                 f,
                 "auth package name mismatch: configured `{expected}` but package manifest declares `{actual}`"
-            ),
-            Self::UnsupportedMode { package, mode } => write!(
-                f,
-                "auth package `{package}` uses unsupported `{mode}` mode for the current file-backed loader"
             ),
             Self::MissingImportBase { package } => write!(
                 f,
@@ -242,10 +234,24 @@ fn load_auth_model_package_inner(
     };
 
     match manifest.mode {
-        PackageMode::Replace => Err(AuthModelPackageLoadError::UnsupportedMode {
-            package: manifest.name,
-            mode: PackageMode::Replace,
-        }),
+        PackageMode::Replace => {
+            let schema = load_model_schema(
+                &package_root.join("model.auth"),
+                &manifest.name,
+                None,
+                true,
+            )?;
+            let capability_bindings = load_capability_bindings(
+                &package_root.join("capabilities.toml"),
+                &manifest.name,
+            )?;
+
+            Ok(LoadedAuthModelPackage {
+                manifest,
+                schema,
+                capability_bindings,
+            })
+        }
         PackageMode::Extend => {
             if manifest.imports.is_empty() {
                 return Err(AuthModelPackageLoadError::MissingImportBase {
@@ -260,14 +266,13 @@ fn load_auth_model_package_inner(
             }
 
             let imported = load_auth_model_package_inner(&manifest.imports[0], app_root)?;
-            let mut schema = imported.schema().clone();
-            let mut capability_bindings = imported.capability_bindings().clone();
-
-            apply_model_extensions(
+            let schema = load_model_schema(
                 &package_root.join("model.auth"),
                 &manifest.name,
-                &mut schema,
+                Some(imported.schema()),
+                false,
             )?;
+            let mut capability_bindings = imported.capability_bindings().clone();
             capability_bindings.extend(load_capability_bindings(
                 &package_root.join("capabilities.toml"),
                 &manifest.name,
@@ -380,13 +385,14 @@ fn load_capability_bindings(
     Ok(bindings)
 }
 
-fn apply_model_extensions(
+fn load_model_schema(
     path: &Path,
     package: &str,
-    schema: &mut Schema,
-) -> Result<(), AuthModelPackageLoadError> {
+    base_schema: Option<&Schema>,
+    replacement_mode: bool,
+) -> Result<Schema, AuthModelPackageLoadError> {
     if !path.is_file() {
-        return Ok(());
+        return Ok(base_schema.cloned().unwrap_or_default());
     }
 
     let input = fs::read_to_string(path).map_err(|error| AuthModelPackageLoadError::Io {
@@ -394,6 +400,7 @@ fn apply_model_extensions(
         message: error.to_string(),
     })?;
 
+    let mut schema = base_schema.cloned().unwrap_or_default();
     let mut current_namespace = None;
     let mut section = None;
 
@@ -411,7 +418,7 @@ fn apply_model_extensions(
                     namespace: namespace_name.to_string(),
                 }
             })?;
-            if !schema.namespaces.contains_key(namespace.as_str()) {
+            if !replacement_mode && !schema.namespaces.contains_key(namespace.as_str()) {
                 return Err(AuthModelPackageLoadError::UnsupportedModelSyntax {
                     path: path.to_path_buf(),
                     line: line_number,
@@ -420,6 +427,10 @@ fn apply_model_extensions(
                     ),
                 });
             }
+            schema
+                .namespaces
+                .entry(namespace.as_str().to_string())
+                .or_insert_with(NamespaceConfig::default);
             current_namespace = Some(namespace);
             section = None;
             continue;
@@ -455,6 +466,14 @@ fn apply_model_extensions(
                         relation: relation_name.to_string(),
                     }
                 })?;
+                let namespace_rules = schema
+                    .namespaces
+                    .get_mut(namespace.as_str())
+                    .expect("validated namespace exists in the schema");
+                namespace_rules
+                    .rules
+                    .entry(relation_name.to_string())
+                    .or_insert_with(Vec::new);
             }
             Some(ModelSection::Permissions) => {
                 let (permission_name, source_name) = line.split_once('=').ok_or_else(|| {
@@ -505,5 +524,5 @@ fn apply_model_extensions(
         }
     }
 
-    Ok(())
+    Ok(schema)
 }

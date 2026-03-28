@@ -2,87 +2,217 @@
 title: Internationalization, Localization, And Content
 ---
 
-Davenda treats locale as part of request context, not as a helper called from templates after the real work is finished.
+This page explains how locale, localized routes, translated UI, and customer content actually fit
+together in Davenda.
 
-That matters because locale affects much more than copy.
+## What Is This?
 
-## What Locale Touches
+Davenda treats internationalization as a combination of:
 
-Locale can affect:
+- request-time locale resolution
+- site-aware locale policy
+- localized routes
+- translated UI strings
+- localized content and formatting
 
-- route resolution
-- canonical and alternate URL generation
-- text translation
-- date, time, number, and money formatting
-- SEO metadata
-- cache variation
-- sometimes which content or product data is valid to publish
+Those are related, but they are not the same problem.
 
-This is why internationalization is documented as a framework concern rather than as a frontend utility.
+## Why Does It Exist?
 
-## Locale Resolution
+Real customer apps need locale to influence more than copy:
 
-The request path is site-aware first and locale-aware second.
+- routing
+- canonical and alternate URLs
+- formatting
+- search-facing metadata
+- cache keys
+- customer-visible controls
 
-At a high level:
+If locale is handled only in frontend code, the application model becomes incoherent.
 
-1. the runtime resolves the site from the request host
-2. it resolves the locale within that site’s supported locale policy
-3. route matching, rendering, metadata, and formatting all use the same resolved context
+## When Should I Use This Model?
 
-This avoids one of the most common multi-lingual failure modes: templates, routers, and metadata all disagreeing about which locale the user is actually viewing.
+Use this model whenever you:
 
-## Translation Keys Versus Content
+- add a second locale
+- add a new site with a different default locale
+- decide whether copy should live in a translation dictionary or in localized content
+- choose between frontend translation keys and server-rendered localized strings
 
-Davenda separates two related but different things:
+## How Locale Resolution Works
 
-- **translated UI strings** such as navigation labels, action copy, and system messages
-- **localized content** such as product descriptions, CMS page copy, or localized slugs
+Davenda resolves:
 
-The first usually belongs in message catalogs or translation dictionaries.
+1. site from host
+2. locale inside that site’s allowed locale set
+3. route under that site-and-locale context
 
-The second belongs in managed data or content models, not in configuration files.
+That means route matching, render values, and SEO all agree about what the user is actually seeing.
 
-## Translation Keys In Templates
+The runtime code for that lives in:
 
-Templates should be written so that user-visible copy can be translated without duplicating the whole page for each locale.
+- `crates/davenda-runtime/src/http/routing/model.rs`
 
-In practice that means:
+## Translation Dictionaries Versus Localized Content
 
-- keeping reusable text in translation dictionaries where possible
-- passing explicit localized values in the render model when the content is managed data
-- avoiding assumptions that the current route, host, and locale will always be the same
+Keep these separate.
 
-## Locale Fallback
+### Translation dictionaries
 
-A fallback locale is a resilience tool, not a substitute for publication discipline.
+Use for:
 
-Good uses:
+- nav labels
+- button text
+- control labels
+- small explanatory UI strings
 
-- default formatting behavior
+Today’s checked-in example is Gitly’s theme-side dictionary in:
+
+- `apps/gitly/theme/assets/site.js`
+
+### Localized content
+
+Use for:
+
+- CMS content
+- product descriptions
+- account messaging produced by runtime code
+- SEO-relevant content bodies
+
+This should come from managed content or render-model values, not from a frontend dictionary.
+
+## Translation File Locations Today
+
+Current honest state:
+
+- Davenda does not yet ship a framework-owned translation file format
+- Gitly demonstrates a customer-owned theme-side dictionary in `apps/gitly/theme/assets/site.js`
+- Shoppr demonstrates server-rendered locale-aware values and site-aware rendering through
+  `apps/shoppr/app.toml`, `apps/shoppr/platform.toml`, and request render models
+
+So if you ask “where do translation files go today?”, the honest answer is:
+
+- wherever the customer app’s chosen convention puts them
+- in the checked-in demos, the only concrete translation dictionary is Gitly’s `site.js`
+
+## Key Naming Patterns
+
+If you adopt a translation-key dictionary today, use stable semantic keys.
+
+Gitly’s checked-in pattern is a good model:
+
+- page or area prefix: `home`, `explore`, `search`, `actions`
+- grouped control keys: `controls.language`, `controls.dark`
+- grouped navigation keys: `nav.home`, `nav.actions`
+
+Examples from `apps/gitly/theme/assets/site.js`:
+
+- `home.title`
+- `home.summary`
+- `search.empty`
+- `controls.theme`
+- `nav.profile`
+
+## Template Translation Examples
+
+### Server-rendered value
+
+```html
+<h1 dv:text="${page.title}">Fallback</h1>
+<p dv:text="${account.stateSummary}">Fallback summary</p>
+```
+
+This is the right pattern for first-render, transactional, and SEO-relevant copy.
+
+### Customer-owned translation-key convention
+
+```html
+<h1 data-i18n="home.title">One Davenda app can look like a forge.</h1>
+<button type="button" data-i18n-control="dark">Dark</button>
+```
+
+This is the checked-in Gitly pattern for theme and demo UI strings.
+
+## Fallback Examples
+
+Fallback locale is useful for:
+
 - temporary UI-string fallback
+- stable locale defaults
+- route generation when a localized path needs a deterministic default
 
-Bad uses:
+Fallback locale is not a substitute for:
 
-- silently serving untranslated customer content forever
-- treating fallback as a reason not to publish real localized content
+- publishing localized customer content
+- product translation discipline
 
-## Common Mistakes
+Current runtime configs show this explicitly:
+
+- `apps/shoppr/platform.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/gitly/platform.toml`
+- `apps/gitly/platform.dev.toml`
+
+## English, French, And Polish Shoppr Example
+
+Shoppr is the canonical multi-site, multi-locale example.
+
+Relevant files:
+
+- `apps/shoppr/app.toml`
+- `apps/shoppr/platform.toml`
+- `apps/shoppr/platform.dev.toml`
+- `apps/shoppr/catalog.toml`
+
+What it demonstrates:
+
+- `shoppr-uk` with default locale `en-GB`
+- `shoppr-fr` with default locale `fr-FR`
+- `shoppr-pl` with default locale `pl-PL`
+- one customer app
+- site-aware branding
+- localized routes
+- site-specific availability in `catalog.toml`
+
+This is the example to follow when adding a new locale and deciding whether it should also be a new
+site.
+
+## How To Add A New Locale
+
+The practical sequence is:
+
+1. add the locale to app-level `supported_locales`
+2. add it to the appropriate site’s `supported_locales`
+3. decide whether the site’s `default_locale` should change
+4. update customer-owned translation dictionaries if you use them
+5. update server-rendered localized content or data if the page content is localized
+6. verify localized routes and canonical behavior in the running app
+
+If the host, brand, or assortment also changes, you likely need a new site, not just a new locale.
+
+## Constraints And Common Mistakes
+
+### Pretending the framework already owns translation-file format and lookup
+
+It does not. Document the customer convention honestly.
 
 ### Treating locale as only text replacement
 
-Locale affects routing, metadata, and cache behavior too.
+Locale also affects routing and metadata.
 
-### Putting translated content into config
+### Putting customer content into config files
 
-Product content belongs in content or data workflows, not in `platform.toml`.
+Config describes locale policy. It should not become your CMS.
 
-### Confusing site and locale
+### Confusing site with locale
 
-Sites choose the commercial or editorial boundary. Locales choose the language and formatting layer within that boundary.
+Sites choose public brand and host boundary. Locales choose language and formatting within that
+boundary.
 
-## What To Read Next
+## What Should I Read Next?
 
+- [Internationalization](../reference/internationalization.md)
+- [SEO](../reference/seo.md)
 - [Sites, Locales, And Markets](./sites-locales-and-markets.md)
-- [Internationalization Reference](../reference/internationalization.md)
-- [SEO Reference](../reference/seo.md)
+- `apps/shoppr/app.toml`
+- `apps/gitly/theme/assets/site.js`

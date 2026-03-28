@@ -6,6 +6,15 @@ Custom auth schemas are supported by design, but they need to be done with disci
 
 This page explains the safe path.
 
+## When You Should Use This Page
+
+Use this page when:
+
+- the default auth package is close but not quite right
+- you need one customer-specific permission path
+- you are deciding whether to extend or replace the default model
+- you want a practical walkthrough instead of only conceptual guidance
+
 ## Start With The Real Question
 
 Before changing auth, decide which of these problems you actually have:
@@ -15,6 +24,17 @@ Before changing auth, decide which of these problems you actually have:
 - the default relation graph is fundamentally wrong for the deployment
 
 Those are different problems, and they should not all lead to a full replacement.
+
+## The Safest Davenda Path Today
+
+Today, the safest practical path is:
+
+1. keep the shipped default package as the base
+2. extend it with one small schema change
+3. bind one stable capability to that new permission
+4. validate and explain the result
+
+That is the pattern the checked-in Shoppr package already demonstrates.
 
 ## Preferred Path: Extend
 
@@ -57,6 +77,23 @@ permission = "featured_edit"
 
 This is the safest custom-schema shape because it preserves first-party capability contracts while adding customer semantics.
 
+## Exact Files Involved
+
+For a customer app, the normal file set is:
+
+- `apps/<app>/app.toml`
+- `apps/<app>/platform.toml`
+- `apps/<app>/platform.dev.toml`
+- `apps/<app>/auth/<package>/package.toml`
+- `apps/<app>/auth/<package>/model.auth`
+- `apps/<app>/auth/<package>/capabilities.toml`
+
+Those files work together:
+
+- `app.toml` declares intent
+- platform config selects the runtime package
+- the auth package defines the semantics
+
 ## When Full Replacement Is Justified
 
 Use `replace` only when:
@@ -82,6 +119,69 @@ So the practical guidance today is:
 - prefer `extend`
 - treat `replace` as a deliberate future-facing contract unless your runtime path fully supports it
 
+## Practical Walkthrough: Add One Customer-Specific Permission
+
+This is the normal workflow for a bounded customization.
+
+### 1. Decide the capability you need
+
+Example:
+
+- you want a merchandising team to edit featured catalog presentation
+- the stable capability name is `catalog.featured.edit`
+
+### 2. Add the schema rule
+
+In `model.auth`:
+
+```text
+type product
+  relations
+    merchandiser: user | group#member
+  permissions
+    featured_edit = merchandiser
+```
+
+### 3. Bind the capability
+
+In `capabilities.toml`:
+
+```toml
+[bindings."catalog.featured.edit"]
+resource_type = "product"
+permission = "featured_edit"
+```
+
+### 4. Select the package in the app
+
+In `app.toml`:
+
+```toml
+[auth]
+mode = "extend"
+package = "shoppr-auth"
+```
+
+And in platform config:
+
+```toml
+[auth]
+package = "shoppr-auth"
+explain_api = false
+tenant_id = 101
+```
+
+### 5. Validate before shipping
+
+The operational rule is simple:
+
+- do not wait to discover auth mistakes through a broken admin or storefront flow
+- validate and inspect the package first
+
+### 6. Explain a decision when behavior is unclear
+
+If the grant path is surprising, use auth explain tooling rather than guessing from relation names.
+
 ## How To Keep A Custom Schema Safe
 
 Rules that matter:
@@ -91,6 +191,16 @@ Rules that matter:
 - version storage, schema semantics, and capability bindings separately
 - ship explainable tests for important decisions
 - fail validation early if installed modules do not have the capability bindings they need
+
+## What A Good First Custom Schema Looks Like
+
+Good first custom schemas are:
+
+- small
+- capability-oriented
+- specific to one business rule
+- easy to explain
+- easy to remove if the requirement changes
 
 ## What To Customize First
 
@@ -113,6 +223,16 @@ Bad first customizations:
 - Forgetting that installed modules still need their published capability contracts satisfied.
 - Assuming design-level replaceability means every runtime loader path already supports arbitrary custom schemas today.
 
+## Repo Example
+
+The canonical checked-in example is:
+
+- `apps/shoppr/auth/shoppr-auth/package.toml`
+- `apps/shoppr/auth/shoppr-auth/model.auth`
+- `apps/shoppr/auth/shoppr-auth/capabilities.toml`
+
+That package adds one merchandising-specific capability while preserving the default package as the base.
+
 ## Decision Rule
 
 If you can express the requirement by:
@@ -125,3 +245,8 @@ If you can express the requirement by:
 use `extend`.
 
 If the deployment needs a genuinely different organization model across the whole app, then plan a full replacement and treat it as a major auth change, not a small customization.
+
+## Read Next
+
+- [Auth Packages](./auth-packages.md)
+- [Auth Schema](./auth-schema.md)

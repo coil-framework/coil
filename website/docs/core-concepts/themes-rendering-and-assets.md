@@ -2,105 +2,237 @@
 title: Themes, Rendering, And Assets
 ---
 
-Davenda themes are the customer-owned rendering layer of the product.
+This page explains how customer-owned templates, theme assets, and runtime rendering fit together in
+Davenda.
 
-They are not just a CSS bundle. A theme shapes how layouts, fragments, assets, and frontend enhancements come together across the whole application.
+## What Is This?
 
-## What A Theme Is
+In Davenda, the customer-facing UI layer is the combination of:
 
-A theme usually combines four things:
+- templates
+- theme configuration
+- published assets
+- runtime render models
+- document decoration such as SEO metadata injection
 
-- **templates and layouts** that define the HTML structure
-- **design tokens** that give names to colors, spacing, typography, motion, and related visual primitives
-- **assets** such as CSS, JavaScript, images, and icons
-- **presentation conventions** for light, dark, or system-driven variants
+This is broader than “CSS plus some HTML.”
 
-In the checked-in demos, the theme lives under `theme/` and works together with the customer template tree under `templates/`.
+## Why Does It Exist?
 
-## Why Davenda Treats Themes As Part Of The Platform Contract
+Davenda needs a rendering model that can do all of these at once:
 
-Themes matter to more than appearance.
+- let the customer app own the visual shell
+- let official modules render inside that shell
+- keep HTML readable and reviewable
+- publish hashed assets safely
+- keep public rendering, account flows, admin surfaces, and fragment composition under one model
 
-They directly affect:
+That is why themes and rendering are documented as a first-class subsystem.
 
-- accessibility
-- SEO and metadata rendering
-- perceived performance
-- brand consistency across modules
-- how easily official module surfaces can be restyled without being forked
+## When Should I Use This Mental Model?
 
-That is why Davenda documents them as a framework concept rather than as an implementation detail.
+Use this page when you are deciding:
 
-## The Resolution Model
+- where a new layout belongs
+- where a reusable fragment belongs
+- where a customer asset belongs
+- whether something belongs in templates, CSS, JS, or linked Rust
+- how a page ends up with the final `<head>` metadata and asset URLs it serves
 
-Davenda does not let every module invent its own skinning mechanism.
+## Annotated Theme Tree
 
-Instead:
+The checked-in customer apps use a structure like this:
 
-- core owns the rules for discovering templates and assets
-- official modules render semantic surfaces and slots
-- the customer app decides the actual shell, layouts, design tokens, and published assets
+```text
+app/
+  app.toml
+  templates/
+    layouts/
+      base.html
+      storefront.html
+    pages/
+      home.html
+      account.html
+    components/
+      ...
+    commerce/
+      cart.html
+      checkout.html
+      checkout-confirmation.html
+  theme/
+    tokens.toml
+    assets/
+      site.css
+      site.js
+      logo.svg
+```
 
-This is what allows a customer app to keep CMS, commerce, memberships, and admin visually coherent without copying those modules wholesale.
+What each area is for:
 
-## Theme Assets And Hashed Publication
+- `templates/layouts/`
+  - full document shells or page wrappers
+- `templates/pages/`
+  - page-specific HTML
+- `templates/components/`, `templates/fragments/`, or module folders
+  - reusable partials
+- `theme/assets/`
+  - publishable frontend files
+- `theme/tokens.toml`
+  - optional design-token convention owned by the customer app
 
-Customer templates should reference logical assets through the platform helpers rather than hard-coding public URLs or unhashed file names.
+Concrete examples:
 
-The runtime publishes hashed outputs and tracks them through an asset manifest. That gives Davenda:
+- Shoppr layouts: `apps/shoppr/templates/layouts/base.html`, `apps/shoppr/templates/layouts/storefront.html`
+- Shoppr pages: `apps/shoppr/templates/pages/home.html`, `apps/shoppr/templates/pages/account.html`
+- Gitly pages: `apps/gitly/templates/gitly/home.html`, `apps/gitly/templates/gitly/repository.html`
 
-- deterministic cache busting
-- safer release switching
-- environment-independent template references
+## Layouts, Fragments, Pages, And Assets In Practice
 
-The practical rule is simple: templates should ask for an asset by logical name, and the runtime should resolve the current published artifact.
+### Layouts
 
-## Light, Dark, And System Mode
+Layouts own document-level structure such as:
 
-Davenda does not force one built-in theming toggle model, but it does expect the theme system to be able to support:
+- `<!DOCTYPE html>`
+- `<html>`
+- `<head>`
+- shared navigation
+- footer
+- named slots
 
-- a stable default visual mode
-- explicit light/dark variants where desired
-- system-mode alignment when the product chooses to support it
+Shoppr’s layout files are the best checked-in example because they show the full customer-owned
+storefront shell.
 
-The checked-in demos model this through customer-owned CSS variables and a small frontend script rather than through a framework-wide magic theme flag.
+### Fragments
 
-That is the intended boundary:
+Fragments exist so that reusable markup stays explicit and server-rendered.
 
-- Davenda gives you the runtime and asset model
-- the customer theme chooses how light, dark, and system behavior should work in the product
+Use them for:
 
-## Design Tokens
+- navigation sections
+- summary panels
+- collection grids
+- reusable promotional or account blocks
 
-Design tokens are not just a naming preference. They are the stable surface that lets customer apps rebrand official module output without depending on DOM trivia.
+### Pages
 
-Well-used tokens describe semantics such as:
+Pages assemble layouts and fragments around route-specific render-model data.
 
-- background and surface roles
-- text and muted text roles
-- accent and action colors
-- spacing scales
-- focus rings
-- motion preferences
+A page is where you usually see:
 
-This makes a large app easier to maintain than scattering hard-coded values through every page.
+- the route-specific title
+- the main heading
+- the body content
+- form or list rendering for that route
 
-## Common Mistakes
+### Assets
+
+Assets provide presentation and enhancement:
+
+- CSS for layout and components
+- JS for enhancement, not for recreating the entire page model
+- images, icons, and similar published files
+
+## Why Some Templates Carry Full HTML Structure
+
+New Davenda developers often expect the runtime to hide the outer document shell completely.
+
+The checked-in apps do not do that, and that is intentional.
+
+Why:
+
+- the customer app owns the actual product shell
+- SEO and asset references are still customer-facing concerns
+- the customer app often wants explicit control over header, main, footer, language controls, and
+  navigation
+
+So in Davenda, it is normal for a customer layout to contain:
+
+- `<html lang=...>`
+- `<head>`
+- CSS and JS asset references
+- document landmarks
+
+That is not duplication. That is ownership.
+
+## How Hashed Assets And Publication Work
+
+Davenda publishes theme assets as runtime-managed artifacts.
+
+Practical flow:
+
+1. the customer app declares `[theme].asset_roots`
+2. `assets publish` or the equivalent customer lifecycle publishes the asset tree
+3. the runtime loads the publication manifest
+4. templates resolve logical asset paths through `asset('...')`
+5. rendered HTML receives the current published URL
+
+Why this is better than hardcoded filenames:
+
+- cache busting is deterministic
+- local and production behavior stay aligned
+- templates do not need to know the final hashed filename
+
+Canonical examples:
+
+- `apps/shoppr/theme/assets/site.css`
+- `apps/shoppr/theme/assets/site.js`
+- `apps/gitly/theme/assets/site.css`
+- `apps/gitly/theme/assets/site.js`
+
+## JSON-LD And Head Metadata Injection
+
+Document-level metadata is not just whatever the template hardcodes into `<head>`.
+
+Davenda’s render layer injects:
+
+- meta description
+- canonical URL
+- robots policy
+- alternate locale links
+- Open Graph fields
+- JSON-LD page nodes when enabled
+
+That logic lives in:
+
+- `crates/davenda-runtime/src/render/seo.rs`
+
+This is why some templates stay focused on page structure and content while the runtime supplies
+search-facing metadata automatically.
+
+## Working Example
+
+If you want one concrete “trace” through the system, use Shoppr home:
+
+1. layout shell in `apps/shoppr/templates/layouts/base.html`
+2. page in `apps/shoppr/templates/pages/home.html`
+3. asset references via `asset('theme/assets/site.css')` and `asset('theme/assets/site.js')`
+4. runtime model from `crates/davenda-runtime/src/render/model.rs`
+5. head metadata injection from `crates/davenda-runtime/src/render/seo.rs`
+
+That is the full rendering stack in one example.
+
+## Constraints And Common Mistakes
 
 ### Treating the theme as only CSS
 
-The theme also includes structural templates, token decisions, and the asset publication model.
+The theme contract includes namespace precedence, assets, and the customer-owned document shell.
 
-### Hard-coding public asset URLs
+### Recreating application state in `site.js`
 
-That bypasses the asset manifest and usually breaks cache busting or local/production parity.
+JavaScript should enhance the HTML-first path, not replace it.
 
-### Rebuilding module UI instead of restyling it
+### Hardcoding final asset URLs
 
-If a theme change requires duplicating entire module screens, the product is fighting the module boundary.
+Use the asset helper and publication manifest path.
 
-## What To Read Next
+### Forking whole module screens instead of using customer-owned shell and fragments
 
-- [Template Language Reference](../reference/template-language.md)
-- [Theme Structure Reference](../reference/theme-structure.md)
-- [Accessibility Reference](../reference/accessibility.md)
+That usually means the customer app is fighting the composition model.
+
+## What Should I Read Next?
+
+- [Template Language](../reference/template-language.md)
+- [Theme Structure](../reference/theme-structure.md)
+- [SEO](../reference/seo.md)
+- `apps/shoppr/templates/`
+- `apps/gitly/templates/`

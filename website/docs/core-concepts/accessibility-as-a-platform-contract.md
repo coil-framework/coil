@@ -2,65 +2,204 @@
 title: Accessibility As A Platform Contract
 ---
 
-Davenda treats accessibility as part of the platform contract.
+This page explains what “accessibility as a platform contract” means in practical Davenda terms.
 
-That is not a slogan. It means accessibility is expected to shape the runtime, rendering, and interaction model rather than appearing only as a design review at the end.
+## What Is This?
 
-## Why It Lives At The Platform Level
+Davenda treats accessibility as a shared contract across:
 
-Davenda controls enough of the application model that it can materially help or harm accessibility.
+- runtime rendering
+- official module surfaces
+- customer templates
+- customer theme assets
+- progressively enhanced interactions
+
+This is broader than “check contrast before launch.”
+
+## Why Does It Live At The Platform Level?
+
+Davenda controls enough of the application model that it can either help or harm accessibility very
+quickly.
 
 The framework influences:
 
 - document structure
-- form rendering and validation
-- route and navigation patterns
+- locale metadata
+- form rendering
+- navigation shells
 - fragment updates
-- focus movement
-- keyboard interaction
-- the semantics of admin and product surfaces
+- first-render HTML
 
-If those primitives are careless, customer apps inherit unnecessary accessibility debt immediately.
+So accessibility cannot be left entirely to late theme review.
 
-## What The Platform Should Make Easier
+## When Should Developers Think About It?
 
-Davenda’s HTML-first model should make the accessible path the natural path for:
+From the first template.
 
-- semantic headings and landmarks
-- working forms without JavaScript
-- accessible validation summaries
-- keyboard-usable navigation
-- visible focus states
-- meaningful live updates for fragment-driven interactions
+Do not wait until the visual design is “done.” In Davenda, the semantics are already visible early:
 
-The framework cannot guarantee every customer theme is accessible, but it can avoid making accessible implementation unnatural.
+- page shells
+- nav bars
+- forms
+- tables
+- status messaging
+- account and checkout flows
 
-## Where Responsibility Still Sits With The Customer App
+## What Davenda Validates Today
 
-Customer apps still own:
+This is the honest answer:
 
-- actual heading structure and page semantics
-- contrast decisions in the theme
-- labels and descriptions for customer-specific components
-- whether motion, theme, and interaction choices remain accessible
+Davenda does **not** currently run a full automatic accessibility validator over customer templates.
 
-Davenda gives the constraints and primitives. The customer app still has to use them well.
+What the platform does give you today is:
+
+- server-rendered HTML-first output
+- request-driven locale values so `lang` can be correct
+- ordinary semantic HTML templates instead of opaque view bytecode
+- module and customer surfaces that can be reviewed directly in checked-in HTML
+
+What remains app responsibility:
+
+- heading order
+- contrast
+- focus states
+- live-region usage
+- keyboard handling in customer JS
+
+## Practical Markup Examples
+
+### Navigation and skip links
+
+Gitly demonstrates the right baseline shape in files such as:
+
+- `apps/gitly/templates/gitly/home.html`
+- `apps/gitly/templates/gitly/explore.html`
+
+Pattern:
+
+```html
+<a class="skip-link" href="#main">Skip to content</a>
+<nav aria-label="Primary navigation">...</nav>
+<main id="main">...</main>
+```
+
+Why this matters:
+
+- repeated navigation becomes skippable
+- landmarks are explicit
+- screen-reader orientation improves immediately
+
+### Forms
+
+Use real form controls and labels. Gitly’s search forms and Shoppr’s cart and checkout templates are
+the best checked-in patterns:
+
+- `apps/gitly/templates/gitly/search.html`
+- `apps/shoppr/templates/commerce/cart.html`
+- `apps/shoppr/templates/commerce/checkout.html`
+
+Baseline rule:
+
+- forms must remain usable without JavaScript
+
+### Tables
+
+Gitly’s issues and pulls pages show the correct baseline:
+
+- real `<table>`
+- real `<caption>`
+- real `<th scope="col">`
+
+See:
+
+- `apps/gitly/templates/gitly/issues.html`
+- `apps/gitly/templates/gitly/pulls.html`
+
+### Status and live feedback
+
+Gitly’s API fallback card shows the minimal correct live-status shape:
+
+```html
+<aside role="status" aria-live="polite">...</aside>
+```
+
+See:
+
+- `apps/gitly/templates/gitly/home.html`
 
 ## Accessibility And Progressive Enhancement
 
-Fragment updates and enhanced UI are where many apps regress.
+Progressive enhancement is where many otherwise good server-rendered apps regress.
 
-Davenda’s model expects enhanced UI to:
+In Davenda, a good enhancement path means:
 
-- preserve working server-driven fallbacks
-- keep focus stable or move it intentionally
-- announce important updates where appropriate
-- avoid requiring pointer-only interaction
+- the base page already works
+- focus remains stable or moves intentionally
+- important changes expose status feedback
+- pointer-only interaction is not required
 
-That is why the docs treat accessibility and progressive enhancement as linked topics.
+This matters especially for:
 
-## What To Read Next
+- cart updates
+- checkout progress
+- account or admin panels
+- search and language controls
 
+## Accessibility And Themes
+
+The theme can easily undo good semantics.
+
+Customer theme review should cover:
+
+- visible focus rings
+- contrast in light, dark, and system mode
+- reduced-motion handling
+- state not conveyed only by color
+
+Gitly is the canonical checked-in example for reviewing these concerns because it ships:
+
+- language switcher
+- theme switcher
+- skip link
+- screen-reader-only labels
+
+across multiple pages under `apps/gitly/templates/gitly/`.
+
+## What Remains The App’s Responsibility?
+
+Customer apps still own:
+
+- semantic page structure
+- customer-specific labels and descriptions
+- accessible dialogs and drawers if they add them
+- JS interaction patterns
+- theme-level visual accessibility
+
+Davenda makes the right path possible and normal. It does not absolve the customer app from using
+that path well.
+
+## Constraints And Common Mistakes
+
+### Treating admin as exempt
+
+Internal tools still need accessible forms, tables, and navigation.
+
+### Removing focus styles in the design pass
+
+That instantly breaks keyboard usability.
+
+### Using placeholders as labels
+
+Search and checkout controls still need real labels.
+
+### Assuming first render passing means fragment updates are also accessible
+
+Partial updates need their own review.
+
+## What Should I Read Next?
+
+- [Accessibility](../reference/accessibility.md)
+- [Themes, Rendering, And Assets](./themes-rendering-and-assets.md)
 - [Request And Render Lifecycle](./request-and-render-lifecycle.md)
-- [Accessibility Reference](../reference/accessibility.md)
-- [Theme Structure Reference](../reference/theme-structure.md)
+- `apps/gitly/templates/gitly/`
+- `apps/shoppr/templates/commerce/`

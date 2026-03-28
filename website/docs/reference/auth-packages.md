@@ -23,6 +23,16 @@ Davenda separates three concerns that are often collapsed together:
 
 The package exists so a customer app can extend or replace auth semantics without forking official modules or modifying the engine.
 
+## When You Should Care About This Page
+
+Read this page when you are:
+
+- selecting an auth package in `app.toml`
+- creating a new customer auth package under `auth/<package>/`
+- versioning auth changes for release
+- trying to understand what is package-owned versus engine-owned
+- validating whether a customer-specific auth change belongs in schema, bindings, seeds, or migrations
+
 ## Package Layout
 
 Typical layout:
@@ -38,6 +48,25 @@ auth/
 ```
 
 The current docs/design also reserve `tests/` for package-owned auth decision tests.
+
+## Required Versus Optional Files
+
+Required package files:
+
+- `package.toml`
+- `model.auth`
+- `capabilities.toml`
+
+Optional but normal directories:
+
+- `migrations/`
+- `seeds/`
+- `tests/`
+
+Practical rule:
+
+- if the package changes auth semantics, it should at least have the first three
+- if the package needs bootstrap tuples or auth-owned evolution, add migrations and seeds
 
 ## `package.toml`
 
@@ -73,6 +102,21 @@ What the version fields mean:
 
 Keep them separate. A binding change is not the same thing as a storage change.
 
+## Exact Repo Example
+
+Shoppr's checked-in auth package is:
+
+```text
+apps/shoppr/auth/shoppr-auth/
+  package.toml
+  model.auth
+  capabilities.toml
+  migrations/
+  seeds/
+```
+
+That is the canonical repo example for a customer-specific extending package.
+
 ## `mode`
 
 Current package mode values:
@@ -100,6 +144,24 @@ Current loader constraint:
 - an extend-mode package must import exactly one base package
 - multiple imported base packages are rejected by the current loader
 
+## How Packages Are Used In Davenda
+
+The normal path is:
+
+1. declare the package in `app.toml`
+2. select the same package at runtime in `platform.toml`
+3. validate or inspect it with auth tooling
+4. run the app with that package active
+
+In practice that means these files move together:
+
+- `apps/<app>/app.toml`
+- `apps/<app>/platform.toml`
+- `apps/<app>/platform.dev.toml`
+- `apps/<app>/auth/<package>/...`
+
+If those disagree, the app/runtime contract is inconsistent.
+
 ## `model.auth`
 
 `model.auth` defines resource types, relations, and derived permissions.
@@ -119,6 +181,18 @@ permission = "featured_edit"
 ```
 
 This is the layer that official modules depend on. Modules do not inspect relation names from `model.auth`.
+
+## Practical Workflow
+
+For a normal customer-specific addition:
+
+1. start from an extending package
+2. add or refine schema in `model.auth`
+3. bind the needed capability in `capabilities.toml`
+4. add bootstrap or migration material only if the change needs it
+5. validate the package before deployment
+
+This is the safer path because capability bindings keep official modules stable while letting customer apps change policy.
 
 ## `migrations/` and `seeds/`
 
@@ -144,6 +218,39 @@ Choose `replace` only when:
 - you are prepared to supply complete capability coverage for installed modules
 - you can own the migration and operational cost of replacing the model
 
+## Common Working Example
+
+A small package-level customization usually looks like this:
+
+```toml
+# package.toml
+name = "shoppr-auth"
+version = "0.1.0"
+mode = "extend"
+storage_schema_version = 1
+model_version = 1
+capability_binding_version = 1
+imports = ["platform-default-auth"]
+```
+
+```text
+# model.auth
+type product
+  relations
+    merchandiser: user | group#member
+  permissions
+    featured_edit = merchandiser
+```
+
+```toml
+# capabilities.toml
+[bindings."catalog.featured.edit"]
+resource_type = "product"
+permission = "featured_edit"
+```
+
+That is the shape to copy first unless you have a strong reason to do something more invasive.
+
 ## Common Mistakes
 
 - Treating the package as a role list instead of a full semantic boundary.
@@ -151,3 +258,8 @@ Choose `replace` only when:
 - Using `replace` without planning full capability coverage for installed modules.
 - Bumping all three package version numbers together by habit instead of by actual change type.
 - Assuming the current file-backed loader supports every design-time package feature. It does not yet.
+
+## Read Next
+
+- [Auth Schema](./auth-schema.md)
+- [Custom Auth Schema Guidance](./custom-auth-schema.md)

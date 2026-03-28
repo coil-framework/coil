@@ -1,0 +1,22 @@
+[package]
+name = "coil-scaffold"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil.rs"
+documentation = "https://coil.rs/docs"
+description = "Scaffolding and workspace lifecycle support for Coil customer projects."
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+coil-app = { version = "0.1.0", path = "../coil-app" }
+coil-config = { version = "0.1.0", path = "../coil-config" }
+dialoguer = "0.11"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

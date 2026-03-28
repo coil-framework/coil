@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/cargo-coil",
     "crates/coil-a11y",
     "crates/coil-app",
     "crates/coil-admin",
@@ -26,6 +27,7 @@ members = [
     "crates/coil-report",
     "crates/coil-runtime",
     "crates/coil-seo",
+    "crates/coil-scaffold",
     "crates/coil-storage",
     "crates/coil-template",
     "crates/coil-tls",

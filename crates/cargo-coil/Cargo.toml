@@ -1,0 +1,20 @@
+[package]
+name = "cargo-coil"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil.rs"
+documentation = "https://coil.rs/docs"
+description = "Cargo subcommand for creating and evolving Coil customer projects."
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+coil-scaffold = { version = "0.1.0", path = "../coil-scaffold" }
+
+[[bin]]
+name = "cargo-coil"
+path = "src/main.rs"

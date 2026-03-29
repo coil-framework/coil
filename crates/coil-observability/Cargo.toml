@@ -1,6 +1,6 @@
 [package]
 name = "coil-observability"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 rust-version = "1.85"
@@ -11,5 +11,5 @@ documentation = "https://coil.rs/docs"
 description = "Observability primitives for the Coil framework."
 readme = "README.md"
 [dependencies]
-coil-config = { version = "0.1.0", path = "../coil-config" }
+coil-config = { version = "0.1.1", path = "../coil-config" }
 thiserror = "1.0"

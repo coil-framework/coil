@@ -1,6 +1,6 @@
 [package]
 name = "coil-assets"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 rust-version = "1.85"
@@ -11,11 +11,11 @@ documentation = "https://coil.rs/docs"
 description = "Asset publishing and delivery primitives for the Coil framework."
 readme = "README.md"
 [dependencies]
-coil-auth = { version = "0.1.0", path = "../coil-auth" }
-coil-storage = { version = "0.1.0", path = "../coil-storage" }
+coil-auth = { version = "0.1.1", path = "../coil-auth" }
+coil-storage = { version = "0.1.1", path = "../coil-storage" }
 sha2 = "0.10"
 thiserror = "1.0"
 
 [dev-dependencies]
-coil-config = { version = "0.1.0", path = "../coil-config" }
+coil-config = { version = "0.1.1", path = "../coil-config" }
 tempfile = "3"

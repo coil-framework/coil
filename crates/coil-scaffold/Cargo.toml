@@ -1,6 +1,6 @@
 [package]
 name = "coil-scaffold"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -12,8 +12,8 @@ readme = "README.md"
 
 [dependencies]
 anyhow = "1"
-coil-app = { version = "0.1.0", path = "../coil-app" }
-coil-config = { version = "0.1.0", path = "../coil-config" }
+coil-app = { version = "0.1.1", path = "../coil-app" }
+coil-config = { version = "0.1.1", path = "../coil-config" }
 dialoguer = "0.11"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

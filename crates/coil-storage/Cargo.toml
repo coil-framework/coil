@@ -1,6 +1,6 @@
 [package]
 name = "coil-storage"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 rust-version = "1.85"
@@ -11,7 +11,7 @@ documentation = "https://coil.rs/docs"
 description = "Object storage primitives for the Coil framework."
 readme = "README.md"
 [dependencies]
-coil-config = { version = "0.1.0", path = "../coil-config" }
+coil-config = { version = "0.1.1", path = "../coil-config" }
 bytes = "1"
 futures = "0.3"
 object_store = { version = "0.13.1", default-features = false, features = ["aws"] }

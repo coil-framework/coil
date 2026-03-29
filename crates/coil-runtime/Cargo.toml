@@ -1,6 +1,6 @@
 [package]
 name = "coil-runtime"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 rust-version = "1.85"
@@ -12,24 +12,24 @@ description = "HTTP runtime and request handling for the Coil framework."
 readme = "README.md"
 [dependencies]
 axum = "0.8"
-coil-auth = { version = "0.1.0", path = "../coil-auth" }
-coil-assets = { version = "0.1.0", path = "../coil-assets" }
-coil-cache = { version = "0.1.0", path = "../coil-cache" }
-coil-commerce = { version = "0.1.0", path = "../coil-commerce" }
-coil-config = { version = "0.1.0", path = "../coil-config" }
-coil-core = { version = "0.1.0", path = "../coil-core" }
-coil-customer-sdk = { version = "0.1.0", path = "../coil-customer-sdk" }
-coil-data = { version = "0.1.0", path = "../coil-data" }
-coil-i18n = { version = "0.1.0", path = "../coil-i18n" }
-coil-jobs = { version = "0.1.0", path = "../coil-jobs" }
-coil-memberships = { version = "0.1.0", path = "../coil-memberships" }
-coil-observability = { version = "0.1.0", path = "../coil-observability" }
-coil-ops = { version = "0.1.0", path = "../coil-ops" }
-coil-seo = { version = "0.1.0", path = "../coil-seo" }
-coil-storage = { version = "0.1.0", path = "../coil-storage" }
-coil-template = { version = "0.1.0", path = "../coil-template" }
-coil-tls = { version = "0.1.0", path = "../coil-tls" }
-coil-wasm = { version = "0.1.0", path = "../coil-wasm" }
+coil-auth = { version = "0.1.1", path = "../coil-auth" }
+coil-assets = { version = "0.1.1", path = "../coil-assets" }
+coil-cache = { version = "0.1.1", path = "../coil-cache" }
+coil-commerce = { version = "0.1.1", path = "../coil-commerce" }
+coil-config = { version = "0.1.1", path = "../coil-config" }
+coil-core = { version = "0.1.1", path = "../coil-core" }
+coil-customer-sdk = { version = "0.1.1", path = "../coil-customer-sdk" }
+coil-data = { version = "0.1.1", path = "../coil-data" }
+coil-i18n = { version = "0.1.1", path = "../coil-i18n" }
+coil-jobs = { version = "0.1.1", path = "../coil-jobs" }
+coil-memberships = { version = "0.1.1", path = "../coil-memberships" }
+coil-observability = { version = "0.1.1", path = "../coil-observability" }
+coil-ops = { version = "0.1.1", path = "../coil-ops" }
+coil-seo = { version = "0.1.1", path = "../coil-seo" }
+coil-storage = { version = "0.1.1", path = "../coil-storage" }
+coil-template = { version = "0.1.1", path = "../coil-template" }
+coil-tls = { version = "0.1.1", path = "../coil-tls" }
+coil-wasm = { version = "0.1.1", path = "../coil-wasm" }
 hmac = "0.12"
 ipnet = "2"
 rusqlite = { version = "0.30", features = ["bundled"] }
@@ -47,10 +47,10 @@ zanzibar = { workspace = true }
 
 [dev-dependencies]
 async-trait = "0.1"
-coil-admin = { version = "0.1.0", path = "../coil-admin" }
-coil-cms = { version = "0.1.0", path = "../coil-cms" }
-coil-events = { version = "0.1.0", path = "../coil-events" }
-coil-media = { version = "0.1.0", path = "../coil-media" }
-coil-memberships = { version = "0.1.0", path = "../coil-memberships" }
-coil-observability = { version = "0.1.0", path = "../coil-observability" }
+coil-admin = { version = "0.1.1", path = "../coil-admin" }
+coil-cms = { version = "0.1.1", path = "../coil-cms" }
+coil-events = { version = "0.1.1", path = "../coil-events" }
+coil-media = { version = "0.1.1", path = "../coil-media" }
+coil-memberships = { version = "0.1.1", path = "../coil-memberships" }
+coil-observability = { version = "0.1.1", path = "../coil-observability" }
 wat = "1"

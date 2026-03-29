@@ -1,6 +1,6 @@
 [package]
 name = "coil-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 rust-version = "1.85"
@@ -14,18 +14,18 @@ readme = "README.md"
 name = "coil"
 
 [dependencies]
-coil-admin = { version = "0.1.0", path = "../coil-admin" }
-coil-app = { version = "0.1.0", path = "../coil-app" }
-coil-auth = { version = "0.1.0", path = "../coil-auth" }
-coil-cms = { version = "0.1.0", path = "../coil-cms" }
-coil-commerce = { version = "0.1.0", path = "../coil-commerce" }
-coil-config = { version = "0.1.0", path = "../coil-config" }
-coil-core = { version = "0.1.0", path = "../coil-core" }
-coil-customer-sdk = { version = "0.1.0", path = "../coil-customer-sdk" }
-coil-events = { version = "0.1.0", path = "../coil-events" }
-coil-media = { version = "0.1.0", path = "../coil-media" }
-coil-memberships = { version = "0.1.0", path = "../coil-memberships" }
-coil-ops = { version = "0.1.0", path = "../coil-ops" }
-coil-runtime = { version = "0.1.0", path = "../coil-runtime" }
+coil-admin = { version = "0.1.1", path = "../coil-admin" }
+coil-app = { version = "0.1.1", path = "../coil-app" }
+coil-auth = { version = "0.1.1", path = "../coil-auth" }
+coil-cms = { version = "0.1.1", path = "../coil-cms" }
+coil-commerce = { version = "0.1.1", path = "../coil-commerce" }
+coil-config = { version = "0.1.1", path = "../coil-config" }
+coil-core = { version = "0.1.1", path = "../coil-core" }
+coil-customer-sdk = { version = "0.1.1", path = "../coil-customer-sdk" }
+coil-events = { version = "0.1.1", path = "../coil-events" }
+coil-media = { version = "0.1.1", path = "../coil-media" }
+coil-memberships = { version = "0.1.1", path = "../coil-memberships" }
+coil-ops = { version = "0.1.1", path = "../coil-ops" }
+coil-runtime = { version = "0.1.1", path = "../coil-runtime" }
 thiserror = "1.0"
 tokio = { version = "1", features = ["net", "rt-multi-thread"] }

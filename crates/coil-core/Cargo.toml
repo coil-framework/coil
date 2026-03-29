@@ -1,6 +1,6 @@
 [package]
 name = "coil-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 rust-version = "1.85"
@@ -13,18 +13,18 @@ readme = "README.md"
 [dependencies]
 aes-gcm = "0.10"
 base64 = "0.22"
-coil-a11y = { version = "0.1.0", path = "../coil-a11y" }
-coil-auth = { version = "0.1.0", path = "../coil-auth" }
-coil-cache = { version = "0.1.0", path = "../coil-cache" }
-coil-config = { version = "0.1.0", path = "../coil-config" }
-coil-data = { version = "0.1.0", path = "../coil-data" }
-coil-i18n = { version = "0.1.0", path = "../coil-i18n" }
-coil-jobs = { version = "0.1.0", path = "../coil-jobs" }
-coil-observability = { version = "0.1.0", path = "../coil-observability" }
-coil-seo = { version = "0.1.0", path = "../coil-seo" }
-coil-template = { version = "0.1.0", path = "../coil-template" }
-coil-tls = { version = "0.1.0", path = "../coil-tls" }
-coil-wasm = { version = "0.1.0", path = "../coil-wasm" }
+coil-a11y = { version = "0.1.1", path = "../coil-a11y" }
+coil-auth = { version = "0.1.1", path = "../coil-auth" }
+coil-cache = { version = "0.1.1", path = "../coil-cache" }
+coil-config = { version = "0.1.1", path = "../coil-config" }
+coil-data = { version = "0.1.1", path = "../coil-data" }
+coil-i18n = { version = "0.1.1", path = "../coil-i18n" }
+coil-jobs = { version = "0.1.1", path = "../coil-jobs" }
+coil-observability = { version = "0.1.1", path = "../coil-observability" }
+coil-seo = { version = "0.1.1", path = "../coil-seo" }
+coil-template = { version = "0.1.1", path = "../coil-template" }
+coil-tls = { version = "0.1.1", path = "../coil-tls" }
+coil-wasm = { version = "0.1.1", path = "../coil-wasm" }
 hmac = "0.12"
 rand = "0.8"
 sha2 = "0.10"

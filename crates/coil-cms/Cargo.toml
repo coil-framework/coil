@@ -1,6 +1,6 @@
 [package]
 name = "coil-cms"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 rust-version = "1.85"
@@ -11,7 +11,7 @@ documentation = "https://coil.rs/docs"
 description = "CMS capabilities for the Coil framework."
 readme = "README.md"
 [dependencies]
-coil-auth = { version = "0.1.0", path = "../coil-auth" }
-coil-core = { version = "0.1.0", path = "../coil-core" }
-coil-data = { version = "0.1.0", path = "../coil-data" }
-coil-jobs = { version = "0.1.0", path = "../coil-jobs" }
+coil-auth = { version = "0.1.1", path = "../coil-auth" }
+coil-core = { version = "0.1.1", path = "../coil-core" }
+coil-data = { version = "0.1.1", path = "../coil-data" }
+coil-jobs = { version = "0.1.1", path = "../coil-jobs" }

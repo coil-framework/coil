@@ -107,7 +107,7 @@ What it does:
    - `COIL_COOKIE_SECRET`
    - `COIL_CSRF_SECRET`
 4. runs the customer app through Cargo
-5. uses `cargo watch` by default for rebuild-and-restart behaviour
+5. watches the workspace and restarts the customer app when files change
 
 Examples:
 
@@ -121,15 +121,11 @@ cargo coil dev --config platform.dev.toml
 
 Notes:
 
-- watch mode requires `cargo-watch`:
-
-  ```bash
-  cargo install cargo-watch --locked
-  ```
-
 - `--no-watch` runs a single host-native app process
 - `--skip-infra` is useful if Postgres and Redis are already running
 - environment variables you set in your shell override the default local values
+- watch mode preserves the customer binary's normal stdout and stderr, so bootstrap and runtime
+  failures are shown directly rather than collapsed into a watcher wrapper error
 
 ### `cargo coil apply`
 

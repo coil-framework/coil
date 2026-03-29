@@ -6,9 +6,13 @@ use coil_scaffold::{
     doctor, load_descriptor, modify_modules, run_wizard, sanitize_slug,
 };
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command as ProcessCommand, Stdio};
+use std::process::{Child, Command as ProcessCommand};
+use std::thread;
+use std::time::SystemTime;
 use std::time::Duration;
 
 #[derive(Debug, Parser)]
@@ -305,13 +309,11 @@ fn dev_project(command: DevCommand) -> Result<()> {
         );
         run_process(&cargo_program, &app_args, &root, &env)
     } else {
-        ensure_cargo_watch_available(&cargo_program, &root)?;
         println!(
             "Watching the workspace and restarting `{}` on change",
             descriptor.bin_crate_package_name()
         );
-        let watch_args = build_watch_args(&app_args);
-        run_process(&cargo_program, &watch_args, &root, &env)
+        watch_process(&cargo_program, &app_args, &root, &env)
     }
 }
 
@@ -565,57 +567,6 @@ fn run_docker_compose_up(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn build_watch_args(app_args: &[OsString]) -> Vec<OsString> {
-    let command = shell_words(app_args);
-    vec![
-        OsString::from("watch"),
-        OsString::from("--poll"),
-        OsString::from("--ignore"),
-        OsString::from(".git/*"),
-        OsString::from("--ignore"),
-        OsString::from("target/*"),
-        OsString::from("--ignore"),
-        OsString::from(".coil/cache/*"),
-        OsString::from("-x"),
-        OsString::from(command),
-    ]
-}
-
-fn shell_words(args: &[OsString]) -> String {
-    args.iter()
-        .map(|arg| {
-            let value = arg.to_string_lossy();
-            if value
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || "-_./:=".contains(ch))
-            {
-                value.into_owned()
-            } else {
-                format!("'{}'", value.replace('\'', "'\"'\"'"))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn ensure_cargo_watch_available(cargo_program: &OsString, root: &Path) -> Result<()> {
-    let status = ProcessCommand::new(cargo_program)
-        .arg("watch")
-        .arg("--version")
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .with_context(|| format!("failed to run `{}`", cargo_program.to_string_lossy()))?;
-    if status.success() {
-        return Ok(());
-    }
-    bail!(
-        "`cargo watch` is required for `cargo coil dev`; install it with `cargo install cargo-watch --locked`, or use `cargo coil dev --no-watch`"
-    )
-}
-
 fn dev_environment(descriptor: &ProjectDescriptor) -> Vec<(String, String)> {
     let slug = descriptor.project_slug();
     vec![
@@ -673,6 +624,111 @@ fn run_process(
             status
         )
     }
+}
+
+fn watch_process(
+    program: &OsString,
+    args: &[OsString],
+    root: &Path,
+    env: &[(String, String)],
+) -> Result<()> {
+    let mut snapshot = watch_snapshot(root)?;
+    let mut child = spawn_process(program, args, root, env)?;
+    let mut child_exited = false;
+    loop {
+        thread::sleep(Duration::from_millis(500));
+        let current = watch_snapshot(root)?;
+        if current != snapshot {
+            snapshot = current;
+            if child.try_wait()?.is_none() {
+                child.kill().ok();
+                let _ = child.wait();
+            }
+            println!("Change detected. Restarting app process.");
+            child = spawn_process(program, args, root, env)?;
+            child_exited = false;
+            continue;
+        }
+
+        if !child_exited {
+            if let Some(status) = child.try_wait()? {
+                child_exited = true;
+                if !status.success() {
+                    eprintln!(
+                        "App process exited with status {}. Waiting for changes to restart.",
+                        status
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn spawn_process(
+    program: &OsString,
+    args: &[OsString],
+    root: &Path,
+    env: &[(String, String)],
+) -> Result<Child> {
+    let mut command = ProcessCommand::new(program);
+    command.args(args).current_dir(root);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    command.spawn().with_context(|| {
+        format!(
+            "failed to run `{}`",
+            std::iter::once(program.to_string_lossy().into_owned())
+                .chain(args.iter().map(|arg| arg.to_string_lossy().into_owned()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    })
+}
+
+fn watch_snapshot(root: &Path) -> Result<BTreeMap<PathBuf, u128>> {
+    let mut snapshot = BTreeMap::new();
+    collect_watch_snapshot(root, root, &mut snapshot)?;
+    Ok(snapshot)
+}
+
+fn collect_watch_snapshot(
+    root: &Path,
+    current: &Path,
+    snapshot: &mut BTreeMap<PathBuf, u128>,
+) -> Result<()> {
+    for entry in fs::read_dir(current)
+        .with_context(|| format!("failed to read watch directory `{}`", current.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        if should_ignore_watch_path(relative) {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            collect_watch_snapshot(root, &path, snapshot)?;
+            continue;
+        }
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        snapshot.insert(relative.to_path_buf(), modified);
+    }
+    Ok(())
+}
+
+fn should_ignore_watch_path(relative: &Path) -> bool {
+    let mut components = relative.components();
+    let Some(first) = components.next() else {
+        return false;
+    };
+    let first = first.as_os_str();
+    first == ".git" || first == "target" || first == "node_modules" || first == ".coil"
 }
 
 fn resolve_framework_version(requested: Option<String>) -> Result<String> {
@@ -775,5 +831,14 @@ mod tests {
     fn default_falls_back_to_built_in_version() {
         let version = resolve_framework_version_with(None, || bail!("network unavailable")).unwrap();
         assert_eq!(version, DEFAULT_FRAMEWORK_VERSION);
+    }
+
+    #[test]
+    fn watch_ignores_runtime_state_directories() {
+        assert!(should_ignore_watch_path(Path::new(".coil")));
+        assert!(should_ignore_watch_path(Path::new(".coil/cache/state.json")));
+        assert!(should_ignore_watch_path(Path::new(".coil/metadata/app.sqlite3")));
+        assert!(should_ignore_watch_path(Path::new("target/debug/app")));
+        assert!(!should_ignore_watch_path(Path::new("templates/pages/home.html")));
     }
 }

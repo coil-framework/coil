@@ -97,10 +97,25 @@ pub enum TemplateExpression {
     LiteralBool(bool),
     AssetPath(String),
     TranslationKey(String),
+    Not(Box<TemplateExpression>),
+    Logical {
+        left: Box<TemplateExpression>,
+        operator: LogicalOperator,
+        right: Box<TemplateExpression>,
+    },
     Compare {
         left: Box<TemplateExpression>,
         operator: ComparisonOperator,
         right: Box<TemplateExpression>,
+    },
+    Elvis {
+        left: Box<TemplateExpression>,
+        right: Box<TemplateExpression>,
+    },
+    Conditional {
+        condition: Box<TemplateExpression>,
+        then_expression: Box<TemplateExpression>,
+        else_expression: Box<TemplateExpression>,
     },
 }
 
@@ -108,6 +123,16 @@ pub enum TemplateExpression {
 pub enum ComparisonOperator {
     Equal,
     NotEqual,
+    GreaterThan,
+    LessThan,
+    GreaterOrEqual,
+    LessOrEqual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicalOperator {
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

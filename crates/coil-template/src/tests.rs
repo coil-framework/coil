@@ -397,6 +397,81 @@ fn comparison_expressions_render_and_drive_conditionals() {
 }
 
 #[test]
+fn thymeleaf_style_operators_render_with_expected_precedence() {
+    let parser = TemplateSourceParser::new();
+    let template = parser
+        .parse_fragment(
+            TemplateNamespace::new("core").unwrap(),
+            TemplateName::new("operators").unwrap(),
+            r#"
+<section coil:fragment="operators" xmlns:coil="https://coil.rs">
+  <span class="gt" coil:text="${headline gt 'A'}">false</span>
+  <span class="lt" coil:text="${headline lt 'Zzz'}">false</span>
+  <span class="ge" coil:text="${headline ge 'Book & Save'}">false</span>
+  <span class="le" coil:text="${headline le 'Book & Save'}">false</span>
+  <span class="eq" coil:text="${headline eq 'Book & Save'}">false</span>
+  <span class="ne" coil:text="${headline ne 'Else'}">false</span>
+  <span class="neq" coil:text="${headline neq 'Else'}">false</span>
+  <span class="not-bang" coil:text="${!is_archived}">false</span>
+  <span class="not-word" coil:text="${not is_archived}">false</span>
+  <span class="and-word" coil:text="${headline eq 'Book & Save' and !is_archived}">false</span>
+  <span class="or-word" coil:text="${headline eq 'Else' or featured}">false</span>
+  <span class="elvis" coil:text="${optional_subtitle ?: 'Fallback subtitle'}">missing</span>
+  <span class="ternary" coil:text="${featured ? 'featured' : 'standard'}">missing</span>
+  <span class="paren" coil:text="${(headline eq 'Else' or featured) and not is_archived}">false</span>
+</section>
+"#,
+        )
+        .unwrap();
+
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+
+    let mut model = model()
+        .with_value("is_archived", RenderValue::bool(false))
+        .unwrap()
+        .with_value("featured", RenderValue::bool(true))
+        .unwrap();
+    model = model.with_value("optional_subtitle", RenderValue::text("")).unwrap();
+
+    let html = TemplateRuntime::new(registry)
+        .render_fragment(
+            &[TemplateNamespace::new("core").unwrap()],
+            FragmentRenderRequest::new(selector("operators"), model),
+        )
+        .unwrap()
+        .html;
+
+    for class in [
+        "gt",
+        "lt",
+        "ge",
+        "le",
+        "eq",
+        "ne",
+        "neq",
+        "not-bang",
+        "not-word",
+        "and-word",
+        "or-word",
+        "paren",
+    ] {
+        assert!(
+            html.contains(&format!(r#"<span class="{class}">true</span>"#)),
+            "{class}: {html}"
+        );
+    }
+    assert!(
+        html.contains(r#"<span class="elvis">Fallback subtitle</span>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<span class="ternary">featured</span>"#),
+        "{html}"
+    );
+}
+
+#[test]
 fn switch_case_renders_matching_branch_and_default() {
     let parser = TemplateSourceParser::new();
     let template = parser

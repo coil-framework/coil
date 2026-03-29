@@ -1,4 +1,5 @@
 use super::*;
+use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateRuntime {
@@ -433,6 +434,30 @@ impl TemplateRuntime {
                 .get_translation(key)
                 .map(|value| RenderValue::text(value.to_string()))
                 .ok_or_else(|| TemplateModelError::MissingTranslation { key: key.clone() }),
+            TemplateExpression::Not(expression) => {
+                let value = self.evaluate_expression(model, expression)?;
+                Ok(RenderValue::bool(!value.as_bool(&expression_label(expression))?))
+            }
+            TemplateExpression::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                let left_value = self.evaluate_expression(model, left)?;
+                let left_bool = left_value.as_bool(&expression_label(left))?;
+                match operator {
+                    LogicalOperator::And if !left_bool => Ok(RenderValue::bool(false)),
+                    LogicalOperator::Or if left_bool => Ok(RenderValue::bool(true)),
+                    LogicalOperator::And | LogicalOperator::Or => {
+                        let right_value = self.evaluate_expression(model, right)?;
+                        let right_bool = right_value.as_bool(&expression_label(right))?;
+                        Ok(RenderValue::bool(match operator {
+                            LogicalOperator::And => left_bool && right_bool,
+                            LogicalOperator::Or => left_bool || right_bool,
+                        }))
+                    }
+                }
+            }
             TemplateExpression::Compare {
                 left,
                 operator,
@@ -440,16 +465,78 @@ impl TemplateRuntime {
             } => {
                 let left_value = self.evaluate_expression(model, left)?;
                 let right_value = self.evaluate_expression(model, right)?;
-                let equal = render_values_equal(
-                    &left_value,
-                    &right_value,
-                    expression_label(expression),
-                )?;
                 Ok(RenderValue::bool(match operator {
-                    ComparisonOperator::Equal => equal,
-                    ComparisonOperator::NotEqual => !equal,
+                    ComparisonOperator::Equal => render_values_equal(
+                        &left_value,
+                        &right_value,
+                        expression_label(expression),
+                    )?,
+                    ComparisonOperator::NotEqual => !render_values_equal(
+                        &left_value,
+                        &right_value,
+                        expression_label(expression),
+                    )?,
+                    ComparisonOperator::GreaterThan => render_values_compare(
+                        &left_value,
+                        &right_value,
+                        expression_label(expression),
+                    )? == Ordering::Greater,
+                    ComparisonOperator::LessThan => render_values_compare(
+                        &left_value,
+                        &right_value,
+                        expression_label(expression),
+                    )? == Ordering::Less,
+                    ComparisonOperator::GreaterOrEqual => matches!(
+                        render_values_compare(
+                            &left_value,
+                            &right_value,
+                            expression_label(expression),
+                        )?,
+                        Ordering::Greater | Ordering::Equal
+                    ),
+                    ComparisonOperator::LessOrEqual => matches!(
+                        render_values_compare(
+                            &left_value,
+                            &right_value,
+                            expression_label(expression),
+                        )?,
+                        Ordering::Less | Ordering::Equal
+                    ),
                 }))
             }
+            TemplateExpression::Elvis { left, right } => {
+                if let Some(value) = self.evaluate_elvis_left(model, left)? {
+                    Ok(value)
+                } else {
+                    self.evaluate_expression(model, right)
+                }
+            }
+            TemplateExpression::Conditional {
+                condition,
+                then_expression,
+                else_expression,
+            } => {
+                let condition_value = self.evaluate_expression(model, condition)?;
+                if condition_value.as_bool(&expression_label(condition))? {
+                    self.evaluate_expression(model, then_expression)
+                } else {
+                    self.evaluate_expression(model, else_expression)
+                }
+            }
+        }
+    }
+
+    fn evaluate_elvis_left(
+        &self,
+        model: &RenderModel,
+        expression: &TemplateExpression,
+    ) -> Result<Option<RenderValue>, TemplateModelError> {
+        match self.evaluate_expression(model, expression) {
+            Ok(RenderValue::Text(value)) if value.is_empty() => Ok(None),
+            Ok(value) => Ok(Some(value)),
+            Err(TemplateModelError::MissingValue { .. })
+            | Err(TemplateModelError::MissingTranslation { .. }) => Ok(None),
+            Err(error) => Err(error),
         }
     }
 
@@ -571,6 +658,22 @@ fn expression_label(expression: &TemplateExpression) -> String {
         TemplateExpression::LiteralBool(value) => value.to_string(),
         TemplateExpression::AssetPath(path) => format!("asset({path})"),
         TemplateExpression::TranslationKey(key) => format!("t('{key}')"),
+        TemplateExpression::Not(expression) => format!("!{}", expression_label(expression)),
+        TemplateExpression::Logical {
+            left,
+            operator,
+            right,
+        } => {
+            let operator = match operator {
+                LogicalOperator::And => "and",
+                LogicalOperator::Or => "or",
+            };
+            format!(
+                "{} {operator} {}",
+                expression_label(left),
+                expression_label(right)
+            )
+        }
         TemplateExpression::Compare {
             left,
             operator,
@@ -579,6 +682,10 @@ fn expression_label(expression: &TemplateExpression) -> String {
             let operator = match operator {
                 ComparisonOperator::Equal => "==",
                 ComparisonOperator::NotEqual => "!=",
+                ComparisonOperator::GreaterThan => ">",
+                ComparisonOperator::LessThan => "<",
+                ComparisonOperator::GreaterOrEqual => ">=",
+                ComparisonOperator::LessOrEqual => "<=",
             };
             format!(
                 "{} {operator} {}",
@@ -586,6 +693,21 @@ fn expression_label(expression: &TemplateExpression) -> String {
                 expression_label(right)
             )
         }
+        TemplateExpression::Elvis { left, right } => format!(
+            "{} ?: {}",
+            expression_label(left),
+            expression_label(right)
+        ),
+        TemplateExpression::Conditional {
+            condition,
+            then_expression,
+            else_expression,
+        } => format!(
+            "{} ? {} : {}",
+            expression_label(condition),
+            expression_label(then_expression),
+            expression_label(else_expression)
+        ),
     }
 }
 
@@ -609,6 +731,32 @@ fn render_values_equal(
             expected: "scalar",
         }),
         _ => Ok(false),
+    }
+}
+
+fn render_values_compare(
+    left: &RenderValue,
+    right: &RenderValue,
+    key: String,
+) -> Result<Ordering, TemplateModelError> {
+    match (left, right) {
+        (RenderValue::Text(left), RenderValue::Text(right)) => Ok(left.cmp(right)),
+        (RenderValue::TrustedHtml(left), RenderValue::TrustedHtml(right)) => {
+            Ok(left.as_str().cmp(right.as_str()))
+        }
+        (RenderValue::Bool(left), RenderValue::Bool(right)) => Ok(left.cmp(right)),
+        (RenderValue::List(_), _) | (_, RenderValue::List(_)) => Err(TemplateModelError::ValueTypeMismatch {
+            key,
+            expected: "scalar",
+        }),
+        (RenderValue::Object(_), _) | (_, RenderValue::Object(_)) => Err(TemplateModelError::ValueTypeMismatch {
+            key,
+            expected: "scalar",
+        }),
+        _ => Err(TemplateModelError::ValueTypeMismatch {
+            key,
+            expected: "comparable_scalar",
+        }),
     }
 }
 

@@ -8,8 +8,8 @@ mod template;
 mod tokens;
 
 pub use dom::{
-    AttributeNode, AttributeValue, ComparisonOperator, ConditionExpression, ElementNode, Node,
-    SlotNode, SwitchCaseNode, TemplateBinding, TemplateExpression,
+    AttributeNode, AttributeValue, ComparisonOperator, ConditionExpression, ElementNode,
+    LogicalOperator, Node, SlotNode, SwitchCaseNode, TemplateBinding, TemplateExpression,
 };
 pub use error::TemplateModelError;
 pub use render::{RenderModel, RenderModelMergePolicy, RenderOutput, RenderValue, TrustedHtml};

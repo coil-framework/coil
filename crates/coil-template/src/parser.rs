@@ -543,7 +543,6 @@ fn parse_slot_name(value: &str) -> String {
 fn parse_condition(value: &str) -> Result<ConditionExpression, TemplateModelError> {
     let value = value.trim();
     match parse_template_expression(value)? {
-        expression @ TemplateExpression::Compare { .. } => Ok(ConditionExpression::Expression(expression)),
         TemplateExpression::LiteralBool(value) => Ok(ConditionExpression::Literal(value)),
         TemplateExpression::LiteralText(value) => match value.to_ascii_lowercase().as_str() {
             "true" => Ok(ConditionExpression::Literal(true)),
@@ -558,6 +557,7 @@ fn parse_condition(value: &str) -> Result<ConditionExpression, TemplateModelErro
             column: 0,
             message: "translation expressions are not valid in coil:if or coil:unless".to_string(),
         }),
+        expression => Ok(ConditionExpression::Expression(expression)),
     }
 }
 
@@ -625,15 +625,7 @@ fn parse_attr_bindings(value: &str) -> Result<Vec<AttributeNode>, TemplateModelE
 }
 
 fn parse_template_expression(value: &str) -> Result<TemplateExpression, TemplateModelError> {
-    let trimmed = value.trim();
-
-    if let Some((left, operator, right)) = split_comparison_expression(trimmed) {
-        return Ok(TemplateExpression::Compare {
-            left: Box::new(parse_template_expression(left.trim())?),
-            operator,
-            right: Box::new(parse_template_expression(right.trim())?),
-        });
-    }
+    let mut trimmed = value.trim();
 
     if let Some(inner) = trimmed
         .strip_prefix("${")
@@ -649,7 +641,7 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
                 .and_then(|value| value.strip_suffix('}'))
         })
     {
-        return parse_template_expression(inner.trim());
+        trimmed = inner.trim();
     }
 
     if let Some(inner) = trimmed
@@ -659,92 +651,417 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
         let inner = inner.trim();
         return Ok(TemplateExpression::AssetPath(inner.to_string()));
     }
+    let tokens = tokenize_template_expression(trimmed)?;
+    let mut parser = TemplateExpressionParser::new(tokens);
+    let expression = parser.parse_expression()?;
+    parser.finish()?;
+    Ok(expression)
+}
 
-    if let Some(inner) = trimmed
-        .strip_prefix("asset(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        let inner = inner.trim().trim_matches('"').trim_matches('\'');
-        return Ok(TemplateExpression::AssetPath(inner.to_string()));
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExpressionToken {
+    Identifier(String),
+    StringLiteral(String),
+    AssetLiteral(String),
+    LParen,
+    RParen,
+    Question,
+    Colon,
+    Elvis,
+    Not,
+    Equal,
+    NotEqual,
+    GreaterThan,
+    LessThan,
+    GreaterOrEqual,
+    LessOrEqual,
+    And,
+    Or,
+    True,
+    False,
+}
+
+fn tokenize_template_expression(value: &str) -> Result<Vec<ExpressionToken>, TemplateModelError> {
+    let mut tokens = Vec::new();
+    let chars: Vec<char> = value.chars().collect();
+    let mut index = 0usize;
+    while index < chars.len() {
+        match chars[index] {
+            ch if ch.is_ascii_whitespace() => index += 1,
+            '(' => {
+                tokens.push(ExpressionToken::LParen);
+                index += 1;
+            }
+            ')' => {
+                tokens.push(ExpressionToken::RParen);
+                index += 1;
+            }
+            '?' => {
+                if chars.get(index + 1) == Some(&':') {
+                    tokens.push(ExpressionToken::Elvis);
+                    index += 2;
+                } else {
+                    tokens.push(ExpressionToken::Question);
+                    index += 1;
+                }
+            }
+            ':' => {
+                tokens.push(ExpressionToken::Colon);
+                index += 1;
+            }
+            '!' => {
+                if chars.get(index + 1) == Some(&'=') {
+                    tokens.push(ExpressionToken::NotEqual);
+                    index += 2;
+                } else {
+                    tokens.push(ExpressionToken::Not);
+                    index += 1;
+                }
+            }
+            '=' => {
+                if chars.get(index + 1) == Some(&'=') {
+                    tokens.push(ExpressionToken::Equal);
+                    index += 2;
+                } else {
+                    return Err(expression_parse_error(format!(
+                        "unexpected `=` in expression `{value}`; use `==` for equality"
+                    )));
+                }
+            }
+            '>' => {
+                if chars.get(index + 1) == Some(&'=') {
+                    tokens.push(ExpressionToken::GreaterOrEqual);
+                    index += 2;
+                } else {
+                    tokens.push(ExpressionToken::GreaterThan);
+                    index += 1;
+                }
+            }
+            '<' => {
+                if chars.get(index + 1) == Some(&'=') {
+                    tokens.push(ExpressionToken::LessOrEqual);
+                    index += 2;
+                } else {
+                    tokens.push(ExpressionToken::LessThan);
+                    index += 1;
+                }
+            }
+            '@' if chars.get(index + 1) == Some(&'{') => {
+                let start = index + 2;
+                index = start;
+                while index < chars.len() && chars[index] != '}' {
+                    index += 1;
+                }
+                if index >= chars.len() {
+                    return Err(expression_parse_error(format!(
+                        "unterminated asset expression in `{value}`"
+                    )));
+                }
+                let asset = chars[start..index].iter().collect::<String>().trim().to_string();
+                tokens.push(ExpressionToken::AssetLiteral(asset));
+                index += 1;
+            }
+            '\'' | '"' => {
+                let quote = chars[index];
+                index += 1;
+                let start = index;
+                while index < chars.len() && chars[index] != quote {
+                    index += 1;
+                }
+                if index >= chars.len() {
+                    return Err(expression_parse_error(format!(
+                        "unterminated string literal in `{value}`"
+                    )));
+                }
+                tokens.push(ExpressionToken::StringLiteral(
+                    chars[start..index].iter().collect::<String>(),
+                ));
+                index += 1;
+            }
+            ch if is_expression_identifier_start(ch) => {
+                let start = index;
+                index += 1;
+                while index < chars.len() && is_expression_identifier_char(chars[index]) {
+                    index += 1;
+                }
+                let identifier = chars[start..index].iter().collect::<String>();
+                let token = match identifier.as_str() {
+                    "and" => ExpressionToken::And,
+                    "or" => ExpressionToken::Or,
+                    "not" => ExpressionToken::Not,
+                    "eq" => ExpressionToken::Equal,
+                    "ne" | "neq" => ExpressionToken::NotEqual,
+                    "gt" => ExpressionToken::GreaterThan,
+                    "lt" => ExpressionToken::LessThan,
+                    "ge" => ExpressionToken::GreaterOrEqual,
+                    "le" => ExpressionToken::LessOrEqual,
+                    "true" => ExpressionToken::True,
+                    "false" => ExpressionToken::False,
+                    _ => ExpressionToken::Identifier(identifier),
+                };
+                tokens.push(token);
+            }
+            other => {
+                return Err(expression_parse_error(format!(
+                    "unexpected character `{other}` in expression `{value}`"
+                )));
+            }
+        }
     }
 
-    if let Some(inner) = trimmed
-        .strip_prefix("t(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        let inner = inner.trim();
-        let key = inner
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .or_else(|| inner.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))
-            .ok_or_else(|| TemplateModelError::ParseError {
-                line: 0,
-                column: 0,
-                message: format!(
-                    "translation helper expects a quoted key like t('checkout.title'), got `{trimmed}`"
-                ),
-            })?;
-        return Ok(TemplateExpression::TranslationKey(validate_token(
-            "translation_key",
-            key.to_string(),
-        )?));
-    }
+    Ok(tokens)
+}
 
-    if let Some(inner) = trimmed
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-    {
-        return Ok(TemplateExpression::LiteralText(inner.to_string()));
-    }
-    if let Some(inner) = trimmed
-        .strip_prefix('\'')
-        .and_then(|value| value.strip_suffix('\''))
-    {
-        return Ok(TemplateExpression::LiteralText(inner.to_string()));
-    }
+fn is_expression_identifier_start(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$')
+}
 
-    match trimmed {
-        "true" => Ok(TemplateExpression::LiteralBool(true)),
-        "false" => Ok(TemplateExpression::LiteralBool(false)),
-        other => Ok(TemplateExpression::ModelKey(other.to_string())),
+fn is_expression_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-' | '/' | ':' | '$')
+}
+
+fn expression_parse_error(message: impl Into<String>) -> TemplateModelError {
+    TemplateModelError::ParseError {
+        line: 0,
+        column: 0,
+        message: message.into(),
     }
 }
 
-fn split_comparison_expression(value: &str) -> Option<(&str, ComparisonOperator, &str)> {
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut paren_depth = 0usize;
-    let mut brace_depth = 0usize;
-    let chars: Vec<(usize, char)> = value.char_indices().collect();
-    let mut index = 0usize;
-    while index < chars.len() {
-        let (byte_index, ch) = chars[index];
-        match ch {
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '(' if !in_single && !in_double => paren_depth += 1,
-            ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
-            '{' if !in_single && !in_double => brace_depth += 1,
-            '}' if !in_single && !in_double && brace_depth > 0 => brace_depth -= 1,
-            '=' if !in_single && !in_double && paren_depth == 0 && brace_depth == 0 => {
-                if value[byte_index..].starts_with("==") {
-                    let left = &value[..byte_index];
-                    let right = &value[byte_index + 2..];
-                    return Some((left, ComparisonOperator::Equal, right));
-                }
-            }
-            '!' if !in_single && !in_double && paren_depth == 0 && brace_depth == 0 => {
-                if value[byte_index..].starts_with("!=") {
-                    let left = &value[..byte_index];
-                    let right = &value[byte_index + 2..];
-                    return Some((left, ComparisonOperator::NotEqual, right));
-                }
-            }
-            _ => {}
-        }
-        index += 1;
+struct TemplateExpressionParser {
+    tokens: Vec<ExpressionToken>,
+    index: usize,
+}
+
+impl TemplateExpressionParser {
+    fn new(tokens: Vec<ExpressionToken>) -> Self {
+        Self { tokens, index: 0 }
     }
-    None
+
+    fn finish(&self) -> Result<(), TemplateModelError> {
+        if self.peek().is_some() {
+            Err(expression_parse_error("unexpected trailing tokens in expression"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn parse_expression(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        self.parse_conditional()
+    }
+
+    fn parse_conditional(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        let condition = self.parse_elvis()?;
+        if self.consume(&ExpressionToken::Question) {
+            let then_expression = self.parse_expression()?;
+            self.expect(ExpressionToken::Colon, "expected `:` in conditional expression")?;
+            let else_expression = self.parse_expression()?;
+            Ok(TemplateExpression::Conditional {
+                condition: Box::new(condition),
+                then_expression: Box::new(then_expression),
+                else_expression: Box::new(else_expression),
+            })
+        } else {
+            Ok(condition)
+        }
+    }
+
+    fn parse_elvis(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        let left = self.parse_or()?;
+        if self.consume(&ExpressionToken::Elvis) {
+            let right = self.parse_elvis()?;
+            Ok(TemplateExpression::Elvis {
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        } else {
+            Ok(left)
+        }
+    }
+
+    fn parse_or(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        let mut expression = self.parse_and()?;
+        while self.consume(&ExpressionToken::Or) {
+            let right = self.parse_and()?;
+            expression = TemplateExpression::Logical {
+                left: Box::new(expression),
+                operator: LogicalOperator::Or,
+                right: Box::new(right),
+            };
+        }
+        Ok(expression)
+    }
+
+    fn parse_and(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        let mut expression = self.parse_equality()?;
+        while self.consume(&ExpressionToken::And) {
+            let right = self.parse_equality()?;
+            expression = TemplateExpression::Logical {
+                left: Box::new(expression),
+                operator: LogicalOperator::And,
+                right: Box::new(right),
+            };
+        }
+        Ok(expression)
+    }
+
+    fn parse_equality(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        let mut expression = self.parse_comparison()?;
+        loop {
+            let operator = if self.consume(&ExpressionToken::Equal) {
+                Some(ComparisonOperator::Equal)
+            } else if self.consume(&ExpressionToken::NotEqual) {
+                Some(ComparisonOperator::NotEqual)
+            } else {
+                None
+            };
+            let Some(operator) = operator else {
+                break;
+            };
+            let right = self.parse_comparison()?;
+            expression = TemplateExpression::Compare {
+                left: Box::new(expression),
+                operator,
+                right: Box::new(right),
+            };
+        }
+        Ok(expression)
+    }
+
+    fn parse_comparison(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        let mut expression = self.parse_unary()?;
+        loop {
+            let operator = if self.consume(&ExpressionToken::GreaterThan) {
+                Some(ComparisonOperator::GreaterThan)
+            } else if self.consume(&ExpressionToken::LessThan) {
+                Some(ComparisonOperator::LessThan)
+            } else if self.consume(&ExpressionToken::GreaterOrEqual) {
+                Some(ComparisonOperator::GreaterOrEqual)
+            } else if self.consume(&ExpressionToken::LessOrEqual) {
+                Some(ComparisonOperator::LessOrEqual)
+            } else {
+                None
+            };
+            let Some(operator) = operator else {
+                break;
+            };
+            let right = self.parse_unary()?;
+            expression = TemplateExpression::Compare {
+                left: Box::new(expression),
+                operator,
+                right: Box::new(right),
+            };
+        }
+        Ok(expression)
+    }
+
+    fn parse_unary(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        if self.consume(&ExpressionToken::Not) {
+            return Ok(TemplateExpression::Not(Box::new(self.parse_unary()?)));
+        }
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Result<TemplateExpression, TemplateModelError> {
+        match self.next() {
+            Some(ExpressionToken::LParen) => {
+                let expression = self.parse_expression()?;
+                self.expect(ExpressionToken::RParen, "expected `)` to close grouped expression")?;
+                Ok(expression)
+            }
+            Some(ExpressionToken::StringLiteral(value)) => Ok(TemplateExpression::LiteralText(value)),
+            Some(ExpressionToken::AssetLiteral(value)) => Ok(TemplateExpression::AssetPath(value)),
+            Some(ExpressionToken::True) => Ok(TemplateExpression::LiteralBool(true)),
+            Some(ExpressionToken::False) => Ok(TemplateExpression::LiteralBool(false)),
+            Some(ExpressionToken::Identifier(identifier)) => {
+                if self.consume(&ExpressionToken::LParen) {
+                    self.parse_helper_call(identifier)
+                } else {
+                    Ok(TemplateExpression::ModelKey(identifier))
+                }
+            }
+            Some(other) => Err(expression_parse_error(format!(
+                "unexpected token `{:?}` in expression",
+                other
+            ))),
+            None => Err(expression_parse_error("unexpected end of expression")),
+        }
+    }
+
+    fn parse_helper_call(
+        &mut self,
+        helper: String,
+    ) -> Result<TemplateExpression, TemplateModelError> {
+        match helper.as_str() {
+            "asset" => {
+                let path = match self.next() {
+                    Some(ExpressionToken::StringLiteral(value))
+                    | Some(ExpressionToken::Identifier(value))
+                    | Some(ExpressionToken::AssetLiteral(value)) => value,
+                    other => {
+                        return Err(expression_parse_error(format!(
+                            "asset(...) expects a path literal, got `{:?}`",
+                            other
+                        )))
+                    }
+                };
+                self.expect(ExpressionToken::RParen, "expected `)` after asset(...)")?;
+                Ok(TemplateExpression::AssetPath(path))
+            }
+            "t" => {
+                let key = match self.next() {
+                    Some(ExpressionToken::StringLiteral(value)) => value,
+                    other => {
+                        return Err(expression_parse_error(format!(
+                            "translation helper expects a quoted key like t('checkout.title'), got `{:?}`",
+                            other
+                        )))
+                    }
+                };
+                self.expect(ExpressionToken::RParen, "expected `)` after t(...)")?;
+                Ok(TemplateExpression::TranslationKey(validate_token(
+                    "translation_key",
+                    key,
+                )?))
+            }
+            other => Err(expression_parse_error(format!(
+                "unknown expression helper `{other}`"
+            ))),
+        }
+    }
+
+    fn expect(
+        &mut self,
+        token: ExpressionToken,
+        message: &str,
+    ) -> Result<(), TemplateModelError> {
+        if self.consume(&token) {
+            Ok(())
+        } else {
+            Err(expression_parse_error(message))
+        }
+    }
+
+    fn consume(&mut self, token: &ExpressionToken) -> bool {
+        if self.peek() == Some(token) {
+            self.index += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn peek(&self) -> Option<&ExpressionToken> {
+        self.tokens.get(self.index)
+    }
+
+    fn next(&mut self) -> Option<ExpressionToken> {
+        let token = self.tokens.get(self.index).cloned();
+        if token.is_some() {
+            self.index += 1;
+        }
+        token
+    }
 }
 
 fn build_switch_node(

@@ -125,7 +125,7 @@ Render only when the expression is `true`:
 </section>
 ```
 
-Simple comparisons are supported directly:
+Comparisons, boolean operators, ternaries, and elvis defaults are all valid here:
 
 ```html
 <section coil:if="${block.type == 'hero_section'}">
@@ -278,11 +278,14 @@ That means the template language currently supports:
 - asset lookups
 - string literals
 - boolean literals
-- equality comparisons
-- inequality comparisons
+- comparisons
+- negation
+- boolean operators
+- elvis defaults
+- ternary conditionals
 
-It does **not** support a general expression language with arithmetic, filters, chained function
-calls, or inline object construction.
+It does **not** support arithmetic, filters, chained arbitrary function calls, or inline object
+construction.
 
 ### Model lookups
 
@@ -316,13 +319,26 @@ This is the normal lookup style you should expect to use in real templates.
 Supported comparison syntax:
 
 - `${left == right}`
+- `${left eq right}`
 - `${left != right}`
+- `${left ne right}`
+- `${left neq right}`
+- `${left > right}`
+- `${left gt right}`
+- `${left < right}`
+- `${left lt right}`
+- `${left >= right}`
+- `${left ge right}`
+- `${left <= right}`
+- `${left le right}`
 
 Example:
 
 ```html
 ${block.type == 'hero_section'}
 ${site.locale != 'fr-FR'}
+${headline gt 'A'}
+${headline le 'Zzz'}
 ```
 
 Comparison rules:
@@ -331,6 +347,49 @@ Comparison rules:
 - `coil:if` and `coil:unless` accept them directly
 - text, trusted HTML, and booleans can be compared
 - lists and objects cannot be compared
+
+### Boolean Operators
+
+Supported boolean syntax:
+
+- `!value`
+- `not value`
+- `left and right`
+- `left or right`
+
+Example:
+
+```html
+${headline eq 'Book & Save' and not is_archived}
+${!has_membership or preview_mode}
+```
+
+Rules:
+
+- `!` and `not` require a boolean expression
+- `and` and `or` short-circuit
+- model lookups used as booleans must resolve to booleans
+
+### Elvis And Ternary
+
+Supported conditional syntax:
+
+- `${primary_title ?: 'Fallback title'}`
+- `${featured ? 'featured' : 'standard'}`
+
+Example:
+
+```html
+<h1 coil:text="${page.subtitle ?: page.title}">Title</h1>
+<span coil:text="${featured ? 'featured' : 'standard'}">standard</span>
+```
+
+Rules:
+
+- the elvis operator returns the left side unless it is missing, a missing translation, or an
+  empty string
+- the ternary condition must evaluate to a boolean
+- elvis binds more tightly than ternary, so `${a ?: b ? c : d}` is parsed as `${(a ?: b) ? c : d}`
 
 ### Asset lookups
 

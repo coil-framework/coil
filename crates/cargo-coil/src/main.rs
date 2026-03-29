@@ -6,7 +6,9 @@ use coil_scaffold::{
     doctor, load_descriptor, modify_modules, run_wizard, sanitize_slug,
 };
 use serde::Deserialize;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
 
 #[derive(Debug, Parser)]
@@ -22,6 +24,7 @@ struct Cli {
 enum Command {
     New(NewCommand),
     Init(InitCommand),
+    Dev(DevCommand),
     Apply {
         #[arg(long, default_value = ".")]
         root: PathBuf,
@@ -48,8 +51,8 @@ enum Command {
 struct NewCommand {
     path: PathBuf,
 
-    #[arg(long)]
-    no_input: bool,
+    #[arg(long = "non-interactive", alias = "no-input")]
+    non_interactive: bool,
 
     #[arg(long)]
     name: Option<String>,
@@ -81,8 +84,8 @@ struct InitCommand {
     #[arg(long, default_value = ".")]
     root: PathBuf,
 
-    #[arg(long)]
-    no_input: bool,
+    #[arg(long = "non-interactive", alias = "no-input")]
+    non_interactive: bool,
 
     #[arg(long)]
     name: Option<String>,
@@ -107,6 +110,24 @@ struct InitCommand {
 
     #[arg(long, help = "Framework version to generate against. Use an explicit version or `latest`.")]
     framework_version: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct DevCommand {
+    #[arg(long, default_value = ".")]
+    root: PathBuf,
+
+    #[arg(long, default_value = "platform.dev.toml")]
+    config: PathBuf,
+
+    #[arg(long)]
+    bind: Option<String>,
+
+    #[arg(long)]
+    no_watch: bool,
+
+    #[arg(long)]
+    skip_infra: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -166,6 +187,7 @@ fn main() -> Result<()> {
     match cli.command {
         Command::New(command) => new_project(command),
         Command::Init(command) => init_project(command),
+        Command::Dev(command) => dev_project(command),
         Command::Apply { root } => apply(root),
         Command::Doctor { root } => doctor_command(root),
         Command::Module { command } => module_command(command),
@@ -185,7 +207,7 @@ fn normalized_args() -> Vec<String> {
 fn new_project(command: NewCommand) -> Result<()> {
     let framework_version = resolve_framework_version(command.framework_version)?;
     let root = command.path;
-    let descriptor = if command.no_input {
+    let descriptor = if command.non_interactive {
         descriptor_from_noninteractive(
             command.name,
             command.display_name,
@@ -219,7 +241,7 @@ fn new_project(command: NewCommand) -> Result<()> {
 fn init_project(command: InitCommand) -> Result<()> {
     let framework_version = resolve_framework_version(command.framework_version)?;
     let root = command.root;
-    let descriptor = if command.no_input {
+    let descriptor = if command.non_interactive {
         descriptor_from_noninteractive(
             command.name,
             command.display_name,
@@ -244,6 +266,53 @@ fn init_project(command: InitCommand) -> Result<()> {
     println!("Initialised Coil project at {}", report.root.display());
     println!("Wrote {} managed files", report.files_written);
     Ok(())
+}
+
+fn dev_project(command: DevCommand) -> Result<()> {
+    let root = command.root.canonicalize().with_context(|| {
+        format!(
+            "failed to resolve project root `{}`",
+            command.root.display()
+        )
+    })?;
+    let descriptor = load_descriptor(&root)?;
+
+    if !command.skip_infra {
+        println!("Starting Postgres and Redis with Docker Compose");
+        run_docker_compose_up(&root)?;
+    }
+
+    let env = dev_environment(&descriptor);
+    let cargo_program = cargo_program();
+    let mut app_args = vec![
+        OsString::from("run"),
+        OsString::from("-p"),
+        OsString::from(descriptor.bin_crate_package_name()),
+        OsString::from("--"),
+        OsString::from("--config"),
+        command.config.into_os_string(),
+        OsString::from("up"),
+    ];
+    if let Some(bind) = command.bind {
+        app_args.push(OsString::from("--bind"));
+        app_args.push(OsString::from(bind));
+    }
+
+    if command.no_watch {
+        println!(
+            "Running `{}` without file watching",
+            descriptor.bin_crate_package_name()
+        );
+        run_process(&cargo_program, &app_args, &root, &env)
+    } else {
+        ensure_cargo_watch_available(&cargo_program, &root)?;
+        println!(
+            "Watching the workspace and restarting `{}` on change",
+            descriptor.bin_crate_package_name()
+        );
+        let watch_args = build_watch_args(&app_args);
+        run_process(&cargo_program, &watch_args, &root, &env)
+    }
 }
 
 fn apply(root: PathBuf) -> Result<()> {
@@ -474,6 +543,136 @@ fn find_coil_repo_root(start: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn docker_program() -> OsString {
+    std::env::var_os("COIL_DEV_DOCKER_BIN").unwrap_or_else(|| OsString::from("docker"))
+}
+
+fn cargo_program() -> OsString {
+    std::env::var_os("COIL_DEV_CARGO_BIN").unwrap_or_else(|| OsString::from("cargo"))
+}
+
+fn run_docker_compose_up(root: &Path) -> Result<()> {
+    let args = [
+        OsString::from("compose"),
+        OsString::from("up"),
+        OsString::from("-d"),
+        OsString::from("postgres"),
+        OsString::from("redis"),
+    ];
+    run_process(&docker_program(), &args, root, &[]).context("failed to start local infra")?;
+    Ok(())
+}
+
+fn build_watch_args(app_args: &[OsString]) -> Vec<OsString> {
+    let command = shell_words(app_args);
+    vec![
+        OsString::from("watch"),
+        OsString::from("--poll"),
+        OsString::from("--ignore"),
+        OsString::from(".git/*"),
+        OsString::from("--ignore"),
+        OsString::from("target/*"),
+        OsString::from("--ignore"),
+        OsString::from(".coil/cache/*"),
+        OsString::from("-x"),
+        OsString::from(command),
+    ]
+}
+
+fn shell_words(args: &[OsString]) -> String {
+    args.iter()
+        .map(|arg| {
+            let value = arg.to_string_lossy();
+            if value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || "-_./:=".contains(ch))
+            {
+                value.into_owned()
+            } else {
+                format!("'{}'", value.replace('\'', "'\"'\"'"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn ensure_cargo_watch_available(cargo_program: &OsString, root: &Path) -> Result<()> {
+    let status = ProcessCommand::new(cargo_program)
+        .arg("watch")
+        .arg("--version")
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("failed to run `{}`", cargo_program.to_string_lossy()))?;
+    if status.success() {
+        return Ok(());
+    }
+    bail!(
+        "`cargo watch` is required for `cargo coil dev`; install it with `cargo install cargo-watch --locked`, or use `cargo coil dev --no-watch`"
+    )
+}
+
+fn dev_environment(descriptor: &ProjectDescriptor) -> Vec<(String, String)> {
+    let slug = descriptor.project_slug();
+    vec![
+        (
+            "DATABASE_URL".to_string(),
+            std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| format!("postgres://coil:coil@127.0.0.1:15432/{slug}")),
+        ),
+        (
+            "REDIS_URL".to_string(),
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:16379/0".to_string()),
+        ),
+        (
+            "COIL_COOKIE_SECRET".to_string(),
+            std::env::var("COIL_COOKIE_SECRET")
+                .unwrap_or_else(|_| "local-development-cookie-secret".to_string()),
+        ),
+        (
+            "COIL_CSRF_SECRET".to_string(),
+            std::env::var("COIL_CSRF_SECRET")
+                .unwrap_or_else(|_| "local-development-csrf-secret".to_string()),
+        ),
+    ]
+}
+
+fn run_process(
+    program: &OsString,
+    args: &[OsString],
+    root: &Path,
+    env: &[(String, String)],
+) -> Result<()> {
+    let mut command = ProcessCommand::new(program);
+    command.args(args).current_dir(root);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let status = command.status().with_context(|| {
+        format!(
+            "failed to run `{}`",
+            std::iter::once(program.to_string_lossy().into_owned())
+                .chain(args.iter().map(|arg| arg.to_string_lossy().into_owned()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    })?;
+    if status.success() {
+        Ok(())
+    } else {
+        bail!(
+            "`{}` exited with status {}",
+            std::iter::once(program.to_string_lossy().into_owned())
+                .chain(args.iter().map(|arg| arg.to_string_lossy().into_owned()))
+                .collect::<Vec<_>>()
+                .join(" "),
+            status
+        )
+    }
 }
 
 fn resolve_framework_version(requested: Option<String>) -> Result<String> {

@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Memberships'"
+  coil:with="page_title='Memberships'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Memberships</title>
+    <title coil:text="${page_title}">Memberships</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
@@ -20,32 +20,32 @@
       <section class="memberships-page__intro">
         <p class="memberships-page__eyebrow">Account access</p>
         <h1>Memberships</h1>
-        <p coil:text="${account.stateSummary}">
+        <p coil:text="${account.state_summary}">
           This page gives customers a direct answer to what they have, when it renews, and what
           support or priority access comes with it.
         </p>
-        <p coil:if="${account.hasPrincipal}">
-          Signed in as <strong coil:text="${customer.displayName}">Member Live</strong>.
+        <p coil:if="${account.has_principal}">
+          Signed in as <strong coil:text="${customer.display_name}">Member Live</strong>.
         </p>
-        <p coil:unless="${account.hasPrincipal}">
+        <p coil:unless="${account.has_principal}">
           This membership view currently follows the browser session you are using right now.
         </p>
-        <p coil:if="${account.hasLatestOrder}">
+        <p coil:if="${account.has_latest_order}">
           Latest order
-          <strong coil:text="${account.latestOrderReference}">ORD-10042</strong>
+          <strong coil:text="${account.latest_order_reference}">ORD-10042</strong>
           is
-          <span coil:text="${account.latestOrderStatus}">Paid</span>.
+          <span coil:text="${account.latest_order_status}">Paid</span>.
         </p>
-        <p coil:if="${account.hasLatestOrder}">
+        <p coil:if="${account.has_latest_order}">
           After returning from the payment provider, this page can keep that order in
           <strong>Pending Payment</strong>
           until settlement updates the same browser session.
         </p>
-        <div coil:if="${account.hasCustomerEmail}">
-          <p coil:if="${account.hasPrincipal}">
+        <div coil:if="${account.has_customer_email}">
+          <p coil:if="${account.has_principal}">
             Signed in as <strong coil:text="${customer.email}">member@example.com</strong>.
           </p>
-          <p coil:unless="${account.hasPrincipal}">
+          <p coil:unless="${account.has_principal}">
             Receipt email on this browser session:
             <strong coil:text="${customer.email}">member@example.com</strong>.
           </p>
@@ -53,27 +53,27 @@
       </section>
       <nav class="account-page__nav" coil:replace="~{account/nav :: nav}"></nav>
 
-      <section class="memberships-page__summary" coil:if="${account.hasMembership}">
+      <section class="memberships-page__summary" coil:if="${account.has_membership}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
-          <h2 coil:text="${membershipSummary.tierName}">Harbor Circle</h2>
-          <p coil:text="${membershipSummary.status}">Active</p>
-          <p coil:text="${membershipSummary.renewalText}">
+          <h2 coil:text="${membership_summary.tier_name}">Harbor Circle</h2>
+          <p coil:text="${membership_summary.status}">Active</p>
+          <p coil:text="${membership_summary.renewal_text}">
             Renewing on 18 April with early-access reservations.
           </p>
           <a class="button" href="/account/orders">View order history</a>
         </article>
       </section>
 
-      <section class="memberships-page__summary" coil:if="${account.hasPendingMembershipOrder}">
+      <section class="memberships-page__summary" coil:if="${account.has_pending_membership_order}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
           <h2>Pending activation</h2>
           <p>
             Your latest order
-            <strong coil:text="${account.latestOrderReference}">ORD-10042</strong>
+            <strong coil:text="${account.latest_order_reference}">ORD-10042</strong>
             is
-            <span coil:text="${account.latestOrderStatus}">Pending Payment</span>.
+            <span coil:text="${account.latest_order_status}">Pending Payment</span>.
             Membership access only appears here after a qualifying membership purchase is captured
             for this account view. After a Stripe return, check order history for the latest
             payment state, then return here once this browser session shows the order as captured.
@@ -84,32 +84,32 @@
         </article>
       </section>
 
-      <section class="memberships-page__summary" coil:if="${account.needsMembershipPurchase}">
+      <section class="memberships-page__summary" coil:if="${account.needs_membership_purchase}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Current tier</p>
           <h2>Membership not active yet</h2>
-          <p coil:text="${account.membershipEmptyText}">
+          <p coil:text="${account.membership_empty_text}">
             Join to unlock early access, subscriber-only bundles, and concierge support.
           </p>
           <a
             class="button"
             href="/en-GB/shop/collections/memberships"
-            coil:attr="href=${account.membershipCtaUrl}"
+            coil:attr="href=${account.membership_cta_url}"
           >
             Explore memberships
           </a>
         </article>
       </section>
 
-      <section class="memberships-page__summary" coil:if="${account.hasLatestOrder}">
+      <section class="memberships-page__summary" coil:if="${account.has_latest_order}">
         <article class="membership-card">
           <p class="membership-card__eyebrow">Latest order</p>
-          <h2 coil:text="${account.latestOrderReference}">ORD-10042</h2>
+          <h2 coil:text="${account.latest_order_reference}">ORD-10042</h2>
           <p>
             Status
-            <strong coil:text="${account.latestOrderStatus}">Paid</strong>
+            <strong coil:text="${account.latest_order_status}">Paid</strong>
           </p>
-          <p coil:text="${account.stateSummary}">
+          <p coil:text="${account.state_summary}">
             Order and membership state are drawn from the live storefront session.
           </p>
           <a class="button button--secondary" href="/account/orders">Review order history</a>

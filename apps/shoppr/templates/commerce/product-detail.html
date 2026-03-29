@@ -1,7 +1,7 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle=t('product.meta.title')"
+  coil:with="page_title=t('product.meta.title')"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
@@ -31,7 +31,7 @@
       <div class="site-header__main">
         <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
         </a>
         <nav coil:replace="~{navigation/primary}"></nav>
       </div>
@@ -39,7 +39,7 @@
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow" coil:t="nav.market">Market</p>
           <ul>
-            <li coil:each="item : ${links.siteSwitches}">
+            <li coil:each="item : ${links.site_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
               <span coil:if="${item.active}" coil:t="nav.current">Current</span>
             </li>
@@ -48,7 +48,7 @@
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow" coil:t="nav.language">Language</p>
           <ul>
-            <li coil:each="item : ${links.localeSwitches}">
+            <li coil:each="item : ${links.locale_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
               <span coil:if="${item.active}" coil:t="nav.current">Current</span>
             </li>
@@ -57,21 +57,21 @@
       </div>
     </header>
     <main class="site-main product-page">
-      <section class="product-page__hero" coil:if="${hasProduct}">
+      <section class="product-page__hero" coil:if="${has_product}">
         <div class="product-page__media">
           <div class="product-gallery" coil:attr="data-gallery-key=${product.slug}">
             <div class="product-gallery__viewport">
               <img
                 class="product-gallery__image"
                 src="/theme/assets/logo.svg"
-                coil:src="${product.imageUrl}"
+                coil:src="${product.image_url}"
                 alt="Product image"
-                coil:attr="alt=${product.imageAlt}"
+                coil:attr="alt=${product.image_alt}"
                 data-gallery-image="main"
               />
             </div>
             <div class="product-gallery__thumbs">
-              <button class="gallery-thumb is-active" type="button" coil:attr="data-gallery-src=${product.imageUrl},data-gallery-alt=${product.imageAlt}" coil:t="product.gallery.main">
+              <button class="gallery-thumb is-active" type="button" coil:attr="data-gallery-src=${product.image_url},data-gallery-alt=${product.image_alt}" coil:t="product.gallery.main">
                 Main
               </button>
               <button class="gallery-thumb" type="button" data-gallery-slot="detail-1" coil:t="product.gallery.detail">
@@ -94,8 +94,8 @@
             <span>/</span>
             <a
               href="/shop/collections/featured"
-              coil:href="${product.collectionUrl}"
-              coil:text="${product.collectionName}"
+              coil:href="${product.collection_url}"
+              coil:text="${product.collection_name}"
             >
               Featured
             </a>
@@ -145,7 +145,7 @@
             </form>
           </div>
           <div class="checkout-actions">
-            <a class="button button--secondary" href="/shop/collections/featured" coil:href="${product.collectionUrl}" coil:t="product.copy.back_to_collection">Back to collection</a>
+            <a class="button button--secondary" href="/shop/collections/featured" coil:href="${product.collection_url}" coil:t="product.copy.back_to_collection">Back to collection</a>
             <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}" coil:t="product.copy.review_cart">Review cart</a>
           </div>
           <div class="accordion-group">
@@ -171,14 +171,14 @@
         </div>
       </section>
 
-      <section class="catalog-assurance" coil:if="${hasProduct}">
+      <section class="catalog-assurance" coil:if="${has_product}">
         <article>
           <h2 coil:t="product.assurance.title">Next step: add to cart or keep browsing this collection</h2>
           <p coil:t="product.assurance.summary">Customers should not have to hunt for the next action here. Keep the cart handoff and the route back to the collection visible at the same time.</p>
         </article>
       </section>
 
-      <section class="catalog-assurance" coil:unless="${hasProduct}">
+      <section class="catalog-assurance" coil:unless="${has_product}">
         <article>
           <h1 coil:t="product.unavailable.title">This product is not currently available.</h1>
           <p coil:t="product.unavailable.summary">Shoppr has removed this item from the live storefront. Return to the current catalog or collections view to keep shopping.</p>
@@ -189,25 +189,25 @@
         </article>
       </section>
 
-      <section class="product-grid" coil:if="${hasProductCards}">
+      <section class="product-grid" coil:if="${has_product_cards}">
         <header class="product-grid__header">
           <p class="product-grid__eyebrow" coil:t="product.related.eyebrow">More from this collection</p>
           <h2 coil:t="product.related.title">Continue browsing nearby products</h2>
           <p coil:t="product.related.summary">Related products keep the customer inside the same merchandising context without throwing them back to the top of the catalog.</p>
         </header>
         <ul class="product-grid__list">
-          <li class="product-grid__item" coil:each="related : ${productCards}">
+          <li class="product-grid__item" coil:each="related : ${product_cards}">
             <article class="product-card">
               <a class="product-card__media" href="/shop/products/harbor-cap" coil:href="${related.url}">
                 <img
                   src="/theme/assets/logo.svg"
-                  coil:src="${related.imageUrl}"
+                  coil:src="${related.image_url}"
                   alt="Related product"
-                  coil:attr="alt=${related.imageAlt}"
+                  coil:attr="alt=${related.image_alt}"
                 />
               </a>
               <div class="product-card__body">
-                <p class="product-card__eyebrow" coil:text="${related.collectionName}">Featured</p>
+                <p class="product-card__eyebrow" coil:text="${related.collection_name}">Featured</p>
                 <h3>
                   <a href="/shop/products/harbor-cap" coil:href="${related.url}" coil:text="${related.name}">
                     Harbor Tote

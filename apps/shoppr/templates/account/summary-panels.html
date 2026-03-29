@@ -3,25 +3,25 @@
     <article class="account-panel">
       <p class="account-panel__eyebrow">Orders</p>
       <h2>Recent purchases</h2>
-      <ul class="account-panel__list" coil:if="${account.hasRecentOrders}">
-        <li coil:each="order : ${recentOrders}">
+      <ul class="account-panel__list" coil:if="${account.has_recent_orders}">
+        <li coil:each="order : ${recent_orders}">
           <strong coil:text="${order.reference}">HS-1048</strong>
           <span coil:text="${order.status}">Packed</span>
           <span coil:text="${order.total}">GBP 84</span>
-          <span coil:text="${order.lineCount}">1</span>
-          <p coil:if="${order.hasPaymentSummary}" coil:text="${order.paymentSummary}">
+          <span coil:text="${order.line_count}">1</span>
+          <p coil:if="${order.has_payment_summary}" coil:text="${order.payment_summary}">
             Card ending 4242, reference PAY-50001
           </p>
         </li>
       </ul>
-      <p coil:unless="${account.hasRecentOrders}" coil:text="${account.ordersEmptyText}">
+      <p coil:unless="${account.has_recent_orders}" coil:text="${account.orders_empty_text}">
         Recent orders will appear here once the customer has completed checkout.
       </p>
       <a
         class="button button--secondary"
         href="/account/orders"
-        coil:attr="href=${account.ordersCtaUrl}"
-        coil:text="${account.ordersCtaLabel}"
+        coil:attr="href=${account.orders_cta_url}"
+        coil:text="${account.orders_cta_label}"
       >
         View order history
       </a>
@@ -30,20 +30,20 @@
     <article class="account-panel">
       <p class="account-panel__eyebrow">Membership</p>
       <h2>Access and renewals</h2>
-      <div coil:if="${account.hasMembership}">
+      <div coil:if="${account.has_membership}">
         <p>
-          <strong coil:text="${membershipSummary.tierName}">Harbor Circle</strong>
-          <span coil:text="${membershipSummary.status}">Active</span>
+          <strong coil:text="${membership_summary.tier_name}">Harbor Circle</strong>
+          <span coil:text="${membership_summary.status}">Active</span>
         </p>
-        <p coil:text="${membershipSummary.renewalText}">
+        <p coil:text="${membership_summary.renewal_text}">
           Renewing on 18 April with market-day priority access.
         </p>
         <a class="button" href="/account/memberships">View membership details</a>
       </div>
-      <div coil:if="${account.hasPendingMembershipOrder}">
+      <div coil:if="${account.has_pending_membership_order}">
         <p>
-          <strong coil:text="${account.latestOrderReference}">ORD-10042</strong>
-          <span coil:text="${account.latestOrderStatus}">Pending Payment</span>
+          <strong coil:text="${account.latest_order_reference}">ORD-10042</strong>
+          <span coil:text="${account.latest_order_status}">Pending Payment</span>
         </p>
         <p>
           Membership access appears here only after a qualifying membership purchase is captured for
@@ -57,14 +57,14 @@
           View order history
         </a>
       </div>
-      <div coil:if="${account.needsMembershipPurchase}">
-        <p coil:text="${account.membershipEmptyText}">
+      <div coil:if="${account.needs_membership_purchase}">
+        <p coil:text="${account.membership_empty_text}">
           No membership is attached yet. Join to unlock early-access drops and concierge support.
         </p>
         <a
           class="button"
           href="/en-GB/shop/collections/memberships"
-          coil:attr="href=${account.membershipCtaUrl}"
+          coil:attr="href=${account.membership_cta_url}"
         >
           Explore memberships
         </a>
@@ -74,20 +74,20 @@
     <article class="account-panel">
       <p class="account-panel__eyebrow">Support</p>
       <h2>Continue your account journey</h2>
-      <p coil:if="${account.hasCustomerEmail}">
+      <p coil:if="${account.has_customer_email}">
         Use this account area to review orders, retry checkout, or check membership access for
         <strong coil:text="${customer.email}">member@example.com</strong>.
       </p>
-      <p coil:if="${account.hasLatestOrder}">
+      <p coil:if="${account.has_latest_order}">
         If the latest order still shows
         <strong>Pending Payment</strong>
         after you return from the provider, keep this browser session and refresh the account
         surfaces before contacting support.
       </p>
-      <p coil:if="${account.hasPrincipal}">
+      <p coil:if="${account.has_principal}">
         This browser is already attached to a live customer identity for this account view.
       </p>
-      <p coil:unless="${account.hasPrincipal}">
+      <p coil:unless="${account.has_principal}">
         This customer account currently follows the browser session you are using. Keep this
         browser active if you need to revisit the same order history or membership state. Orders
         and membership changes from another browser will not appear here yet.

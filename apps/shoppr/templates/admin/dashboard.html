@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Shoppr Admin'"
+  coil:with="page_title='Shoppr Admin'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Shoppr Admin</title>
+    <title coil:text="${page_title}">Shoppr Admin</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
@@ -23,15 +23,15 @@
         <p coil:text="${page.summary}">
           Operator overview for catalog, orders, and content.
         </p>
-        <p coil:if="${operator.hasPrincipal}">
-          Signed in as <strong coil:text="${operator.displayName}">Current Operator</strong>.
+        <p coil:if="${operator.has_principal}">
+          Signed in as <strong coil:text="${operator.display_name}">Current Operator</strong>.
         </p>
-        <p coil:if="${operator.hasPrincipal}">
+        <p coil:if="${operator.has_principal}">
           Principal id
-          <code coil:text="${operator.principalId}">operator-live-1</code>
+          <code coil:text="${operator.principal_id}">operator-live-1</code>
           is using the current admin session.
         </p>
-        <p coil:unless="${operator.hasPrincipal}">
+        <p coil:unless="${operator.has_principal}">
           This operator view is using the current browser session.
         </p>
         <p>
@@ -44,15 +44,15 @@
       <section class="admin-metrics">
         <article class="admin-metric">
           <p class="admin-metric__label">Catalog products</p>
-          <strong coil:text="${catalogCount}">3</strong>
+          <strong coil:text="${catalog_count}">3</strong>
         </article>
         <article class="admin-metric">
           <p class="admin-metric__label">Recent orders</p>
-          <strong coil:text="${orderCount}">2</strong>
+          <strong coil:text="${order_count}">2</strong>
         </article>
         <article class="admin-metric">
           <p class="admin-metric__label">Content routes</p>
-          <strong coil:text="${contentCount}">6</strong>
+          <strong coil:text="${content_count}">6</strong>
         </article>
       </section>
 
@@ -65,7 +65,7 @@
               Check whether checkout is producing a visible order queue with the same reference,
               status, and total that customers see in the storefront account area.
             </p>
-            <a class="button" href="/admin/orders" coil:attr="href=${links.adminOrders}">
+            <a class="button" href="/admin/orders" coil:attr="href=${links.admin_orders}">
               Open orders
             </a>
           </article>
@@ -75,7 +75,7 @@
               Update product titles, summaries, prices, and collection placement from the admin
               catalog screen, then verify the same browse loop customers will use.
             </p>
-            <a class="button" href="/admin/catalog/products" coil:attr="href=${links.adminCatalog}">
+            <a class="button" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
               Open catalog
             </a>
           </article>
@@ -85,7 +85,7 @@
               Review the live route set, navigation, and redirect readiness before traffic or
               migration cutover.
             </p>
-            <a class="button" href="/admin/pages" coil:attr="href=${links.adminPages}">
+            <a class="button" href="/admin/pages" coil:attr="href=${links.admin_pages}">
               Open content
             </a>
           </article>
@@ -179,9 +179,9 @@
           <code>cargo run -p shoppr -- linked-backend demo</code> to execute the checked-in
           linked backend rules without the optional sidecar.
         </p>
-        <div class="admin-card-grid" coil:if="${hasLinkedCustomerPlugins}">
-          <article class="admin-card" coil:each="plugin : ${linkedCustomerPlugins}">
-            <h3 coil:text="${plugin.displayName}">Shoppr Linked Backend</h3>
+        <div class="admin-card-grid" coil:if="${has_linked_customer_plugins}">
+          <article class="admin-card" coil:each="plugin : ${linked_customer_plugins}">
+            <h3 coil:text="${plugin.display_name}">Shoppr Linked Backend</h3>
             <p>
               Plugin id:
               <code coil:text="${plugin.id}">shoppr-backend</code>
@@ -192,17 +192,17 @@
             </p>
             <p>
               Registered hooks:
-              <span coil:text="${plugin.hooksSummary}">checkout, verified-webhook</span>
+              <span coil:text="${plugin.hooks_summary}">checkout, verified-webhook</span>
             </p>
           </article>
         </div>
-        <p coil:unless="${hasLinkedCustomerPlugins}">
+        <p coil:unless="${has_linked_customer_plugins}">
           No linked customer plugins are registered in the current runtime plan.
         </p>
       </section>
 
       <section class="admin-panels">
-        <article class="admin-panel" coil:each="panel : ${adminPanels}">
+        <article class="admin-panel" coil:each="panel : ${admin_panels}">
           <p class="admin-panel__eyebrow" coil:text="${panel.label}">Inspect products and collections</p>
           <h2 coil:text="${panel.title}">Catalog</h2>
           <p coil:text="${panel.summary}">
@@ -223,16 +223,16 @@
           the live actions it does support.
         </p>
         <div class="admin-page__actions">
-          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.adminOrders}">
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
             Orders
           </a>
-          <a class="button button--secondary" href="/admin/catalog/products" coil:attr="href=${links.adminCatalog}">
+          <a class="button button--secondary" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
             Catalog
           </a>
-          <a class="button button--secondary" href="/admin/pages" coil:attr="href=${links.adminPages}">
+          <a class="button button--secondary" href="/admin/pages" coil:attr="href=${links.admin_pages}">
             Pages
           </a>
-          <a class="button button--secondary" href="/admin/audit" coil:attr="href=${links.adminAudit}">
+          <a class="button button--secondary" href="/admin/audit" coil:attr="href=${links.admin_audit}">
             Audit
           </a>
         </div>

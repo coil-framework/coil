@@ -184,7 +184,7 @@ fn events_list_template() -> &'static str {
             events catalog is connected; until then, the page keeps the member journey honest.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/shop/collections/events" coil:attr="href=${links.eventsCollection}">
+            <a class="button" href="/shop/collections/events" coil:attr="href=${links.events_collection}">
               Browse event-linked offers
             </a>
             <a
@@ -208,7 +208,7 @@ fn events_list_template() -> &'static str {
             <a
               class="button button--secondary"
               href="/shop/collections/memberships"
-              coil:attr="href=${links.membershipsCollection}"
+              coil:attr="href=${links.memberships_collection}"
             >
               Membership offers
             </a>
@@ -271,7 +271,7 @@ fn events_detail_template() -> &'static str {
             <a
               class="button button--secondary"
               href="/shop/collections/events"
-              coil:attr="href=${links.eventsCollection}"
+              coil:attr="href=${links.events_collection}"
             >
               Browse event-linked offers
             </a>

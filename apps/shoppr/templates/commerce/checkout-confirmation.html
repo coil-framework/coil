@@ -1,7 +1,7 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Order status'"
+  coil:with="page_title='Order status'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
@@ -17,13 +17,13 @@
       <nav coil:replace="~{navigation/primary}"></nav>
     </header>
     <main class="site-main account-page">
-      <section class="storefront-flash" coil:if="${hasFlashMessages}">
-        <article class="storefront-flash__message" coil:each="message : ${flashMessages}">
+      <section class="storefront-flash" coil:if="${has_flash_messages}">
+        <article class="storefront-flash__message" coil:each="message : ${flash_messages}">
           <p class="storefront-flash__eyebrow" coil:text="${message.level}">info</p>
           <p coil:text="${message.text}">Your order is still moving through payment confirmation.</p>
         </article>
       </section>
-      <section class="account-page__intro" coil:if="${hasConfirmation}">
+      <section class="account-page__intro" coil:if="${has_confirmation}">
         <p class="account-page__eyebrow">Stripe return</p>
         <h1>Order and payment status</h1>
         <p>
@@ -31,21 +31,21 @@
           Review the payment state here before leaving the order.
         </p>
         <p class="checkout-confirmation__order">
-          Reference <strong coil:text="${confirmation.orderNumber}">HS-10482</strong>
+          Reference <strong coil:text="${confirmation.order_number}">HS-10482</strong>
         </p>
         <p>
           Status <strong coil:text="${confirmation.status}">Paid</strong>
           with total <strong coil:text="${confirmation.total}">£0.00</strong>.
         </p>
-        <p coil:if="${confirmation.hasEmail}">
+        <p coil:if="${confirmation.has_email}">
           Receipt email <strong coil:text="${confirmation.email}">member@example.com</strong>.
         </p>
-        <p coil:text="${confirmation.nextStep}">
+        <p coil:text="${confirmation.next_step}">
           A confirmation email and membership activation will follow shortly.
         </p>
         <div class="checkout-confirmation__payment">
           <p>
-            <strong coil:text="${confirmation.providerLabel}">Stripe payment confirmation</strong>
+            <strong coil:text="${confirmation.provider_label}">Stripe payment confirmation</strong>
           </p>
           <p>
             Shoppr has already recorded the order and is now waiting for the provider result
@@ -53,9 +53,9 @@
           </p>
           <p>
             Payment state
-            <strong coil:text="${confirmation.paymentStatus}">Awaiting provider confirmation</strong>.
+            <strong coil:text="${confirmation.payment_status}">Awaiting provider confirmation</strong>.
           </p>
-          <p coil:text="${confirmation.paymentSummary}">
+          <p coil:text="${confirmation.payment_summary}">
             Card ending 4242, reference PAY-50001
           </p>
           <p>
@@ -68,8 +68,8 @@
           <li>Stripe confirmation updates the payment state shown on this page.</li>
           <li>Order history and memberships in this same browser session reflect the final result.</li>
         </ol>
-        <ul class="checkout-summary checkout-summary--stacked" coil:if="${confirmation.hasLineItems}">
-          <li coil:each="item : ${confirmation.lineItems}">
+        <ul class="checkout-summary checkout-summary--stacked" coil:if="${confirmation.has_line_items}">
+          <li coil:each="item : ${confirmation.line_items}">
             <span coil:text="${item.title}">Harbor pantry set</span>
             <span coil:text="${item.quantity}">1</span>
             <strong coil:text="${item.total}">GBP 48</strong>
@@ -78,7 +78,7 @@
         <div class="checkout-actions">
           <a class="button" href="/account/orders">View order history</a>
           <a class="button button--secondary" href="/account">View account</a>
-          <a class="button button--secondary" href="/account/memberships" coil:if="${confirmation.hasMembershipItems}">
+          <a class="button button--secondary" href="/account/memberships" coil:if="${confirmation.has_membership_items}">
             Check memberships
           </a>
           <a
@@ -90,10 +90,10 @@
           </a>
         </div>
       </section>
-      <section class="account-page__intro" coil:unless="${hasConfirmation}">
+      <section class="account-page__intro" coil:unless="${has_confirmation}">
         <p class="account-page__eyebrow">Stripe return</p>
         <h1>No recent provider return to review</h1>
-        <p coil:text="${confirmation.nextStep}">
+        <p coil:text="${confirmation.next_step}">
           There is no recent checkout confirmation for this browser session yet.
         </p>
         <p>

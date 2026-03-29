@@ -14,7 +14,7 @@ pub struct PostgresTlsControlPlaneStore {
     namespace: String,
     schema: String,
     state_table: String,
-    runtime: Runtime,
+    runtime: Option<Runtime>,
 }
 
 impl PostgresTlsControlPlaneStore {
@@ -41,12 +41,15 @@ impl PostgresTlsControlPlaneStore {
             state_table: state_table_name(&data_runtime.schema),
             client,
             namespace,
-            runtime,
+            runtime: Some(runtime),
         })
     }
 
     fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
-        self.runtime.block_on(future)
+        self.runtime
+            .as_ref()
+            .expect("tls runtime missing during live operation")
+            .block_on(future)
     }
 
     async fn ensure_schema(
@@ -218,6 +221,16 @@ impl PostgresTlsControlPlaneStore {
             }
         })?;
         Ok(outcome)
+    }
+}
+
+impl Drop for PostgresTlsControlPlaneStore {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            std::thread::spawn(move || drop(runtime))
+                .join()
+                .expect("tls runtime drop thread panicked");
+        }
     }
 }
 

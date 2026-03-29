@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Audit Log'"
+  coil:with="page_title='Audit Log'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Audit Log</title>
+    <title coil:text="${page_title}">Audit Log</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
@@ -23,13 +23,13 @@
         <p coil:text="${page.summary}">
           Audit trail and operator action history.
         </p>
-        <p coil:if="${operator.hasPrincipal}">
-          Signed in as <strong coil:text="${operator.displayName}">Current Operator</strong>.
+        <p coil:if="${operator.has_principal}">
+          Signed in as <strong coil:text="${operator.display_name}">Current Operator</strong>.
         </p>
-        <p coil:if="${operator.hasPrincipal}">
-          Principal id <code coil:text="${operator.principalId}">operator-live-1</code>.
+        <p coil:if="${operator.has_principal}">
+          Principal id <code coil:text="${operator.principal_id}">operator-live-1</code>.
         </p>
-        <p coil:if="${operator.hasSession}">
+        <p coil:if="${operator.has_session}">
           The current browser session is active, so you can cross-check nearby operator surfaces
           without re-authenticating.
         </p>
@@ -38,13 +38,13 @@
           changed what and when without leaving the checked-in back office.
         </p>
         <p>
-          Backend <code coil:text="${auditBackend}">local-sqlite</code> at
-          <code coil:text="${auditLocation}">/var/lib/coil/shared-state</code> with
-          <strong coil:text="${auditEntryCount}">0</strong> recorded entries.
+          Backend <code coil:text="${audit_backend}">local-sqlite</code> at
+          <code coil:text="${audit_location}">/var/lib/coil/shared-state</code> with
+          <strong coil:text="${audit_entry_count}">0</strong> recorded entries.
         </p>
       </section>
 
-      <section class="admin-panel" coil:if="${hasAuditEntries}">
+      <section class="admin-panel" coil:if="${has_audit_entries}">
         <p class="admin-panel__eyebrow">Audit entries</p>
         <table class="admin-table">
           <thead>
@@ -59,7 +59,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="entry : ${auditEntries}">
+            <tr coil:each="entry : ${audit_entries}">
               <td coil:text="${entry.when}">1764223200</td>
               <td coil:text="${entry.actor}">operator-live-1</td>
               <td coil:text="${entry.action}">Issue refund</td>
@@ -67,32 +67,32 @@
               <td coil:text="${entry.outcome}">Succeeded</td>
               <td coil:text="${entry.resource}">order:ORD-10042</td>
               <td>
-                <span coil:if="${entry.hasDetail}" coil:text="${entry.detail}">Operator detail</span>
-                <span coil:unless="${entry.hasDetail}">No additional detail</span>
+                <span coil:if="${entry.has_detail}" coil:text="${entry.detail}">Operator detail</span>
+                <span coil:unless="${entry.has_detail}">No additional detail</span>
               </td>
             </tr>
           </tbody>
         </table>
       </section>
 
-      <section class="admin-panel" coil:unless="${hasAuditEntries}">
+      <section class="admin-panel" coil:unless="${has_audit_entries}">
         <p class="admin-panel__eyebrow">Status</p>
         <h2>No privileged admin actions captured yet</h2>
-        <p coil:text="${auditEmptyText}">
+        <p coil:text="${audit_empty_text}">
           No privileged admin actions have been captured yet.
         </p>
         <div class="admin-card-grid">
           <article class="admin-card">
             <h3>Capture a support action</h3>
             <p>Use the orders surface to review live order state or process a refund so the audit history proves who handled the action.</p>
-            <a class="button" href="/admin/orders" coil:attr="href=${links.adminOrders}">
+            <a class="button" href="/admin/orders" coil:attr="href=${links.admin_orders}">
               Open orders
             </a>
           </article>
           <article class="admin-card">
             <h3>Capture a content action</h3>
             <p>Use pages, navigation, and redirects to save a draft, publish a page, or update route protection and then confirm the audit row appears here.</p>
-            <a class="button" href="/admin/pages" coil:attr="href=${links.adminPages}">
+            <a class="button" href="/admin/pages" coil:attr="href=${links.admin_pages}">
               Open pages
             </a>
           </article>
@@ -102,16 +102,16 @@
               Use catalog admin to change live product or collection copy and verify the same actor,
               capability, and resource show up in the audit trail.
             </p>
-            <a class="button" href="/admin/catalog/products" coil:attr="href=${links.adminCatalog}">
+            <a class="button" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
               Open catalog
             </a>
           </article>
         </div>
         <div class="admin-page__actions">
-          <a class="button button--secondary" href="/admin" coil:attr="href=${links.adminDashboard}">
+          <a class="button button--secondary" href="/admin" coil:attr="href=${links.admin_dashboard}">
             Back to dashboard
           </a>
-          <a class="button button--secondary" href="/admin/navigation" coil:attr="href=${links.adminNavigation}">
+          <a class="button button--secondary" href="/admin/navigation" coil:attr="href=${links.admin_navigation}">
             Review navigation
           </a>
         </div>

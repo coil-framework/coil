@@ -181,6 +181,45 @@ fn template_model_rejects_invalid_tokens_and_names() {
 }
 
 #[test]
+fn static_attributes_allow_empty_values() {
+    let attribute = AttributeNode::static_value("alt", "").unwrap();
+    assert_eq!(attribute.value, AttributeValue::Static(String::new()));
+}
+
+#[test]
+fn parser_and_runtime_accept_empty_and_boolean_html_attributes() {
+    let parser = TemplateSourceParser::new();
+    let template = parser
+        .parse_fragment(
+            TemplateNamespace::new("core").unwrap(),
+            TemplateName::new("html-attrs").unwrap(),
+            r#"
+<section coil:fragment="html-attrs" xmlns:coil="https://coil.rs">
+  <img src="/hero.png" alt="" />
+  <script src="/theme/assets/site.js" defer></script>
+  <option selected>Featured</option>
+</section>
+"#,
+        )
+        .unwrap();
+
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+
+    let html = TemplateRuntime::new(registry)
+        .render_fragment(
+            &[TemplateNamespace::new("core").unwrap()],
+            FragmentRenderRequest::new(selector("html-attrs"), RenderModel::new()),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains(r#"alt="""#), "{html}");
+    assert!(html.contains(r#"defer="""#), "{html}");
+    assert!(html.contains(r#"selected="""#), "{html}");
+}
+
+#[test]
 fn render_values_support_bool_and_list_types() {
     let bool_model = RenderModel::new()
         .with_bool("enabled", true)
@@ -442,7 +481,7 @@ fn conditional_and_each_nodes_render_using_bool_and_list_values() {
                                 vec![
                                     Node::each(
                                         "collection",
-                                        "featuredCollections",
+                                        "featured_collections",
                                         vec![Node::Element(
                                             ElementNode::new(
                                                 "li",
@@ -494,7 +533,7 @@ fn conditional_and_each_nodes_render_using_bool_and_list_values() {
                 RenderModel::new()
                     .with_bool("featured", true)
                     .unwrap()
-                    .with_list("featuredCollections", collections)
+                    .with_list("featured_collections", collections)
                     .unwrap(),
             ),
         )
@@ -826,7 +865,7 @@ fn template_source_parser_escapes_by_default_and_renders_each_with_nested_object
 <section coil:fragment="grid" coil:if="${featured}">
   <h2 coil:text="${title}">Fallback</h2>
   <ul>
-    <li coil:each="collection : ${featuredCollections}">
+    <li coil:each="collection : ${featured_collections}">
       <a coil:attr="href=${collection.url}" coil:text="${collection.name}">Fallback</a>
     </li>
   </ul>
@@ -862,7 +901,7 @@ fn template_source_parser_escapes_by_default_and_renders_each_with_nested_object
                     .unwrap()
                     .with_value("title", RenderValue::text("Featured <Collections>"))
                     .unwrap()
-                    .with_list("featuredCollections", collections)
+                    .with_list("featured_collections", collections)
                     .unwrap(),
             ),
         )

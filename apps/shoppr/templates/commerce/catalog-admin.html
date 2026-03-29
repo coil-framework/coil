@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Catalog Administration'"
+  coil:with="page_title='Catalog Administration'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Catalog Administration</title>
+    <title coil:text="${page_title}">Catalog Administration</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
@@ -43,20 +43,20 @@
         </div>
       </section>
 
-      <section class="storefront-flash" coil:if="${hasFlashMessages}">
-        <article class="storefront-flash__message" coil:each="message : ${flashMessages}">
+      <section class="storefront-flash" coil:if="${has_flash_messages}">
+        <article class="storefront-flash__message" coil:each="message : ${flash_messages}">
           <p coil:text="${message.text}">Saved successfully.</p>
         </article>
       </section>
 
-      <section class="admin-panel" coil:if="${catalogAdminForm.hasErrors}">
+      <section class="admin-panel" coil:if="${catalog_admin_form.has_errors}">
         <p class="admin-panel__eyebrow">Save blocked</p>
         <h2>Catalog changes need attention</h2>
-        <p coil:text="${catalogAdminForm.errorSummary}">
+        <p coil:text="${catalog_admin_form.error_summary}">
           Fix the highlighted catalog fields and save again.
         </p>
         <ul>
-          <li coil:each="error : ${catalogAdminForm.errors}" coil:text="${error.message}">
+          <li coil:each="error : ${catalog_admin_form.errors}" coil:text="${error.message}">
             Update the highlighted field and try again.
           </li>
         </ul>
@@ -89,12 +89,12 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${hasProductCards}">
+      <section class="admin-panel" coil:if="${has_product_cards}">
         <p class="admin-panel__eyebrow">Products</p>
         <div class="admin-card-grid">
-          <article class="admin-card" coil:each="product : ${productCards}">
+          <article class="admin-card" coil:each="product : ${product_cards}">
             <h2 coil:text="${product.name}">Harbor Cap</h2>
-            <p class="admin-panel__eyebrow" coil:text="${product.visibilityLabel}">
+            <p class="admin-panel__eyebrow" coil:text="${product.visibility_label}">
               Visible in storefront
             </p>
             <p>
@@ -109,25 +109,25 @@
 
               <label>
                 Product title
-                <input type="text" name="product_title" coil:attr="value=${product.titleInput}" />
+                <input type="text" name="product_title" coil:attr="value=${product.title_input}" />
               </label>
-              <p class="field-error" coil:if="${product.hasTitleError}" coil:text="${product.titleError}">
+              <p class="field-error" coil:if="${product.has_title_error}" coil:text="${product.title_error}">
                 Enter a product title.
               </p>
 
               <label>
                 Summary
-                <textarea name="product_summary" rows="4" coil:text="${product.summaryInput}">Product summary</textarea>
+                <textarea name="product_summary" rows="4" coil:text="${product.summary_input}">Product summary</textarea>
               </label>
-              <p class="field-error" coil:if="${product.hasSummaryError}" coil:text="${product.summaryError}">
+              <p class="field-error" coil:if="${product.has_summary_error}" coil:text="${product.summary_error}">
                 Enter a product summary.
               </p>
 
               <label>
                 List price (GBP)
-                <input type="text" name="product_price" coil:attr="value=${product.priceInput}" />
+                <input type="text" name="product_price" coil:attr="value=${product.price_input}" />
               </label>
-              <p class="field-error" coil:if="${product.hasPriceError}" coil:text="${product.priceError}">
+              <p class="field-error" coil:if="${product.has_price_error}" coil:text="${product.price_error}">
                 Enter a positive GBP price such as 29.00.
               </p>
 
@@ -135,7 +135,7 @@
                 Collection
                 <select name="product_collection_handle">
                   <option
-                    coil:each="option : ${product.collectionOptions}"
+                    coil:each="option : ${product.collection_options}"
                     coil:if="${option.selected}"
                     selected="selected"
                     coil:attr="value=${option.handle}"
@@ -144,7 +144,7 @@
                     Featured
                   </option>
                   <option
-                    coil:each="option : ${product.collectionOptions}"
+                    coil:each="option : ${product.collection_options}"
                     coil:unless="${option.selected}"
                     coil:attr="value=${option.handle}"
                     coil:text="${option.title}"
@@ -153,7 +153,7 @@
                   </option>
                 </select>
               </label>
-              <p class="field-error" coil:if="${product.hasCollectionError}" coil:text="${product.collectionError}">
+              <p class="field-error" coil:if="${product.has_collection_error}" coil:text="${product.collection_error}">
                 Choose a collection for this product.
               </p>
 
@@ -162,14 +162,14 @@
                   type="checkbox"
                   name="product_visible"
                   value="yes"
-                  coil:if="${product.visibilityInput}"
+                  coil:if="${product.visibility_input}"
                   checked="checked"
                 />
                 <input
                   type="checkbox"
                   name="product_visible"
                   value="yes"
-                  coil:unless="${product.visibilityInput}"
+                  coil:unless="${product.visibility_input}"
                 />
                 Visible in storefront
               </label>
@@ -185,12 +185,12 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${hasCatalogSections}">
+      <section class="admin-panel" coil:if="${has_catalog_sections}">
         <p class="admin-panel__eyebrow">Collections</p>
         <div class="admin-card-grid">
-          <article class="admin-card" coil:each="section : ${catalogSections}">
+          <article class="admin-card" coil:each="section : ${catalog_sections}">
             <h2 coil:text="${section.title}">Featured</h2>
-            <p class="admin-panel__eyebrow" coil:text="${section.visibilityLabel}">
+            <p class="admin-panel__eyebrow" coil:text="${section.visibility_label}">
               Visible in storefront
             </p>
             <p>
@@ -205,25 +205,25 @@
 
               <label>
                 Collection title
-                <input type="text" name="collection_title" coil:attr="value=${section.titleInput}" />
+                <input type="text" name="collection_title" coil:attr="value=${section.title_input}" />
               </label>
-              <p class="field-error" coil:if="${section.hasTitleError}" coil:text="${section.titleError}">
+              <p class="field-error" coil:if="${section.has_title_error}" coil:text="${section.title_error}">
                 Enter a collection title.
               </p>
 
               <label>
                 Merchandising label
-                <input type="text" name="collection_label" coil:attr="value=${section.labelInput}" />
+                <input type="text" name="collection_label" coil:attr="value=${section.label_input}" />
               </label>
-              <p class="field-error" coil:if="${section.hasLabelError}" coil:text="${section.labelError}">
+              <p class="field-error" coil:if="${section.has_label_error}" coil:text="${section.label_error}">
                 Enter a merchandising label.
               </p>
 
               <label>
                 Summary
-                <textarea name="collection_summary" rows="4" coil:text="${section.summaryInput}">Collection summary</textarea>
+                <textarea name="collection_summary" rows="4" coil:text="${section.summary_input}">Collection summary</textarea>
               </label>
-              <p class="field-error" coil:if="${section.hasSummaryError}" coil:text="${section.summaryError}">
+              <p class="field-error" coil:if="${section.has_summary_error}" coil:text="${section.summary_error}">
                 Enter a collection summary.
               </p>
 
@@ -232,14 +232,14 @@
                   type="checkbox"
                   name="collection_visible"
                   value="yes"
-                  coil:if="${section.visibilityInput}"
+                  coil:if="${section.visibility_input}"
                   checked="checked"
                 />
                 <input
                   type="checkbox"
                   name="collection_visible"
                   value="yes"
-                  coil:unless="${section.visibilityInput}"
+                  coil:unless="${section.visibility_input}"
                 />
                 Visible in storefront
               </label>
@@ -255,10 +255,10 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:unless="${hasProductCards}">
+      <section class="admin-panel" coil:unless="${has_product_cards}">
         <p class="admin-panel__eyebrow">Products</p>
         <h2>No catalog entries yet</h2>
-        <p coil:text="${catalogEmptyText}">
+        <p coil:text="${catalog_empty_text}">
           No catalog entries are available in the sample app yet.
         </p>
         <p>

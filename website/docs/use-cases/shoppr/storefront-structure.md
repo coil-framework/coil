@@ -112,8 +112,8 @@ In Shoppr, the product-detail page is not a free-floating HTML file. The binding
 
 1. the commerce module contributes route `commerce.product-detail`
 2. that route is wired to template `commerce/product-detail`
-3. the runtime adds the shared request keys and then appends `product`, `productCards`,
-   `hasProduct`, and related fields for that route
+3. the runtime adds the shared request keys and then appends `product`, `product_cards`,
+   `has_product`, and related fields for that route
 4. `apps/shoppr/templates/commerce/product-detail.html` consumes those fields directly
 
 The important consequence is that this markup:

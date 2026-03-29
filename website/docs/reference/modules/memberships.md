@@ -90,8 +90,8 @@ Concrete example:
 ```html title="templates/memberships/account.html"
 <section xmlns:coil="https://coil.rs">
   <h2>Your membership</h2>
-  <p coil:text="${membership.tierName}">Founders</p>
-  <p coil:text="${membership.stateLabel}">Active</p>
+  <p coil:text="${membership.tier_name}">Founders</p>
+  <p coil:text="${membership.state_label}">Active</p>
 </section>
 ```
 

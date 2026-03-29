@@ -128,7 +128,7 @@ Examples from `apps/gitly/theme/assets/site.js`:
 
 ```html
 <h1 coil:text="${page.title}">Fallback</h1>
-<p coil:text="${account.stateSummary}">Fallback summary</p>
+<p coil:text="${account.state_summary}">Fallback summary</p>
 ```
 
 This is the right pattern for first-render, transactional, and SEO-relevant copy.

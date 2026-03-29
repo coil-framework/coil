@@ -3123,20 +3123,17 @@ fn validated_storefront_payment_input_from_execution(
         .map(|provider| provider.uses_hosted_checkout())
         .unwrap_or(false);
     let checkout_email = execution_form_field(execution, "checkout_email")
-        .or_else(|| execution_form_field(execution, "checkoutEmail"))
         .or_else(|| execution_form_field(execution, "email"))
         .or_else(|| execution_form_field(execution, "billing_email"))
         .unwrap_or_default()
         .trim()
         .to_string();
     let last4 = execution_form_field(execution, "payment_last4")
-        .or_else(|| execution_form_field(execution, "paymentLast4"))
         .or_else(|| execution_form_field(execution, "card_last4"))
         .unwrap_or_default()
         .trim()
         .to_string();
     let method = execution_form_field(execution, "payment_method")
-        .or_else(|| execution_form_field(execution, "paymentMethod"))
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -3174,7 +3171,6 @@ fn validated_storefront_payment_input_from_execution(
     if execution_form_field(execution, "checkout_intent")
         .or_else(|| execution_form_field(execution, "payment_intent"))
         .or_else(|| execution_form_field(execution, "payment_reference"))
-        .or_else(|| execution_form_field(execution, "paymentReference"))
         .is_none()
     {
         has_errors = true;
@@ -3198,7 +3194,6 @@ fn validated_storefront_payment_input_from_execution(
     let intent_reference = execution_form_field(execution, "checkout_intent")
         .or_else(|| execution_form_field(execution, "payment_intent"))
         .or_else(|| execution_form_field(execution, "payment_reference"))
-        .or_else(|| execution_form_field(execution, "paymentReference"))
         .unwrap_or_default();
     let method = if method.is_empty() && hosted_checkout {
         "card".to_string()
@@ -3326,7 +3321,7 @@ fn validated_generic_verified_payment_webhook_from_execution(
             })
         })?;
     let payment_reference = execution_form_field(execution, "payment_reference")
-        .or_else(|| execution_form_field(execution, "paymentReference"))
+        .or_else(|| execution_form_field(execution, "payment_reference"))
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -3532,12 +3527,7 @@ fn stripe_payment_reference_from_event(
         .and_then(serde_json::Value::as_object);
     let payment_reference = metadata
         .and_then(|metadata| {
-            [
-                "payment_reference",
-                "paymentReference",
-                "checkout_intent",
-                "checkoutIntent",
-            ]
+            ["payment_reference", "checkout_intent"]
             .iter()
             .find_map(|key| metadata.get(*key).and_then(serde_json::Value::as_str))
         })
@@ -3773,18 +3763,14 @@ fn storefront_payment_input_from_execution(
 ) -> Result<StorefrontPaymentInput, RuntimeServerError> {
     let intent_reference = execution_form_field(execution, "checkout_intent")
         .or_else(|| execution_form_field(execution, "payment_intent"))
-        .or_else(|| execution_form_field(execution, "payment_reference"))
-        .or_else(|| execution_form_field(execution, "paymentReference"));
+        .or_else(|| execution_form_field(execution, "payment_reference"));
     let last4 = execution_form_field(execution, "payment_last4")
-        .or_else(|| execution_form_field(execution, "paymentLast4"))
         .or_else(|| execution_form_field(execution, "card_last4"))
         .map(str::to_string);
     let method = execution_form_field(execution, "payment_method")
-        .or_else(|| execution_form_field(execution, "paymentMethod"))
         .map(str::to_string)
         .or_else(|| last4.as_ref().map(|_| "card".to_string()));
     let checkout_email = execution_form_field(execution, "checkout_email")
-        .or_else(|| execution_form_field(execution, "checkoutEmail"))
         .or_else(|| execution_form_field(execution, "email"))
         .or_else(|| execution_form_field(execution, "billing_email"));
     StorefrontPaymentInput::new(

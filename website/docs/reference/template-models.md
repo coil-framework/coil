@@ -74,10 +74,10 @@ After that, route-specific bindings add the product-specific fields:
     if catalog.visible_product_for_site(site_id, slug).is_some() {
         let product_cards = fixture.related_product_cards_for_product(slug);
         model = model
-            .with_bool("hasProduct", true)?
+            .with_bool("has_product", true)?
             .with_object("product", fixture.product_for(slug))?
-            .with_bool("hasProductCards", !product_cards.is_empty())?
-            .with_list("productCards", product_cards)?;
+            .with_bool("has_product_cards", !product_cards.is_empty())?
+            .with_list("product_cards", product_cards)?;
     }
 }
 ```
@@ -85,7 +85,7 @@ After that, route-specific bindings add the product-specific fields:
 Finally, the template consumes those exact keys:
 
 ```html
-<section class="product-page__hero" coil:if="${hasProduct}">
+<section class="product-page__hero" coil:if="${has_product}">
   <h1 coil:text="${product.name}">Harbor Cap</h1>
   <p class="product-page__price" coil:text="${product.price}">GBP 29</p>
   <p coil:text="${product.summary}">Product summary</p>
@@ -162,12 +162,12 @@ let model = RenderModel::new()
     .with_object(
         "site",
         RenderModel::new()
-            .with_value("brandName", RenderValue::text("Shoppr"))?
-            .with_value("displayName", RenderValue::text("Shoppr UK"))?,
+            .with_value("brand_name", RenderValue::text("Shoppr"))?
+            .with_value("display_name", RenderValue::text("Shoppr UK"))?,
     )?
-    .with_bool("hasFlashMessages", true)?
+    .with_bool("has_flash_messages", true)?
     .with_list(
-        "flashMessages",
+        "flash_messages",
         vec![
             RenderModel::new()
                 .with_value("text", RenderValue::text("Order updated"))?
@@ -185,9 +185,9 @@ And this template consuming it:
     <link rel="stylesheet" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body>
-    <h1 coil:text="${site.brandName}">Brand</h1>
-    <section coil:if="${hasFlashMessages}">
-      <article coil:each="message : ${flashMessages}">
+    <h1 coil:text="${site.brand_name}">Brand</h1>
+    <section coil:if="${has_flash_messages}">
+      <article coil:each="message : ${flash_messages}">
         <p coil:text="${message.text}">Fallback</p>
       </article>
     </section>
@@ -221,9 +221,9 @@ These are the important rules:
 
 - `${page.title}`
   - reads nested object keys
-- `coil:if="${hasFlashMessages}"`
+- `coil:if="${has_flash_messages}"`
   - expects a boolean
-- `coil:each="entry : ${auditEntries}"`
+- `coil:each="entry : ${audit_entries}"`
   - expects a list of child models
 - `asset('theme/assets/site.css')`
   - reads from the model’s asset-path map
@@ -245,7 +245,7 @@ Coil’s runtime request model usually starts with keys like:
 - `links`
 - `navigation`
 - `page`
-- `flashMessages`
+- `flash_messages`
 
 That is why templates can usually stay simple: the runtime has already done the shaping work.
 
@@ -256,7 +256,7 @@ That is why templates can usually stay simple: the runtime has already done the 
 Use objects when a group of values belongs together:
 
 ```html
-<span coil:text="${site.brandName}">Brand</span>
+<span coil:text="${site.brand_name}">Brand</span>
 <p coil:text="${page.summary}">Summary</p>
 ```
 
@@ -265,8 +265,8 @@ Use objects when a group of values belongs together:
 Use booleans for visibility and state:
 
 ```html
-<section coil:if="${hasFlashMessages}">...</section>
-<p coil:unless="${cartItems}">Your cart is empty.</p>
+<section coil:if="${has_flash_messages}">...</section>
+<p coil:unless="${cart_items}">Your cart is empty.</p>
 ```
 
 ### Lists
@@ -274,7 +274,7 @@ Use booleans for visibility and state:
 Lists are always lists of child models, not raw primitives:
 
 ```html
-<li coil:each="item : ${cartItems}">
+<li coil:each="item : ${cart_items}">
   <strong coil:text="${item.title}">Fallback</strong>
 </li>
 ```
@@ -332,7 +332,7 @@ Use the demos for these two different lessons:
 
 - Shoppr
   - shows how a real server-side route ends up with strongly shaped keys such as `product`,
-    `collection`, `cartItems`, `cartSummary`, and `page`
+    `collection`, `cart_items`, `cart_summary`, and `page`
 - Gitly
   - shows how a customer app adds its own routes and maps them to template names such as
     `gitly/repository` and `gitly/actions`

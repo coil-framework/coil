@@ -20,7 +20,7 @@ impl AttributeNode {
     ) -> Result<Self, TemplateModelError> {
         Ok(Self {
             name: validate_attribute_name(name.into())?,
-            value: AttributeValue::Static(require_non_empty("attribute_value", value.into())?),
+            value: AttributeValue::Static(value.into()),
         })
     }
 

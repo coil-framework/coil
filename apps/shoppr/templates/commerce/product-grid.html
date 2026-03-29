@@ -8,23 +8,23 @@
     </p>
   </header>
 
-  <ul class="product-grid__list" coil:if="${hasProductCards}">
-    <li class="product-grid__item" coil:each="product : ${productCards}">
+  <ul class="product-grid__list" coil:if="${has_product_cards}">
+    <li class="product-grid__item" coil:each="product : ${product_cards}">
       <article class="product-card">
         <a class="product-card__media" href="/shop/products/harbor-cap" coil:href="${product.url}">
           <img
             src="/theme/assets/logo.svg"
-            coil:src="${product.imageUrl}"
+            coil:src="${product.image_url}"
             alt="Featured product"
-            coil:attr="alt=${product.imageAlt}"
+            coil:attr="alt=${product.image_alt}"
           />
         </a>
         <div class="product-card__body">
           <p class="product-card__eyebrow">
             <a
               href="/shop/collections/featured"
-              coil:href="${product.collectionUrl}"
-              coil:text="${product.collectionName}"
+              coil:href="${product.collection_url}"
+              coil:text="${product.collection_name}"
             >
               Harbor pantry
             </a>
@@ -58,7 +58,7 @@
     </li>
   </ul>
 
-  <div class="product-grid__fallback" coil:unless="${hasProductCards}">
+  <div class="product-grid__fallback" coil:unless="${has_product_cards}">
     <article class="product-card">
       <div class="product-card__body">
         <p class="product-card__eyebrow">Featured</p>

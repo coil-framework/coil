@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle=t('home.meta.title')"
+  coil:with="page_title=t('home.meta.title')"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Shoppr</title>
+    <title coil:text="${page_title}">Shoppr</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
@@ -31,7 +31,7 @@
       <div class="site-header__main">
         <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
         </a>
         <nav coil:replace="~{navigation/primary}"></nav>
       </div>
@@ -39,7 +39,7 @@
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow" coil:t="nav.market">Market</p>
           <ul>
-            <li coil:each="item : ${links.siteSwitches}">
+            <li coil:each="item : ${links.site_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
               <span coil:if="${item.active}" coil:t="nav.current">Current</span>
             </li>
@@ -48,7 +48,7 @@
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow" coil:t="nav.language">Language</p>
           <ul>
-            <li coil:each="item : ${links.localeSwitches}">
+            <li coil:each="item : ${links.locale_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
               <span coil:if="${item.active}" coil:t="nav.current">Current</span>
             </li>
@@ -66,7 +66,7 @@
               style="--hero-image:url('https://unsplash.com/photos/woman-in-white-dress-choosing-coat-from-fur-coats-oyLU7C-2kRE/download?force=true&amp;w=1600&amp;q=80')"
             >
               <div class="home-hero__content">
-                <p class="home-hero__eyebrow" coil:text="${site.displayName}">Shoppr UK</p>
+                <p class="home-hero__eyebrow" coil:text="${site.display_name}">Shoppr UK</p>
                 <h1 coil:t="home.hero.title">Quiet luxury, fast routes, and the full storefront loop in one starter.</h1>
                 <p coil:t="home.hero.summary">Shoppr is now a fashion-first demo: immersive campaigns, catalog depth, interactive product detail, and visible market and language switching across one customer app.</p>
                 <div class="checkout-actions">
@@ -166,7 +166,7 @@
     <footer class="site-footer">
       <div>
         <p class="site-footer__eyebrow" coil:t="home.footer.brand">Shoppr</p>
-        <strong coil:text="${site.displayName}">Shoppr UK</strong>
+        <strong coil:text="${site.display_name}">Shoppr UK</strong>
         <p coil:t="home.footer.summary">Fashion-led Coil starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries.</p>
       </div>
       <div>

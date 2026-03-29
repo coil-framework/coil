@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle=${page.title}"
+  coil:with="page_title=${page.title}"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Order Detail</title>
+    <title coil:text="${page_title}">Order Detail</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
@@ -23,131 +23,131 @@
         <p coil:text="${page.summary}">
           Support and finance detail for a specific order.
         </p>
-        <p coil:if="${operator.hasPrincipal}">
-          Signed in as <strong coil:text="${operator.displayName}">Current Operator</strong>.
+        <p coil:if="${operator.has_principal}">
+          Signed in as <strong coil:text="${operator.display_name}">Current Operator</strong>.
         </p>
       </section>
 
-      <section class="storefront-flash" coil:if="${hasFlashMessages}">
-        <article class="storefront-flash__message" coil:each="message : ${flashMessages}">
+      <section class="storefront-flash" coil:if="${has_flash_messages}">
+        <article class="storefront-flash__message" coil:each="message : ${flash_messages}">
           <p class="storefront-flash__eyebrow" coil:text="${message.level}">info</p>
           <p coil:text="${message.text}">Order support update</p>
         </article>
       </section>
 
-      <section class="admin-panel" coil:if="${hasRefundErrors}">
+      <section class="admin-panel" coil:if="${has_refund_errors}">
         <p class="admin-panel__eyebrow">Refund request</p>
         <h2>Review the refund request</h2>
-        <p coil:text="${refundErrorSummary}">
+        <p coil:text="${refund_error_summary}">
           Review the refund request before issuing another order change.
         </p>
         <ul class="flash-list">
-          <li coil:each="error : ${refundErrors}" coil:text="${error.message}">Refund error</li>
+          <li coil:each="error : ${refund_errors}" coil:text="${error.message}">Refund error</li>
         </ul>
       </section>
 
-      <section class="admin-panel" coil:if="${hasSelectedOrder}">
+      <section class="admin-panel" coil:if="${has_selected_order}">
         <p class="admin-panel__eyebrow">Order overview</p>
         <div class="admin-card-grid">
           <article class="admin-card">
             <h2>Reference</h2>
-            <p><strong coil:text="${selectedOrder.reference}">ORD-10042</strong></p>
-            <p>Status <span coil:text="${selectedOrder.status}">Paid</span></p>
-            <p>Payment <span coil:text="${selectedOrder.paymentStatus}">Captured</span></p>
+            <p><strong coil:text="${selected_order.reference}">ORD-10042</strong></p>
+            <p>Status <span coil:text="${selected_order.status}">Paid</span></p>
+            <p>Payment <span coil:text="${selected_order.payment_status}">Captured</span></p>
           </article>
           <article class="admin-card">
             <h2>Customer</h2>
-            <p coil:if="${selectedOrder.hasCheckoutEmail}">
-              Receipt email <strong coil:text="${selectedOrder.checkoutEmail}">member@example.com</strong>
+            <p coil:if="${selected_order.has_checkout_email}">
+              Receipt email <strong coil:text="${selected_order.checkout_email}">member@example.com</strong>
             </p>
-            <p coil:unless="${selectedOrder.hasCheckoutEmail}">Receipt email has not been captured yet.</p>
-            <p coil:if="${selectedOrder.hasPrincipalId}">
-              Principal <code coil:text="${selectedOrder.principalId}">member-live</code>
+            <p coil:unless="${selected_order.has_checkout_email}">Receipt email has not been captured yet.</p>
+            <p coil:if="${selected_order.has_principal_id}">
+              Principal <code coil:text="${selected_order.principal_id}">member-live</code>
             </p>
             <p>
-              Session <code coil:text="${selectedOrder.sessionId}">session-live</code>
+              Session <code coil:text="${selected_order.session_id}">session-live</code>
             </p>
           </article>
           <article class="admin-card">
             <h2>Finance</h2>
-            <p>Total <strong coil:text="${selectedOrder.total}">£89.00</strong></p>
-            <p>Refunded <span coil:text="${selectedOrder.refundedTotal}">£0.00</span></p>
-            <p>Remaining <span coil:text="${selectedOrder.refundableTotal}">£89.00</span></p>
+            <p>Total <strong coil:text="${selected_order.total}">£89.00</strong></p>
+            <p>Refunded <span coil:text="${selected_order.refunded_total}">£0.00</span></p>
+            <p>Remaining <span coil:text="${selected_order.refundable_total}">£89.00</span></p>
           </article>
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${hasSelectedOrder}">
+      <section class="admin-panel" coil:if="${has_selected_order}">
         <p class="admin-panel__eyebrow">Payment</p>
         <div class="admin-card-grid">
           <article class="admin-card">
             <h2>Payment trace</h2>
-            <p coil:text="${selectedOrder.paymentSummary}">
+            <p coil:text="${selected_order.payment_summary}">
               Card ending 4242, reference PAY-50001
             </p>
-            <p coil:if="${selectedOrder.hasPaymentReference}">
+            <p coil:if="${selected_order.has_payment_reference}">
               Provider reference
-              <code coil:text="${selectedOrder.paymentReference}">PAY-50001</code>
+              <code coil:text="${selected_order.payment_reference}">PAY-50001</code>
             </p>
           </article>
           <article class="admin-card">
             <h2>Refund action</h2>
-            <p coil:text="${selectedOrder.refundActionSummary}">
+            <p coil:text="${selected_order.refund_action_summary}">
               Issue a full remaining refund from the checked-in order state.
             </p>
             <form action="/admin/orders/refund" method="post">
-              <input type="hidden" name="order_id" coil:attr="value=${selectedOrder.orderId}" />
+              <input type="hidden" name="order_id" coil:attr="value=${selected_order.order_id}" />
               <label>
                 Refund reason
-                <input type="text" name="reason" coil:attr="value=${selectedOrder.refundReason}" />
+                <input type="text" name="reason" coil:attr="value=${selected_order.refund_reason}" />
               </label>
-              <p coil:if="${selectedOrder.hasRefundReasonError}" coil:text="${selectedOrder.refundReasonError}">
+              <p coil:if="${selected_order.has_refund_reason_error}" coil:text="${selected_order.refund_reason_error}">
                 Refund reason is required.
               </p>
-              <button type="submit" class="button" coil:if="${selectedOrder.canRefund}">Issue refund</button>
-              <button type="submit" class="button" coil:unless="${selectedOrder.canRefund}" disabled="disabled">
+              <button type="submit" class="button" coil:if="${selected_order.can_refund}">Issue refund</button>
+              <button type="submit" class="button" coil:unless="${selected_order.can_refund}" disabled="disabled">
                 Refund unavailable
               </button>
             </form>
           </article>
           <article class="admin-card">
             <h2>Fulfillment action</h2>
-            <p coil:text="${selectedOrder.fulfillmentActionSummary}">
+            <p coil:text="${selected_order.fulfillment_action_summary}">
               Mark the order fulfilled after packing or dispatch so the support queue reflects the completed shipment.
             </p>
             <form action="/admin/orders/fulfill" method="post">
-              <input type="hidden" name="order_id" coil:attr="value=${selectedOrder.orderId}" />
-              <button type="submit" class="button" coil:if="${selectedOrder.canFulfill}">Mark fulfilled</button>
-              <button type="submit" class="button" coil:unless="${selectedOrder.canFulfill}" disabled="disabled">
+              <input type="hidden" name="order_id" coil:attr="value=${selected_order.order_id}" />
+              <button type="submit" class="button" coil:if="${selected_order.can_fulfill}">Mark fulfilled</button>
+              <button type="submit" class="button" coil:unless="${selected_order.can_fulfill}" disabled="disabled">
                 Fulfillment unavailable
               </button>
             </form>
           </article>
-          <article class="admin-card" coil:if="${selectedOrder.hasCustomerReview}">
+          <article class="admin-card" coil:if="${selected_order.has_customer_review}">
             <h2>Linked customer backend</h2>
             <p>
               Review status
-              <strong coil:text="${selectedOrder.customerReview.status}">Approved</strong>
+              <strong coil:text="${selected_order.customer_review.status}">Approved</strong>
             </p>
-            <p coil:text="${selectedOrder.customerReview.summary}">
+            <p coil:text="${selected_order.customer_review.summary}">
               The linked Shoppr backend approved this order without extra handling.
             </p>
             <p>
               Decision code
-              <code coil:text="${selectedOrder.customerReview.code}">approved</code>
+              <code coil:text="${selected_order.customer_review.code}">approved</code>
             </p>
-            <p coil:if="${selectedOrder.customerReview.hasAssignedQueue}">
+            <p coil:if="${selected_order.customer_review.has_assigned_queue}">
               Assigned queue
-              <strong coil:text="${selectedOrder.customerReview.assignedQueue}">vip-fulfilment</strong>
+              <strong coil:text="${selected_order.customer_review.assigned_queue}">vip-fulfilment</strong>
             </p>
-            <p coil:if="${selectedOrder.customerReview.hasServiceLevel}">
+            <p coil:if="${selected_order.customer_review.has_service_level}">
               Service level
-              <strong coil:text="${selectedOrder.customerReview.serviceLevel}">priority</strong>
+              <strong coil:text="${selected_order.customer_review.service_level}">priority</strong>
             </p>
-            <div coil:if="${selectedOrder.customerReview.hasMetadata}">
+            <div coil:if="${selected_order.customer_review.has_metadata}">
               <p>Adjustment metadata</p>
               <ul>
-                <li coil:each="entry : ${selectedOrder.customerReview.metadataEntries}">
+                <li coil:each="entry : ${selected_order.customer_review.metadata_entries}">
                   <code coil:text="${entry.key}">assigned_queue</code>:
                   <span coil:text="${entry.value}">vip-fulfilment</span>
                 </li>
@@ -157,9 +157,9 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${hasSelectedOrder}">
+      <section class="admin-panel" coil:if="${has_selected_order}">
         <p class="admin-panel__eyebrow">Line items</p>
-        <table class="admin-table" coil:if="${selectedOrder.hasLineItems}">
+        <table class="admin-table" coil:if="${selected_order.has_line_items}">
           <thead>
             <tr>
               <th scope="col">Item</th>
@@ -169,12 +169,12 @@
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="line : ${selectedOrder.lineItems}">
+            <tr coil:each="line : ${selected_order.line_items}">
               <td>
                 <strong coil:text="${line.title}">Gold Membership</strong>
-                <div coil:text="${line.variantTitle}">Annual</div>
-                <div coil:if="${line.hasEntitlementKey}">
-                  <code coil:text="${line.entitlementKey}">membership.gold</code>
+                <div coil:text="${line.variant_title}">Annual</div>
+                <div coil:if="${line.has_entitlement_key}">
+                  <code coil:text="${line.entitlement_key}">membership.gold</code>
                 </div>
               </td>
               <td coil:text="${line.sku}">membership-gold</td>
@@ -185,23 +185,23 @@
         </table>
       </section>
 
-      <section class="admin-panel" coil:if="${hasSelectedOrder}">
+      <section class="admin-panel" coil:if="${has_selected_order}">
         <p class="admin-panel__eyebrow">Refund history</p>
-        <div coil:if="${selectedOrder.hasRefunds}">
-          <article class="admin-card" coil:each="refund : ${selectedOrder.refunds}">
+        <div coil:if="${selected_order.has_refunds}">
+          <article class="admin-card" coil:each="refund : ${selected_order.refunds}">
             <h2>
-              <span coil:text="${refund.refundId}">RFD-07001</span>
+              <span coil:text="${refund.refund_id}">RFD-07001</span>
               <span coil:text="${refund.amount}">£89.00</span>
             </h2>
             <p coil:text="${refund.reason}">customer_support</p>
           </article>
         </div>
-        <p coil:unless="${selectedOrder.hasRefunds}">
+        <p coil:unless="${selected_order.has_refunds}">
           No refunds have been recorded for this order yet.
         </p>
       </section>
 
-      <section class="admin-panel" coil:if="${hasMissingOrder}">
+      <section class="admin-panel" coil:if="${has_missing_order}">
         <p class="admin-panel__eyebrow">Order detail</p>
         <h2>Order not found</h2>
         <p>The requested order could not be loaded from the checked-in storefront state.</p>
@@ -209,7 +209,7 @@
 
       <section class="admin-panel">
         <p class="admin-panel__eyebrow">Recent orders</p>
-        <table class="admin-table" coil:if="${hasRecentOrders}">
+        <table class="admin-table" coil:if="${has_recent_orders}">
           <thead>
             <tr>
               <th scope="col">Order</th>
@@ -218,9 +218,9 @@
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="order : ${recentOrders}">
+            <tr coil:each="order : ${recent_orders}">
               <td>
-                <a href="/admin/orders/ORD-10042" coil:attr="href=${order.detailHref}">
+                <a href="/admin/orders/ORD-10042" coil:attr="href=${order.detail_href}">
                   <strong coil:text="${order.reference}">ORD-10042</strong>
                 </a>
               </td>
@@ -232,10 +232,10 @@
       </section>
 
       <div class="admin-page__actions">
-        <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.adminOrders}">
+        <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
           Back to orders
         </a>
-        <a class="button button--secondary" href="/admin" coil:attr="href=${links.adminDashboard}">
+        <a class="button button--secondary" href="/admin" coil:attr="href=${links.admin_dashboard}">
           Back to dashboard
         </a>
       </div>

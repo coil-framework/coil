@@ -96,7 +96,7 @@ Concrete example:
 ```html title="templates/admin/dashboard.html"
 <section xmlns:coil="https://coil.rs">
   <h3>Recovery</h3>
-  <p>Last catalogue rebuild: <span coil:text="${ops.lastRebuildAt}">never</span></p>
+  <p>Last catalogue rebuild: <span coil:text="${ops.last_rebuild_at}">never</span></p>
 </section>
 ```
 

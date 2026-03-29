@@ -226,7 +226,7 @@ fn theme_workspace() -> TempDir {
         r#"<!doctype html>
 <html xmlns:coil="https://coil.rs" coil:fragment="shell" coil:attr="lang=${locale}">
   <head>
-    <title coil:text="${pageTitle}">Shoppr</title>
+    <title coil:text="${page_title}">Shoppr</title>
   </head>
   <body>
     <main coil:slot="content">

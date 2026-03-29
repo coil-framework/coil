@@ -48,12 +48,12 @@ The template itself tells you what the runtime is shaping:
 
 ```html
 <p>
-  Backend <code coil:text="${auditBackend}">local-sqlite</code> at
-  <code coil:text="${auditLocation}">/var/lib/coil/shared-state</code> with
-  <strong coil:text="${auditEntryCount}">0</strong> recorded entries.
+  Backend <code coil:text="${audit_backend}">local-sqlite</code> at
+  <code coil:text="${audit_location}">/var/lib/coil/shared-state</code> with
+  <strong coil:text="${audit_entry_count}">0</strong> recorded entries.
 </p>
 ...
-<tr coil:each="entry : ${auditEntries}">
+<tr coil:each="entry : ${audit_entries}">
   <td coil:text="${entry.when}">1764223200</td>
   <td coil:text="${entry.actor}">operator-live-1</td>
   <td coil:text="${entry.action}">Issue refund</td>

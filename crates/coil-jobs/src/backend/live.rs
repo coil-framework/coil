@@ -155,7 +155,7 @@ impl JobsCoordinationRuntime for ProductionPostgresSharedJobsCoordinationRuntime
 #[derive(Debug)]
 struct ProductionPostgresSharedJobsStore {
     pool: sqlx::Pool<Postgres>,
-    runtime: Runtime,
+    runtime: Option<Runtime>,
     backend: coil_config::JobBackend,
     namespace: String,
 }
@@ -182,7 +182,7 @@ impl ProductionPostgresSharedJobsStore {
         })?;
         Ok(Self {
             pool,
-            runtime: executor,
+            runtime: Some(executor),
             backend: runtime.backend,
             namespace,
         })
@@ -191,7 +191,11 @@ impl ProductionPostgresSharedJobsStore {
     fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
         match Handle::try_current() {
             Ok(handle) => task::block_in_place(|| handle.block_on(future)),
-            Err(_) => self.runtime.block_on(future),
+            Err(_) => self
+                .runtime
+                .as_ref()
+                .expect("jobs runtime missing during live operation")
+                .block_on(future),
         }
     }
 
@@ -324,6 +328,17 @@ impl ProductionPostgresSharedJobsStore {
 
             Ok(outcome)
         })
+    }
+}
+
+#[cfg(not(test))]
+impl Drop for ProductionPostgresSharedJobsStore {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            std::thread::spawn(move || drop(runtime))
+                .join()
+                .expect("jobs runtime drop thread panicked");
+        }
     }
 }
 

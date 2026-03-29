@@ -308,11 +308,11 @@ impl RuntimePlan {
             .with_object("links", links_model(self, execution)?)?
             .with_object("navigation", navigation_model(Some(self))?)?
             .with_bool(
-                "hasFlashMessages",
+                "has_flash_messages",
                 !storefront_feedback.visible_flash_messages.is_empty(),
             )?
             .with_list(
-                "flashMessages",
+                "flash_messages",
                 flash_messages_model(&storefront_feedback.visible_flash_messages)?,
             )?
             .with_object(
@@ -320,11 +320,11 @@ impl RuntimePlan {
                 page_model_for_route(execution, template_name, fragment_id),
             )?
             .with_bool(
-                "hasLinkedCustomerPlugins",
+                "has_linked_customer_plugins",
                 !self.linked_customer_plugins.is_empty(),
             )?
             .with_list(
-                "linkedCustomerPlugins",
+                "linked_customer_plugins",
                 linked_customer_plugins_model(&self.linked_customer_plugins)?,
             )?;
 
@@ -369,12 +369,12 @@ fn linked_customer_plugins_model(
             RenderModel::new()
                 .with_value("id", RenderValue::text(plugin.plugin_id.clone()))?
                 .with_value(
-                    "displayName",
+                    "display_name",
                     RenderValue::text(plugin.display_name.clone()),
                 )?
                 .with_value("version", RenderValue::text(plugin.version.clone()))?
                 .with_value(
-                    "hooksSummary",
+                    "hooks_summary",
                     RenderValue::text(
                         plugin
                             .registered_hooks
@@ -463,11 +463,11 @@ fn site_model(
 
     RenderModel::new()
         .with_value("id", RenderValue::text(site_id))?
-        .with_value("displayName", RenderValue::text(display_name))?
-        .with_value("requestHost", RenderValue::text(execution.host.clone()))?
-        .with_value("canonicalHost", RenderValue::text(canonical_host))?
-        .with_bool("hasBrandName", true)?
-        .with_value("brandName", RenderValue::text(brand_name))
+        .with_value("display_name", RenderValue::text(display_name))?
+        .with_value("request_host", RenderValue::text(execution.host.clone()))?
+        .with_value("canonical_host", RenderValue::text(canonical_host))?
+        .with_bool("has_brand_name", true)?
+        .with_value("brand_name", RenderValue::text(brand_name))
 }
 
 fn links_model(
@@ -511,7 +511,7 @@ fn links_model(
             )),
         )?
         .with_value(
-            "featuredCollection",
+            "featured_collection",
             RenderValue::text(route_link(
                 plan,
                 site_id,
@@ -522,7 +522,7 @@ fn links_model(
             )),
         )?
         .with_value(
-            "membershipsCollection",
+            "memberships_collection",
             RenderValue::text(route_link(
                 plan,
                 site_id,
@@ -533,7 +533,7 @@ fn links_model(
             )),
         )?
         .with_value(
-            "eventsCollection",
+            "events_collection",
             RenderValue::text(route_link(
                 plan,
                 site_id,
@@ -565,18 +565,18 @@ fn links_model(
                 "/checkout",
             )),
         )?
-        .with_list("localeSwitches", locale_switches_model(plan, execution)?)?
-        .with_list("siteSwitches", site_switches_model(plan, execution)?)?
+        .with_list("locale_switches", locale_switches_model(plan, execution)?)?
+        .with_list("site_switches", site_switches_model(plan, execution)?)?
         .with_value("account", RenderValue::text("/account"))?
         .with_value("orders", RenderValue::text("/account/orders"))?
         .with_value("memberships", RenderValue::text("/account/memberships"))?
-        .with_value("adminDashboard", RenderValue::text("/admin"))?
-        .with_value("adminAudit", RenderValue::text("/admin/audit"))?
-        .with_value("adminOrders", RenderValue::text("/admin/orders"))?
-        .with_value("adminCatalog", RenderValue::text("/admin/catalog/products"))?
-        .with_value("adminPages", RenderValue::text("/admin/pages"))?
-        .with_value("adminNavigation", RenderValue::text("/admin/navigation"))?
-        .with_value("adminRedirects", RenderValue::text("/admin/redirects"))
+        .with_value("admin_dashboard", RenderValue::text("/admin"))?
+        .with_value("admin_audit", RenderValue::text("/admin/audit"))?
+        .with_value("admin_orders", RenderValue::text("/admin/orders"))?
+        .with_value("admin_catalog", RenderValue::text("/admin/catalog/products"))?
+        .with_value("admin_pages", RenderValue::text("/admin/pages"))?
+        .with_value("admin_navigation", RenderValue::text("/admin/navigation"))?
+        .with_value("admin_redirects", RenderValue::text("/admin/redirects"))
 }
 
 fn route_link(
@@ -884,10 +884,10 @@ fn apply_route_specific_bindings(
             let has_catalog_sections = !fixture.catalog_sections.is_empty();
             let has_product_cards = !fixture.product_cards.is_empty();
             model = model
-                .with_bool("hasCatalogSections", has_catalog_sections)?
-                .with_bool("hasProductCards", has_product_cards)?
-                .with_list("catalogSections", fixture.catalog_sections.clone())?
-                .with_list("productCards", fixture.product_cards.clone())?;
+                .with_bool("has_catalog_sections", has_catalog_sections)?
+                .with_bool("has_product_cards", has_product_cards)?
+                .with_list("catalog_sections", fixture.catalog_sections.clone())?
+                .with_list("product_cards", fixture.product_cards.clone())?;
         }
         "commerce.collection-detail" => {
             let slug = params
@@ -897,15 +897,15 @@ fn apply_route_specific_bindings(
             if let Some(_collection) = catalog.visible_collection_for_site(site_id, slug) {
                 let product_cards = fixture.product_cards_for_collection(slug);
                 model = model
-                    .with_bool("hasCollection", true)?
+                    .with_bool("has_collection", true)?
                     .with_object("collection", fixture.collection_for(slug))?
-                    .with_bool("hasProductCards", !product_cards.is_empty())?
-                    .with_list("productCards", product_cards)?;
+                    .with_bool("has_product_cards", !product_cards.is_empty())?
+                    .with_list("product_cards", product_cards)?;
             } else {
                 model = model
-                    .with_bool("hasCollection", false)?
-                    .with_bool("hasProductCards", false)?
-                    .with_list("productCards", Vec::<RenderModel>::new())?
+                    .with_bool("has_collection", false)?
+                    .with_bool("has_product_cards", false)?
+                    .with_list("product_cards", Vec::<RenderModel>::new())?
                     .with_value(
                         "missingCollectionHandle",
                         RenderValue::text(slug.to_string()),
@@ -920,24 +920,24 @@ fn apply_route_specific_bindings(
             if catalog.visible_product_for_site(site_id, slug).is_some() {
                 let product_cards = fixture.related_product_cards_for_product(slug);
                 model = model
-                    .with_bool("hasProduct", true)?
+                    .with_bool("has_product", true)?
                     .with_object("product", fixture.product_for(slug))?
-                    .with_bool("hasProductCards", !product_cards.is_empty())?
-                    .with_list("productCards", product_cards)?;
+                    .with_bool("has_product_cards", !product_cards.is_empty())?
+                    .with_list("product_cards", product_cards)?;
             } else {
                 model = model
-                    .with_bool("hasProduct", false)?
-                    .with_bool("hasProductCards", false)?
-                    .with_list("productCards", Vec::<RenderModel>::new())?
-                    .with_value("missingProductHandle", RenderValue::text(slug.to_string()))?;
+                    .with_bool("has_product", false)?
+                    .with_bool("has_product_cards", false)?
+                    .with_list("product_cards", Vec::<RenderModel>::new())?
+                    .with_value("missing_product_handle", RenderValue::text(slug.to_string()))?;
             }
         }
         "commerce.cart" => {
             if let Some(snapshot) = live_storefront_state(plan, session, principal)? {
                 model = model
-                    .with_bool("hasCartItems", !snapshot.cart.lines.is_empty())?
+                    .with_bool("has_cart_items", !snapshot.cart.lines.is_empty())?
                     .with_list(
-                        "cartItems",
+                        "cart_items",
                         cart_items_from_storefront(
                             catalog,
                             locale,
@@ -945,14 +945,14 @@ fn apply_route_specific_bindings(
                             form_state,
                         )?,
                     )?
-                    .with_object("cartSummary", cart_summary_from_storefront(&snapshot)?)?
-                    .with_object("cartForm", cart_form_model(form_state)?)?;
+                    .with_object("cart_summary", cart_summary_from_storefront(&snapshot)?)?
+                    .with_object("cart_form", cart_form_model(form_state)?)?;
             } else {
                 model = model
-                    .with_bool("hasCartItems", !fixture.cart_items.is_empty())?
-                    .with_list("cartItems", fixture.cart_items.clone())?
-                    .with_object("cartSummary", fixture.cart_summary.clone())?
-                    .with_object("cartForm", cart_form_model(form_state)?)?;
+                    .with_bool("has_cart_items", !fixture.cart_items.is_empty())?
+                    .with_list("cart_items", fixture.cart_items.clone())?
+                    .with_object("cart_summary", fixture.cart_summary.clone())?
+                    .with_object("cart_form", cart_form_model(form_state)?)?;
             }
         }
         "commerce.checkout" => {
@@ -970,17 +970,17 @@ fn apply_route_specific_bindings(
                             form_state,
                         )?,
                     )?
-                    .with_bool("hasLineItems", !line_items.is_empty())?
-                    .with_list("lineItems", line_items)?
-                    .with_object("orderSummary", cart_summary_from_storefront(&snapshot)?)?;
+                    .with_bool("has_line_items", !line_items.is_empty())?
+                    .with_list("line_items", line_items)?
+                    .with_object("order_summary", cart_summary_from_storefront(&snapshot)?)?;
             } else {
                 let checkout = merge_checkout_form_feedback(fixture.checkout.clone(), form_state)?;
                 model = model
                     .with_object("customer", fixture.customer.clone())?
                     .with_object("checkout", checkout)?
-                    .with_bool("hasLineItems", !fixture.cart_items.is_empty())?
-                    .with_list("lineItems", fixture.cart_items.clone())?
-                    .with_object("orderSummary", fixture.cart_summary.clone())?;
+                    .with_bool("has_line_items", !fixture.cart_items.is_empty())?
+                    .with_list("line_items", fixture.cart_items.clone())?
+                    .with_object("order_summary", fixture.cart_summary.clone())?;
             }
         }
         "commerce.checkout-confirmation" => {
@@ -995,29 +995,29 @@ fn apply_route_specific_bindings(
                     .unwrap_or(empty_confirmation_model(plan)?);
                 if snapshot.latest_order.is_some() {
                     model = model
-                        .with_bool("hasConfirmation", true)?
+                        .with_bool("has_confirmation", true)?
                         .with_object("confirmation", confirmation)?
                         .with_object("account", account.account)?
                         .with_object("customer", account.customer)?
-                        .with_list("recentOrders", account.recent_orders)?
-                        .with_object("membershipSummary", account.membership_summary)?;
+                        .with_list("recent_orders", account.recent_orders)?
+                        .with_object("membership_summary", account.membership_summary)?;
                 } else {
                     model = model
-                        .with_bool("hasConfirmation", false)?
+                        .with_bool("has_confirmation", false)?
                         .with_object("confirmation", confirmation)?
                         .with_object("account", account.account)?
                         .with_object("customer", account.customer)?
-                        .with_list("recentOrders", account.recent_orders)?
-                        .with_object("membershipSummary", account.membership_summary)?;
+                        .with_list("recent_orders", account.recent_orders)?
+                        .with_object("membership_summary", account.membership_summary)?;
                 }
             } else {
                 model = model
-                    .with_bool("hasConfirmation", true)?
+                    .with_bool("has_confirmation", true)?
                     .with_object("confirmation", fixture.confirmation.clone())?
                     .with_object("account", account.account)?
                     .with_object("customer", account.customer)?
-                    .with_list("recentOrders", account.recent_orders)?
-                    .with_object("membershipSummary", account.membership_summary)?;
+                    .with_list("recent_orders", account.recent_orders)?
+                    .with_object("membership_summary", account.membership_summary)?;
             }
         }
         "commerce.account.orders"
@@ -1036,8 +1036,8 @@ fn apply_route_specific_bindings(
             model = model
                 .with_object("account", account.account)?
                 .with_object("customer", account.customer)?
-                .with_list("recentOrders", account.recent_orders)?
-                .with_object("membershipSummary", account.membership_summary)?;
+                .with_list("recent_orders", account.recent_orders)?
+                .with_object("membership_summary", account.membership_summary)?;
         }
         "admin.dashboard" => {
             let live_recent_orders = recent_orders_from_storefront(
@@ -1055,29 +1055,29 @@ fn apply_route_specific_bindings(
             };
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasAdminPanels", true)?
-                .with_list("adminPanels", admin_panels(locale, &fixture, order_count)?)?
+                .with_bool("has_admin_panels", true)?
+                .with_list("admin_panels", admin_panels(locale, &fixture, order_count)?)?
                 .with_value(
-                    "catalogCount",
+                    "catalog_count",
                     RenderValue::text(fixture.product_cards.len().to_string()),
                 )?
-                .with_value("orderCount", RenderValue::text(order_count.to_string()))?
-                .with_value("contentCount", RenderValue::text(content_count))?;
+                .with_value("order_count", RenderValue::text(order_count.to_string()))?
+                .with_value("content_count", RenderValue::text(content_count))?;
         }
         "admin.audit" => {
             let audit_history = admin_audit_history(plan)?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasAuditEntries", !audit_history.entries.is_empty())?
-                .with_list("auditEntries", audit_history.entries)?
+                .with_bool("has_audit_entries", !audit_history.entries.is_empty())?
+                .with_list("audit_entries", audit_history.entries)?
                 .with_value(
-                    "auditEmptyText",
+                    "audit_empty_text",
                     RenderValue::text(audit_history.empty_text),
                 )?
-                .with_value("auditBackend", RenderValue::text(audit_history.backend))?
-                .with_value("auditLocation", RenderValue::text(audit_history.location))?
+                .with_value("audit_backend", RenderValue::text(audit_history.backend))?
+                .with_value("audit_location", RenderValue::text(audit_history.location))?
                 .with_value(
-                    "auditEntryCount",
+                    "audit_entry_count",
                     RenderValue::text(audit_history.entry_count.to_string()),
                 )?;
         }
@@ -1085,11 +1085,11 @@ fn apply_route_specific_bindings(
             let (recent_orders, order_stats) = admin_orders_from_storefront(plan, &fixture)?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasRecentOrders", !recent_orders.is_empty())?
-                .with_list("recentOrders", recent_orders)?
-                .with_object("orderStats", order_stats)?
+                .with_bool("has_recent_orders", !recent_orders.is_empty())?
+                .with_list("recent_orders", recent_orders)?
+                .with_object("order_stats", order_stats)?
                 .with_value(
-                    "ordersEmptyText",
+                    "orders_empty_text",
                     RenderValue::text(
                         "No completed orders have been captured in the checked-in sample app yet.",
                     ),
@@ -1106,15 +1106,15 @@ fn apply_route_specific_bindings(
                 .transpose()?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasRecentOrders", !recent_orders.is_empty())?
-                .with_list("recentOrders", recent_orders)?
-                .with_bool("hasSelectedOrder", selected_order.is_some())?
+                .with_bool("has_recent_orders", !recent_orders.is_empty())?
+                .with_list("recent_orders", recent_orders)?
+                .with_bool("has_selected_order", selected_order.is_some())?
                 .with_bool(
-                    "hasMissingOrder",
+                    "has_missing_order",
                     params.get("order_id").is_some() && selected_order.is_none(),
                 )?;
             if let Some(order) = selected_order {
-                model = model.with_object("selectedOrder", order)?;
+                model = model.with_object("selected_order", order)?;
             }
             model = merge_order_refund_form_feedback(model, form_state)?;
         }
@@ -1123,13 +1123,13 @@ fn apply_route_specific_bindings(
             let catalog_sections = catalog_admin_collections_model(locale, catalog, form_state)?;
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_object("catalogAdminForm", catalog_admin_form_model(form_state)?)?
-                .with_bool("hasCatalogSections", !catalog_sections.is_empty())?
-                .with_list("catalogSections", catalog_sections)?
-                .with_bool("hasProductCards", !product_cards.is_empty())?
-                .with_list("productCards", product_cards)?
+                .with_object("catalog_admin_form", catalog_admin_form_model(form_state)?)?
+                .with_bool("has_catalog_sections", !catalog_sections.is_empty())?
+                .with_list("catalog_sections", catalog_sections)?
+                .with_bool("has_product_cards", !product_cards.is_empty())?
+                .with_list("product_cards", product_cards)?
                 .with_value(
-                    "catalogEmptyText",
+                    "catalog_empty_text",
                     RenderValue::text("No catalog entries are available in the sample app yet."),
                 )?;
         }
@@ -1150,24 +1150,24 @@ fn apply_route_specific_bindings(
                 .flatten();
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasContentPages", !pages.is_empty())?
-                .with_list("contentPages", pages)?
+                .with_bool("has_content_pages", !pages.is_empty())?
+                .with_list("content_pages", pages)?
                 .with_bool(
-                    "hasSelectedContentPage",
+                    "has_selected_content_page",
                     selected_page.is_some() || is_creating_page,
                 )?
-                .with_bool("isCreatingContentPage", is_creating_page)?
-                .with_bool("hasPersistedContentPage", selected_page.is_some())?
+                .with_bool("is_creating_content_page", is_creating_page)?
+                .with_bool("has_persisted_content_page", selected_page.is_some())?
                 .with_object(
-                    "selectedContentPage",
+                    "selected_content_page",
                     cms_admin_selected_page_model_with_form_state(selected_page, form_state)?,
                 )?
                 .with_value(
-                    "newContentPageHref",
+                    "new_content_page_href",
                     RenderValue::text("/admin/pages?new=1"),
                 )?
                 .with_value(
-                    "contentPageEditorTitle",
+                    "content_page_editor_title",
                     RenderValue::text(if is_creating_page {
                         "New page draft"
                     } else {
@@ -1175,7 +1175,7 @@ fn apply_route_specific_bindings(
                     }),
                 )?
                 .with_value(
-                    "contentPageEditorSummary",
+                    "content_page_editor_summary",
                     RenderValue::text(if is_creating_page {
                         "Start a new draft page, save it to create a stable preview, then publish it when the route is ready."
                     } else {
@@ -1183,7 +1183,7 @@ fn apply_route_specific_bindings(
                     }),
                 )?
                 .with_value(
-                    "contentPageSaveLabel",
+                    "content_page_save_label",
                     RenderValue::text(if is_creating_page {
                         "Create draft"
                     } else {
@@ -1191,11 +1191,11 @@ fn apply_route_specific_bindings(
                     }),
                 )?
                 .with_bool(
-                    "showPagesEmptyState",
+                    "show_pages_empty_state",
                     workspace.pages.is_empty() && !is_creating_page,
                 )?
                 .with_value(
-                    "pagesEmptyText",
+                    "pages_empty_text",
                     RenderValue::text(
                         "Create or update a draft page, preview it below, then publish it to the live /pages/{slug} route.",
                     ),
@@ -1211,7 +1211,7 @@ fn apply_route_specific_bindings(
                 .selected_page(query_first(query_params, "page"))
                 .cloned();
             model = model.with_object(
-                "selectedContentPage",
+                "selected_content_page",
                 cms_admin_selected_page_model_with_form_state(selected_page, form_state)?,
             )?;
         }
@@ -1222,9 +1222,9 @@ fn apply_route_specific_bindings(
                 .unwrap_or_else(default_cms_admin_workspace);
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasNavigationItems", !workspace.navigation.is_empty())?
+                .with_bool("has_navigation_items", !workspace.navigation.is_empty())?
                 .with_list(
-                    "navigationItems",
+                    "navigation_items",
                     cms_navigation_items_model(&workspace.navigation)?,
                 )?
                 .with_value(
@@ -1240,7 +1240,7 @@ fn apply_route_specific_bindings(
                 .unwrap_or_else(default_cms_admin_workspace);
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
-                .with_bool("hasRedirects", !workspace.redirects.is_empty())?
+                .with_bool("has_redirects", !workspace.redirects.is_empty())?
                 .with_list("redirects", cms_redirects_model(&workspace.redirects)?)?
                 .with_value(
                     "redirectsEmptyText",
@@ -1256,7 +1256,7 @@ fn apply_route_specific_bindings(
                 .transpose()?
                 .unwrap_or_else(default_cms_admin_workspace);
             let slug = params.get("slug").map(String::as_str).unwrap_or_default();
-            model = model.with_object("cmsPage", cms_live_page_model(&workspace, slug)?)?;
+            model = model.with_object("cms_page", cms_live_page_model(&workspace, slug)?)?;
         }
         _ => {}
     }
@@ -1357,64 +1357,64 @@ fn confirmation_from_storefront(
         order.payment.reference.as_deref(),
     );
     RenderModel::new()
-        .with_value("orderNumber", RenderValue::text(order.order_id.clone()))?
+        .with_value("order_number", RenderValue::text(order.order_id.clone()))?
         .with_value(
             "email",
             RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
         )?
-        .with_bool("hasEmail", order.payment.checkout_email.is_some())?
-        .with_value("nextStep", RenderValue::text(next_step))?
+        .with_bool("has_email", order.payment.checkout_email.is_some())?
+        .with_value("next_step", RenderValue::text(next_step))?
         .with_value(
             "status",
             RenderValue::text(display_status_label(&order.status)),
         )?
         .with_value("subtotal", RenderValue::text(order.subtotal.clone()))?
         .with_value("total", RenderValue::text(order.total.clone()))?
-        .with_value("paymentStatus", RenderValue::text(payment_status))?
-        .with_value("paymentMethod", RenderValue::text(payment_method))?
+        .with_value("payment_status", RenderValue::text(payment_status))?
+        .with_value("payment_method", RenderValue::text(payment_method))?
         .with_value(
-            "paymentReference",
+            "payment_reference",
             RenderValue::text(order.payment.reference.clone().unwrap_or_default()),
         )?
         .with_value(
-            "paymentLast4",
+            "payment_last4",
             RenderValue::text(order.payment.last4.clone().unwrap_or_default()),
         )?
-        .with_value("paymentSummary", RenderValue::text(payment_summary))?
+        .with_value("payment_summary", RenderValue::text(payment_summary))?
         .with_value(
-            "providerLabel",
+            "provider_label",
             RenderValue::text(payment_provider_label(plan)),
         )?
-        .with_bool("hasPaymentLast4", order.payment.last4.is_some())?
-        .with_bool("hasPaymentReference", order.payment.reference.is_some())?
-        .with_bool("hasMembershipItems", includes_membership)?
-        .with_bool("hasLineItems", !order.lines.is_empty())?
-        .with_list("lineItems", confirmation_line_items_from_storefront(order)?)
+        .with_bool("has_payment_last4", order.payment.last4.is_some())?
+        .with_bool("has_payment_reference", order.payment.reference.is_some())?
+        .with_bool("has_membership_items", includes_membership)?
+        .with_bool("has_line_items", !order.lines.is_empty())?
+        .with_list("line_items", confirmation_line_items_from_storefront(order)?)
 }
 
 fn empty_confirmation_model(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
-        .with_value("orderNumber", RenderValue::text(String::new()))?
+        .with_value("order_number", RenderValue::text(String::new()))?
         .with_value("status", RenderValue::text("No recent order".to_string()))?
         .with_value("total", RenderValue::text("£0.00".to_string()))?
-        .with_bool("hasEmail", false)?
+        .with_bool("has_email", false)?
         .with_value("email", RenderValue::text(String::new()))?
         .with_value(
-            "nextStep",
+            "next_step",
             RenderValue::text(
                 "There is no recent checkout confirmation for this browser session yet.",
             ),
         )?
         .with_value(
-            "providerLabel",
+            "provider_label",
             RenderValue::text(payment_provider_label(plan)),
         )?
         .with_value(
-            "paymentSummary",
+            "payment_summary",
             RenderValue::text("No payment has been submitted yet."),
         )?
-        .with_bool("hasLineItems", false)?
-        .with_list("lineItems", Vec::new())
+        .with_bool("has_line_items", false)?
+        .with_list("line_items", Vec::new())
 }
 
 fn account_order_from_storefront(
@@ -1433,21 +1433,21 @@ fn account_order_from_storefront(
             RenderValue::text(display_status_label(&order.status)),
         )
         .and_then(|model| {
-            model.with_value("lineCount", RenderValue::text(order.line_count.to_string()))
+            model.with_value("line_count", RenderValue::text(order.line_count.to_string()))
         })
         .and_then(|model| {
             model.with_value(
-                "checkoutEmail",
+                "checkout_email",
                 RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
             )
         })
-        .and_then(|model| model.with_value("paymentSummary", RenderValue::text(payment_summary)))
+        .and_then(|model| model.with_value("payment_summary", RenderValue::text(payment_summary)))
         .and_then(|model| {
-            model.with_bool("hasCheckoutEmail", order.payment.checkout_email.is_some())
+            model.with_bool("has_checkout_email", order.payment.checkout_email.is_some())
         })
         .and_then(|model| {
             model.with_bool(
-                "hasPaymentSummary",
+                "has_payment_summary",
                 order.payment.method.is_some()
                     || order.payment.reference.is_some()
                     || order.payment.last4.is_some(),
@@ -1545,20 +1545,20 @@ fn order_detail_from_storefront(
             RenderModel::new()
                 .with_value("title", RenderValue::text(line.title.clone()))?
                 .with_value(
-                    "variantTitle",
+                    "variant_title",
                     RenderValue::text(line.variant_title.clone()),
                 )?
                 .with_value("sku", RenderValue::text(line.sku.clone()))?
                 .with_value("quantity", RenderValue::text(line.quantity.to_string()))?
                 .with_value("total", RenderValue::text(line.total.clone()))?
                 .with_bool(
-                    "hasEntitlementKey",
+                    "has_entitlement_key",
                     line.entitlement_key
                         .as_deref()
                         .is_some_and(|value| !value.is_empty()),
                 )?
                 .with_value(
-                    "entitlementKey",
+                    "entitlement_key",
                     RenderValue::text(line.entitlement_key.clone().unwrap_or_default()),
                 )
         })
@@ -1568,7 +1568,7 @@ fn order_detail_from_storefront(
         .iter()
         .map(|refund| {
             RenderModel::new()
-                .with_value("refundId", RenderValue::text(refund.refund_id.clone()))?
+                .with_value("refund_id", RenderValue::text(refund.refund_id.clone()))?
                 .with_value("amount", RenderValue::text(refund.amount.clone()))?
                 .with_value("reason", RenderValue::text(refund.reason.clone()))
         })
@@ -1579,61 +1579,61 @@ fn order_detail_from_storefront(
         .map(customer_order_review_model)
         .transpose()?;
     let mut model = RenderModel::new()
-        .with_value("orderId", RenderValue::text(order.order_id.clone()))?
+        .with_value("order_id", RenderValue::text(order.order_id.clone()))?
         .with_value("reference", RenderValue::text(order.order_id.clone()))?
         .with_value(
             "status",
             RenderValue::text(display_status_label(&order.status)),
         )?
         .with_value(
-            "paymentStatus",
+            "payment_status",
             RenderValue::text(payment_status_label(&order.payment.status)),
         )?
-        .with_value("paymentSummary", RenderValue::text(payment_summary))?
-        .with_value("paymentReference", RenderValue::text(payment_reference))?
-        .with_bool("hasPaymentReference", order.payment.reference.is_some())?
-        .with_value("checkoutEmail", RenderValue::text(checkout_email))?
-        .with_bool("hasCheckoutEmail", order.payment.checkout_email.is_some())?
-        .with_value("principalId", RenderValue::text(principal_id))?
-        .with_bool("hasPrincipalId", order.principal_id.is_some())?
-        .with_bool("canFulfill", can_fulfill)?
+        .with_value("payment_summary", RenderValue::text(payment_summary))?
+        .with_value("payment_reference", RenderValue::text(payment_reference))?
+        .with_bool("has_payment_reference", order.payment.reference.is_some())?
+        .with_value("checkout_email", RenderValue::text(checkout_email))?
+        .with_bool("has_checkout_email", order.payment.checkout_email.is_some())?
+        .with_value("principal_id", RenderValue::text(principal_id))?
+        .with_bool("has_principal_id", order.principal_id.is_some())?
+        .with_bool("can_fulfill", can_fulfill)?
         .with_value(
-            "fulfillmentActionSummary",
+            "fulfillment_action_summary",
             RenderValue::text(fulfillment_action_summary),
         )?
-        .with_value("sessionId", RenderValue::text(order.session_id.clone()))?
+        .with_value("session_id", RenderValue::text(order.session_id.clone()))?
         .with_value("subtotal", RenderValue::text(order.subtotal.clone()))?
         .with_value("total", RenderValue::text(order.total.clone()))?
         .with_value(
-            "refundedTotal",
+            "refunded_total",
             RenderValue::text(order.refunded_total.clone()),
         )?
         .with_value(
-            "refundableTotal",
+            "refundable_total",
             RenderValue::text(order.refundable_total.clone()),
         )?
-        .with_bool("canRefund", can_refund)?
+        .with_bool("can_refund", can_refund)?
         .with_value(
-            "refundActionSummary",
+            "refund_action_summary",
             RenderValue::text(refund_action_summary),
         )?
-        .with_value("refundReason", RenderValue::text(refund_reason))?
-        .with_bool("hasRefundReasonError", refund_reason_error.is_some())?
+        .with_value("refund_reason", RenderValue::text(refund_reason))?
+        .with_bool("has_refund_reason_error", refund_reason_error.is_some())?
         .with_value(
-            "refundReasonError",
+            "refund_reason_error",
             RenderValue::text(refund_reason_error.unwrap_or_default()),
         )?
-        .with_bool("hasRefunds", !order.refunds.is_empty())?
+        .with_bool("has_refunds", !order.refunds.is_empty())?
         .with_list("refunds", refunds)?
-        .with_bool("hasLineItems", !order.lines.is_empty())?
-        .with_list("lineItems", line_items)?
-        .with_bool("hasCustomerReview", has_customer_review)?
+        .with_bool("has_line_items", !order.lines.is_empty())?
+        .with_list("line_items", line_items)?
+        .with_bool("has_customer_review", has_customer_review)?
         .with_value(
-            "detailHref",
+            "detail_href",
             RenderValue::text(format!("/admin/orders/{}", order.order_id)),
         )?;
     if let Some(customer_review_model) = customer_review_model {
-        model = model.with_object("customerReview", customer_review_model)?;
+        model = model.with_object("customer_review", customer_review_model)?;
     }
     Ok(Some(model))
 }
@@ -1948,22 +1948,22 @@ fn customer_order_review_model(
                 ),
             )?
             .with_value("code", RenderValue::text("approved"))?
-            .with_bool("isApproved", true)?
-            .with_bool("isRejected", false)?
-            .with_bool("isAdjusted", false)?,
+            .with_bool("is_approved", true)?
+            .with_bool("is_rejected", false)?
+            .with_bool("is_adjusted", false)?,
         OrderReviewDecision::Rejected(rejection) => RenderModel::new()
             .with_value("status", RenderValue::text("Rejected"))?
             .with_value("summary", RenderValue::text(rejection.message.clone()))?
             .with_value("code", RenderValue::text(rejection.code))?
-            .with_bool("isApproved", false)?
-            .with_bool("isRejected", true)?
-            .with_bool("isAdjusted", false)?,
+            .with_bool("is_approved", false)?
+            .with_bool("is_rejected", true)?
+            .with_bool("is_adjusted", false)?,
         OrderReviewDecision::Adjusted(adjustment) => RenderModel::new()
             .with_value("status", RenderValue::text("Adjusted"))?
             .with_value("summary", RenderValue::text(adjustment.reason.clone()))?
             .with_value("code", RenderValue::text("adjusted"))?
             .with_value(
-                "assignedQueue",
+                "assigned_queue",
                 RenderValue::text(
                     adjustment
                         .metadata
@@ -1973,7 +1973,7 @@ fn customer_order_review_model(
                 ),
             )?
             .with_value(
-                "serviceLevel",
+                "service_level",
                 RenderValue::text(
                     adjustment
                         .metadata
@@ -1983,21 +1983,21 @@ fn customer_order_review_model(
                 ),
             )?
             .with_bool(
-                "hasAssignedQueue",
+                "has_assigned_queue",
                 adjustment.metadata.contains_key("assigned_queue"),
             )?
             .with_bool(
-                "hasServiceLevel",
+                "has_service_level",
                 adjustment.metadata.contains_key("service_level"),
             )?
-            .with_bool("isApproved", false)?
-            .with_bool("isRejected", false)?
-            .with_bool("isAdjusted", true)?,
+            .with_bool("is_approved", false)?
+            .with_bool("is_rejected", false)?
+            .with_bool("is_adjusted", true)?,
     };
-    base.with_bool("hasNotes", !notes.is_empty())?
-        .with_bool("hasMetadata", !adjustment_metadata.is_empty())?
-        .with_value("noteCount", RenderValue::text(notes.len().to_string()))?
-        .with_list("metadataEntries", adjustment_metadata)?
+    base.with_bool("has_notes", !notes.is_empty())?
+        .with_bool("has_metadata", !adjustment_metadata.is_empty())?
+        .with_value("note_count", RenderValue::text(notes.len().to_string()))?
+        .with_list("metadata_entries", adjustment_metadata)?
         .with_list("notes", notes)
 }
 
@@ -2011,17 +2011,17 @@ fn admin_order_row_from_storefront(
             RenderValue::text(display_status_label(&order.status)),
         )?
         .with_value(
-            "paymentStatus",
+            "payment_status",
             RenderValue::text(payment_status_label(&order.payment.status)),
         )?
         .with_value("total", RenderValue::text(order.total.clone()))?
         .with_value(
-            "customerEmail",
+            "customer_email",
             RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
         )?
-        .with_bool("hasCustomerEmail", order.payment.checkout_email.is_some())?
+        .with_bool("has_customer_email", order.payment.checkout_email.is_some())?
         .with_value(
-            "detailHref",
+            "detail_href",
             RenderValue::text(format!("/admin/orders/{}", order.order_id)),
         )
 }
@@ -2050,11 +2050,11 @@ fn operator_identity(
         display_name_from_principal_id(principal_id)
     };
     RenderModel::new()
-        .with_value("displayName", RenderValue::text(display_name))?
-        .with_value("principalId", RenderValue::text(principal_id.to_string()))?
-        .with_bool("hasPrincipal", principal.is_some())?
+        .with_value("display_name", RenderValue::text(display_name))?
+        .with_value("principal_id", RenderValue::text(principal_id.to_string()))?
+        .with_bool("has_principal", principal.is_some())?
         .with_bool(
-            "hasSession",
+            "has_session",
             session
                 .and_then(|session| session.session_id.as_deref())
                 .is_some(),
@@ -2184,7 +2184,7 @@ fn admin_audit_entry_model(
             "outcome",
             RenderValue::text(admin_audit_outcome_label(parsed.outcome.as_str())),
         )?
-        .with_bool("hasDetail", !detail.is_empty())?
+        .with_bool("has_detail", !detail.is_empty())?
         .with_value("detail", RenderValue::text(detail))
 }
 
@@ -2414,17 +2414,17 @@ fn cms_admin_pages_model(
                 .with_value("title", RenderValue::text(page.draft.title.clone()))?
                 .with_value("slug", RenderValue::text(page.draft.slug.clone()))?
                 .with_value(
-                    "statusLabel",
+                    "status_label",
                     RenderValue::text(page.status_label().to_string()),
                 )?
                 .with_value("summary", RenderValue::text(page.draft.summary.clone()))?
                 .with_value(
-                    "editHref",
+                    "edit_href",
                     RenderValue::text(format!("/admin/pages?page={}", page.id)),
                 )?
-                .with_bool("hasLivePath", page.live_path().is_some())?
+                .with_bool("has_live_path", page.live_path().is_some())?
                 .with_value(
-                    "livePath",
+                    "live_path",
                     RenderValue::text(page.live_path().unwrap_or_default()),
                 )
         })
@@ -2439,21 +2439,21 @@ fn cms_admin_selected_page_model(page: CmsAdminPage) -> Result<RenderModel, Temp
         .with_value("slug", RenderValue::text(page.draft.slug.clone()))?
         .with_value("summary", RenderValue::text(page.draft.summary.clone()))?
         .with_value(
-            "bodySource",
+            "body_source",
             RenderValue::text(page.draft.body_html.clone()),
         )?
-        .with_value("bodyHtml", RenderValue::trusted_html(preview_html))?
+        .with_value("body_html", RenderValue::trusted_html(preview_html))?
         .with_value(
-            "statusLabel",
+            "status_label",
             RenderValue::text(page.status_label().to_string()),
         )?
-        .with_bool("hasLivePath", page.live_path().is_some())?
+        .with_bool("has_live_path", page.live_path().is_some())?
         .with_value(
-            "livePath",
+            "live_path",
             RenderValue::text(page.live_path().unwrap_or_default()),
         )?
-        .with_bool("hasPreviewPath", true)?
-        .with_value("previewPath", RenderValue::text(page.preview_path()))
+        .with_bool("has_preview_path", true)?
+        .with_value("preview_path", RenderValue::text(page.preview_path()))
 }
 
 fn cms_admin_selected_page_model_with_form_state(
@@ -2504,16 +2504,16 @@ fn cms_admin_selected_page_model_with_form_state(
         .with_value("title", RenderValue::text(title))?
         .with_value("slug", RenderValue::text(slug.clone()))?
         .with_value("summary", RenderValue::text(summary))?
-        .with_value("bodySource", RenderValue::text(body_html.clone()))?
+        .with_value("body_source", RenderValue::text(body_html.clone()))?
         .with_value(
-            "bodyHtml",
+            "body_html",
             RenderValue::trusted_html(TrustedHtml::new(body_html)?),
         )?
-        .with_value("statusLabel", RenderValue::text(status_label))?
-        .with_bool("hasLivePath", has_live_path)?
-        .with_value("livePath", RenderValue::text(live_path))?
-        .with_bool("hasPreviewPath", !preview_path.is_empty())?
-        .with_value("previewPath", RenderValue::text(preview_path))
+        .with_value("status_label", RenderValue::text(status_label))?
+        .with_bool("has_live_path", has_live_path)?
+        .with_value("live_path", RenderValue::text(live_path))?
+        .with_bool("has_preview_path", !preview_path.is_empty())?
+        .with_value("preview_path", RenderValue::text(preview_path))
 }
 
 fn empty_cms_admin_selected_page_model() -> Result<RenderModel, TemplateModelError> {
@@ -2522,18 +2522,18 @@ fn empty_cms_admin_selected_page_model() -> Result<RenderModel, TemplateModelErr
         .with_value("title", RenderValue::text(String::new()))?
         .with_value("slug", RenderValue::text(String::new()))?
         .with_value("summary", RenderValue::text(String::new()))?
-        .with_value("bodySource", RenderValue::text(String::new()))?
+        .with_value("body_source", RenderValue::text(String::new()))?
         .with_value(
-            "bodyHtml",
+            "body_html",
             RenderValue::trusted_html(TrustedHtml::new(
                 "<p>Create a draft page to preview it.</p>",
             )?),
         )?
-        .with_value("statusLabel", RenderValue::text("Draft only"))?
-        .with_bool("hasLivePath", false)?
-        .with_value("livePath", RenderValue::text(String::new()))?
-        .with_bool("hasPreviewPath", false)?
-        .with_value("previewPath", RenderValue::text(String::new()))
+        .with_value("status_label", RenderValue::text("Draft only"))?
+        .with_bool("has_live_path", false)?
+        .with_value("live_path", RenderValue::text(String::new()))?
+        .with_bool("has_preview_path", false)?
+        .with_value("preview_path", RenderValue::text(String::new()))
 }
 
 fn cms_navigation_items_model(
@@ -2547,10 +2547,10 @@ fn cms_navigation_items_model(
                 .with_value("label", RenderValue::text(item.label.clone()))?
                 .with_value("href", RenderValue::text(item.href.clone()))?
                 .with_value(
-                    "labelField",
+                    "label_field",
                     RenderValue::text(format!("nav_label_{index}")),
                 )?
-                .with_value("hrefField", RenderValue::text(format!("nav_href_{index}")))
+                .with_value("href_field", RenderValue::text(format!("nav_href_{index}")))
         })
         .collect()
 }
@@ -2567,12 +2567,12 @@ fn cms_redirects_model(
                 .with_value("to", RenderValue::text(redirect.to.clone()))?
                 .with_bool("permanent", redirect.permanent)?
                 .with_value(
-                    "fromField",
+                    "from_field",
                     RenderValue::text(format!("redirect_from_{index}")),
                 )?
-                .with_value("toField", RenderValue::text(format!("redirect_to_{index}")))?
+                .with_value("to_field", RenderValue::text(format!("redirect_to_{index}")))?
                 .with_value(
-                    "permanentField",
+                    "permanent_field",
                     RenderValue::text(format!("redirect_permanent_{index}")),
                 )
         })
@@ -2589,18 +2589,18 @@ fn cms_live_page_model(
             .as_ref()
             .expect("live page should have a live revision");
         return RenderModel::new()
-            .with_bool("isPublished", true)?
+            .with_bool("is_published", true)?
             .with_value("title", RenderValue::text(live.title.clone()))?
             .with_value("summary", RenderValue::text(live.summary.clone()))?
             .with_value(
-                "bodyHtml",
+                "body_html",
                 RenderValue::trusted_html(TrustedHtml::new(live.body_html.clone())?),
             )?
             .with_value("slug", RenderValue::text(live.slug.clone()));
     }
 
     RenderModel::new()
-        .with_bool("isPublished", false)?
+        .with_bool("is_published", false)?
         .with_value("title", RenderValue::text("Page unavailable"))?
         .with_value(
             "summary",
@@ -2609,7 +2609,7 @@ fn cms_live_page_model(
             ),
         )?
         .with_value(
-            "bodyHtml",
+            "body_html",
             RenderValue::trusted_html(TrustedHtml::new(
                 "<p>The requested CMS page is not live yet.</p>",
             )?),
@@ -2624,9 +2624,9 @@ fn merge_cms_page_form_feedback(
     let errors = form_errors_model(form_state)?;
     let has_errors = form_state.is_some() || !errors.is_empty();
     model
-        .with_bool("hasErrors", has_errors)?
+        .with_bool("has_errors", has_errors)?
         .with_value(
-            "errorSummary",
+            "error_summary",
             RenderValue::text(
                 form_state
                     .map(|state| state.summary.clone())
@@ -2643,9 +2643,9 @@ fn merge_cms_navigation_form_feedback(
     let errors = form_errors_model(form_state)?;
     let has_errors = form_state.is_some() || !errors.is_empty();
     model
-        .with_bool("hasErrors", has_errors)?
+        .with_bool("has_errors", has_errors)?
         .with_value(
-            "errorSummary",
+            "error_summary",
             RenderValue::text(
                 form_state
                     .map(|state| state.summary.clone())
@@ -2662,9 +2662,9 @@ fn merge_cms_redirect_form_feedback(
     let errors = form_errors_model(form_state)?;
     let has_errors = form_state.is_some() || !errors.is_empty();
     model
-        .with_bool("hasErrors", has_errors)?
+        .with_bool("has_errors", has_errors)?
         .with_value(
-            "errorSummary",
+            "error_summary",
             RenderValue::text(
                 form_state
                     .map(|state| state.summary.clone())
@@ -2680,9 +2680,9 @@ fn merge_order_refund_form_feedback(
 ) -> Result<RenderModel, TemplateModelError> {
     let errors = form_errors_model(form_state)?;
     model
-        .with_bool("hasRefundErrors", !errors.is_empty())?
+        .with_bool("has_refund_errors", !errors.is_empty())?
         .with_value(
-            "refundErrorSummary",
+            "refund_error_summary",
             RenderValue::text(
                 form_state
                     .map(|state| state.summary.clone())
@@ -2691,7 +2691,7 @@ fn merge_order_refund_form_feedback(
                     }),
             ),
         )?
-        .with_list("refundErrors", errors)
+        .with_list("refund_errors", errors)
 }
 
 fn cart_item_from_storefront(
@@ -2712,11 +2712,11 @@ fn cart_item_from_storefront(
         &quantity_value,
         &line.total,
     )?
-    .with_value("quantityField", RenderValue::text(quantity_field))
-    .and_then(|model| model.with_bool("hasQuantityError", quantity_error.is_some()))
+    .with_value("quantity_field", RenderValue::text(quantity_field))
+    .and_then(|model| model.with_bool("has_quantity_error", quantity_error.is_some()))
     .and_then(|model| {
         model.with_value(
-            "quantityError",
+            "quantity_error",
             RenderValue::text(quantity_error.cloned().unwrap_or_default()),
         )
     })?;
@@ -2733,10 +2733,10 @@ fn decorate_cart_item_with_catalog_context(
 ) -> Result<RenderModel, TemplateModelError> {
     let Some(product) = catalog_product_for_cart_item(catalog, sku_or_handle, title) else {
         return model
-            .with_bool("hasProductLink", false)?
-            .with_value("productUrl", RenderValue::text(String::new()))?
-            .with_value("collectionUrl", RenderValue::text(String::new()))?
-            .with_value("collectionName", RenderValue::text(String::new()));
+            .with_bool("has_product_link", false)?
+            .with_value("product_url", RenderValue::text(String::new()))?
+            .with_value("collection_url", RenderValue::text(String::new()))?
+            .with_value("collection_name", RenderValue::text(String::new()));
     };
 
     let collection_name = catalog
@@ -2745,19 +2745,19 @@ fn decorate_cart_item_with_catalog_context(
         .unwrap_or("Collection");
 
     model
-        .with_bool("hasProductLink", true)?
+        .with_bool("has_product_link", true)?
         .with_value(
-            "productUrl",
+            "product_url",
             RenderValue::text(localized_product_path(locale, &product.handle)),
         )?
         .with_value(
-            "collectionUrl",
+            "collection_url",
             RenderValue::text(localized_collection_path(
                 locale,
                 &product.collection_handle,
             )),
         )?
-        .with_value("collectionName", RenderValue::text(collection_name))
+        .with_value("collection_name", RenderValue::text(collection_name))
 }
 
 fn catalog_product_for_cart_item<'a>(
@@ -2785,7 +2785,7 @@ fn checkout_customer(
         .map(display_name_from_principal_id)
         .unwrap_or_else(|| "Guest Checkout".to_string());
     RenderModel::new()
-        .with_value("displayName", RenderValue::text(display_name))?
+        .with_value("display_name", RenderValue::text(display_name))?
         .with_value("email", RenderValue::text(email))
 }
 
@@ -2843,33 +2843,33 @@ fn checkout_form_from_storefront(
         .is_some();
     let has_checkout_email = !checkout_email.is_empty();
     let model = RenderModel::new()
-        .with_value("paymentReference", RenderValue::text(payment_reference))?
-        .with_value("paymentMethod", RenderValue::text(payment_method.clone()))?
-        .with_value("checkoutEmail", RenderValue::text(checkout_email))?
-        .with_bool("hasCheckoutEmail", has_checkout_email)?
-        .with_value("paymentLast4", RenderValue::text(payment_last4))?
-        .with_value("checkoutIntent", RenderValue::text(checkout_intent))?
-        .with_value("deliveryName", RenderValue::text(delivery_name))?
-        .with_value("deliveryNote", RenderValue::text(delivery_note))?
-        .with_bool("termsAccepted", terms_accepted)?
+        .with_value("payment_reference", RenderValue::text(payment_reference))?
+        .with_value("payment_method", RenderValue::text(payment_method.clone()))?
+        .with_value("checkout_email", RenderValue::text(checkout_email))?
+        .with_bool("has_checkout_email", has_checkout_email)?
+        .with_value("payment_last4", RenderValue::text(payment_last4))?
+        .with_value("checkout_intent", RenderValue::text(checkout_intent))?
+        .with_value("delivery_name", RenderValue::text(delivery_name))?
+        .with_value("delivery_note", RenderValue::text(delivery_note))?
+        .with_bool("terms_accepted", terms_accepted)?
         .with_value(
-            "paymentMethodLabel",
+            "payment_method_label",
             RenderValue::text(payment_method_label(Some(payment_method.as_str()))),
         )?
-        .with_value("paymentStatus", RenderValue::text(payment.status.clone()))?
+        .with_value("payment_status", RenderValue::text(payment.status.clone()))?
         .with_value(
-            "paymentStatusLabel",
+            "payment_status_label",
             RenderValue::text(payment_status_label(&payment.status)),
         )?
-        .with_value("providerCode", RenderValue::text(provider_code.to_string()))?
+        .with_value("provider_code", RenderValue::text(provider_code.to_string()))?
         .with_value(
-            "providerLabel",
+            "provider_label",
             RenderValue::text(provider_label.to_string()),
         )?
-        .with_value("providerSummary", RenderValue::text(provider_summary))?
-        .with_value("submitLabel", RenderValue::text(submit_label))?
-        .with_bool("hasPaymentReference", payment.reference.is_some())?
-        .with_bool("hasPaymentLast4", payment.last4.is_some())?;
+        .with_value("provider_summary", RenderValue::text(provider_summary))?
+        .with_value("submit_label", RenderValue::text(submit_label))?
+        .with_bool("has_payment_reference", payment.reference.is_some())?
+        .with_bool("has_payment_last4", payment.last4.is_some())?;
     merge_checkout_form_feedback(model, form_state)
 }
 
@@ -3075,45 +3075,45 @@ fn fixture_account_surface_bindings(
     };
     Ok(AccountSurfaceBindings {
         account: RenderModel::new()
-            .with_bool("hasLiveSession", false)?
-            .with_bool("hasPrincipal", false)?
-            .with_bool("hasCustomerEmail", true)?
-            .with_bool("hasRecentOrders", has_recent_orders)?
-            .with_bool("hasMembership", true)?
-            .with_bool("hasLatestOrder", true)?
-            .with_bool("hasPendingMembershipOrder", false)?
-            .with_bool("needsMembershipPurchase", false)?
-            .with_value("stateSource", RenderValue::text("fixture-preview"))?
+            .with_bool("has_live_session", false)?
+            .with_bool("has_principal", false)?
+            .with_bool("has_customer_email", true)?
+            .with_bool("has_recent_orders", has_recent_orders)?
+            .with_bool("has_membership", true)?
+            .with_bool("has_latest_order", true)?
+            .with_bool("has_pending_membership_order", false)?
+            .with_bool("needs_membership_purchase", false)?
+            .with_value("state_source", RenderValue::text("fixture-preview"))?
             .with_value(
-                "stateSummary",
+                "state_summary",
                 RenderValue::text(
                     "Previewing deterministic account content until a live storefront session is resolved.",
                 ),
             )?
             .with_value(
-                "ordersEmptyText",
+                "orders_empty_text",
                 RenderValue::text(
                     "Recent orders will appear here once the customer has completed checkout.",
                 ),
             )?
             .with_value(
-                "membershipEmptyText",
+                "membership_empty_text",
                 RenderValue::text(
                     "No membership is attached yet. Join to unlock early-access drops and concierge support.",
                 ),
             )?
-            .with_value("ordersCtaUrl", RenderValue::text(orders_cta_url))?
-            .with_value("ordersCtaLabel", RenderValue::text(orders_cta_label))?
+            .with_value("orders_cta_url", RenderValue::text(orders_cta_url))?
+            .with_value("orders_cta_label", RenderValue::text(orders_cta_label))?
             .with_value(
-                "membershipCtaUrl",
+                "membership_cta_url",
                 RenderValue::text(localized_collection_path(locale, "memberships")),
             )?
             .with_value(
-                "latestOrderReference",
+                "latest_order_reference",
                 RenderValue::text(latest_preview_order.id.to_string()),
             )?
             .with_value(
-                "latestOrderStatus",
+                "latest_order_status",
                 RenderValue::text(latest_preview_order.history_status_label()),
             )?,
         customer: fixture.customer.clone(),
@@ -3190,18 +3190,18 @@ fn live_account_surface_bindings(
 
     Ok(AccountSurfaceBindings {
         account: RenderModel::new()
-            .with_bool("hasLiveSession", session.session_id.is_some())?
-            .with_bool("hasPrincipal", principal_id.is_some())?
-            .with_bool("hasCustomerEmail", !email.is_empty())?
-            .with_bool("hasRecentOrders", has_recent_orders)?
-            .with_bool("hasMembership", has_membership)?
-            .with_bool("hasLatestOrder", has_latest_order)?
-            .with_bool("hasPendingMembershipOrder", has_pending_membership_order)?
-            .with_bool("needsMembershipPurchase", needs_membership_purchase)?
-            .with_value("stateSource", RenderValue::text("storefront-session"))?
-            .with_value("stateSummary", RenderValue::text(state_summary))?
+            .with_bool("has_live_session", session.session_id.is_some())?
+            .with_bool("has_principal", principal_id.is_some())?
+            .with_bool("has_customer_email", !email.is_empty())?
+            .with_bool("has_recent_orders", has_recent_orders)?
+            .with_bool("has_membership", has_membership)?
+            .with_bool("has_latest_order", has_latest_order)?
+            .with_bool("has_pending_membership_order", has_pending_membership_order)?
+            .with_bool("needs_membership_purchase", needs_membership_purchase)?
+            .with_value("state_source", RenderValue::text("storefront-session"))?
+            .with_value("state_summary", RenderValue::text(state_summary))?
             .with_value(
-                "ordersEmptyText",
+                "orders_empty_text",
                 RenderValue::text(
                     if principal_id.is_some() {
                         "No order history is attached to this signed-in account yet. Completed storefront purchases will appear here once live account history is available."
@@ -3211,7 +3211,7 @@ fn live_account_surface_bindings(
                 ),
             )?
             .with_value(
-                "membershipEmptyText",
+                "membership_empty_text",
                 RenderValue::text(
                     if principal_id.is_some() {
                         "No active membership is attached to this signed-in account yet. Join from the storefront to unlock early access and renewal visibility."
@@ -3220,19 +3220,19 @@ fn live_account_surface_bindings(
                     },
                 ),
             )?
-            .with_value("ordersCtaUrl", RenderValue::text(orders_cta_url))?
-            .with_value("ordersCtaLabel", RenderValue::text(orders_cta_label))?
+            .with_value("orders_cta_url", RenderValue::text(orders_cta_url))?
+            .with_value("orders_cta_label", RenderValue::text(orders_cta_label))?
             .with_value(
-                "membershipCtaUrl",
+                "membership_cta_url",
                 RenderValue::text(localized_collection_path(locale, "memberships")),
             )?
             .with_value(
-                "latestOrderReference",
+                "latest_order_reference",
                 RenderValue::text(latest_order_reference),
             )?
-            .with_value("latestOrderStatus", RenderValue::text(latest_order_status))?,
+            .with_value("latest_order_status", RenderValue::text(latest_order_status))?,
         customer: RenderModel::new()
-            .with_value("displayName", RenderValue::text(display_name))?
+            .with_value("display_name", RenderValue::text(display_name))?
             .with_value("email", RenderValue::text(email))?,
         recent_orders,
         membership_summary: membership_summary.unwrap_or(empty_membership_summary()?),
@@ -3698,34 +3698,34 @@ fn storefront_fixture(
             RenderValue::text(money_display(&current_order.totals.total)),
         )?;
     let checkout = RenderModel::new()
-        .with_value("paymentReference", RenderValue::text("card-on-file"))?
-        .with_value("paymentMethod", RenderValue::text("card"))?
-        .with_value("paymentMethodLabel", RenderValue::text("Card"))?
-        .with_value("paymentStatus", RenderValue::text("ready_for_payment"))?
-        .with_value("paymentStatusLabel", RenderValue::text("Ready for payment"))?
+        .with_value("payment_reference", RenderValue::text("card-on-file"))?
+        .with_value("payment_method", RenderValue::text("card"))?
+        .with_value("payment_method_label", RenderValue::text("Card"))?
+        .with_value("payment_status", RenderValue::text("ready_for_payment"))?
+        .with_value("payment_status_label", RenderValue::text("Ready for payment"))?
         .with_value(
-            "providerCode",
+            "provider_code",
             RenderValue::text(payment_provider_code(None)),
         )?
         .with_value(
-            "providerLabel",
+            "provider_label",
             RenderValue::text(payment_provider_label(None).to_string()),
         )?
         .with_value(
-            "providerSummary",
+            "provider_summary",
             RenderValue::text(payment_provider_summary(None)),
         )?
-        .with_value("submitLabel", RenderValue::text("Place order"))?
-        .with_value("checkoutEmail", RenderValue::text("member@example.com"))?
-        .with_bool("hasCheckoutEmail", true)?
-        .with_value("paymentLast4", RenderValue::text("4242"))?
-        .with_bool("hasPaymentReference", true)?
-        .with_bool("hasPaymentLast4", true)?;
+        .with_value("submit_label", RenderValue::text("Place order"))?
+        .with_value("checkout_email", RenderValue::text("member@example.com"))?
+        .with_bool("has_checkout_email", true)?
+        .with_value("payment_last4", RenderValue::text("4242"))?
+        .with_bool("has_payment_reference", true)?
+        .with_bool("has_payment_last4", true)?;
 
     let confirmation = confirmation_model(&current_order)?;
 
     let customer = RenderModel::new()
-        .with_value("displayName", RenderValue::text("Alex Mariner"))?
+        .with_value("display_name", RenderValue::text("Alex Mariner"))?
         .with_value("email", RenderValue::text("member@example.com"))?;
 
     let recent_orders = vec![
@@ -3773,9 +3773,9 @@ fn catalog_admin_form_model(
     let errors = form_errors_model(form_state)?;
     let has_errors = !errors.is_empty();
     RenderModel::new()
-        .with_bool("hasErrors", has_errors)?
+        .with_bool("has_errors", has_errors)?
         .with_value(
-            "errorSummary",
+            "error_summary",
             RenderValue::text(
                 form_state
                     .map(|state| state.summary.clone())
@@ -3823,10 +3823,10 @@ fn catalog_admin_products_model(
                 product.is_visible,
             );
             product_model_for_locale(locale, &fixture, plan)?
-                .with_bool("isVisible", product.is_visible)?
-                .with_bool("visibilityInput", visibility_input)?
+                .with_bool("is_visible", product.is_visible)?
+                .with_bool("visibility_input", visibility_input)?
                 .with_value(
-                    "visibilityLabel",
+                    "visibility_label",
                     RenderValue::text(if product.is_visible {
                         "Visible in storefront"
                     } else {
@@ -3834,7 +3834,7 @@ fn catalog_admin_products_model(
                     }),
                 )?
                 .with_value(
-                    "titleInput",
+                    "title_input",
                     RenderValue::text(catalog_admin_form_value(
                         form_state,
                         is_active_form,
@@ -3843,7 +3843,7 @@ fn catalog_admin_products_model(
                     )),
                 )?
                 .with_value(
-                    "summaryInput",
+                    "summary_input",
                     RenderValue::text(catalog_admin_form_value(
                         form_state,
                         is_active_form,
@@ -3852,7 +3852,7 @@ fn catalog_admin_products_model(
                     )),
                 )?
                 .with_value(
-                    "priceInput",
+                    "price_input",
                     RenderValue::text(catalog_admin_form_value(
                         form_state,
                         is_active_form,
@@ -3861,7 +3861,7 @@ fn catalog_admin_products_model(
                     )),
                 )?
                 .with_value(
-                    "collectionHandleInput",
+                    "collection_handle_input",
                     RenderValue::text(catalog_admin_form_value(
                         form_state,
                         is_active_form,
@@ -3869,28 +3869,28 @@ fn catalog_admin_products_model(
                         &product.collection_handle,
                     )),
                 )?
-                .with_bool("hasTitleError", title_error.is_some())?
+                .with_bool("has_title_error", title_error.is_some())?
                 .with_value(
-                    "titleError",
+                    "title_error",
                     RenderValue::text(title_error.unwrap_or_default()),
                 )?
-                .with_bool("hasSummaryError", summary_error.is_some())?
+                .with_bool("has_summary_error", summary_error.is_some())?
                 .with_value(
-                    "summaryError",
+                    "summary_error",
                     RenderValue::text(summary_error.unwrap_or_default()),
                 )?
-                .with_bool("hasPriceError", price_error.is_some())?
+                .with_bool("has_price_error", price_error.is_some())?
                 .with_value(
-                    "priceError",
+                    "price_error",
                     RenderValue::text(price_error.unwrap_or_default()),
                 )?
-                .with_bool("hasCollectionError", collection_error.is_some())?
+                .with_bool("has_collection_error", collection_error.is_some())?
                 .with_value(
-                    "collectionError",
+                    "collection_error",
                     RenderValue::text(collection_error.unwrap_or_default()),
                 )?
                 .with_list(
-                    "collectionOptions",
+                    "collection_options",
                     catalog_admin_collection_options(
                         catalog,
                         catalog_admin_form_value(
@@ -3937,10 +3937,10 @@ fn catalog_admin_collections_model(
                 collection.is_visible,
             );
             collection_section_model(locale, &fixture)?
-                .with_bool("isVisible", collection.is_visible)?
-                .with_bool("visibilityInput", visibility_input)?
+                .with_bool("is_visible", collection.is_visible)?
+                .with_bool("visibility_input", visibility_input)?
                 .with_value(
-                    "visibilityLabel",
+                    "visibility_label",
                     RenderValue::text(if collection.is_visible {
                         "Visible in storefront"
                     } else {
@@ -3948,7 +3948,7 @@ fn catalog_admin_collections_model(
                     }),
                 )?
                 .with_value(
-                    "titleInput",
+                    "title_input",
                     RenderValue::text(catalog_admin_form_value(
                         form_state,
                         is_active_form,
@@ -3957,7 +3957,7 @@ fn catalog_admin_collections_model(
                     )),
                 )?
                 .with_value(
-                    "labelInput",
+                    "label_input",
                     RenderValue::text(catalog_admin_form_value(
                         form_state,
                         is_active_form,
@@ -3966,7 +3966,7 @@ fn catalog_admin_collections_model(
                     )),
                 )?
                 .with_value(
-                    "summaryInput",
+                    "summary_input",
                     RenderValue::text(catalog_admin_form_value(
                         form_state,
                         is_active_form,
@@ -3974,19 +3974,19 @@ fn catalog_admin_collections_model(
                         &collection.summary,
                     )),
                 )?
-                .with_bool("hasTitleError", title_error.is_some())?
+                .with_bool("has_title_error", title_error.is_some())?
                 .with_value(
-                    "titleError",
+                    "title_error",
                     RenderValue::text(title_error.unwrap_or_default()),
                 )?
-                .with_bool("hasLabelError", label_error.is_some())?
+                .with_bool("has_label_error", label_error.is_some())?
                 .with_value(
-                    "labelError",
+                    "label_error",
                     RenderValue::text(label_error.unwrap_or_default()),
                 )?
-                .with_bool("hasSummaryError", summary_error.is_some())?
+                .with_bool("has_summary_error", summary_error.is_some())?
                 .with_value(
-                    "summaryError",
+                    "summary_error",
                     RenderValue::text(summary_error.unwrap_or_default()),
                 )
         })
@@ -4159,25 +4159,25 @@ fn product_model_for_locale(
             "url",
             RenderValue::text(localized_product_path(locale, product.handle.as_str())),
         )?
-        .with_value("addToCartUrl", RenderValue::text("/cart/items"))?
+        .with_value("add_to_cart_url", RenderValue::text("/cart/items"))?
         .with_value(
-            "imageUrl",
+            "image_url",
             RenderValue::text(storefront_product_image_url(product.handle.as_str(), plan)),
         )?
-        .with_value("imageAlt", RenderValue::text(product.title.as_str()))?
+        .with_value("image_alt", RenderValue::text(product.title.as_str()))?
         .with_value(
-            "collectionHandle",
+            "collection_handle",
             RenderValue::text(product.collection_handle.as_str()),
         )?
         .with_value(
-            "collectionUrl",
+            "collection_url",
             RenderValue::text(localized_collection_path(
                 locale,
                 product.collection_handle.as_str(),
             )),
         )?
         .with_value(
-            "collectionName",
+            "collection_name",
             RenderValue::text(product.collection_name.as_str()),
         )
 }
@@ -4228,7 +4228,7 @@ fn cart_item(
         .with_value("variant", RenderValue::text(variant))?
         .with_value("quantity", RenderValue::text(quantity))?
         .with_value(
-            "quantityField",
+            "quantity_field",
             RenderValue::text(format!(
                 "quantity_{}",
                 title.to_lowercase().replace(' ', "-")
@@ -4270,10 +4270,10 @@ fn cart_item_from_line(
 
 fn confirmation_model(order: &Order) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
-        .with_value("orderNumber", RenderValue::text(order.id.to_string()))?
+        .with_value("order_number", RenderValue::text(order.id.to_string()))?
         .with_value("email", RenderValue::text("member@example.com"))?
-        .with_bool("hasEmail", true)?
-        .with_value("nextStep", RenderValue::text(order.confirmation_message()))
+        .with_bool("has_email", true)?
+        .with_value("next_step", RenderValue::text(order.confirmation_message()))
         .and_then(|model| {
             model.with_value("status", RenderValue::text(order.history_status_label()))
         })
@@ -4284,27 +4284,27 @@ fn confirmation_model(order: &Order) -> Result<RenderModel, TemplateModelError> 
             )
         })
         .and_then(|model| model.with_value("total", RenderValue::text(order.display_total())))
-        .and_then(|model| model.with_value("paymentStatus", RenderValue::text("Captured")))
-        .and_then(|model| model.with_value("paymentMethod", RenderValue::text("Card")))
-        .and_then(|model| model.with_value("paymentReference", RenderValue::text("PAY-50001")))
-        .and_then(|model| model.with_value("paymentLast4", RenderValue::text("4242")))
+        .and_then(|model| model.with_value("payment_status", RenderValue::text("Captured")))
+        .and_then(|model| model.with_value("payment_method", RenderValue::text("Card")))
+        .and_then(|model| model.with_value("payment_reference", RenderValue::text("PAY-50001")))
+        .and_then(|model| model.with_value("payment_last4", RenderValue::text("4242")))
         .and_then(|model| {
             model.with_value(
-                "paymentSummary",
+                "payment_summary",
                 RenderValue::text("Card ending 4242, reference PAY-50001"),
             )
         })
         .and_then(|model| {
             model.with_value(
-                "providerLabel",
+                "provider_label",
                 RenderValue::text(payment_provider_label(None).to_string()),
             )
         })
-        .and_then(|model| model.with_bool("hasPaymentLast4", true))
-        .and_then(|model| model.with_bool("hasPaymentReference", true))
+        .and_then(|model| model.with_bool("has_payment_last4", true))
+        .and_then(|model| model.with_bool("has_payment_reference", true))
         .and_then(|model| {
             model.with_bool(
-                "hasMembershipItems",
+                "has_membership_items",
                 order.outcomes().iter().any(|outcome| {
                     matches!(
                         outcome,
@@ -4316,10 +4316,10 @@ fn confirmation_model(order: &Order) -> Result<RenderModel, TemplateModelError> 
                 }),
             )
         })
-        .and_then(|model| model.with_bool("hasLineItems", !order.lines.is_empty()))
+        .and_then(|model| model.with_bool("has_line_items", !order.lines.is_empty()))
         .and_then(|model| {
             model.with_list(
-                "lineItems",
+                "line_items",
                 order
                     .lines
                     .iter()
@@ -4352,9 +4352,9 @@ fn membership_summary(
     renewal_text: &str,
 ) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
-        .with_value("tierName", RenderValue::text(tier_name))?
+        .with_value("tier_name", RenderValue::text(tier_name))?
         .with_value("status", RenderValue::text(status))?
-        .with_value("renewalText", RenderValue::text(renewal_text))
+        .with_value("renewal_text", RenderValue::text(renewal_text))
 }
 
 fn sample_completed_order() -> Order {
@@ -5009,7 +5009,7 @@ cdn_base_url = "https://cdn.example.com"
 <html xmlns:coil="https://coil.rs">
   <body>
     <ul>
-      <li coil:each="section : catalogSections" coil:text="${section.title}">Fallback</li>
+      <li coil:each="section : catalog_sections" coil:text="${section.title}">Fallback</li>
     </ul>
   </body>
 </html>"#,
@@ -5026,11 +5026,11 @@ cdn_base_url = "https://cdn.example.com"
             r#"<!doctype html>
 <html xmlns:coil="https://coil.rs">
   <body>
-    <p class="provider" coil:text="${checkout.providerLabel}">Provider</p>
-    <p class="status" coil:text="${checkout.paymentStatusLabel}">Ready</p>
-    <p class="reference" coil:text="${checkout.paymentReference}">PAYMENT-PENDING</p>
-    <p class="summary" coil:text="${checkout.providerSummary}">Summary</p>
-    <input type="hidden" name="payment_method" coil:attr="value=${checkout.paymentMethod}" />
+    <p class="provider" coil:text="${checkout.provider_label}">Provider</p>
+    <p class="status" coil:text="${checkout.payment_status_label}">Ready</p>
+    <p class="reference" coil:text="${checkout.payment_reference}">PAYMENT-PENDING</p>
+    <p class="summary" coil:text="${checkout.provider_summary}">Summary</p>
+    <input type="hidden" name="payment_method" coil:attr="value=${checkout.payment_method}" />
   </body>
 </html>"#,
         );
@@ -5051,8 +5051,8 @@ cdn_base_url = "https://cdn.example.com"
   <body>
     <p class="status" coil:text="${confirmation.status}">Paid</p>
     <p class="total" coil:text="${confirmation.total}">£0.00</p>
-    <p class="payment-summary" coil:text="${confirmation.paymentSummary}">Summary</p>
-    <p class="provider" coil:text="${confirmation.providerLabel}">Provider</p>
+    <p class="payment-summary" coil:text="${confirmation.payment_summary}">Summary</p>
+    <p class="provider" coil:text="${confirmation.provider_label}">Provider</p>
   </body>
 </html>"#,
         );
@@ -5070,8 +5070,8 @@ cdn_base_url = "https://cdn.example.com"
             r#"<!doctype html>
 <html xmlns:coil="https://coil.rs">
   <body>
-    <h1 coil:text="${customer.displayName}">Fallback</h1>
-    <p coil:text="${membershipSummary.tierName}">Tier</p>
+    <h1 coil:text="${customer.display_name}">Fallback</h1>
+    <p coil:text="${membership_summary.tier_name}">Tier</p>
   </body>
 </html>"#,
         );
@@ -5087,7 +5087,7 @@ cdn_base_url = "https://cdn.example.com"
             r#"<!doctype html>
 <html xmlns:coil="https://coil.rs">
   <body>
-    <input type="text" coil:attr="value=${checkout.paymentReference}" value="fallback" />
+    <input type="text" coil:attr="value=${checkout.payment_reference}" value="fallback" />
     <strong coil:text="${customer.email}">Fallback</strong>
   </body>
 </html>"#,
@@ -5106,7 +5106,7 @@ cdn_base_url = "https://cdn.example.com"
   <body>
     <input type="hidden" coil:attr="value=${product.slug}" value="fallback" />
     <ul>
-      <li coil:each="product : ${productCards}" coil:text="${product.slug}">fallback</li>
+      <li coil:each="product : ${product_cards}" coil:text="${product.slug}">fallback</li>
     </ul>
   </body>
 </html>"#,
@@ -5124,9 +5124,9 @@ cdn_base_url = "https://cdn.example.com"
 <html xmlns:coil="https://coil.rs">
   <body>
     <ul>
-      <li coil:each="item : ${cartItems}">
-        <a class="collection" coil:if="${item.hasProductLink}" coil:attr="href=${item.collectionUrl}" coil:text="${item.collectionName}">Collection</a>
-        <a class="product" coil:if="${item.hasProductLink}" coil:attr="href=${item.productUrl}" coil:text="${item.title}">Product</a>
+      <li coil:each="item : ${cart_items}">
+        <a class="collection" coil:if="${item.has_product_link}" coil:attr="href=${item.collection_url}" coil:text="${item.collection_name}">Collection</a>
+        <a class="product" coil:if="${item.has_product_link}" coil:attr="href=${item.product_url}" coil:text="${item.title}">Product</a>
       </li>
     </ul>
   </body>
@@ -5152,22 +5152,22 @@ cdn_base_url = "https://cdn.example.com"
                 r#"<!doctype html>
 <html xmlns:coil="https://coil.rs">
   <body>
-    <h1 coil:text="${customer.displayName}">Fallback</h1>
-    <p class="summary" coil:text="${account.stateSummary}">State</p>
-    <p class="email" coil:if="${account.hasCustomerEmail}" coil:text="${customer.email}">Email</p>
-    <p class="latest-order" coil:if="${account.hasLatestOrder}">
-      <strong coil:text="${account.latestOrderReference}">Order</strong>
-      <span coil:text="${account.latestOrderStatus}">Status</span>
+    <h1 coil:text="${customer.display_name}">Fallback</h1>
+    <p class="summary" coil:text="${account.state_summary}">State</p>
+    <p class="email" coil:if="${account.has_customer_email}" coil:text="${customer.email}">Email</p>
+    <p class="latest-order" coil:if="${account.has_latest_order}">
+      <strong coil:text="${account.latest_order_reference}">Order</strong>
+      <span coil:text="${account.latest_order_status}">Status</span>
     </p>
     <ul class="orders">
-      <li coil:each="order : ${recentOrders}">
+      <li coil:each="order : ${recent_orders}">
         <strong coil:text="${order.reference}">Order</strong>
         <span coil:text="${order.status}">Status</span>
         <span coil:text="${order.total}">Total</span>
       </li>
     </ul>
-    <p class="membership" coil:text="${membershipSummary.tierName}">Membership</p>
-    <p class="membership-status" coil:text="${membershipSummary.status}">Active</p>
+    <p class="membership" coil:text="${membership_summary.tier_name}">Membership</p>
+    <p class="membership-status" coil:text="${membership_summary.status}">Active</p>
   </body>
 </html>"#,
             )
@@ -5204,9 +5204,9 @@ cdn_base_url = "https://cdn.example.com"
                 r#"<!doctype html>
 <html xmlns:coil="https://coil.rs">
   <body>
-    <p class="summary" coil:text="${account.stateSummary}">State</p>
-    <p class="orders-empty" coil:text="${account.ordersEmptyText}">Orders</p>
-    <p class="membership-empty" coil:text="${account.membershipEmptyText}">Membership</p>
+    <p class="summary" coil:text="${account.state_summary}">State</p>
+    <p class="orders-empty" coil:text="${account.orders_empty_text}">Orders</p>
+    <p class="membership-empty" coil:text="${account.membership_empty_text}">Membership</p>
   </body>
 </html>"#,
             )
@@ -5250,7 +5250,7 @@ cdn_base_url = "https://cdn.example.com"
 <html xmlns:coil="https://coil.rs">
   <body>
     <p class="status" coil:text="${review.status}">Approved</p>
-    <ul coil:if="${review.hasNotes}">
+    <ul coil:if="${review.has_notes}">
       <li coil:each="note : ${review.notes}" coil:text="${note.text}">note</li>
     </ul>
   </body>
@@ -5354,10 +5354,10 @@ cdn_base_url = "https://cdn.example.com"
                             r#"<!doctype html>
 <html xmlns:coil="https://coil.rs">
   <body>
-    <p coil:text="${review.assignedQueue}">vip-fulfilment</p>
-    <p coil:text="${review.serviceLevel}">priority</p>
-    <ul coil:if="${review.hasMetadata}">
-      <li coil:each="entry : ${review.metadataEntries}">
+    <p coil:text="${review.assigned_queue}">vip-fulfilment</p>
+    <p coil:text="${review.service_level}">priority</p>
+    <ul coil:if="${review.has_metadata}">
+      <li coil:each="entry : ${review.metadata_entries}">
         <span coil:text="${entry.key}">assigned_queue</span>
         <span>=</span>
         <span coil:text="${entry.value}">vip-fulfilment</span>
@@ -5440,9 +5440,9 @@ fn cart_form_model(
     let errors = form_errors_model(form_state)?;
     let has_errors = !errors.is_empty();
     RenderModel::new()
-        .with_bool("hasErrors", has_errors)?
+        .with_bool("has_errors", has_errors)?
         .with_value(
-            "errorSummary",
+            "error_summary",
             RenderValue::text(
                 form_state
                     .map(|state| state.summary.clone())
@@ -5464,9 +5464,9 @@ fn merge_checkout_form_feedback(
     let checkout_intent_error = storefront_field_error(form_state, "checkout_intent");
     let terms_accepted_error = storefront_field_error(form_state, "terms_accepted");
     model
-        .with_bool("hasErrors", has_errors)?
+        .with_bool("has_errors", has_errors)?
         .with_value(
-            "errorSummary",
+            "error_summary",
             RenderValue::text(
                 form_state
                     .map(|state| state.summary.clone())
@@ -5476,29 +5476,29 @@ fn merge_checkout_form_feedback(
             ),
         )?
         .with_list("errors", errors)?
-        .with_bool("hasCheckoutEmailError", checkout_email_error.is_some())?
+        .with_bool("has_checkout_email_error", checkout_email_error.is_some())?
         .with_value(
-            "checkoutEmailError",
+            "checkout_email_error",
             RenderValue::text(checkout_email_error.unwrap_or_default()),
         )?
-        .with_bool("hasPaymentMethodError", payment_method_error.is_some())?
+        .with_bool("has_payment_method_error", payment_method_error.is_some())?
         .with_value(
-            "paymentMethodError",
+            "payment_method_error",
             RenderValue::text(payment_method_error.unwrap_or_default()),
         )?
-        .with_bool("hasPaymentLast4Error", payment_last4_error.is_some())?
+        .with_bool("has_payment_last4_error", payment_last4_error.is_some())?
         .with_value(
-            "paymentLast4Error",
+            "payment_last4_error",
             RenderValue::text(payment_last4_error.unwrap_or_default()),
         )?
-        .with_bool("hasCheckoutIntentError", checkout_intent_error.is_some())?
+        .with_bool("has_checkout_intent_error", checkout_intent_error.is_some())?
         .with_value(
-            "checkoutIntentError",
+            "checkout_intent_error",
             RenderValue::text(checkout_intent_error.unwrap_or_default()),
         )?
-        .with_bool("hasTermsAcceptedError", terms_accepted_error.is_some())?
+        .with_bool("has_terms_accepted_error", terms_accepted_error.is_some())?
         .with_value(
-            "termsAcceptedError",
+            "terms_accepted_error",
             RenderValue::text(terms_accepted_error.unwrap_or_default()),
         )
 }

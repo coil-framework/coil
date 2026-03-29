@@ -102,7 +102,7 @@ Concrete example:
 ```html title="templates/commerce/product-detail.html"
 <img
   alt="Product image"
-  coil:attr="src=${product.heroImage.url},alt=${product.heroImage.alt}"
+  coil:attr="src=${product.hero_image.url},alt=${product.hero_image.alt}"
 />
 ```
 

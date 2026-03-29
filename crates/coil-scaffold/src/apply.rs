@@ -727,7 +727,7 @@ fn base_layout(descriptor: &ProjectDescriptor) -> String {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${{pageTitle}}">{title}</title>
+    <title coil:text="${{page_title}}">{title}</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
@@ -746,11 +746,11 @@ fn base_layout(descriptor: &ProjectDescriptor) -> String {
 fn home_template(descriptor: &ProjectDescriptor) -> String {
     format!(
         r#"<!doctype html>
-<html xmlns:coil="https://coil.rs" coil:with="pageTitle=t('home.meta.title')" lang="{locale}" coil:attr="lang=${{locale}}">
+<html xmlns:coil="https://coil.rs" coil:with="page_title=t('home.meta.title')" lang="{locale}" coil:attr="lang=${{locale}}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${{pageTitle}}">{title}</title>
+    <title coil:text="${{page_title}}">{title}</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
@@ -764,7 +764,7 @@ fn home_template(descriptor: &ProjectDescriptor) -> String {
       <article>
         <h2 coil:t="nav.market">Market</h2>
         <ul>
-          <li coil:each="item : ${{links.siteSwitches}}">
+          <li coil:each="item : ${{links.site_switches}}">
             <a href="/" coil:attr="href=${{item.href}}" coil:text="${{item.label}}">Primary site</a>
             <span coil:if="${{item.active}}" coil:t="nav.current">Current</span>
           </li>
@@ -773,7 +773,7 @@ fn home_template(descriptor: &ProjectDescriptor) -> String {
       <article>
         <h2 coil:t="nav.language">Language</h2>
         <ul>
-          <li coil:each="item : ${{links.localeSwitches}}">
+          <li coil:each="item : ${{links.locale_switches}}">
             <a href="/" coil:attr="href=${{item.href}}" coil:text="${{item.label}}">English</a>
             <span coil:if="${{item.active}}" coil:t="nav.current">Current</span>
           </li>

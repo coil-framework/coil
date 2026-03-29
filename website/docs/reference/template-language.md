@@ -120,7 +120,7 @@ Use this rarely. It is the exception, not the default.
 Render only when the value is truthy:
 
 ```html
-<section coil:if="${hasFlashMessages}">
+<section coil:if="${has_flash_messages}">
   ...
 </section>
 ```
@@ -130,7 +130,7 @@ Render only when the value is truthy:
 Render only when the value is falsey:
 
 ```html
-<p coil:unless="${cartItems}">Your cart is empty.</p>
+<p coil:unless="${cart_items}">Your cart is empty.</p>
 ```
 
 ### `coil:each`
@@ -138,7 +138,7 @@ Render only when the value is falsey:
 Repeat for each item in a list:
 
 ```html
-<li coil:each="item : ${cartItems}">
+<li coil:each="item : ${cart_items}">
   <strong coil:text="${item.title}">Fallback</strong>
 </li>
 ```
@@ -152,7 +152,7 @@ Syntax:
 Create local bindings for a subtree:
 
 ```html
-<section coil:with="pageTitle='Collections',showCta=true">
+<section coil:with="page_title='Collections',show_cta=true">
   ...
 </section>
 ```
@@ -198,7 +198,7 @@ Declare a named insertion point:
 Bind one or more attributes dynamically:
 
 ```html
-<a coil:attr="href=${links.home},aria-label=${navigationLabel}">Home</a>
+<a coil:attr="href=${links.home},aria-label=${navigation_label}">Home</a>
 ```
 
 ### `coil:<attribute>`
@@ -220,7 +220,7 @@ The most common examples are:
 `coil:block` is a non-rendering wrapper. Its children render, but the wrapper tag itself does not:
 
 ```html
-</?coil:block coil:if="${hasMembership}">
+</?coil:block coil:if="${has_membership}">
   <p>...</p>
 </?coil:block>
 ```
@@ -261,7 +261,7 @@ That keeps templates easier to read and avoids implying distinctions that do not
 Nested access uses dotted keys:
 
 ```html
-<span coil:text="${site.brandName}">Brand</span>
+<span coil:text="${site.brand_name}">Brand</span>
 ```
 
 This is the normal lookup style you should expect to use in real templates.

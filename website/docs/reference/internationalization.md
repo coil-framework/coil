@@ -42,7 +42,7 @@ This is the base pattern templates should prefer for request-critical and SEO-re
 ```html
 <html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}">
   <a coil:attr="href=${links.home}">
-    <span coil:text="${site.brandName}">Brand</span>
+    <span coil:text="${site.brand_name}">Brand</span>
   </a>
 </html>
 ```

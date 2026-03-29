@@ -85,7 +85,7 @@ Customer apps usually extend events by:
 Concrete example:
 
 ```html title="templates/events/event-detail.html"
-<form method="post" coil:attr="action=${event.bookingAction}">
+<form method="post" coil:attr="action=${event.booking_action}">
   <input type="hidden" name="event_id" coil:attr="value=${event.id}" />
   <button type="submit">Reserve a place</button>
 </form>

@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Checkout'"
+  coil:with="page_title='Checkout'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Checkout</title>
+    <title coil:text="${page_title}">Checkout</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
@@ -34,16 +34,16 @@
           <li>Return to order status while Shoppr waits for the signed provider result.</li>
         </ol>
       </section>
-      <section class="storefront-flash" coil:if="${hasFlashMessages}">
-        <article class="storefront-flash__message" coil:each="message : ${flashMessages}">
+      <section class="storefront-flash" coil:if="${has_flash_messages}">
+        <article class="storefront-flash__message" coil:each="message : ${flash_messages}">
           <p class="storefront-flash__eyebrow" coil:text="${message.level}">error</p>
           <p coil:text="${message.text}">The checkout submission needs another look.</p>
         </article>
       </section>
-      <section class="storefront-errors" coil:if="${checkout.hasErrors}">
+      <section class="storefront-errors" coil:if="${checkout.has_errors}">
         <article class="storefront-errors__summary">
           <h2>Checkout details need attention</h2>
-          <p coil:text="${checkout.errorSummary}">
+          <p coil:text="${checkout.error_summary}">
             Review the highlighted checkout fields and try again.
           </p>
           <ul class="storefront-errors__list">
@@ -57,8 +57,8 @@
       <div class="checkout-page__grid">
         <section class="checkout-card">
           <h2>Contact</h2>
-          <p coil:if="${checkout.hasCheckoutEmail}" coil:text="${checkout.checkoutEmail}">hello@example.com</p>
-          <p coil:unless="${checkout.hasCheckoutEmail}">Guests can continue with email confirmation and order tracking.</p>
+          <p coil:if="${checkout.has_checkout_email}" coil:text="${checkout.checkout_email}">hello@example.com</p>
+          <p coil:unless="${checkout.has_checkout_email}">Guests can continue with email confirmation and order tracking.</p>
 
           <h2>Delivery</h2>
           <ul class="checkout-list">
@@ -74,17 +74,17 @@
           </p>
           <div class="checkout-provider">
             <p>
-              <strong coil:text="${checkout.providerLabel}">Stripe hosted checkout</strong>
+              <strong coil:text="${checkout.provider_label}">Stripe hosted checkout</strong>
             </p>
-            <p coil:text="${checkout.providerSummary}">
+            <p coil:text="${checkout.provider_summary}">
               This checkout reserves the order in Coil, then redirects to Stripe Checkout for
               payment collection.
             </p>
             <p>
               Intent
-              <strong coil:text="${checkout.paymentReference}">PAYMENT-PENDING</strong>
+              <strong coil:text="${checkout.payment_reference}">PAYMENT-PENDING</strong>
               is
-              <span coil:text="${checkout.paymentStatusLabel}">Ready for payment</span>.
+              <span coil:text="${checkout.payment_status_label}">Ready for payment</span>.
             </p>
             <p>
               Shoppr keeps this payment reference and local order state visible so the return
@@ -100,25 +100,25 @@
 
         <aside class="checkout-card">
           <h2>Order summary</h2>
-          <ul class="checkout-summary" coil:if="${hasLineItems}">
-            <li coil:each="item : ${lineItems}">
+          <ul class="checkout-summary" coil:if="${has_line_items}">
+            <li coil:each="item : ${line_items}">
               <span coil:text="${item.title}">Harbor pantry set</span>
               <span coil:text="${item.quantity}">1</span>
               <strong coil:text="${item.total}">GBP 48</strong>
             </li>
           </ul>
-          <div class="checkout-card__empty" coil:unless="${hasLineItems}">
+          <div class="checkout-card__empty" coil:unless="${has_line_items}">
             <p>No items are in checkout for this browser session yet.</p>
             <p>Return to the cart or keep browsing to add products before placing an order.</p>
           </div>
 
           <div class="checkout-totals">
-            <p><span>Subtotal</span><strong coil:text="${orderSummary.subtotal}">GBP 70</strong></p>
-            <p><span>Delivery</span><strong coil:text="${orderSummary.shipping}">GBP 6</strong></p>
-            <p><span>Total</span><strong coil:text="${orderSummary.total}">GBP 76</strong></p>
+            <p><span>Subtotal</span><strong coil:text="${order_summary.subtotal}">GBP 70</strong></p>
+            <p><span>Delivery</span><strong coil:text="${order_summary.shipping}">GBP 6</strong></p>
+            <p><span>Total</span><strong coil:text="${order_summary.total}">GBP 76</strong></p>
           </div>
 
-          <div class="checkout-actions" coil:if="${hasLineItems}">
+          <div class="checkout-actions" coil:if="${has_line_items}">
             <a class="button button--secondary" href="/cart">Return to cart</a>
             <form class="commerce-form checkout-form" action="/checkout/complete" method="post">
               <div class="checkout-form__grid">
@@ -128,9 +128,9 @@
                     type="email"
                     name="checkout_email"
                     value="hello@example.com"
-                    coil:attr="value=${checkout.checkoutEmail}"
+                    coil:attr="value=${checkout.checkout_email}"
                   />
-                  <small class="commerce-form__error" coil:if="${checkout.hasCheckoutEmailError}" coil:text="${checkout.checkoutEmailError}">
+                  <small class="commerce-form__error" coil:if="${checkout.has_checkout_email_error}" coil:text="${checkout.checkout_email_error}">
                     Enter the email address for order confirmation.
                   </small>
                 </label>
@@ -140,35 +140,35 @@
                     type="text"
                     value="Shoppr Customer"
                     readonly="readonly"
-                    coil:attr="value=${customer.displayName}"
+                    coil:attr="value=${customer.display_name}"
                   />
                 </label>
                 <section class="commerce-form__field checkout-form__field--wide">
                   <span>Stripe handoff</span>
                   <p>
                     Method
-                    <strong coil:text="${checkout.paymentMethodLabel}">Card</strong>
+                    <strong coil:text="${checkout.payment_method_label}">Card</strong>
                   </p>
                   <p>
                     Reference
-                    <strong coil:text="${checkout.paymentReference}">PAYMENT-PENDING</strong>
+                    <strong coil:text="${checkout.payment_reference}">PAYMENT-PENDING</strong>
                   </p>
                   <p>
                     Local status
-                    <strong coil:text="${checkout.paymentStatusLabel}">Ready for payment</strong>
+                    <strong coil:text="${checkout.payment_status_label}">Ready for payment</strong>
                   </p>
-                  <p coil:if="${checkout.hasPaymentLast4}">
+                  <p coil:if="${checkout.has_payment_last4}">
                     Last confirmed card ending
-                    <strong coil:text="${checkout.paymentLast4}">4242</strong>.
+                    <strong coil:text="${checkout.payment_last4}">4242</strong>.
                   </p>
                   <p>
                     Place the order to continue into the Stripe-backed confirmation flow. Shoppr
                     then returns you to the status page for this same browser session.
                   </p>
-                  <small class="commerce-form__error" coil:if="${checkout.hasPaymentMethodError}" coil:text="${checkout.paymentMethodError}">
+                  <small class="commerce-form__error" coil:if="${checkout.has_payment_method_error}" coil:text="${checkout.payment_method_error}">
                     Choose or confirm a payment method before placing the order.
                   </small>
-                  <small class="commerce-form__error" coil:if="${checkout.hasPaymentLast4Error}" coil:text="${checkout.paymentLast4Error}">
+                  <small class="commerce-form__error" coil:if="${checkout.has_payment_last4_error}" coil:text="${checkout.payment_last4_error}">
                     Enter the final 4 digits for the payment card.
                   </small>
                 </section>
@@ -176,37 +176,37 @@
                   type="hidden"
                   name="payment_method"
                   value="card"
-                  coil:attr="value=${checkout.paymentMethod}"
+                  coil:attr="value=${checkout.payment_method}"
                 />
                 <input
                   type="hidden"
                   name="checkout_intent"
                   value="PAYMENT-PENDING"
-                  coil:attr="value=${checkout.checkoutIntent}"
+                  coil:attr="value=${checkout.checkout_intent}"
                 />
               </div>
-              <p class="commerce-form__error" coil:if="${checkout.hasCheckoutIntentError}" coil:text="${checkout.checkoutIntentError}">
+              <p class="commerce-form__error" coil:if="${checkout.has_checkout_intent_error}" coil:text="${checkout.checkout_intent_error}">
                 Refresh checkout and try again before placing the order.
               </p>
-              <label class="commerce-form__checkbox" coil:if="${checkout.termsAccepted}">
+              <label class="commerce-form__checkbox" coil:if="${checkout.terms_accepted}">
                 <input type="checkbox" name="terms_accepted" value="yes" checked="checked" />
                 <span>I have reviewed the basket, receipt details, and the Stripe handoff summary.</span>
               </label>
-              <label class="commerce-form__checkbox" coil:unless="${checkout.termsAccepted}">
+              <label class="commerce-form__checkbox" coil:unless="${checkout.terms_accepted}">
                 <input type="checkbox" name="terms_accepted" value="yes" />
                 <span>I have reviewed the basket, receipt details, and the Stripe handoff summary.</span>
               </label>
-              <p class="commerce-form__error" coil:if="${checkout.hasTermsAcceptedError}" coil:text="${checkout.termsAcceptedError}">
+              <p class="commerce-form__error" coil:if="${checkout.has_terms_accepted_error}" coil:text="${checkout.terms_accepted_error}">
                 Review the basket and confirm the final total before placing the order.
               </p>
               <p class="checkout-form__consent">
                 Placing the order keeps this browser on Shoppr while Stripe confirmation
                 completes against the payment reference above.
               </p>
-              <button class="button" type="submit" coil:text="${checkout.submitLabel}">Place order</button>
+              <button class="button" type="submit" coil:text="${checkout.submit_label}">Place order</button>
             </form>
           </div>
-          <div class="checkout-actions" coil:unless="${hasLineItems}">
+          <div class="checkout-actions" coil:unless="${has_line_items}">
             <a class="button button--secondary" href="/cart">Return to cart</a>
             <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}">
               Continue shopping

@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Cart'"
+  coil:with="page_title='Cart'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Cart</title>
+    <title coil:text="${page_title}">Cart</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
@@ -27,8 +27,8 @@
           <h2>Items</h2>
           <form class="commerce-form cart-update-form" action="/cart" method="post">
             <input type="hidden" name="cart_action" value="update" />
-            <ul class="cart-lines" coil:if="${cartItems}">
-              <li class="cart-line" coil:each="item : ${cartItems}">
+            <ul class="cart-lines" coil:if="${cart_items}">
+              <li class="cart-line" coil:each="item : ${cart_items}">
                 <div>
                   <strong coil:text="${item.title}">Harbor pantry set</strong>
                   <p coil:text="${item.variant}">Seasonal assortment</p>
@@ -40,13 +40,13 @@
                     name="quantity"
                     min="0"
                     value="1"
-                    coil:attr="name=${item.quantityField},value=${item.quantity}"
+                    coil:attr="name=${item.quantity_field},value=${item.quantity}"
                   />
                 </label>
                 <strong coil:text="${item.total}">GBP 48</strong>
               </li>
             </ul>
-            <ul class="cart-lines" coil:unless="${cartItems}">
+            <ul class="cart-lines" coil:unless="${cart_items}">
               <li class="cart-line">
                 <div>
                   <strong>Harbor pantry set</strong>
@@ -78,9 +78,9 @@
 
         <aside class="cart-card">
           <h2>Summary</h2>
-          <p><span>Subtotal</span><strong coil:text="${cartSummary.subtotal}">GBP 70</strong></p>
-          <p><span>Delivery</span><strong coil:text="${cartSummary.shipping}">GBP 6</strong></p>
-          <p><span>Total</span><strong coil:text="${cartSummary.total}">GBP 76</strong></p>
+          <p><span>Subtotal</span><strong coil:text="${cart_summary.subtotal}">GBP 70</strong></p>
+          <p><span>Delivery</span><strong coil:text="${cart_summary.shipping}">GBP 6</strong></p>
+          <p><span>Total</span><strong coil:text="${cart_summary.total}">GBP 76</strong></p>
           <div class="cart-page__actions">
             <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
               <input type="hidden" name="cart_intent" value="reviewed" />

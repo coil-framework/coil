@@ -1,7 +1,7 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Collection'"
+  coil:with="page_title='Collection'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
@@ -31,7 +31,7 @@
       <div class="site-header__main">
         <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
         </a>
         <nav coil:replace="~{navigation/primary}"></nav>
       </div>
@@ -39,7 +39,7 @@
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Market</p>
           <ul>
-            <li coil:each="item : ${links.siteSwitches}">
+            <li coil:each="item : ${links.site_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
               <span coil:if="${item.active}">Current</span>
             </li>
@@ -48,7 +48,7 @@
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Language</p>
           <ul>
-            <li coil:each="item : ${links.localeSwitches}">
+            <li coil:each="item : ${links.locale_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
               <span coil:if="${item.active}">Current</span>
             </li>
@@ -57,7 +57,7 @@
       </div>
     </header>
     <main class="site-main collections-page">
-      <section class="collections-page__intro" coil:if="${hasCollection}">
+      <section class="collections-page__intro" coil:if="${has_collection}">
         <p class="collections-page__eyebrow">Campaign edit</p>
         <p>
           <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
@@ -81,7 +81,7 @@
         </div>
       </section>
 
-      <section class="catalog-assurance" coil:if="${hasCollection}">
+      <section class="catalog-assurance" coil:if="${has_collection}">
         <article>
           <h2>Browse the products in this edit.</h2>
           <p>
@@ -91,7 +91,7 @@
         </article>
       </section>
 
-      <section class="catalog-assurance" coil:unless="${hasCollection}">
+      <section class="catalog-assurance" coil:unless="${has_collection}">
         <article>
           <h1>This collection is not currently available.</h1>
           <p>
@@ -109,16 +109,16 @@
         </article>
       </section>
 
-      <section class="product-grid" coil:if="${hasCollection}">
-        <ul class="product-grid__list" coil:if="${hasProductCards}">
+      <section class="product-grid" coil:if="${has_collection}">
+        <ul class="product-grid__list" coil:if="${has_product_cards}">
           <li class="product-grid__item" coil:each="product : ${collection.products}">
             <article class="product-card">
               <a class="product-card__media" href="/shop/products/harbor-cap" coil:href="${product.url}">
                 <img
                   src="/theme/assets/logo.svg"
-                  coil:src="${product.imageUrl}"
+                  coil:src="${product.image_url}"
                   alt="Featured product"
-                  coil:attr="alt=${product.imageAlt}"
+                  coil:attr="alt=${product.image_alt}"
                 />
               </a>
               <div class="product-card__body">
@@ -151,7 +151,7 @@
             </article>
           </li>
         </ul>
-        <div class="product-grid__fallback" coil:unless="${hasProductCards}">
+        <div class="product-grid__fallback" coil:unless="${has_product_cards}">
           <article class="product-card">
             <div class="product-card__body">
               <h2>No products are available in this collection yet.</h2>
@@ -172,7 +172,7 @@
         </div>
       </section>
 
-      <div coil:replace="~{commerce/storefront-journey :: journey}" coil:if="${hasCollection}"></div>
+      <div coil:replace="~{commerce/storefront-journey :: journey}" coil:if="${has_collection}"></div>
     </main>
     <footer class="site-footer">
       <div>

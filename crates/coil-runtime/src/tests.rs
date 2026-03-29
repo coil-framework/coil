@@ -445,7 +445,7 @@ fn render_model_and_seo_use_site_aware_links_and_canonical_host() {
 <html xmlns:coil="https://coil.rs">
   <body>
     <p class="site" coil:text="${site.id}">default</p>
-    <p class="canonical" coil:text="${site.canonicalHost}">host</p>
+    <p class="canonical" coil:text="${site.canonical_host}">host</p>
     <p class="catalog" coil:text="${links.catalog}">/shop</p>
   </body>
 </html>"#,
@@ -501,7 +501,7 @@ fn render_model_exposes_locale_switches_with_locale_root_fallback_for_default_on
     <a
       class="locale-switch"
       href="#"
-      coil:each="item : ${links.localeSwitches}"
+      coil:each="item : ${links.locale_switches}"
       coil:attr="href=${item.href},data-active=${item.active}"
       coil:text="${item.label}"
     >
@@ -557,7 +557,7 @@ fn render_model_exposes_site_switches_with_site_root_fallback_for_default_only_r
     <a
       class="site-switch"
       href="#"
-      coil:each="item : ${links.siteSwitches}"
+      coil:each="item : ${links.site_switches}"
       coil:attr="href=${item.href},data-active=${item.active}"
       coil:text="${item.label}"
     >
@@ -619,7 +619,7 @@ fn render_model_exposes_site_switches_with_route_aware_absolute_urls() {
     <a
       class="site-switch"
       href="#"
-      coil:each="item : ${links.siteSwitches}"
+      coil:each="item : ${links.site_switches}"
       coil:attr="href=${item.href},data-active=${item.active}"
       coil:text="${item.label}"
     >
@@ -2169,24 +2169,24 @@ fn render_page_response_uses_live_storefront_orders_for_account_surfaces() {
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="account-dashboard">
-      <h1 coil:text="${customer.displayName}">Account</h1>
+      <h1 coil:text="${customer.display_name}">Account</h1>
       <p class="email" coil:text="${customer.email}">member@example.com</p>
-      <p class="summary" coil:text="${account.stateSummary}">Summary</p>
-      <p class="latest-order" coil:if="${account.hasLatestOrder}">
-        <strong coil:text="${account.latestOrderReference}">ORD-10042</strong>
-        <span coil:text="${account.latestOrderStatus}">Paid</span>
+      <p class="summary" coil:text="${account.state_summary}">Summary</p>
+      <p class="latest-order" coil:if="${account.has_latest_order}">
+        <strong coil:text="${account.latest_order_reference}">ORD-10042</strong>
+        <span coil:text="${account.latest_order_status}">Paid</span>
       </p>
       <ul class="orders">
-        <li coil:each="order : ${recentOrders}">
+        <li coil:each="order : ${recent_orders}">
           <strong coil:text="${order.reference}">ORD-10042</strong>
           <span coil:text="${order.status}">Paid</span>
           <span coil:text="${order.total}">£118.00</span>
         </li>
       </ul>
-      <div class="membership" coil:if="${account.hasMembership}">
-        <strong coil:text="${membershipSummary.tierName}">Gold Membership</strong>
-        <span coil:text="${membershipSummary.status}">Purchased</span>
-        <p coil:text="${membershipSummary.renewalText}">Renewal timing pending</p>
+      <div class="membership" coil:if="${account.has_membership}">
+        <strong coil:text="${membership_summary.tier_name}">Gold Membership</strong>
+        <span coil:text="${membership_summary.status}">Purchased</span>
+        <p coil:text="${membership_summary.renewal_text}">Renewal timing pending</p>
       </div>
     </main>
   </body>
@@ -2310,7 +2310,7 @@ product_kind = "physical"
       <h1 coil:text="${product.name}">Fallback</h1>
       <p class="price" coil:text="${product.price}">GBP 0.00</p>
       <p class="summary" coil:text="${product.summary}">Summary</p>
-      <p class="collection" coil:text="${product.collectionName}">Collection</p>
+      <p class="collection" coil:text="${product.collection_name}">Collection</p>
     </main>
   </body>
 </html>"#,

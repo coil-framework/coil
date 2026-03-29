@@ -1,14 +1,14 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="pageTitle='Pages'"
+  coil:with="page_title='Pages'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Pages</title>
+    <title coil:text="${page_title}">Pages</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor harbor--admin">
@@ -27,35 +27,35 @@
           route family.
         </p>
         <div class="admin-page__actions">
-          <a class="button" href="/admin/pages?new=1" coil:attr="href=${newContentPageHref}">
+          <a class="button" href="/admin/pages?new=1" coil:attr="href=${new_content_page_href}">
             Create page
           </a>
-          <a class="button button--secondary" href="/admin/navigation" coil:attr="href=${links.adminNavigation}">
+          <a class="button button--secondary" href="/admin/navigation" coil:attr="href=${links.admin_navigation}">
             Edit navigation
           </a>
-          <a class="button button--secondary" href="/admin/redirects" coil:attr="href=${links.adminRedirects}">
+          <a class="button button--secondary" href="/admin/redirects" coil:attr="href=${links.admin_redirects}">
             Edit redirects
           </a>
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${hasFlashMessages}">
+      <section class="admin-panel" coil:if="${has_flash_messages}">
         <p class="admin-panel__eyebrow">Operator messages</p>
         <ul class="flash-list">
-          <li coil:each="message : ${flashMessages}" coil:text="${message.text}">Saved.</li>
+          <li coil:each="message : ${flash_messages}" coil:text="${message.text}">Saved.</li>
         </ul>
       </section>
 
-      <section class="admin-panel" coil:if="${hasErrors}">
+      <section class="admin-panel" coil:if="${has_errors}">
         <p class="admin-panel__eyebrow">Draft errors</p>
         <h2>Review the page draft</h2>
-        <p coil:text="${errorSummary}">Update the page draft and save again.</p>
+        <p coil:text="${error_summary}">Update the page draft and save again.</p>
         <ul class="flash-list">
           <li coil:each="error : ${errors}" coil:text="${error.message}">Error</li>
         </ul>
       </section>
 
-      <section class="admin-panel" coil:if="${hasContentPages}">
+      <section class="admin-panel" coil:if="${has_content_pages}">
         <p class="admin-panel__eyebrow">Managed pages</p>
         <table class="admin-table">
           <thead>
@@ -68,25 +68,25 @@
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="pageRecord : ${contentPages}">
+            <tr coil:each="page_record : ${content_pages}">
               <td>
-                <strong coil:text="${pageRecord.title}">Visit Harbor</strong>
+                <strong coil:text="${page_record.title}">Visit Harbor</strong>
               </td>
-              <td coil:text="${pageRecord.statusLabel}">Published</td>
+              <td coil:text="${page_record.status_label}">Published</td>
               <td>
                 <a
-                  coil:if="${pageRecord.hasLivePath}"
+                  coil:if="${page_record.has_live_path}"
                   href="/pages/visit-harbor"
-                  coil:attr="href=${pageRecord.livePath}"
-                  coil:text="${pageRecord.livePath}"
+                  coil:attr="href=${page_record.live_path}"
+                  coil:text="${page_record.live_path}"
                 >
                   /pages/visit-harbor
                 </a>
-                <span coil:unless="${pageRecord.hasLivePath}">Not live</span>
+                <span coil:unless="${page_record.has_live_path}">Not live</span>
               </td>
-              <td coil:text="${pageRecord.summary}">Page summary</td>
+              <td coil:text="${page_record.summary}">Page summary</td>
               <td>
-                <a class="button button--secondary" href="/admin/pages" coil:attr="href=${pageRecord.editHref}">
+                <a class="button button--secondary" href="/admin/pages" coil:attr="href=${page_record.edit_href}">
                   Edit draft
                 </a>
               </td>
@@ -95,86 +95,86 @@
         </table>
       </section>
 
-      <section class="admin-panel" coil:if="${hasSelectedContentPage}">
+      <section class="admin-panel" coil:if="${has_selected_content_page}">
         <p class="admin-panel__eyebrow">Editor</p>
-        <h2 coil:text="${contentPageEditorTitle}">Draft workflow</h2>
-        <p coil:text="${contentPageEditorSummary}">
+        <h2 coil:text="${content_page_editor_title}">Draft workflow</h2>
+        <p coil:text="${content_page_editor_summary}">
           Update the draft, review the preview, then publish it to the live route.
         </p>
         <form action="/admin/pages/draft" method="post">
-          <input type="hidden" name="page_id" coil:attr="value=${selectedContentPage.id}" />
+          <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
           <div class="admin-card-grid">
             <label class="admin-card">
               <span class="admin-panel__eyebrow">Title</span>
-              <input type="text" name="page_title" coil:attr="value=${selectedContentPage.title}" />
+              <input type="text" name="page_title" coil:attr="value=${selected_content_page.title}" />
             </label>
             <label class="admin-card">
               <span class="admin-panel__eyebrow">Slug</span>
-              <input type="text" name="page_slug" coil:attr="value=${selectedContentPage.slug}" />
+              <input type="text" name="page_slug" coil:attr="value=${selected_content_page.slug}" />
             </label>
           </div>
           <label class="admin-card">
             <span class="admin-panel__eyebrow">Summary</span>
-            <textarea name="page_summary" rows="3" coil:text="${selectedContentPage.summary}">Summary</textarea>
+            <textarea name="page_summary" rows="3" coil:text="${selected_content_page.summary}">Summary</textarea>
           </label>
           <label class="admin-card">
             <span class="admin-panel__eyebrow">Body HTML</span>
-            <textarea name="page_body_html" rows="10" coil:text="${selectedContentPage.bodySource}">
+            <textarea name="page_body_html" rows="10" coil:text="${selected_content_page.body_source}">
               <p>Body</p>
             </textarea>
           </label>
           <div class="admin-page__actions">
-            <button class="button button--secondary" type="submit" coil:text="${contentPageSaveLabel}">
+            <button class="button button--secondary" type="submit" coil:text="${content_page_save_label}">
               Save draft
             </button>
             <a
               class="button button--secondary"
               href="/admin/pages"
-              coil:if="${isCreatingContentPage}"
-              coil:attr="href=${links.adminPages}"
+              coil:if="${is_creating_content_page}"
+              coil:attr="href=${links.admin_pages}"
             >
               Cancel
             </a>
           </div>
         </form>
 
-        <div class="admin-page__actions" coil:if="${hasPersistedContentPage}">
+        <div class="admin-page__actions" coil:if="${has_persisted_content_page}">
           <form action="/admin/pages/publish" method="post">
-            <input type="hidden" name="page_id" coil:attr="value=${selectedContentPage.id}" />
+            <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
             <button class="button" type="submit">Publish live page</button>
           </form>
           <form action="/admin/pages/unpublish" method="post">
-            <input type="hidden" name="page_id" coil:attr="value=${selectedContentPage.id}" />
+            <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
             <button class="button button--secondary" type="submit">Unpublish</button>
           </form>
         </div>
-        <p coil:unless="${hasPersistedContentPage}">
+        <p coil:unless="${has_persisted_content_page}">
           Save the draft first to generate the stable preview route and unlock publish controls.
         </p>
 
         <div class="admin-card-grid">
           <article class="admin-card">
             <h3>Status</h3>
-            <p coil:text="${selectedContentPage.statusLabel}">Published</p>
-            <p coil:if="${selectedContentPage.hasLivePath}">
+            <p coil:text="${selected_content_page.status_label}">Published</p>
+            <p coil:if="${selected_content_page.has_live_path}">
               Live route:
-              <a href="/pages/visit-harbor" coil:attr="href=${selectedContentPage.livePath}" coil:text="${selectedContentPage.livePath}">
+              <a href="/pages/visit-harbor" coil:attr="href=${selected_content_page.live_path}" coil:text="${selected_content_page.live_path}">
                 /pages/visit-harbor
               </a>
             </p>
           </article>
           <article class="admin-card">
             <h3>Preview path</h3>
-            <p coil:if="${selectedContentPage.hasPreviewPath}">
+            <p coil:if="${selected_content_page.has_preview_path}">
               <a
                 href="/admin/pages/preview?page=page-visit-harbor"
-                coil:attr="href=${selectedContentPage.previewPath}"
-                coil:text="${selectedContentPage.previewPath}"
+                coil:attr="href=${selected_content_page.preview_path}"
+                coil:text="${selected_content_page.preview_path}"
               >
                 /admin/pages/preview?page=page-visit-harbor
               </a>
             </p>
-            <p coil:unless="${selectedContentPage.hasPreviewPath}">
+            <p coil:unless="${selected_content_page.has_preview_path}">
               Save the draft first to get a stable preview endpoint.
             </p>
             <p>The preview below renders the same draft body HTML exposed by the CMS preview endpoint.</p>
@@ -182,21 +182,21 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${hasSelectedContentPage}">
+      <section class="admin-panel" coil:if="${has_selected_content_page}">
         <p class="admin-panel__eyebrow">Draft preview</p>
         <article class="page-shell">
-          <h2 coil:text="${selectedContentPage.title}">Visit Harbor</h2>
-          <p coil:text="${selectedContentPage.summary}">Summary</p>
-          <div coil:utext="${selectedContentPage.bodyHtml}">
+          <h2 coil:text="${selected_content_page.title}">Visit Harbor</h2>
+          <p coil:text="${selected_content_page.summary}">Summary</p>
+          <div coil:utext="${selected_content_page.body_html}">
             <p>Preview body.</p>
           </div>
         </article>
       </section>
 
-      <section class="admin-panel" coil:if="${showPagesEmptyState}">
+      <section class="admin-panel" coil:if="${show_pages_empty_state}">
         <p class="admin-panel__eyebrow">Pages</p>
         <h2>No CMS pages yet</h2>
-        <p coil:text="${pagesEmptyText}">Create a draft page and publish it.</p>
+        <p coil:text="${pages_empty_text}">Create a draft page and publish it.</p>
       </section>
     </main>
     <footer class="site-footer">

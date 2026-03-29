@@ -8,7 +8,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${pageTitle}">Shoppr</title>
+    <title coil:text="${page_title}">Shoppr</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
@@ -35,7 +35,7 @@
       <div class="site-header__main">
         <a href="/" class="brand" coil:attr="href=${links.home}">
           <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brandName}">Shoppr</span>
+          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
         </a>
         <nav coil:replace="~{navigation/primary}"></nav>
       </div>
@@ -43,7 +43,7 @@
         <div class="switcher-panel" id="market-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Market</p>
           <ul>
-            <li coil:each="item : ${links.siteSwitches}">
+            <li coil:each="item : ${links.site_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
               <span coil:if="${item.active}">Current</span>
             </li>
@@ -52,7 +52,7 @@
         <div class="switcher-panel" id="locale-panel" hidden="hidden">
           <p class="switcher-panel__eyebrow">Language</p>
           <ul>
-            <li coil:each="item : ${links.localeSwitches}">
+            <li coil:each="item : ${links.locale_switches}">
               <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
               <span coil:if="${item.active}">Current</span>
             </li>
@@ -66,7 +66,7 @@
     <footer class="site-footer">
       <div>
         <p class="site-footer__eyebrow">Shoppr starter</p>
-        <strong coil:text="${site.displayName}">Shoppr</strong>
+        <strong coil:text="${site.display_name}">Shoppr</strong>
         <p>Fashion-led customer app demonstrating Coil’s site, locale, CMS, commerce, and extension boundaries.</p>
       </div>
       <div>

@@ -729,9 +729,9 @@ mod tests {
         write_file(
             &path,
             r#"<!doctype html>
-<html xmlns:coil="https://coil.rs" coil:with="pageTitle='Shoppr'">
+<html xmlns:coil="https://coil.rs" coil:with="page_title='Shoppr'">
   <head>
-    <title coil:text="${pageTitle}">Fallback</title>
+    <title coil:text="${page_title}">Fallback</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="${asset('theme/assets/site.css')}" />
   </head>
   <body>

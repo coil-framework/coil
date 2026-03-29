@@ -88,7 +88,7 @@ impl DistributedSessionStoreRuntime for ProductionPostgresSharedSessionStoreRunt
 #[derive(Debug)]
 struct ProductionPostgresSharedSessionStore {
     pool: sqlx::Pool<Postgres>,
-    runtime: Runtime,
+    runtime: Option<Runtime>,
     kind: SessionStoreBackendKind,
     namespace: String,
 }
@@ -122,7 +122,7 @@ impl ProductionPostgresSharedSessionStore {
 
         Ok(Self {
             pool,
-            runtime,
+            runtime: Some(runtime),
             kind,
             namespace,
         })
@@ -132,7 +132,12 @@ impl ProductionPostgresSharedSessionStore {
     where
         T: Send,
     {
-        run_future_on_runtime(&self.runtime, future)
+        run_future_on_runtime(
+            self.runtime
+                .as_ref()
+                .expect("session store runtime missing during live operation"),
+            future,
+        )
     }
 
     async fn ensure_table(pool: &sqlx::Pool<Postgres>) -> Result<(), RuntimeBrowserError> {
@@ -274,6 +279,16 @@ impl ProductionPostgresSharedSessionStore {
 
             outcome
         })
+    }
+}
+
+impl Drop for ProductionPostgresSharedSessionStore {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            std::thread::spawn(move || drop(runtime))
+                .join()
+                .expect("session store runtime drop thread panicked");
+        }
     }
 }
 

@@ -2444,9 +2444,9 @@ async fn server_host_loads_customer_storefront_templates_from_template_roots() {
         &template_root,
         "templates/pages/home.html",
         r#"<!doctype html>
-<html xmlns:coil="https://coil.rs" coil:with="pageTitle='Shoppr'">
+<html xmlns:coil="https://coil.rs" coil:with="page_title='Shoppr'">
   <head>
-    <title coil:text="${pageTitle}">Shoppr</title>
+    <title coil:text="${page_title}">Shoppr</title>
   </head>
   <body>
     <header>
@@ -2627,15 +2627,15 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
       <h1 coil:text="${page.title}">Checkout</h1>
       <p class="customer" coil:text="${customer.email}">customer@example.com</p>
       <ul class="line-items">
-        <li coil:each="item : ${lineItems}">
+        <li coil:each="item : ${line_items}">
           <span class="item-title" coil:text="${item.title}">Item</span>
           <span class="item-qty" coil:text="${item.quantity}">1</span>
           <strong class="item-total" coil:text="${item.total}">£0.00</strong>
         </li>
       </ul>
-      <p class="grand-total" coil:text="${orderSummary.total}">£0.00</p>
-      <p class="provider" coil:text="${checkout.providerLabel}">Provider</p>
-      <p class="intent" coil:text="${checkout.paymentReference}">PAYMENT-PENDING</p>
+      <p class="grand-total" coil:text="${order_summary.total}">£0.00</p>
+      <p class="provider" coil:text="${checkout.provider_label}">Provider</p>
+      <p class="intent" coil:text="${checkout.payment_reference}">PAYMENT-PENDING</p>
       <form action="/checkout/complete" method="post">
         <button type="submit">Place order</button>
       </form>
@@ -2650,14 +2650,14 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="checkout-confirmation">
-      <h1 coil:text="${confirmation.orderNumber}">ORD-10042</h1>
+      <h1 coil:text="${confirmation.order_number}">ORD-10042</h1>
       <p class="confirmation-email" coil:text="${confirmation.email}">member@example.com</p>
       <p class="confirmation-status" coil:text="${confirmation.status}">Paid</p>
       <p class="confirmation-total" coil:text="${confirmation.total}">£118.00</p>
-      <p class="confirmation-payment" coil:text="${confirmation.paymentSummary}">
+      <p class="confirmation-payment" coil:text="${confirmation.payment_summary}">
         Card ending 4242, reference PAY-50001
       </p>
-      <p class="confirmation-next-step" coil:text="${confirmation.nextStep}">
+      <p class="confirmation-next-step" coil:text="${confirmation.next_step}">
         A confirmation email and membership activation will follow shortly.
       </p>
       <div coil:replace="~{account/summary-panels :: panels}"></div>
@@ -2672,7 +2672,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="account-dashboard">
-      <h1 coil:text="${customer.displayName}">Account</h1>
+      <h1 coil:text="${customer.display_name}">Account</h1>
       <p class="principal" coil:text="${principal_id}">member</p>
       <div coil:replace="~{account/summary-panels :: panels}"></div>
     </main>
@@ -2686,16 +2686,16 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="account-orders">
-      <h1 coil:text="${customer.displayName}">Orders</h1>
-      <p class="summary" coil:text="${account.stateSummary}">Summary</p>
+      <h1 coil:text="${customer.display_name}">Orders</h1>
+      <p class="summary" coil:text="${account.state_summary}">Summary</p>
       <ol class="orders">
-        <li coil:each="order : ${recentOrders}">
+        <li coil:each="order : ${recent_orders}">
           <strong coil:text="${order.reference}">ORD-10042</strong>
           <span coil:text="${order.status}">Paid</span>
           <span coil:text="${order.total}">£118.00</span>
-          <span class="line-count" coil:text="${order.lineCount}">2</span>
-          <span class="payment" coil:text="${order.paymentSummary}">Card ending 4242</span>
-          <span class="email" coil:text="${order.checkoutEmail}">member@example.com</span>
+          <span class="line-count" coil:text="${order.line_count}">2</span>
+          <span class="payment" coil:text="${order.payment_summary}">Card ending 4242</span>
+          <span class="email" coil:text="${order.checkout_email}">member@example.com</span>
         </li>
       </ol>
     </main>
@@ -2710,7 +2710,7 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
     <article class="account-panel">
       <h2>Recent purchases</h2>
       <ul class="account-panel__list">
-        <li coil:each="order : ${recentOrders}">
+        <li coil:each="order : ${recent_orders}">
           <strong coil:text="${order.reference}">ORD-10042</strong>
           <span coil:text="${order.status}">Paid</span>
           <span coil:text="${order.total}">£118.00</span>
@@ -2719,9 +2719,9 @@ async fn server_host_renders_checkout_confirmation_and_account_history_from_samp
     </article>
     <article class="account-panel">
       <h2>Membership</h2>
-      <strong coil:text="${membershipSummary.tierName}">Harbor Circle</strong>
-      <span coil:text="${membershipSummary.status}">Active</span>
-      <p coil:text="${membershipSummary.renewalText}">Renews on 18 April</p>
+      <strong coil:text="${membership_summary.tier_name}">Harbor Circle</strong>
+      <span coil:text="${membership_summary.status}">Active</span>
+      <p coil:text="${membership_summary.renewal_text}">Renews on 18 April</p>
     </article>
   </div>
 </section>"#,
@@ -3021,11 +3021,11 @@ async fn server_host_bootstraps_guest_storefront_session_and_injects_live_state(
   <body>
     <main class="cart-page">
       <h1 coil:text="${route_name}">Cart</h1>
-      <p class="empty" coil:unless="${hasCartItems}">Your cart is empty.</p>
+      <p class="empty" coil:unless="${has_cart_items}">Your cart is empty.</p>
       <ul class="cart-lines">
-        <li coil:each="item : ${cartItems}" coil:text="${item.title}">Fallback item</li>
+        <li coil:each="item : ${cart_items}" coil:text="${item.title}">Fallback item</li>
       </ul>
-      <p class="subtotal" coil:text="${cartSummary.subtotal}">£0.00</p>
+      <p class="subtotal" coil:text="${cart_summary.subtotal}">£0.00</p>
     </main>
   </body>
 </html>"#,
@@ -3098,13 +3098,13 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
   <body>
     <main class="cart-page">
       <ul class="cart-lines">
-        <li coil:each="item : ${cartItems}">
+        <li coil:each="item : ${cart_items}">
           <span class="item-title" coil:text="${item.title}">Item</span>
           <span class="item-qty" coil:text="${item.quantity}">1</span>
           <strong class="item-total" coil:text="${item.total}">£0.00</strong>
         </li>
       </ul>
-      <p class="cart-subtotal" coil:text="${cartSummary.subtotal}">£0.00</p>
+      <p class="cart-subtotal" coil:text="${cart_summary.subtotal}">£0.00</p>
     </main>
   </body>
 </html>"#,
@@ -3117,15 +3117,15 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
   <body>
     <main class="checkout-page">
       <ul class="line-items">
-        <li coil:each="item : ${lineItems}">
+        <li coil:each="item : ${line_items}">
           <span class="item-title" coil:text="${item.title}">Item</span>
           <span class="item-qty" coil:text="${item.quantity}">1</span>
           <strong class="item-total" coil:text="${item.total}">£0.00</strong>
         </li>
       </ul>
-      <p class="checkout-total" coil:text="${orderSummary.total}">£0.00</p>
-      <p class="checkout-provider" coil:text="${checkout.providerLabel}">Provider</p>
-      <p class="checkout-reference" coil:text="${checkout.paymentReference}">PAYMENT-PENDING</p>
+      <p class="checkout-total" coil:text="${order_summary.total}">£0.00</p>
+      <p class="checkout-provider" coil:text="${checkout.provider_label}">Provider</p>
+      <p class="checkout-reference" coil:text="${checkout.payment_reference}">PAYMENT-PENDING</p>
     </main>
   </body>
 </html>"#,
@@ -3137,19 +3137,19 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="checkout-confirmation">
-      <h1 class="order-number" coil:text="${confirmation.orderNumber}">ORD-10042</h1>
-      <p class="payment-summary" coil:text="${confirmation.paymentSummary}">
+      <h1 class="order-number" coil:text="${confirmation.order_number}">ORD-10042</h1>
+      <p class="payment-summary" coil:text="${confirmation.payment_summary}">
         Card ending 4242, reference PAY-50001
       </p>
       <p class="order-total" coil:text="${confirmation.total}">£0.00</p>
       <ul class="confirmation-lines">
-        <li coil:each="item : ${confirmation.lineItems}">
+        <li coil:each="item : ${confirmation.line_items}">
           <span class="item-title" coil:text="${item.title}">Item</span>
           <span class="item-qty" coil:text="${item.quantity}">1</span>
           <strong class="item-total" coil:text="${item.total}">£0.00</strong>
         </li>
       </ul>
-      <p class="next-step" coil:text="${confirmation.nextStep}">Next step</p>
+      <p class="next-step" coil:text="${confirmation.next_step}">Next step</p>
     </main>
   </body>
 </html>"#,
@@ -3453,13 +3453,13 @@ async fn server_host_rejects_checkout_completion_without_payment_details() {
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="checkout-page">
-      <p class="checkout-summary" coil:if="${checkout.hasErrors}" coil:text="${checkout.errorSummary}">Summary</p>
-      <p class="email-error" coil:if="${checkout.hasCheckoutEmailError}" coil:text="${checkout.checkoutEmailError}">Email error</p>
-      <p class="last4-error" coil:if="${checkout.hasPaymentLast4Error}" coil:text="${checkout.paymentLast4Error}">Last4 error</p>
-      <p class="terms-error" coil:if="${checkout.hasTermsAcceptedError}" coil:text="${checkout.termsAcceptedError}">Terms error</p>
-      <input class="checkout-email" type="email" coil:attr="value=${checkout.checkoutEmail}" />
-      <input class="payment-method" type="text" coil:attr="value=${checkout.paymentMethod}" />
-      <input class="payment-last4" type="text" coil:attr="value=${checkout.paymentLast4}" />
+      <p class="checkout-summary" coil:if="${checkout.has_errors}" coil:text="${checkout.error_summary}">Summary</p>
+      <p class="email-error" coil:if="${checkout.has_checkout_email_error}" coil:text="${checkout.checkout_email_error}">Email error</p>
+      <p class="last4-error" coil:if="${checkout.has_payment_last4_error}" coil:text="${checkout.payment_last4_error}">Last4 error</p>
+      <p class="terms-error" coil:if="${checkout.has_terms_accepted_error}" coil:text="${checkout.terms_accepted_error}">Terms error</p>
+      <input class="checkout-email" type="email" coil:attr="value=${checkout.checkout_email}" />
+      <input class="payment-method" type="text" coil:attr="value=${checkout.payment_method}" />
+      <input class="payment-last4" type="text" coil:attr="value=${checkout.payment_last4}" />
     </main>
   </body>
 </html>"#,
@@ -3683,10 +3683,10 @@ async fn server_host_rejects_checkout_completion_without_reserved_payment_intent
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="checkout-page">
-      <p class="checkout-summary" coil:if="${checkout.hasErrors}" coil:text="${checkout.errorSummary}">Summary</p>
-      <p class="intent-error" coil:if="${checkout.hasCheckoutIntentError}" coil:text="${checkout.checkoutIntentError}">Intent error</p>
-      <input class="checkout-email" type="email" coil:attr="value=${checkout.checkoutEmail}" />
-      <input class="payment-last4" type="text" coil:attr="value=${checkout.paymentLast4}" />
+      <p class="checkout-summary" coil:if="${checkout.has_errors}" coil:text="${checkout.error_summary}">Summary</p>
+      <p class="intent-error" coil:if="${checkout.has_checkout_intent_error}" coil:text="${checkout.checkout_intent_error}">Intent error</p>
+      <input class="checkout-email" type="email" coil:attr="value=${checkout.checkout_email}" />
+      <input class="payment-last4" type="text" coil:attr="value=${checkout.payment_last4}" />
     </main>
   </body>
 </html>"#,
@@ -3898,11 +3898,11 @@ async fn server_host_redirects_cart_validation_failures_back_to_cart_with_repopu
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="cart-page">
-      <p class="cart-summary" coil:if="${cartForm.hasErrors}" coil:text="${cartForm.errorSummary}">Summary</p>
+      <p class="cart-summary" coil:if="${cart_form.has_errors}" coil:text="${cart_form.error_summary}">Summary</p>
       <ul class="cart-lines">
-        <li coil:each="item : ${cartItems}">
-          <input class="item-qty" type="number" coil:attr="name=${item.quantityField},value=${item.quantity}" />
-          <p class="item-error" coil:if="${item.hasQuantityError}" coil:text="${item.quantityError}">Error</p>
+        <li coil:each="item : ${cart_items}">
+          <input class="item-qty" type="number" coil:attr="name=${item.quantity_field},value=${item.quantity}" />
+          <p class="item-error" coil:if="${item.has_quantity_error}" coil:text="${item.quantity_error}">Error</p>
         </li>
       </ul>
     </main>
@@ -4038,9 +4038,9 @@ async fn server_host_renders_checkout_form_defaults_for_active_checkout() {
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="checkout-page">
-      <input class="checkout-email" type="email" coil:attr="value=${checkout.checkoutEmail}" />
-      <input class="payment-method" type="text" coil:attr="value=${checkout.paymentMethod}" />
-      <input class="payment-last4" type="text" coil:attr="value=${checkout.paymentLast4}" />
+      <input class="checkout-email" type="email" coil:attr="value=${checkout.checkout_email}" />
+      <input class="payment-method" type="text" coil:attr="value=${checkout.payment_method}" />
+      <input class="payment-last4" type="text" coil:attr="value=${checkout.payment_last4}" />
     </main>
   </body>
 </html>"#,
@@ -4532,10 +4532,10 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="checkout-page">
-      <p class="provider" coil:text="${checkout.providerLabel}">Provider</p>
-      <p class="summary" coil:text="${checkout.providerSummary}">Summary</p>
-      <button class="submit" coil:text="${checkout.submitLabel}">Submit</button>
-      <p class="reference" coil:text="${checkout.paymentReference}">PAY-50001</p>
+      <p class="provider" coil:text="${checkout.provider_label}">Provider</p>
+      <p class="summary" coil:text="${checkout.provider_summary}">Summary</p>
+      <button class="submit" coil:text="${checkout.submit_label}">Submit</button>
+      <p class="reference" coil:text="${checkout.payment_reference}">PAY-50001</p>
     </main>
   </body>
 </html>"#,
@@ -4547,11 +4547,11 @@ async fn server_host_renders_checked_in_harbor_shop_stripe_checkout_contract() {
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="confirmation-page">
-      <div class="flash" coil:if="${hasFlashMessages}">
-        <p coil:each="message : ${flashMessages}" coil:text="${message.text}">Flash</p>
+      <div class="flash" coil:if="${has_flash_messages}">
+        <p coil:each="message : ${flash_messages}" coil:text="${message.text}">Flash</p>
       </div>
-      <p class="provider" coil:text="${confirmation.providerLabel}">Provider</p>
-      <p class="next-step" coil:text="${confirmation.nextStep}">Next step</p>
+      <p class="provider" coil:text="${confirmation.provider_label}">Provider</p>
+      <p class="next-step" coil:text="${confirmation.next_step}">Next step</p>
     </main>
   </body>
 </html>"#,
@@ -4940,7 +4940,7 @@ async fn server_host_accepts_checkout_completion_with_card_last4_only() {
 <html xmlns:coil="https://coil.rs">
   <body>
     <main class="checkout-confirmation">
-      <h1 class="order-number" coil:text="${confirmation.orderNumber}">ORD-10042</h1>
+      <h1 class="order-number" coil:text="${confirmation.order_number}">ORD-10042</h1>
     </main>
   </body>
 </html>"#,

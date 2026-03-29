@@ -122,15 +122,15 @@ let mut model = RenderModel::new()
 
 // later for commerce.product-detail
 model = model
-    .with_bool("hasProduct", true)?
+    .with_bool("has_product", true)?
     .with_object("product", fixture.product_for(slug))?
-    .with_list("productCards", product_cards)?;
+    .with_list("product_cards", product_cards)?;
 ```
 
 And the product-detail template consumes those exact keys:
 
 ```html
-<section class="product-page__hero" coil:if="${hasProduct}">
+<section class="product-page__hero" coil:if="${has_product}">
   <h1 coil:text="${product.name}">Harbor Cap</h1>
   <p class="product-page__price" coil:text="${product.price}">GBP 29</p>
   <a class="button" coil:attr="href=${links.cart}">Review cart</a>

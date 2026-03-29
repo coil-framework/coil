@@ -175,8 +175,8 @@ Recommended theme-mode guidance:
 Most multi-site apps should keep one theme tree and branch on runtime values such as:
 
 - `site.id`
-- `site.displayName`
-- `site.brandName`
+- `site.display_name`
+- `site.brand_name`
 - `locale`
 
 That is usually better than cloning the entire theme per site.
@@ -187,7 +187,7 @@ A good multi-site template looks like this:
 <html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}">
   <body>
     <a class="brand" coil:attr="href=${links.home}">
-      <span coil:text="${site.brandName}">Brand</span>
+      <span coil:text="${site.brand_name}">Brand</span>
     </a>
   </body>
 </html>

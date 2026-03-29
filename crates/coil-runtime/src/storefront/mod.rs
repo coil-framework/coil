@@ -2009,12 +2009,12 @@ impl StorefrontStateStore {
             .map(|token| account_session_end_form_markup(token));
         let payload = serde_json::to_string(&serde_json::json!({
             "route": route_name,
-            "sessionId": snapshot.session_id,
-            "principalId": snapshot.principal_id,
+            "session_id": snapshot.session_id,
+            "principal_id": snapshot.principal_id,
             "cart": snapshot.cart,
             "payment": snapshot.payment,
-            "recentOrders": snapshot.recent_orders,
-            "latestOrder": snapshot.latest_order,
+            "recent_orders": snapshot.recent_orders,
+            "latest_order": snapshot.latest_order,
             "csrf": csrf_tokens,
         }))
         .map_err(|error| StorefrontStateError::Serialization {

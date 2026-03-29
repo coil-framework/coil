@@ -123,6 +123,7 @@ const sidebars: SidebarsConfig = {
         },
         "reference/composition",
         "reference/linked-rust-hook-apis",
+        "reference/render-model-hooks",
         "reference/extension-package-format",
         "reference/wasm-host-apis",
         "reference/wasm-writing-and-installing-extensions",

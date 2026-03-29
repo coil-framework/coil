@@ -83,6 +83,9 @@ where
         customer_hooks.checkout.extend(registered_hooks.checkout);
         customer_hooks.cms.extend(registered_hooks.cms);
         customer_hooks
+            .render_model
+            .extend(registered_hooks.render_model);
+        customer_hooks
             .verified_webhooks
             .extend(registered_hooks.verified_webhooks);
         customer_hooks

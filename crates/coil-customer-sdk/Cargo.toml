@@ -11,3 +11,4 @@ documentation = "https://coil.rs/docs"
 description = "Stable customer extension interfaces for the Coil framework."
 readme = "README.md"
 [dependencies]
+coil-template = { version = "0.1.1", path = "../coil-template" }

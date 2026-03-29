@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
 use crate::{
-    BackendError, CheckoutHooks, CmsHooks, CustomerPluginDescriptor, VerifiedWebhookAssetHooks,
-    VerifiedWebhookHooks,
+    BackendError, CheckoutHooks, CmsHooks, CustomerPluginDescriptor, RenderModelHooks,
+    VerifiedWebhookAssetHooks, VerifiedWebhookHooks,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisteredHookKind {
     Checkout,
     CmsPagePublish,
+    RenderModel,
     VerifiedWebhook,
     VerifiedWebhookAssets,
 }
@@ -18,6 +19,7 @@ impl RegisteredHookKind {
         match self {
             Self::Checkout => "checkout",
             Self::CmsPagePublish => "cms.page_publish",
+            Self::RenderModel => "render_model",
             Self::VerifiedWebhook => "verified_webhook",
             Self::VerifiedWebhookAssets => "verified_webhook.assets",
         }
@@ -31,6 +33,11 @@ pub trait CustomerHookRegistry {
     ) -> Result<(), BackendError>;
 
     fn register_cms_hooks(&mut self, hooks: Arc<dyn CmsHooks>) -> Result<(), BackendError>;
+
+    fn register_render_model_hooks(
+        &mut self,
+        hooks: Arc<dyn RenderModelHooks>,
+    ) -> Result<(), BackendError>;
 
     fn register_verified_webhook_hooks(
         &mut self,

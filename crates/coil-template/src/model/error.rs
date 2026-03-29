@@ -38,6 +38,10 @@ pub enum TemplateModelError {
         column: usize,
         message: String,
     },
+    RenderModelConflict {
+        path: String,
+        message: String,
+    },
     FragmentCannotRenderLayout {
         name: TemplateName,
     },
@@ -86,6 +90,9 @@ impl fmt::Display for TemplateModelError {
                 column,
                 message,
             } => write!(f, "template parse error at {line}:{column}: {message}"),
+            Self::RenderModelConflict { path, message } => {
+                write!(f, "render model conflict at `{path}`: {message}")
+            }
             Self::FragmentCannotRenderLayout { name } => {
                 write!(
                     f,

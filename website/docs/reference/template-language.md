@@ -117,7 +117,7 @@ Use this rarely. It is the exception, not the default.
 
 ### `coil:if`
 
-Render only when the value is truthy:
+Render only when the expression is `true`:
 
 ```html
 <section coil:if="${has_flash_messages}">
@@ -125,12 +125,20 @@ Render only when the value is truthy:
 </section>
 ```
 
-### `coil:unless`
-
-Render only when the value is falsey:
+Simple comparisons are supported directly:
 
 ```html
-<p coil:unless="${cart_items}">Your cart is empty.</p>
+<section coil:if="${block.type == 'hero_section'}">
+  ...
+</section>
+```
+
+### `coil:unless`
+
+Render only when the expression is `false`:
+
+```html
+<p coil:unless="${has_cart_items}">Your cart is empty.</p>
 ```
 
 ### `coil:each`
@@ -158,6 +166,24 @@ Create local bindings for a subtree:
 ```
 
 Use it to improve readability, not to smuggle application logic into the view.
+
+### `coil:switch`, `coil:case`, and `coil:default`
+
+Use these when a template needs to branch between a small set of explicit variants:
+
+```html
+<div coil:switch="${block.type}">
+  <section coil:case="'hero_section'">...</section>
+  <section coil:case="'featured_events'">...</section>
+  <section coil:default>Unsupported block</section>
+</div>
+```
+
+Rules:
+
+- `coil:switch` only accepts direct children annotated with `coil:case` or `coil:default`
+- each `coil:case` compares against the switch expression
+- only one `coil:default` branch is allowed
 
 ### `coil:replace`
 
@@ -225,16 +251,35 @@ The most common examples are:
 </?coil:block>
 ```
 
+### `coil:replace-fragment` and `coil:include-fragment`
+
+These are the expression-based fragment inclusion directives.
+
+Use `coil:replace-fragment` when the current element should be replaced by the resolved fragment:
+
+```html
+<coil:block coil:replace-fragment="${block.render_fragment}"></coil:block>
+```
+
+Use `coil:include-fragment` when the host element should stay and only its children should be
+replaced:
+
+```html
+<section class="block-shell" coil:include-fragment="${block.render_fragment}"></section>
+```
+
 ## Expressions
 
 Coil expressions are intentionally small.
 
-That means the template language currently supports only four expression categories:
+That means the template language currently supports:
 
 - model lookups
 - asset lookups
 - string literals
 - boolean literals
+- equality comparisons
+- inequality comparisons
 
 It does **not** support a general expression language with arithmetic, filters, chained function
 calls, or inline object construction.
@@ -265,6 +310,27 @@ Nested access uses dotted keys:
 ```
 
 This is the normal lookup style you should expect to use in real templates.
+
+### Comparisons
+
+Supported comparison syntax:
+
+- `${left == right}`
+- `${left != right}`
+
+Example:
+
+```html
+${block.type == 'hero_section'}
+${site.locale != 'fr-FR'}
+```
+
+Comparison rules:
+
+- comparisons evaluate to booleans
+- `coil:if` and `coil:unless` accept them directly
+- text, trusted HTML, and booleans can be compared
+- lists and objects cannot be compared
 
 ### Asset lookups
 
@@ -318,6 +384,43 @@ Current behaviour:
 - dynamic attribute bindings escape attribute content
 - plain `RenderValue::text(...)` is escaped when rendered
 - `coil:utext` is the explicit unescaped path
+
+## Rendering CMS-Style Block Lists
+
+For heterogeneous page-builder blocks, Coil now supports two clean patterns.
+
+### Explicit branching
+
+```html
+<div coil:each="block : ${page.blocks}">
+  <div coil:switch="${block.type}">
+    <section coil:case="'hero_section'">...</section>
+    <section coil:case="'featured_events'">...</section>
+  </div>
+</div>
+```
+
+### Fragment dispatch by block type
+
+This is the preferred pattern when each block type has its own fragment:
+
+```html
+<div coil:each="block : ${page.blocks}">
+  <coil:block coil:replace-fragment="${block.render_fragment}"></coil:block>
+</div>
+```
+
+Inside `coil:each`, Coil augments block-like items that expose a `type` field. For a block type of
+`hero_section` inside a `pages/home` template, the loop item gains:
+
+- `block.is_hero_section`
+- `block.render_fragment = "pages/home/blocks/hero_section"`
+- `block.render_fragment_shared = "blocks/hero_section"`
+
+That gives you both styles:
+
+- branch inline with `block.is_<type>` or `coil:switch`
+- or dispatch straight into a fragment tree rooted at `pages/home/blocks/<type>.html`
 
 ## Constraints And Common Mistakes
 

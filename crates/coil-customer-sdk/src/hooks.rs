@@ -1,7 +1,8 @@
 use crate::{
     AssetsFacade, AuditFacade, AuthFacade, BackendError, CmsPageDraft, CmsPublishDecision,
     CommerceFacade, JobsFacade, OrderDraft, OrderReviewDecision, OutboundHttpFacade,
-    RepositoryFacade, RequestContext, VerifiedWebhook, WebhookHandlingResult,
+    RenderModelContribution, RenderTarget, RepositoryFacade, RequestContext, VerifiedWebhook,
+    WebhookHandlingResult,
 };
 
 pub trait CheckoutHooks: Send + Sync {
@@ -23,6 +24,16 @@ pub trait CmsHooks: Send + Sync {
         repositories: &dyn RepositoryFacade,
         audit: &dyn AuditFacade,
     ) -> Result<CmsPublishDecision, BackendError>;
+}
+
+pub trait RenderModelHooks: Send + Sync {
+    fn contribute_render_model(
+        &self,
+        ctx: &RequestContext,
+        target: &RenderTarget,
+        repositories: &dyn RepositoryFacade,
+        audit: &dyn AuditFacade,
+    ) -> Result<Vec<RenderModelContribution>, BackendError>;
 }
 
 pub trait VerifiedWebhookHooks: Send + Sync {

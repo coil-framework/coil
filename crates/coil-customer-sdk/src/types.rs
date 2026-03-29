@@ -1,4 +1,5 @@
 use crate::{BackendError, BackendErrorKind};
+use coil_template::RenderModel;
 use std::collections::BTreeMap;
 
 pub type MetadataMap = BTreeMap<String, String>;
@@ -136,6 +137,138 @@ impl RequestContext {
             trace,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderTarget {
+    pub route_name: String,
+    pub template_name: String,
+    pub fragment_id: Option<String>,
+    pub site_id: Option<String>,
+    pub locale: String,
+    pub route_params: BTreeMap<String, String>,
+    pub query_params: BTreeMap<String, String>,
+}
+
+impl RenderTarget {
+    pub fn new(
+        route_name: impl Into<String>,
+        template_name: impl Into<String>,
+        locale: impl Into<String>,
+    ) -> Self {
+        Self {
+            route_name: route_name.into(),
+            template_name: template_name.into(),
+            fragment_id: None,
+            site_id: None,
+            locale: locale.into(),
+            route_params: BTreeMap::new(),
+            query_params: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_fragment_id(mut self, fragment_id: impl Into<String>) -> Self {
+        self.fragment_id = Some(fragment_id.into());
+        self
+    }
+
+    pub fn with_site_id(mut self, site_id: impl Into<String>) -> Self {
+        self.site_id = Some(site_id.into());
+        self
+    }
+
+    pub fn with_route_params(mut self, route_params: BTreeMap<String, String>) -> Self {
+        self.route_params = route_params;
+        self
+    }
+
+    pub fn with_query_params(mut self, query_params: BTreeMap<String, String>) -> Self {
+        self.query_params = query_params;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderModelPath(String);
+
+impl RenderModelPath {
+    pub fn new(value: impl Into<String>) -> Result<Self, BackendError> {
+        Ok(Self(validate_render_model_path(value.into())?))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergePolicy {
+    FailOnConflict,
+    ReplaceExisting,
+    AppendLists,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenderModelContribution {
+    Mount {
+        path: RenderModelPath,
+        model: RenderModel,
+    },
+    Merge {
+        path: RenderModelPath,
+        model: RenderModel,
+        policy: MergePolicy,
+    },
+}
+
+impl RenderModelContribution {
+    pub fn mount(path: impl Into<String>, model: RenderModel) -> Result<Self, BackendError> {
+        Ok(Self::Mount {
+            path: RenderModelPath::new(path)?,
+            model,
+        })
+    }
+
+    pub fn merge(
+        path: impl Into<String>,
+        model: RenderModel,
+        policy: MergePolicy,
+    ) -> Result<Self, BackendError> {
+        Ok(Self::Merge {
+            path: RenderModelPath::new(path)?,
+            model,
+            policy,
+        })
+    }
+}
+
+fn validate_render_model_path(path: String) -> Result<String, BackendError> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(BackendError::new(
+            BackendErrorKind::InvalidInput,
+            "render_model.path.empty",
+            "Render model paths must not be empty.",
+        ));
+    }
+
+    for segment in path.split('.') {
+        if segment.is_empty()
+            || !segment
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return Err(BackendError::new(
+                BackendErrorKind::InvalidInput,
+                "render_model.path.invalid",
+                format!(
+                    "Render model path `{path}` contains an invalid segment `{segment}`."
+                ),
+            ));
+        }
+    }
+
+    Ok(path.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

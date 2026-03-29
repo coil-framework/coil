@@ -24,6 +24,7 @@ Typical responsibilities include:
 
 - product-specific checkout rules
 - CMS publish validation
+- request-time page and block shaping through render-model hooks
 - verified webhook handling
 - customer-specific admin or integration behaviour
 
@@ -61,6 +62,7 @@ This model is strong enough to let customer code participate in first-party beha
 Use these pages together rather than in isolation:
 
 - [Customer-root workspace](../core-concepts/customer-root-workspace.md)
+- [Render Model Hooks](../reference/render-model-hooks.md)
 - [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
 - [Shoppr overview](../use-cases/shoppr/overview.md)
 - [Gitly overview](../use-cases/gitly/overview.md)
@@ -82,6 +84,18 @@ You may still want:
 - plain HTTP integration when the dependency should remain external
 
 The point is not "everything must be linked." The point is that Coil has a clear default path when the code is truly customer-owned application logic.
+
+## One Important Current Capability
+
+If you need customer-owned server-side page shaping, use linked Rust render-model hooks.
+
+That is the supported path for:
+
+- mounting your own top-level model prefix such as `crm_page`
+- merging fields into `page`
+- shaping block-driven pages at request time before template render
+
+Read [Render Model Hooks](../reference/render-model-hooks.md) for the exact API and merge rules.
 
 ## Common Mistakes
 

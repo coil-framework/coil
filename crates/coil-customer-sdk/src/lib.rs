@@ -15,6 +15,7 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coil_template::{RenderModel, RenderValue};
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
 
@@ -39,6 +40,14 @@ mod tests {
 
         fn register_cms_hooks(&mut self, _hooks: Arc<dyn CmsHooks>) -> Result<(), BackendError> {
             self.hook_kinds.push(RegisteredHookKind::CmsPagePublish);
+            Ok(())
+        }
+
+        fn register_render_model_hooks(
+            &mut self,
+            _hooks: Arc<dyn RenderModelHooks>,
+        ) -> Result<(), BackendError> {
+            self.hook_kinds.push(RegisteredHookKind::RenderModel);
             Ok(())
         }
 
@@ -97,6 +106,7 @@ mod tests {
             let hooks = Arc::new(ExampleHooks);
             registry.register_checkout_hooks(hooks.clone())?;
             registry.register_cms_hooks(hooks.clone())?;
+            registry.register_render_model_hooks(hooks.clone())?;
             registry.register_verified_webhook_hooks(hooks)?;
             Ok(())
         }
@@ -143,6 +153,29 @@ mod tests {
         }
     }
 
+    impl RenderModelHooks for ExampleHooks {
+        fn contribute_render_model(
+            &self,
+            _ctx: &RequestContext,
+            _target: &RenderTarget,
+            _repositories: &dyn RepositoryFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<Vec<RenderModelContribution>, BackendError> {
+            Ok(vec![RenderModelContribution::mount(
+                "customer_extension",
+                RenderModel::new()
+                    .with_value("status", RenderValue::text("active"))
+                    .map_err(|error| {
+                        BackendError::new(
+                            BackendErrorKind::Internal,
+                            "render_model.test.invalid",
+                            error.to_string(),
+                        )
+                    })?,
+            )?])
+        }
+    }
+
     impl VerifiedWebhookAssetHooks for ExampleHooks {
         fn handle_verified_webhook(
             &self,
@@ -170,6 +203,7 @@ mod tests {
             vec![
                 RegisteredHookKind::Checkout,
                 RegisteredHookKind::CmsPagePublish,
+                RegisteredHookKind::RenderModel,
                 RegisteredHookKind::VerifiedWebhook,
             ]
         );

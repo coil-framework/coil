@@ -26,6 +26,7 @@ impl TemplateRuntime {
 
         let html = self.render_nodes(
             namespaces,
+            &layout.key.name,
             &request.model,
             &request.slots,
             &layout.nodes,
@@ -49,6 +50,7 @@ impl TemplateRuntime {
 
         let html = self.render_nodes(
             namespaces,
+            &fragment.key.name,
             &request.model,
             &BTreeMap::new(),
             &fragment.nodes,
@@ -61,6 +63,7 @@ impl TemplateRuntime {
     fn render_nodes(
         &self,
         namespaces: &[TemplateNamespace],
+        current_template: &TemplateName,
         model: &RenderModel,
         slots: &BTreeMap<SlotName, SlotFill>,
         nodes: &[Node],
@@ -118,6 +121,7 @@ impl TemplateRuntime {
                     if element.tag == "coil:block" {
                         rendered.push_str(&self.render_nodes(
                             namespaces,
+                            current_template,
                             model,
                             slots,
                             &element.children,
@@ -168,6 +172,7 @@ impl TemplateRuntime {
                     rendered.push('>');
                     rendered.push_str(&self.render_nodes(
                         namespaces,
+                        current_template,
                         model,
                         slots,
                         &element.children,
@@ -179,11 +184,23 @@ impl TemplateRuntime {
                 }
                 Node::Slot(slot) => {
                     if let Some(fill) = slots.get(&slot.name) {
-                        rendered
-                            .push_str(&self.render_slot_fill(namespaces, model, fill, surface)?);
+                        rendered.push_str(&self.render_slot_fill(
+                            namespaces,
+                            current_template,
+                            model,
+                            fill,
+                            surface,
+                        )?);
                     } else if let Some(fallback) = &slot.fallback {
                         rendered.push_str(
-                            &self.render_nodes(namespaces, model, slots, fallback, surface)?,
+                            &self.render_nodes(
+                                namespaces,
+                                current_template,
+                                model,
+                                slots,
+                                fallback,
+                                surface,
+                            )?,
                         );
                     } else {
                         return Err(TemplateModelError::MissingSlotFill {
@@ -198,7 +215,14 @@ impl TemplateRuntime {
                         extended = extended.with_value(binding.key.clone(), value)?;
                     }
                     rendered.push_str(
-                        &self.render_nodes(namespaces, &extended, slots, children, surface)?,
+                        &self.render_nodes(
+                            namespaces,
+                            current_template,
+                            &extended,
+                            slots,
+                            children,
+                            surface,
+                        )?,
                     );
                 }
                 Node::Conditional {
@@ -211,9 +235,59 @@ impl TemplateRuntime {
 
                     if enabled {
                         rendered.push_str(
-                            &self.render_nodes(namespaces, model, slots, children, surface)?,
+                            &self.render_nodes(
+                                namespaces,
+                                current_template,
+                                model,
+                                slots,
+                                children,
+                                surface,
+                            )?,
                         );
                     }
+                }
+                Node::Switch {
+                    expression,
+                    cases,
+                    default,
+                } => {
+                    let switch_value = self.evaluate_expression(model, expression)?;
+                    let mut matched = false;
+                    for case in cases {
+                        let case_value = self.evaluate_expression(model, &case.expression)?;
+                        if render_values_equal(&switch_value, &case_value, expression_label(expression))? {
+                            rendered.push_str(&self.render_nodes(
+                                namespaces,
+                                current_template,
+                                model,
+                                slots,
+                                &case.children,
+                                surface,
+                            )?);
+                            matched = true;
+                            break;
+                        }
+                    }
+
+                    if !matched {
+                        if let Some(default_nodes) = default {
+                            rendered.push_str(&self.render_nodes(
+                                namespaces,
+                                current_template,
+                                model,
+                                slots,
+                                default_nodes,
+                                surface,
+                            )?);
+                        }
+                    }
+                }
+                Node::Case { .. } | Node::Default { .. } => {
+                    return Err(TemplateModelError::ParseError {
+                        line: 0,
+                        column: 0,
+                        message: "coil:case and coil:default may only appear inside coil:switch".to_string(),
+                    });
                 }
                 Node::Each {
                     item,
@@ -225,12 +299,17 @@ impl TemplateRuntime {
                             key: collection.clone(),
                         }
                     })?;
-                    for entry in value.as_list(collection)? {
+                    let entries = value.as_list(collection)?;
+                    let known_block_types = collect_block_types(entries);
+                    for entry in entries {
+                        let dispatch_entry =
+                            augment_block_dispatch(entry, current_template, &known_block_types)?;
                         let loop_model = model
-                            .merged_with(entry)
-                            .with_object(item.clone(), entry.clone())?;
+                            .merged_with(&dispatch_entry)
+                            .with_object(item.clone(), dispatch_entry)?;
                         rendered.push_str(&self.render_nodes(
                             namespaces,
+                            current_template,
                             &loop_model,
                             slots,
                             children,
@@ -247,6 +326,35 @@ impl TemplateRuntime {
                     }
                     rendered.push_str(&self.render_nodes(
                         namespaces,
+                        &template.key.name,
+                        model,
+                        slots,
+                        &template.nodes,
+                        surface,
+                    )?);
+                }
+                Node::IncludeExpression(expression) => {
+                    let value = self.evaluate_expression(model, expression)?;
+                    let name = match value {
+                        RenderValue::Text(value) => value,
+                        RenderValue::TrustedHtml(value) => value.as_str().to_string(),
+                        RenderValue::Bool(_) | RenderValue::List(_) | RenderValue::Object(_) => {
+                            return Err(TemplateModelError::ValueTypeMismatch {
+                                key: expression_label(expression),
+                                expected: "text",
+                            });
+                        }
+                    };
+                    let selector = TemplateSelector::new(TemplateName::new(name)?);
+                    let template = self.registry.resolve(namespaces, &selector)?;
+                    if template.kind != TemplateKind::Fragment {
+                        return Err(TemplateModelError::LayoutCannotBeIncludedAsFragment {
+                            name: selector.name().clone(),
+                        });
+                    }
+                    rendered.push_str(&self.render_nodes(
+                        namespaces,
+                        &template.key.name,
                         model,
                         slots,
                         &template.nodes,
@@ -268,6 +376,7 @@ impl TemplateRuntime {
     fn render_slot_fill(
         &self,
         namespaces: &[TemplateNamespace],
+        current_template: &TemplateName,
         model: &RenderModel,
         fill: &SlotFill,
         surface: RenderSurface,
@@ -282,6 +391,7 @@ impl TemplateRuntime {
                 }
                 self.render_nodes(
                     namespaces,
+                    &template.key.name,
                     model,
                     &BTreeMap::new(),
                     &template.nodes,
@@ -289,7 +399,14 @@ impl TemplateRuntime {
                 )
             }
             SlotFill::Nodes(nodes) => {
-                self.render_nodes(namespaces, model, &BTreeMap::new(), nodes, surface)
+                self.render_nodes(
+                    namespaces,
+                    current_template,
+                    model,
+                    &BTreeMap::new(),
+                    nodes,
+                    surface,
+                )
             }
         }
     }
@@ -316,6 +433,23 @@ impl TemplateRuntime {
                 .get_translation(key)
                 .map(|value| RenderValue::text(value.to_string()))
                 .ok_or_else(|| TemplateModelError::MissingTranslation { key: key.clone() }),
+            TemplateExpression::Compare {
+                left,
+                operator,
+                right,
+            } => {
+                let left_value = self.evaluate_expression(model, left)?;
+                let right_value = self.evaluate_expression(model, right)?;
+                let equal = render_values_equal(
+                    &left_value,
+                    &right_value,
+                    expression_label(expression),
+                )?;
+                Ok(RenderValue::bool(match operator {
+                    ComparisonOperator::Equal => equal,
+                    ComparisonOperator::NotEqual => !equal,
+                }))
+            }
         }
     }
 
@@ -331,6 +465,10 @@ impl TemplateRuntime {
                     .get_path(key)
                     .ok_or_else(|| TemplateModelError::MissingValue { key: key.clone() })?;
                 value.as_bool(key)
+            }
+            ConditionExpression::Expression(expression) => {
+                let value = self.evaluate_expression(model, expression)?;
+                value.as_bool(&expression_label(expression))
             }
         }
     }
@@ -433,5 +571,99 @@ fn expression_label(expression: &TemplateExpression) -> String {
         TemplateExpression::LiteralBool(value) => value.to_string(),
         TemplateExpression::AssetPath(path) => format!("asset({path})"),
         TemplateExpression::TranslationKey(key) => format!("t('{key}')"),
+        TemplateExpression::Compare {
+            left,
+            operator,
+            right,
+        } => {
+            let operator = match operator {
+                ComparisonOperator::Equal => "==",
+                ComparisonOperator::NotEqual => "!=",
+            };
+            format!(
+                "{} {operator} {}",
+                expression_label(left),
+                expression_label(right)
+            )
+        }
     }
+}
+
+fn render_values_equal(
+    left: &RenderValue,
+    right: &RenderValue,
+    key: String,
+) -> Result<bool, TemplateModelError> {
+    match (left, right) {
+        (RenderValue::Text(left), RenderValue::Text(right)) => Ok(left == right),
+        (RenderValue::TrustedHtml(left), RenderValue::TrustedHtml(right)) => {
+            Ok(left.as_str() == right.as_str())
+        }
+        (RenderValue::Bool(left), RenderValue::Bool(right)) => Ok(left == right),
+        (RenderValue::List(_), _) | (_, RenderValue::List(_)) => Err(TemplateModelError::ValueTypeMismatch {
+            key,
+            expected: "scalar",
+        }),
+        (RenderValue::Object(_), _) | (_, RenderValue::Object(_)) => Err(TemplateModelError::ValueTypeMismatch {
+            key,
+            expected: "scalar",
+        }),
+        _ => Ok(false),
+    }
+}
+
+pub(crate) fn augment_block_dispatch(
+    entry: &RenderModel,
+    current_template: &TemplateName,
+    known_block_types: &[String],
+) -> Result<RenderModel, TemplateModelError> {
+    let Some(RenderValue::Text(block_type)) = entry.get_path("type") else {
+        return Ok(entry.clone());
+    };
+
+    let current_block_type = block_type.clone();
+    let dispatch_key = block_dispatch_key(block_type);
+    let local_fragment = format!("{}/blocks/{block_type}", current_template.as_str());
+    let shared_fragment = format!("blocks/{block_type}");
+    let mut model = entry.clone();
+    for known_block_type in known_block_types {
+        model = model.with_bool(
+            format!("is_{}", block_dispatch_key(known_block_type)),
+            *known_block_type == current_block_type,
+        )?;
+    }
+    model
+        .with_bool(format!("is_{dispatch_key}"), true)?
+        .with_value("render_fragment", RenderValue::text(local_fragment))?
+        .with_value("render_fragment_shared", RenderValue::text(shared_fragment))
+}
+
+fn block_dispatch_key(block_type: &str) -> String {
+    let mut key = String::with_capacity(block_type.len());
+    for ch in block_type.chars() {
+        match ch {
+            'a'..='z' | '0'..='9' | '_' => key.push(ch),
+            'A'..='Z' => key.push(ch.to_ascii_lowercase()),
+            '-' | '.' | ':' | '/' => key.push('_'),
+            _ => {}
+        }
+    }
+    if key.is_empty() {
+        "block".to_string()
+    } else {
+        key
+    }
+}
+
+fn collect_block_types(entries: &[RenderModel]) -> Vec<String> {
+    let mut block_types = Vec::new();
+    for entry in entries {
+        let Some(RenderValue::Text(block_type)) = entry.get_path("type") else {
+            continue;
+        };
+        if !block_types.iter().any(|existing| existing == block_type) {
+            block_types.push(block_type.to_string());
+        }
+    }
+    block_types
 }

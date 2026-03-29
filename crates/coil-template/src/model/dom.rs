@@ -97,6 +97,17 @@ pub enum TemplateExpression {
     LiteralBool(bool),
     AssetPath(String),
     TranslationKey(String),
+    Compare {
+        left: Box<TemplateExpression>,
+        operator: ComparisonOperator,
+        right: Box<TemplateExpression>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComparisonOperator {
+    Equal,
+    NotEqual,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +132,13 @@ impl TemplateBinding {
 pub enum ConditionExpression {
     Key(String),
     Literal(bool),
+    Expression(TemplateExpression),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchCaseNode {
+    pub(crate) expression: TemplateExpression,
+    pub(crate) children: Vec<Node>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +151,7 @@ pub enum Node {
     Element(ElementNode),
     Slot(SlotNode),
     Include(TemplateSelector),
+    IncludeExpression(TemplateExpression),
     With {
         bindings: Vec<TemplateBinding>,
         children: Vec<Node>,
@@ -140,6 +159,18 @@ pub enum Node {
     Conditional {
         condition: ConditionExpression,
         negated: bool,
+        children: Vec<Node>,
+    },
+    Switch {
+        expression: TemplateExpression,
+        cases: Vec<SwitchCaseNode>,
+        default: Option<Vec<Node>>,
+    },
+    Case {
+        expression: TemplateExpression,
+        children: Vec<Node>,
+    },
+    Default {
         children: Vec<Node>,
     },
     Each {
@@ -174,6 +205,10 @@ impl Node {
         Self::Include(selector)
     }
 
+    pub fn include_expression(expression: TemplateExpression) -> Self {
+        Self::IncludeExpression(expression)
+    }
+
     pub fn with(bindings: Vec<TemplateBinding>, children: Vec<Node>) -> Self {
         Self::With { bindings, children }
     }
@@ -193,6 +228,25 @@ impl Node {
         Self::Conditional {
             condition: ConditionExpression::Literal(value),
             negated: false,
+            children,
+        }
+    }
+
+    pub fn conditional_expression(expression: TemplateExpression, children: Vec<Node>) -> Self {
+        Self::Conditional {
+            condition: ConditionExpression::Expression(expression),
+            negated: false,
+            children,
+        }
+    }
+
+    pub fn conditional_expression_not(
+        expression: TemplateExpression,
+        children: Vec<Node>,
+    ) -> Self {
+        Self::Conditional {
+            condition: ConditionExpression::Expression(expression),
+            negated: true,
             children,
         }
     }
@@ -218,5 +272,28 @@ impl Node {
             collection: validate_token("render_key", collection.into())?,
             children,
         })
+    }
+
+    pub fn switch(
+        expression: TemplateExpression,
+        cases: Vec<SwitchCaseNode>,
+        default: Option<Vec<Node>>,
+    ) -> Self {
+        Self::Switch {
+            expression,
+            cases,
+            default,
+        }
+    }
+
+    pub fn case(expression: TemplateExpression, children: Vec<Node>) -> Self {
+        Self::Case {
+            expression,
+            children,
+        }
+    }
+
+    pub fn default(children: Vec<Node>) -> Self {
+        Self::Default { children }
     }
 }

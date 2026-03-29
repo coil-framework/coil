@@ -619,6 +619,9 @@ dependencies = [
 [[package]]
 name = "coil-customer-sdk"
 version = "0.1.1"
+dependencies = [
+ "coil-template",
+]
 
 [[package]]
 name = "coil-data"

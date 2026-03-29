@@ -14,7 +14,9 @@ use coil_customer_sdk::{
     AuthExplanation, AuthFacade, BackendError, BackendErrorKind, CommerceFacade,
     CustomerAppContext as CustomerPluginAppContext, MoneyAmount, OrderDraft, OrderLineDraft,
     OrderReviewDecision, PrincipalContext as CustomerPluginPrincipalContext,
-    PrincipalKind as CustomerPluginPrincipalKind, RequestContext as CustomerPluginRequestContext,
+    PrincipalKind as CustomerPluginPrincipalKind, RenderModelContribution, RenderTarget,
+    RepositoryFacade, RepositoryQuery, RepositoryRecord, RepositoryRecordSet, RepositoryWrite,
+    RepositoryWriteReceipt, RequestContext as CustomerPluginRequestContext,
     TraceContext as CustomerPluginTraceContext,
 };
 use coil_memberships::{
@@ -22,7 +24,8 @@ use coil_memberships::{
     MembershipTier, MembershipTierId, SubscriptionStatus, TierVisibility,
 };
 use coil_template::{
-    RenderModel, RenderValue, TemplateModelError, TemplateNamespace, TrustedHtml,
+    RenderModel, RenderModelMergePolicy, RenderValue, TemplateModelError, TemplateNamespace,
+    TrustedHtml,
 };
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -213,6 +216,222 @@ impl AuditFacade for RuntimeCustomerAuditFacade<'_> {
     }
 }
 
+struct RuntimeRenderRepositoryFacade<'a> {
+    catalog: &'a StorefrontCatalog,
+    workspace: Option<Arc<Mutex<CmsAdminWorkspace>>>,
+}
+
+impl RepositoryFacade for RuntimeRenderRepositoryFacade<'_> {
+    fn read(&self, query: &RepositoryQuery) -> Result<RepositoryRecordSet, BackendError> {
+        let records = match query.repository.as_str() {
+            "cms.pages" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Render model hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
+                .pages
+                .iter()
+                .filter(|page| {
+                    query.key.as_deref().map_or(true, |key| {
+                        page.id == key
+                            || page.draft.slug == key
+                            || page.live.as_ref().is_some_and(|live| live.slug == key)
+                    })
+                })
+                .map(|page| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("title".to_string(), page.draft.title.clone());
+                    fields.insert("slug".to_string(), page.draft.slug.clone());
+                    fields.insert("summary".to_string(), page.draft.summary.clone());
+                    fields.insert("body_html".to_string(), page.draft.body_html.clone());
+                    fields.insert("status".to_string(), page.status_label().to_string());
+                    if let Some(live_path) = page.live_path() {
+                        fields.insert("live_path".to_string(), live_path);
+                    }
+                    RepositoryRecord {
+                        id: page.id.clone(),
+                        fields,
+                    }
+                })
+                .collect(),
+            "cms.navigation" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Render model hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
+                .navigation
+                .iter()
+                .enumerate()
+                .filter(|(index, item)| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| key == index.to_string() || key == item.href)
+                })
+                .map(|(index, item)| RepositoryRecord {
+                    id: index.to_string(),
+                    fields: BTreeMap::from([
+                        ("label".to_string(), item.label.clone()),
+                        ("href".to_string(), item.href.clone()),
+                    ]),
+                })
+                .collect(),
+            "cms.redirects" => self
+                .workspace
+                .as_ref()
+                .ok_or_else(|| {
+                    BackendError::new(
+                        BackendErrorKind::Unsupported,
+                        "repository.read.unsupported",
+                        "Render model hooks did not expose a CMS workspace for this request.",
+                    )
+                })?
+                .lock()
+                .map_err(|_| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "repository.workspace.lock_failed",
+                        "Runtime could not acquire the CMS workspace lock.",
+                    )
+                })?
+                .redirects
+                .iter()
+                .enumerate()
+                .filter(|(index, redirect)| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| key == index.to_string() || key == redirect.from)
+                })
+                .map(|(index, redirect)| RepositoryRecord {
+                    id: index.to_string(),
+                    fields: BTreeMap::from([
+                        ("from".to_string(), redirect.from.clone()),
+                        ("to".to_string(), redirect.to.clone()),
+                        ("permanent".to_string(), redirect.permanent.to_string()),
+                    ]),
+                })
+                .collect(),
+            "commerce.catalog.products" => self
+                .catalog
+                .products
+                .iter()
+                .filter(|product| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| product.handle == key || product.sku == key)
+                        && query
+                            .filters
+                            .get("collection_handle")
+                            .map_or(true, |handle| product.collection_handle == *handle)
+                })
+                .map(|product| RepositoryRecord {
+                    id: product.handle.clone(),
+                    fields: BTreeMap::from([
+                        ("handle".to_string(), product.handle.clone()),
+                        ("sku".to_string(), product.sku.clone()),
+                        ("title".to_string(), product.title.clone()),
+                        ("summary".to_string(), product.summary.clone()),
+                        ("price_minor".to_string(), product.price_minor.to_string()),
+                        ("currency".to_string(), product.currency.clone()),
+                        (
+                            "collection_handle".to_string(),
+                            product.collection_handle.clone(),
+                        ),
+                        ("is_visible".to_string(), product.is_visible.to_string()),
+                        ("product_kind".to_string(), product.product_kind.clone()),
+                        (
+                            "entitlement_key".to_string(),
+                            product.entitlement_key.clone().unwrap_or_default(),
+                        ),
+                    ]),
+                })
+                .collect(),
+            "commerce.catalog.collections" => self
+                .catalog
+                .collections
+                .iter()
+                .filter(|collection| {
+                    query
+                        .key
+                        .as_deref()
+                        .map_or(true, |key| collection.handle == key)
+                })
+                .map(|collection| RepositoryRecord {
+                    id: collection.handle.clone(),
+                    fields: BTreeMap::from([
+                        ("handle".to_string(), collection.handle.clone()),
+                        ("title".to_string(), collection.title.clone()),
+                        ("label".to_string(), collection.label.clone()),
+                        ("summary".to_string(), collection.summary.clone()),
+                        ("is_visible".to_string(), collection.is_visible.to_string()),
+                    ]),
+                })
+                .collect(),
+            "commerce.orders" => {
+                return Err(BackendError::new(
+                    BackendErrorKind::Unsupported,
+                    "repository.read.unsupported",
+                    "Render model hooks do not expose commerce order reads during template rendering.",
+                ));
+            }
+            _ => {
+                return Err(BackendError::new(
+                    BackendErrorKind::Unsupported,
+                    "repository.read.unsupported",
+                    format!(
+                        "Render model hooks only expose `cms.pages`, `cms.navigation`, `cms.redirects`, `commerce.catalog.products`, and `commerce.catalog.collections` reads; `{}` is not available.",
+                        query.repository
+                    ),
+                ));
+            }
+        };
+
+        Ok(RepositoryRecordSet {
+            repository: query.repository.clone(),
+            records,
+        })
+    }
+
+    fn write(&self, change: RepositoryWrite) -> Result<RepositoryWriteReceipt, BackendError> {
+        Err(BackendError::new(
+            BackendErrorKind::Unsupported,
+            "repository.write.unsupported",
+            format!(
+                "Render model hooks are read-only; repository `{}` cannot be written during render.",
+                change.repository
+            ),
+        ))
+    }
+}
+
 impl RuntimePlan {
     pub(super) fn template_namespaces_for_execution(
         &self,
@@ -345,7 +564,7 @@ impl RuntimePlan {
             model = model.with_translation(key.as_str(), value)?;
         }
 
-        apply_route_specific_bindings(
+        let model = apply_route_specific_bindings(
             Some(self),
             model,
             execution.route.route_name.as_str(),
@@ -356,7 +575,9 @@ impl RuntimePlan {
             storefront_feedback.form_state.as_ref(),
             Some(&execution.session),
             Some(&execution.principal),
-        )
+        )?;
+
+        apply_customer_render_model_contributions(self, execution, template_name, fragment_id, model)
     }
 }
 
@@ -392,9 +613,125 @@ fn registered_hook_label(kind: &RegisteredHookKind) -> &'static str {
     match kind {
         RegisteredHookKind::Checkout => "checkout",
         RegisteredHookKind::CmsPagePublish => "cms-page-publish",
+        RegisteredHookKind::RenderModel => "render-model",
         RegisteredHookKind::VerifiedWebhook => "verified-webhook",
         RegisteredHookKind::VerifiedWebhookAssets => "verified-webhook-assets",
     }
+}
+
+fn apply_customer_render_model_contributions(
+    plan: &RuntimePlan,
+    execution: &RequestExecution,
+    template_name: &str,
+    fragment_id: Option<&str>,
+    mut model: RenderModel,
+) -> Result<RenderModel, TemplateModelError> {
+    if plan.customer_hooks.render_model.is_empty() {
+        return Ok(model);
+    }
+
+    let workspace = cms_admin_workspace(plan)
+        .ok()
+        .map(|workspace| Arc::new(Mutex::new(workspace)));
+    let repositories = RuntimeRenderRepositoryFacade {
+        catalog: &plan.storefront_catalog,
+        workspace,
+    };
+    let audit = RuntimeCustomerAuditFacade {
+        plan,
+        principal_id: execution.principal.principal_id.as_deref(),
+    };
+    let context = runtime_customer_render_request_context(plan, execution);
+    let target = runtime_customer_render_target(execution, template_name, fragment_id);
+
+    for hook in &plan.customer_hooks.render_model {
+        let contributions = hook
+            .contribute_render_model(&context, &target, &repositories, &audit)
+            .map_err(customer_plugin_template_error)?;
+        for contribution in contributions {
+            model = apply_customer_render_model_contribution(model, contribution)?;
+        }
+    }
+
+    Ok(model)
+}
+
+fn apply_customer_render_model_contribution(
+    model: RenderModel,
+    contribution: RenderModelContribution,
+) -> Result<RenderModel, TemplateModelError> {
+    match contribution {
+        RenderModelContribution::Mount { path, model: value } => {
+            model.mount_object(path.as_str(), value)
+        }
+        RenderModelContribution::Merge {
+            path,
+            model: value,
+            policy,
+        } => model.merge_object(path.as_str(), value, merge_policy(policy)),
+    }
+}
+
+fn merge_policy(policy: coil_customer_sdk::MergePolicy) -> RenderModelMergePolicy {
+    match policy {
+        coil_customer_sdk::MergePolicy::FailOnConflict => {
+            RenderModelMergePolicy::FailOnConflict
+        }
+        coil_customer_sdk::MergePolicy::ReplaceExisting => {
+            RenderModelMergePolicy::ReplaceExisting
+        }
+        coil_customer_sdk::MergePolicy::AppendLists => RenderModelMergePolicy::AppendLists,
+    }
+}
+
+fn runtime_customer_render_request_context(
+    plan: &RuntimePlan,
+    execution: &RequestExecution,
+) -> CustomerPluginRequestContext {
+    let environment = match plan.config.app.environment {
+        coil_config::Environment::Development => "development",
+        coil_config::Environment::Staging => "staging",
+        coil_config::Environment::Production => "production",
+    };
+    let mut customer_app =
+        CustomerPluginAppContext::new(execution.customer_app.clone(), environment.to_owned());
+    if let Some(site_id) = execution.site_id.as_deref() {
+        customer_app = customer_app.with_site_id(site_id.to_string());
+    }
+    if !execution.locale.trim().is_empty() {
+        customer_app = customer_app.with_locale(execution.locale.clone());
+    }
+    let principal = customer_plugin_principal(execution.principal.principal_id.as_deref());
+    let trace = CustomerPluginTraceContext::new(execution.trace.request_id.clone())
+        .with_request_id(execution.trace.request_id.clone());
+    CustomerPluginRequestContext::new(customer_app, principal, trace)
+}
+
+fn runtime_customer_render_target(
+    execution: &RequestExecution,
+    template_name: &str,
+    fragment_id: Option<&str>,
+) -> RenderTarget {
+    let mut target = RenderTarget::new(
+        execution.route.route_name.clone(),
+        template_name.to_string(),
+        execution.locale.clone(),
+    )
+    .with_route_params(execution.route.params.clone())
+    .with_query_params(
+        execution
+            .query_params
+            .iter()
+            .filter_map(|(key, values)| values.first().map(|value| (key.clone(), value.clone())))
+            .collect(),
+    );
+    if let Some(site_id) = execution.site_id.as_deref() {
+        target = target.with_site_id(site_id.to_string());
+    }
+    if let Some(fragment_id) = fragment_id {
+        target = target.with_fragment_id(fragment_id.to_string());
+    }
+    target
 }
 
 fn route_params_model(params: &BTreeMap<String, String>) -> RenderModel {
@@ -4460,11 +4797,13 @@ mod tests {
     use super::*;
     use crate::builder::RuntimeBuilder;
     use coil_auth::DefaultAuthModelPackage;
+    use coil_commerce::CommerceModule;
     use coil_config::PlatformConfig;
     use coil_customer_sdk::{
-        AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade,
-        CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor, OrderDraft,
-        OrderReviewDecision, RequestContext,
+        AuditFacade, AuthFacade, BackendError, BackendErrorKind, CheckoutHooks, CommerceFacade,
+        CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor, MergePolicy,
+        OrderDraft, OrderReviewDecision, RenderModelContribution, RenderModelHooks, RenderTarget,
+        RepositoryFacade, RequestContext,
     };
     use coil_template::{
         DocumentRenderRequest, TemplateName, TemplateNamespace, TemplateRegistry, TemplateRuntime,
@@ -4476,7 +4815,7 @@ mod tests {
 
     const RENDER_TEST_CONFIG: &str = r#"
 [app]
-name = "showcase-events"
+name = "customer-render-tests"
 environment = "production"
 
 [server]
@@ -4629,6 +4968,12 @@ cdn_base_url = "https://cdn.example.com"
 
     #[derive(Debug)]
     struct ReplayPrincipalCheckoutHooks;
+
+    #[derive(Debug)]
+    struct TargetAwareRenderModelPlugin;
+
+    #[derive(Debug)]
+    struct TargetAwareRenderModelHooks;
 
     impl CheckoutHooks for WrongOrderNoteCheckoutHooks {
         fn review_order(
@@ -4841,6 +5186,76 @@ cdn_base_url = "https://cdn.example.com"
         }
     }
 
+    impl RenderModelHooks for TargetAwareRenderModelHooks {
+        fn contribute_render_model(
+            &self,
+            _ctx: &RequestContext,
+            target: &RenderTarget,
+            _repositories: &dyn RepositoryFacade,
+            _audit: &dyn AuditFacade,
+        ) -> Result<Vec<RenderModelContribution>, BackendError> {
+            let mounted = RenderModel::new()
+                .with_value("route_name", RenderValue::text(target.route_name.clone()))
+                .and_then(|model| {
+                    model.with_value("template_name", RenderValue::text(target.template_name.clone()))
+                })
+                .and_then(|model| {
+                    model.with_value(
+                        "product_slug",
+                        RenderValue::text(
+                            target
+                                .route_params
+                                .get("product_slug")
+                                .cloned()
+                                .unwrap_or_default(),
+                        ),
+                    )
+                })
+                .and_then(|model| {
+                    model.with_value(
+                        "view",
+                        RenderValue::text(
+                            target.query_params.get("view").cloned().unwrap_or_default(),
+                        ),
+                    )
+                })
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "render_model.target.invalid",
+                        error.to_string(),
+                    )
+                })?;
+            let page_overlay = RenderModel::new()
+                .with_value("render_source", RenderValue::text("linked-rust"))
+                .map_err(|error| {
+                    BackendError::new(
+                        BackendErrorKind::Internal,
+                        "render_model.target.invalid",
+                        error.to_string(),
+                    )
+                })?;
+            Ok(vec![
+                RenderModelContribution::mount("customer_extension", mounted)?,
+                RenderModelContribution::merge("page", page_overlay, MergePolicy::FailOnConflict)?,
+            ])
+        }
+    }
+
+    impl CustomerBackendPlugin for TargetAwareRenderModelPlugin {
+        fn descriptor(&self) -> CustomerPluginDescriptor {
+            CustomerPluginDescriptor::new(
+                "customer-render-model-target-aware",
+                "Customer Render Model Target Aware",
+                "0.1.0",
+            )
+        }
+
+        fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+            registry.register_render_model_hooks(Arc::new(TargetAwareRenderModelHooks))
+        }
+    }
+
     fn render_test_plan_with_customer_plugin<C>(plugin: C) -> RuntimePlan
     where
         C: CustomerBackendPlugin,
@@ -4856,7 +5271,7 @@ cdn_base_url = "https://cdn.example.com"
         let config = PlatformConfig::from_toml_str(
             &RENDER_TEST_CONFIG
                 .replace(
-                    "name = \"showcase-events\"",
+                    "name = \"customer-render-tests\"",
                     &format!("name = \"{app_name}\""),
                 )
                 .replace(
@@ -5408,6 +5823,207 @@ cdn_base_url = "https://cdn.example.com"
         .expect("principal-aware review should exist");
 
         assert!(matches!(review.decision, OrderReviewDecision::Approved));
+    }
+
+    #[test]
+    fn render_model_hooks_mount_namespaced_models_and_merge_page_fields() {
+        let config = PlatformConfig::from_toml_str(RENDER_TEST_CONFIG).unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .with_module(CommerceModule::new())
+            .with_customer_plugin(TargetAwareRenderModelPlugin)
+            .build()
+            .unwrap();
+
+        let execution = plan
+            .execute_request(
+                RequestInput::new(
+                    HttpMethod::Get,
+                    "www.example.com",
+                    "/en-GB/shop/products/harbor-cap",
+                )
+                .unwrap()
+                .with_query_param("view", "summary"),
+                b"01234567012345670123456701234567",
+                b"76543210765432107654321076543210",
+            )
+            .unwrap();
+        let model = plan
+            .render_model_for_execution(&execution, "commerce/product-detail", None)
+            .unwrap();
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <p class="route" coil:text="${customer_extension.route_name}">route</p>
+    <p class="template" coil:text="${customer_extension.template_name}">template</p>
+    <p class="slug" coil:text="${customer_extension.product_slug}">slug</p>
+    <p class="view" coil:text="${customer_extension.view}">view</p>
+    <p class="source" coil:text="${page.render_source}">source</p>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    model,
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains("commerce.product-detail"), "{html}");
+        assert!(html.contains("commerce/product-detail"), "{html}");
+        assert!(html.contains("harbor-cap"), "{html}");
+        assert!(html.contains("summary"), "{html}");
+        assert!(html.contains("linked-rust"), "{html}");
+    }
+
+    #[test]
+    fn render_model_hooks_fail_closed_on_merge_conflicts_by_default() {
+        let model = RenderModel::new()
+            .with_object(
+                "page",
+                RenderModel::new()
+                    .with_value("title", RenderValue::text("Runtime title"))
+                    .unwrap(),
+            )
+            .unwrap();
+        let contribution = RenderModelContribution::merge(
+            "page",
+            RenderModel::new()
+                .with_value("title", RenderValue::text("Customer title"))
+                .unwrap(),
+            MergePolicy::FailOnConflict,
+        )
+        .unwrap();
+
+        let error = apply_customer_render_model_contribution(model, contribution).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("page.title"), "{message}");
+        assert!(message.contains("existing value differs"), "{message}");
+    }
+
+    #[test]
+    fn render_model_hooks_can_replace_existing_fields() {
+        let model = RenderModel::new()
+            .with_object(
+                "page",
+                RenderModel::new()
+                    .with_value("title", RenderValue::text("Runtime title"))
+                    .unwrap(),
+            )
+            .unwrap();
+        let contribution = RenderModelContribution::merge(
+            "page",
+            RenderModel::new()
+                .with_value("title", RenderValue::text("Customer title"))
+                .unwrap(),
+            MergePolicy::ReplaceExisting,
+        )
+        .unwrap();
+
+        let merged = apply_customer_render_model_contribution(model, contribution).unwrap();
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <p coil:text="${page.title}">title</p>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    merged,
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains("Customer title"), "{html}");
+    }
+
+    #[test]
+    fn render_model_hooks_can_append_lists() {
+        let model = RenderModel::new()
+            .with_object(
+                "page",
+                RenderModel::new()
+                    .with_list(
+                        "sections",
+                        vec![
+                            RenderModel::new()
+                                .with_value("label", RenderValue::text("alpha"))
+                                .unwrap(),
+                        ],
+                    )
+                    .unwrap(),
+            )
+            .unwrap();
+        let contribution = RenderModelContribution::merge(
+            "page",
+            RenderModel::new()
+                .with_list(
+                    "sections",
+                    vec![
+                        RenderModel::new()
+                            .with_value("label", RenderValue::text("beta"))
+                            .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            MergePolicy::AppendLists,
+        )
+        .unwrap();
+
+        let merged = apply_customer_render_model_contribution(model, contribution).unwrap();
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <p coil:each="section : ${page.sections}" coil:text="${section.label}">section</p>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    merged,
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains("alpha"), "{html}");
+        assert!(html.contains("beta"), "{html}");
     }
 }
 #[derive(Clone)]

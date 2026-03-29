@@ -259,12 +259,16 @@ fn render_element<'a>(
     let mut static_attrs = Vec::new();
     let mut dynamic_attrs = Vec::new();
     let mut include_selector: Option<IncludeTarget> = None;
+    let mut include_expression: Option<TemplateExpression> = None;
     let mut slot_name: Option<String> = None;
     let mut text_expression: Option<TemplateExpression> = None;
     let mut raw_text_expression: Option<TemplateExpression> = None;
     let mut with_bindings: Vec<TemplateBinding> = Vec::new();
     let mut each_binding: Option<(String, String)> = None;
     let mut condition: Option<(ConditionExpression, bool)> = None;
+    let mut switch_expression: Option<TemplateExpression> = None;
+    let mut case_expression: Option<TemplateExpression> = None;
+    let mut default_case = false;
 
     for attr in attrs {
         let name = attr.name.local.to_string();
@@ -282,8 +286,12 @@ fn render_element<'a>(
                 "replace" => {
                     include_selector = Some(IncludeTarget::Replace(parse_selector_ref(&value)?))
                 }
+                "replace-fragment" => include_expression = Some(parse_template_expression(&value)?),
                 "include" => {
                     include_selector = Some(IncludeTarget::Insert(parse_selector_ref(&value)?))
+                }
+                "include-fragment" | "insert-fragment" => {
+                    include_expression = Some(parse_template_expression(&value)?)
                 }
                 "insert" => {
                     let selector = parse_selector_ref(&value)?;
@@ -300,6 +308,9 @@ fn render_element<'a>(
                 "with" => with_bindings = parse_with_bindings(&value)?,
                 "if" => condition = Some((parse_condition(&value)?, false)),
                 "unless" => condition = Some((parse_condition(&value)?, true)),
+                "switch" => switch_expression = Some(parse_template_expression(&value)?),
+                "case" => case_expression = Some(parse_template_expression(&value)?),
+                "default" => default_case = true,
                 "each" => each_binding = Some(parse_each_expression(&value)?),
                 other => dynamic_attrs.push(AttributeNode::dynamic_expression(
                     other,
@@ -313,10 +324,38 @@ fn render_element<'a>(
     }
 
     let mut rendered_children = render_children(children, path)?;
+    if case_expression.is_some() && default_case {
+        return Err(TemplateModelError::ParseError {
+            line: 0,
+            column: 0,
+            message: "coil:case and coil:default cannot be used on the same element".to_string(),
+        });
+    }
+    if case_expression.is_some() || default_case {
+        if switch_expression.is_some() {
+            return Err(TemplateModelError::ParseError {
+                line: 0,
+                column: 0,
+                message: "coil:switch cannot be combined with coil:case or coil:default on the same element".to_string(),
+            });
+        }
+    }
+    if include_selector.is_some() && include_expression.is_some() {
+        return Err(TemplateModelError::ParseError {
+            line: 0,
+            column: 0,
+            message: "static fragment inclusion cannot be combined with expression-based fragment inclusion".to_string(),
+        });
+    }
+
     if let Some(expression) = text_expression {
         rendered_children = vec![Node::expression(expression)];
     } else if let Some(expression) = raw_text_expression {
         rendered_children = vec![Node::raw_expression(expression)];
+    }
+
+    if let Some(expression) = switch_expression {
+        rendered_children = vec![build_switch_node(expression, rendered_children)?];
     }
 
     let mut element = if tag.eq_ignore_ascii_case("coil:block") {
@@ -330,28 +369,33 @@ fn render_element<'a>(
         )?)
     };
 
-    let mut nodes = match (slot_name, include_selector, element.take()) {
-        (Some(slot), _, Some(mut element)) => {
+    let mut nodes = match (slot_name, include_selector, include_expression, element.take()) {
+        (Some(slot), _, _, Some(mut element)) => {
             element.children = vec![Node::Slot(
                 SlotNode::new(SlotName::new(slot)?).with_fallback(rendered_children),
             )];
             vec![Node::Element(element)]
         }
-        (Some(slot), _, None) => vec![Node::Slot(
+        (Some(slot), _, _, None) => vec![Node::Slot(
             SlotNode::new(SlotName::new(slot)?).with_fallback(rendered_children),
         )],
-        (None, Some(IncludeTarget::Replace(selector)), _) => {
+        (None, Some(IncludeTarget::Replace(selector)), _, _) => {
             vec![Node::include(selector_to_template_selector(selector)?)]
         }
-        (None, Some(IncludeTarget::Insert(selector)), Some(mut element)) => {
+        (None, Some(IncludeTarget::Insert(selector)), _, Some(mut element)) => {
             element.children = vec![Node::include(selector_to_template_selector(selector)?)];
             vec![Node::Element(element)]
         }
-        (None, Some(IncludeTarget::Insert(selector)), None) => {
+        (None, Some(IncludeTarget::Insert(selector)), _, None) => {
             vec![Node::include(selector_to_template_selector(selector)?)]
         }
-        (None, None, Some(element)) => vec![Node::Element(element)],
-        (None, None, None) => rendered_children,
+        (None, None, Some(expression), Some(mut element)) => {
+            element.children = vec![Node::include_expression(expression)];
+            vec![Node::Element(element)]
+        }
+        (None, None, Some(expression), None) => vec![Node::include_expression(expression)],
+        (None, None, None, Some(element)) => vec![Node::Element(element)],
+        (None, None, None, None) => rendered_children,
     };
 
     if let Some((condition, negated)) = condition {
@@ -360,6 +404,12 @@ fn render_element<'a>(
             (ConditionExpression::Key(key), true) => Node::conditional_not(key, nodes)?,
             (ConditionExpression::Literal(value), false) => Node::conditional_literal(value, nodes),
             (ConditionExpression::Literal(value), true) => Node::conditional_literal(!value, nodes),
+            (ConditionExpression::Expression(expression), false) => {
+                Node::conditional_expression(expression, nodes)
+            }
+            (ConditionExpression::Expression(expression), true) => {
+                Node::conditional_expression_not(expression, nodes)
+            }
         }];
     }
 
@@ -369,6 +419,12 @@ fn render_element<'a>(
 
     if !with_bindings.is_empty() {
         nodes = vec![Node::with(with_bindings, nodes)];
+    }
+
+    if let Some(expression) = case_expression {
+        nodes = vec![Node::case(expression, nodes)];
+    } else if default_case {
+        nodes = vec![Node::default(nodes)];
     }
 
     Ok(nodes)
@@ -487,6 +543,7 @@ fn parse_slot_name(value: &str) -> String {
 fn parse_condition(value: &str) -> Result<ConditionExpression, TemplateModelError> {
     let value = value.trim();
     match parse_template_expression(value)? {
+        expression @ TemplateExpression::Compare { .. } => Ok(ConditionExpression::Expression(expression)),
         TemplateExpression::LiteralBool(value) => Ok(ConditionExpression::Literal(value)),
         TemplateExpression::LiteralText(value) => match value.to_ascii_lowercase().as_str() {
             "true" => Ok(ConditionExpression::Literal(true)),
@@ -570,6 +627,14 @@ fn parse_attr_bindings(value: &str) -> Result<Vec<AttributeNode>, TemplateModelE
 fn parse_template_expression(value: &str) -> Result<TemplateExpression, TemplateModelError> {
     let trimmed = value.trim();
 
+    if let Some((left, operator, right)) = split_comparison_expression(trimmed) {
+        return Ok(TemplateExpression::Compare {
+            left: Box::new(parse_template_expression(left.trim())?),
+            operator,
+            right: Box::new(parse_template_expression(right.trim())?),
+        });
+    }
+
     if let Some(inner) = trimmed
         .strip_prefix("${")
         .and_then(|value| value.strip_suffix('}'))
@@ -643,6 +708,85 @@ fn parse_template_expression(value: &str) -> Result<TemplateExpression, Template
         "false" => Ok(TemplateExpression::LiteralBool(false)),
         other => Ok(TemplateExpression::ModelKey(other.to_string())),
     }
+}
+
+fn split_comparison_expression(value: &str) -> Option<(&str, ComparisonOperator, &str)> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let chars: Vec<(usize, char)> = value.char_indices().collect();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let (byte_index, ch) = chars[index];
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '(' if !in_single && !in_double => paren_depth += 1,
+            ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
+            '{' if !in_single && !in_double => brace_depth += 1,
+            '}' if !in_single && !in_double && brace_depth > 0 => brace_depth -= 1,
+            '=' if !in_single && !in_double && paren_depth == 0 && brace_depth == 0 => {
+                if value[byte_index..].starts_with("==") {
+                    let left = &value[..byte_index];
+                    let right = &value[byte_index + 2..];
+                    return Some((left, ComparisonOperator::Equal, right));
+                }
+            }
+            '!' if !in_single && !in_double && paren_depth == 0 && brace_depth == 0 => {
+                if value[byte_index..].starts_with("!=") {
+                    let left = &value[..byte_index];
+                    let right = &value[byte_index + 2..];
+                    return Some((left, ComparisonOperator::NotEqual, right));
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn build_switch_node(
+    expression: TemplateExpression,
+    children: Vec<Node>,
+) -> Result<Node, TemplateModelError> {
+    let mut cases = Vec::new();
+    let mut default = None;
+
+    for child in children {
+        match child {
+            Node::Case {
+                expression,
+                children,
+            } => cases.push(SwitchCaseNode {
+                expression,
+                children,
+            }),
+            Node::Default { children } => {
+                if default.is_some() {
+                    return Err(TemplateModelError::ParseError {
+                        line: 0,
+                        column: 0,
+                        message: "coil:switch may only contain one coil:default branch".to_string(),
+                    });
+                }
+                default = Some(children);
+            }
+            other => {
+                return Err(TemplateModelError::ParseError {
+                    line: 0,
+                    column: 0,
+                    message: format!(
+                        "coil:switch only accepts direct children annotated with coil:case or coil:default, found `{:?}`",
+                        other
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok(Node::switch(expression, cases, default))
 }
 
 fn parse_translation_expression(value: &str) -> Result<TemplateExpression, TemplateModelError> {
@@ -805,14 +949,24 @@ mod tests {
                 }
                 Node::With { children, .. }
                 | Node::Conditional { children, .. }
-                | Node::Each { children, .. } => contains_translation_node(children, key),
+                | Node::Each { children, .. }
+                | Node::Default { children } => contains_translation_node(children, key),
+                Node::Switch { cases, default, .. } => {
+                    cases.iter().any(|case| contains_translation_node(&case.children, key))
+                        || default
+                            .as_ref()
+                            .is_some_and(|children| contains_translation_node(children, key))
+                }
+                Node::Case { children, .. } => contains_translation_node(children, key),
                 Node::Slot(slot) => slot
                     .fallback
                     .as_ref()
                     .is_some_and(|children| contains_translation_node(children, key)),
-                Node::StaticText(_) | Node::Value(_) | Node::RawValue(_) | Node::Include(_) => {
-                    false
-                }
+                Node::StaticText(_)
+                | Node::Value(_)
+                | Node::RawValue(_)
+                | Node::Include(_)
+                | Node::IncludeExpression(_) => false,
             })
         }
 
@@ -849,14 +1003,24 @@ mod tests {
                 Node::Element(element) => contains_translation_node(&element.children, key),
                 Node::With { children, .. }
                 | Node::Conditional { children, .. }
-                | Node::Each { children, .. } => contains_translation_node(children, key),
+                | Node::Each { children, .. }
+                | Node::Default { children } => contains_translation_node(children, key),
+                Node::Switch { cases, default, .. } => {
+                    cases.iter().any(|case| contains_translation_node(&case.children, key))
+                        || default
+                            .as_ref()
+                            .is_some_and(|children| contains_translation_node(children, key))
+                }
+                Node::Case { children, .. } => contains_translation_node(children, key),
                 Node::Slot(slot) => slot
                     .fallback
                     .as_ref()
                     .is_some_and(|children| contains_translation_node(children, key)),
-                Node::StaticText(_) | Node::Value(_) | Node::RawValue(_) | Node::Include(_) => {
-                    false
-                }
+                Node::StaticText(_)
+                | Node::Value(_)
+                | Node::RawValue(_)
+                | Node::Include(_)
+                | Node::IncludeExpression(_) => false,
             })
         }
 

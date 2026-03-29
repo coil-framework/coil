@@ -4,59 +4,82 @@ title: Linked Rust Hook APIs
 
 Linked Rust backends are the first-party customer extension model in Coil.
 
-Start with the smallest useful plugin shape:
+This page explains the public hook surface as it exists today:
+
+- how a customer plugin registers hooks
+- which hook families are supported
+- what each family is for
+- how render-model hooks fit into page rendering
+
+## The Plugin Boundary
+
+Every linked backend starts the same way:
 
 ```rust
 use coil_customer_sdk::{
-    CheckoutHooks, CustomerBackendPlugin, CustomerHookRegistry, PluginDescriptor,
+    BackendError, CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor,
 };
 
-struct ShopprBackend;
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CustomerBackend;
 
-impl CustomerBackendPlugin for ShopprBackend {
-    fn descriptor(&self) -> PluginDescriptor {
-        PluginDescriptor::new("shoppr-backend", "Shoppr Linked Backend", "0.1.0")
+impl CustomerBackendPlugin for CustomerBackend {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "customer-backend",
+            "Customer Backend",
+            env!("CARGO_PKG_VERSION"),
+        )
     }
 
-    fn register(&self, registry: &mut dyn CustomerHookRegistry) {
-        registry.register_checkout(Box::new(ShopprCheckoutHooks));
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        Ok(())
     }
 }
 ```
 
-That is the model:
+That trait is the top-level contract.
 
-- the customer binary links a plugin
-- the plugin registers explicit hooks
-- the runtime invokes those hooks through stable SDK traits and facades
+The plugin declares:
 
-Use this page when you want to answer:
+- its stable identity
+- its display name
+- its version
+- which hook families it wants to register
 
-- how a customer plugin registers hooks
-- which hook kinds exist today
-- which facades hooks can call
-- where Shoppr and Gitly demonstrate the pattern
+Coil does not scan random customer code for magic functions. Registration is explicit.
 
-## A Complete Plugin
+## Hook Families
 
-The smallest useful linked backend is not just a trait name. It is a plugin type plus explicit
-hook registration:
+The registry currently supports five hook families:
+
+- `register_checkout_hooks(...)`
+- `register_cms_hooks(...)`
+- `register_render_model_hooks(...)`
+- `register_verified_webhook_hooks(...)`
+- `register_verified_webhook_asset_hooks(...)`
+
+Each one is a different runtime boundary.
+
+## A Real Registration Example
+
+This is the normal shape for a plugin that participates in checkout and render-model shaping:
 
 ```rust
 use coil_customer_sdk::{
     BackendError, CheckoutHooks, CustomerBackendPlugin, CustomerHookRegistry,
-    CustomerPluginDescriptor, VerifiedWebhookHooks,
+    CustomerPluginDescriptor, RenderModelHooks,
 };
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ShopprBackend;
+pub struct CustomerBackend;
 
-impl CustomerBackendPlugin for ShopprBackend {
+impl CustomerBackendPlugin for CustomerBackend {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new(
-            "shoppr-backend",
-            "Shoppr Linked Backend",
+            "customer-backend",
+            "Customer Backend",
             env!("CARGO_PKG_VERSION"),
         )
     }
@@ -64,387 +87,217 @@ impl CustomerBackendPlugin for ShopprBackend {
     fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
         let hooks = Arc::new(*self);
         registry.register_checkout_hooks(hooks.clone())?;
-        registry.register_verified_webhook_hooks(hooks)?;
+        registry.register_render_model_hooks(hooks)?;
         Ok(())
     }
 }
 ```
 
-That is the real contract:
+That is the public model:
 
-- the plugin chooses its stable identity
-- the plugin explicitly registers the hook families it supports
-- the runtime invokes only those registered hooks
-
-## The Core Plugin Contract
-
-The top-level trait is `CustomerBackendPlugin`.
-
-Each plugin provides:
-
-- `descriptor()`
-  - id, display name, version, docs URL
-- `register(...)`
-  - hook registration against a `CustomerHookRegistry`
-
-That is the stable boundary a customer crate should target.
-
-## How To Think About Linked Rust
-
-Linked Rust is for first-party product policy, not for generic "run arbitrary code."
-
-Good linked Rust use cases:
-
-- checkout review rules
-- CMS publish validation
-- verified webhook handling
-- customer-specific audit or CRM routing
-
-Bad linked Rust use cases:
-
-- replacing core services
-- bypassing runtime policy through private internals
-- re-implementing official modules in customer code
-
-## Registered Hook Kinds
-
-The registry currently supports four hook families:
-
-- `Checkout`
-- `CmsPagePublish`
-- `VerifiedWebhook`
-- `VerifiedWebhookAssets`
-
-Use them like this:
-
-- `Checkout`
-  - order review, loyalty, fraud, or customer-specific checkout policy
-- `CmsPagePublish`
-  - customer-owned editorial rules before publication
-- `VerifiedWebhook`
-  - post-verification webhook policy
-- `VerifiedWebhookAssets`
-  - post-verification webhook policy that also needs managed asset publication or inspection
+- one plugin can implement multiple hook families
+- registration order is explicit
+- only registered hooks are invoked
 
 ## Checkout Hooks
 
-The checkout hook trait lives in `crates/coil-customer-sdk/src/hooks.rs`:
-
-- `CheckoutHooks::review_order(...)`
-
-This is the first hook to read if you are building customer-specific pricing, membership, fraud,
-or CRM routing logic.
-
-Concrete examples:
-
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
-- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-
-These show how Shoppr:
-
-- inspects the draft order
-- adds order notes through `CommerceFacade`
-- returns approve, reject, or adjust decisions
-
-Minimal mental model for checkout hooks:
-
-1. runtime builds an order draft
-2. hook receives the draft through the SDK
-3. hook uses stable facades if needed
-4. hook returns a bounded decision
-
-The Shoppr wrapper around the real loyalty backend is small on purpose:
+Trait:
 
 ```rust
-impl CheckoutHooks for ShopprBackend {
-    fn review_order(
-        &self,
-        ctx: &RequestContext,
-        order: &OrderDraft,
-        commerce: &dyn CommerceFacade,
-        auth: &dyn AuthFacade,
-        audit: &dyn AuditFacade,
-    ) -> Result<OrderReviewDecision, BackendError> {
-        self.inner.review_order(ctx, order, commerce, auth, audit)
-    }
-}
+CheckoutHooks::review_order(...)
 ```
 
-What a checkout hook can actually do:
+Use checkout hooks for:
 
-- read the order draft
-- inspect products through `CommerceFacade`
-- ask auth questions through `AuthFacade`
-- write audit entries through `AuditFacade`
-- return `allow`, `reject`, or an adjusted review result
+- customer-specific checkout rules
+- CRM routing at checkout time
+- fraud or fulfilment annotations
+- first-party product policy around order approval
 
-That is much safer than letting customer code reach directly into runtime request internals.
+The hook receives:
+
+- `RequestContext`
+- `OrderDraft`
+- `CommerceFacade`
+- `AuthFacade`
+- `AuditFacade`
+
+That gives customer code a controlled way to inspect the draft order and return an explicit review
+decision without reaching into runtime internals.
 
 ## CMS Publish Hooks
 
-The CMS hook trait is:
-
-- `CmsHooks::validate_page_publish(...)`
-
-Gitly is the clearer example here:
-
-- `apps/gitly/crates/gitly-backend/src/lib.rs`
-
-Gitly uses this hook to keep its README-style content honest by requiring accessibility guidance in
-published content.
-
-The real shape is:
+Trait:
 
 ```rust
-impl CmsHooks for GitlyBackend {
-    fn validate_page_publish(
-        &self,
-        _ctx: &RequestContext,
-        draft: &CmsPageDraft,
-        _repositories: &dyn RepositoryFacade,
-        audit: &dyn AuditFacade,
-    ) -> Result<CmsPublishDecision, BackendError> {
-        if draft.slug.contains("readme")
-            && !draft.body_html.to_ascii_lowercase().contains("accessibility")
-        {
-            return Ok(CmsPublishDecision::reject(
-                "gitly.cms.readme.accessibility_required",
-                "README-style documentation pages must mention accessibility guidance before they can be published.",
-            ));
-        }
-
-        audit.record(
-            AuditEntry::new(
-                "gitly.cms.publish.validated",
-                "cms.page",
-                draft.page_id.clone(),
-                "allowed",
-            )
-        )?;
-
-        Ok(CmsPublishDecision::Allow)
-    }
-}
+CmsHooks::validate_page_publish(...)
 ```
 
-That is the intended pattern:
+Use CMS hooks for:
 
-- inspect the draft
-- apply a customer-owned rule
-- record audit evidence
-- return an explicit publish decision
+- editorial validation
+- content policy enforcement
+- customer-specific workflow rules before publication
 
-That is a good example of linked Rust doing first-party product policy, not generic platform work.
+The hook receives:
 
-## Verified Webhook Hooks
-
-Verified webhooks are the hook family that runs after the runtime has already authenticated and
-normalized inbound webhook data.
-
-The traits are:
-
-- `VerifiedWebhookHooks::handle_verified_webhook(...)`
-- `VerifiedWebhookAssetHooks::handle_verified_webhook(...)`
-
-These hooks matter because they combine multiple host facades safely:
-
-- outbound HTTP
-- jobs
-- repositories
-- assets
-- audit
-
-The strongest current runtime coverage for these hooks lives in:
-
-These hooks are where multiple facades come together:
-
-- repository access
-- jobs
-- audit
-- outbound HTTP
-- managed assets
-
-That makes them the best example of "customer-owned logic through stable runtime contracts."
-
-The Shoppr registration point is:
-
-```rust
-impl VerifiedWebhookHooks for ShopprBackend {
-    fn handle_verified_webhook(
-        &self,
-        ctx: &RequestContext,
-        webhook: &VerifiedWebhook,
-        http: &dyn OutboundHttpFacade,
-        jobs: &dyn JobsFacade,
-        repositories: &dyn RepositoryFacade,
-        audit: &dyn AuditFacade,
-    ) -> Result<WebhookHandlingResult, BackendError> {
-        self.inner
-            .handle_verified_webhook(ctx, webhook, http, jobs, repositories, audit)
-    }
-}
-```
-
-Use verified webhook hooks when you need to:
-
-- call an approved upstream after a verified payment or provider event
-- enqueue follow-up background work
-- update repository-backed records
-- write audit evidence about the decision
-
-## Available Facades
-
-The facade traits live in `crates/coil-customer-sdk/src/facade.rs`.
-
-Current families:
-
-- `CommerceFacade`
-  - product lookup
-  - add order note
-- `JobsFacade`
-  - enqueue runtime jobs
+- `RequestContext`
+- `CmsPageDraft`
 - `RepositoryFacade`
-  - read and write stable repository surfaces
-- `AuthFacade`
-  - capability checks and denial explanations
 - `AuditFacade`
-  - operator or hook audit records
-- `OutboundHttpFacade`
-  - approved integration HTTP only
-- `AssetsFacade`
-  - publish and inspect managed assets
+
+That lets customer code reject invalid drafts through a stable, bounded contract.
+
+## Render Model Hooks
+
+Trait:
+
+```rust
+RenderModelHooks::contribute_render_model(...)
+```
+
+This is the hook family for customer-owned page shaping.
+
+Use it when:
+
+- the runtime should still own route resolution and template rendering
+- customer code needs to mount a top-level namespace such as `crm_page`
+- customer code needs to merge fields into a shared object such as `page`
+- page structure is derived from customer-owned data at request time
+
+The hook receives:
+
+- `RequestContext`
+- `RenderTarget`
+- `RepositoryFacade`
+- `AuditFacade`
+
+And it returns:
+
+- `Vec<RenderModelContribution>`
+
+That is the explicit handoff path for customer-owned render-model data.
 
 Simple example:
 
 ```rust
-let product = commerce.product("harbor-cap").await?;
-audit.record("checkout.reviewed", "customer draft inspected").await?;
-jobs.enqueue("crm.sync.contact", payload).await?;
-```
+use coil_customer_sdk::{
+    AuditFacade, BackendError, BackendErrorKind, MergePolicy, RenderModelContribution,
+    RenderModelHooks, RenderTarget, RepositoryFacade, RequestContext,
+};
+use coil_template::{RenderModel, RenderValue};
 
-The exact facade methods vary by family, but the pattern stays the same:
+impl RenderModelHooks for CustomerBackend {
+    fn contribute_render_model(
+        &self,
+        _ctx: &RequestContext,
+        target: &RenderTarget,
+        _repositories: &dyn RepositoryFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<Vec<RenderModelContribution>, BackendError> {
+        if target.route_name != "home" {
+            return Ok(Vec::new());
+        }
 
-- customer code uses typed SDK services
-- the runtime decides how those services are actually implemented
+        let mounted = RenderModel::new()
+            .with_value("page_kind", RenderValue::text("crm-home"))
+            .map_err(|error| {
+                BackendError::new(
+                    BackendErrorKind::Internal,
+                    "render_model.invalid",
+                    error.to_string(),
+                )
+            })?;
 
-The most practical repository helpers already cover:
+        let overlay = RenderModel::new()
+            .with_value("render_source", RenderValue::text("linked-rust"))
+            .map_err(|error| {
+                BackendError::new(
+                    BackendErrorKind::Internal,
+                    "render_model.invalid",
+                    error.to_string(),
+                )
+            })?;
 
-- CMS pages
-- CMS navigation
-- CMS redirects
-- catalog products and collections
-- commerce order lookup by id or payment reference
-
-That means a customer backend can often stay entirely inside the SDK surface without dropping down
-into runtime internals.
-
-## How To Add A Linked Backend Crate
-
-The shortest real sequence is:
-
-1. create a customer crate such as `crates/shoppr-backend`
-2. implement `CustomerBackendPlugin`
-3. implement one or more hook traits on the same type
-4. register `plugin()` from the customer binary or app bootstrap
-
-Minimal entry point:
-
-```rust
-pub fn plugin() -> ShopprBackend {
-    ShopprBackend::default()
+        Ok(vec![
+            RenderModelContribution::mount("customer_extension", mounted)?,
+            RenderModelContribution::merge("page", overlay, MergePolicy::FailOnConflict)?,
+        ])
+    }
 }
 ```
 
-Minimal binary composition:
+Read the full detailed contract in [Render Model Hooks](./render-model-hooks.md).
 
-```rust
-fn main() -> anyhow::Result<()> {
-    coil::builder()
-        .with_customer_plugin(shoppr_backend::plugin())
-        .run_from_env()
-}
-```
+## Verified Webhook Hooks
 
-That is the whole model. There is no extra sidecar HTTP API and no need to patch core Coil
-crates.
+Traits:
 
-The extension traits in `RepositoryFacadeExt` are also worth reading because they show the current
-stable repository surfaces directly:
+- `VerifiedWebhookHooks::handle_verified_webhook(...)`
+- `VerifiedWebhookAssetHooks::handle_verified_webhook(...)`
 
-- CMS pages
-- CMS navigation
-- CMS redirects
-- commerce catalog product and collection
-- commerce order lookup by id or payment reference
+Use these for:
 
-## What A Good Hook API Feels Like
+- customer-owned webhook policy after verification
+- integration workflows
+- bounded asset publication or inspection from trusted webhook flows
 
-You should be able to explain linked Rust hooks in one sentence:
+These hooks are intentionally later in the lifecycle. The runtime verifies and normalizes the
+incoming webhook first, then invokes customer code through a stable SDK surface.
 
-"Customer-owned Rust implements explicit hook traits and talks to Coil only through stable SDK facades."
+## Facade Philosophy
 
-If a customization needs private runtime types or deep internal crates, it is crossing the wrong boundary.
+Linked Rust hooks do not receive the whole runtime.
 
-## Try It Locally
+They receive stable facades instead:
 
-Useful commands:
+- commerce
+- auth
+- repository
+- audit
+- jobs
+- outbound HTTP
+- assets
 
-```bash
-cargo run -p shoppr -- describe
-cargo run -p shoppr -- linked-backend describe
-cargo run -p shoppr -- linked-backend demo
-```
+That is deliberate. It keeps the platform boundary explicit and keeps customer code out of private
+runtime internals.
 
-## Constraints
+## What Linked Rust Is Good For
 
-- Linked Rust is first-party only.
-  - it is compiled into the customer binary
-  - it is not runtime-installed like WASM
-- Hooks must use the facades the runtime exposes.
-  - they do not get arbitrary process internals
-- The hook registry is explicit.
-  - if a plugin does not register a hook, the runtime will not discover it magically
+Good linked Rust use cases:
 
-## When To Use Linked Rust Instead Of WASM
+- checkout policy
+- customer-owned content validation
+- request-time page shaping
+- verified integration policy
+- first-party audit and product workflow rules
 
-Use linked Rust when the logic is:
+Bad linked Rust use cases:
+
+- replacing core runtime services wholesale
+- depending on private runtime modules instead of the SDK
+- treating customer hooks as a back door into arbitrary framework internals
+
+## The Most Important Distinction
+
+Use linked Rust when the code is:
 
 - customer-owned
-- first-party
-- tightly tied to product policy
-- likely to evolve with the customer app workspace
+- trusted as first-party product code
+- close to runtime decisions such as rendering, checkout, or verified integrations
 
-Use WASM when the logic is:
+Use WASM when the code is:
 
-- runtime-installed
-- bounded
-- grant-scoped
-- more operationally swappable
+- lower-trust
+- third-party
+- bounded to marketplace-style extension points
 
-## Full Implementation
+Those are intentionally different trust boundaries.
 
-Canonical Shoppr implementation:
+## What To Read Next
 
-- `apps/shoppr/backend/shoppr-loyalty-backend/src/lib.rs`
-- `apps/shoppr/crates/shoppr-backend/src/lib.rs`
-- `apps/shoppr/crates/shoppr-app/src/lib.rs`
-- `apps/shoppr/crates/shoppr-bin/src/main.rs`
-
-Canonical Gitly implementation:
-
-- `apps/gitly/crates/gitly-backend/src/lib.rs`
-- `apps/gitly/crates/gitly-app/src/lib.rs`
-
-- `apps/gitly/crates/gitly-backend/src/lib.rs`
-- `apps/gitly/crates/gitly-app/src/lib.rs`
-- `apps/gitly/crates/gitly-bin/src/main.rs`
-
-Runtime coverage:
-
-- `crates/coil-runtime/src/tests/server.rs`
-
-## Read Next
-
-- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
-- [WASM Host APIs](./wasm-host-apis.md)
-- [Shoppr Linked Rust Backend](../use-cases/shoppr/linked-rust-backend.md)
+- [Render Model Hooks](./render-model-hooks.md)
+- [Template Models](./template-models.md)
+- [Template Language](./template-language.md)
+- [Customer Rust vs third-party WASM](./customer-vs-wasm.md)
+- [Request And Render Lifecycle](../core-concepts/request-and-render-lifecycle.md)

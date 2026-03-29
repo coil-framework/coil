@@ -115,6 +115,13 @@ impl RenderValue {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderModelMergePolicy {
+    FailOnConflict,
+    ReplaceExisting,
+    AppendLists,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RenderModel {
     values: BTreeMap<String, RenderValue>,
@@ -183,6 +190,46 @@ impl RenderModel {
         Ok(self)
     }
 
+    pub fn mount_object(
+        mut self,
+        path: impl AsRef<str>,
+        value: RenderModel,
+    ) -> Result<Self, TemplateModelError> {
+        let segments = validate_render_model_path(path.as_ref())?;
+        merge_named_string_maps(
+            &mut self.asset_paths,
+            &value.asset_paths,
+            "asset_path",
+            RenderModelMergePolicy::FailOnConflict,
+        )?;
+        merge_named_string_maps(
+            &mut self.translations,
+            &value.translations,
+            "translation",
+            RenderModelMergePolicy::FailOnConflict,
+        )?;
+        self.mount_object_segments(&segments, value)?;
+        Ok(self)
+    }
+
+    pub fn merge_object(
+        mut self,
+        path: impl AsRef<str>,
+        value: RenderModel,
+        policy: RenderModelMergePolicy,
+    ) -> Result<Self, TemplateModelError> {
+        let segments = validate_render_model_path(path.as_ref())?;
+        merge_named_string_maps(&mut self.asset_paths, &value.asset_paths, "asset_path", policy)?;
+        merge_named_string_maps(
+            &mut self.translations,
+            &value.translations,
+            "translation",
+            policy,
+        )?;
+        self.merge_object_segments(&segments, value, policy)?;
+        Ok(self)
+    }
+
     pub(crate) fn get(&self, key: &str) -> Option<&RenderValue> {
         if let Some(value) = self.values.get(key) {
             return Some(value);
@@ -217,6 +264,194 @@ impl RenderModel {
             asset_paths,
             translations,
         }
+    }
+
+    fn mount_object_segments(
+        &mut self,
+        segments: &[String],
+        value: RenderModel,
+    ) -> Result<(), TemplateModelError> {
+        let head = &segments[0];
+        if segments.len() == 1 {
+            if self.values.contains_key(head) {
+                return Err(TemplateModelError::RenderModelConflict {
+                    path: head.clone(),
+                    message: "mount target already exists".to_string(),
+                });
+            }
+            self.values.insert(head.clone(), RenderValue::object(value));
+            return Ok(());
+        }
+
+        let existing = self.values.remove(head);
+        let mut child = match existing {
+            Some(RenderValue::Object(child)) => child,
+            Some(_) => {
+                return Err(TemplateModelError::RenderModelConflict {
+                    path: head.clone(),
+                    message: "mount target traverses a non-object value".to_string(),
+                });
+            }
+            None => RenderModel::new(),
+        };
+        child.mount_object_segments(&segments[1..], value)?;
+        self.values.insert(head.clone(), RenderValue::object(child));
+        Ok(())
+    }
+
+    fn merge_object_segments(
+        &mut self,
+        segments: &[String],
+        value: RenderModel,
+        policy: RenderModelMergePolicy,
+    ) -> Result<(), TemplateModelError> {
+        let head = &segments[0];
+        if segments.len() == 1 {
+            match self.values.remove(head) {
+                Some(RenderValue::Object(mut existing)) => {
+                    merge_render_model_objects(&mut existing, value, policy, head.as_str())?;
+                    self.values
+                        .insert(head.clone(), RenderValue::object(existing));
+                }
+                Some(_) => {
+                    return Err(TemplateModelError::RenderModelConflict {
+                        path: head.clone(),
+                        message: "merge target must be an object".to_string(),
+                    });
+                }
+                None => {
+                    self.values.insert(head.clone(), RenderValue::object(value));
+                }
+            }
+            return Ok(());
+        }
+
+        let existing = self.values.remove(head);
+        let mut child = match existing {
+            Some(RenderValue::Object(child)) => child,
+            Some(_) => {
+                return Err(TemplateModelError::RenderModelConflict {
+                    path: head.clone(),
+                    message: "merge target traverses a non-object value".to_string(),
+                });
+            }
+            None => RenderModel::new(),
+        };
+        child.merge_object_segments(&segments[1..], value, policy)?;
+        self.values.insert(head.clone(), RenderValue::object(child));
+        Ok(())
+    }
+}
+
+fn validate_render_model_path(path: &str) -> Result<Vec<String>, TemplateModelError> {
+    let path = require_non_empty("render_model_path", path.trim().to_string())?;
+    path.split('.')
+        .map(|segment| validate_token("render_key", segment.to_string()))
+        .collect()
+}
+
+fn merge_named_string_maps(
+    target: &mut BTreeMap<String, String>,
+    overlay: &BTreeMap<String, String>,
+    label: &str,
+    policy: RenderModelMergePolicy,
+) -> Result<(), TemplateModelError> {
+    for (key, value) in overlay {
+        match target.get(key) {
+            None => {
+                target.insert(key.clone(), value.clone());
+            }
+            Some(existing) if existing == value => {}
+            Some(_) => match policy {
+                RenderModelMergePolicy::FailOnConflict | RenderModelMergePolicy::AppendLists => {
+                    return Err(TemplateModelError::RenderModelConflict {
+                        path: format!("{label}:{key}"),
+                        message: "existing value differs from contribution".to_string(),
+                    });
+                }
+                RenderModelMergePolicy::ReplaceExisting => {
+                    target.insert(key.clone(), value.clone());
+                }
+            },
+        }
+    }
+    Ok(())
+}
+
+fn merge_render_model_objects(
+    target: &mut RenderModel,
+    overlay: RenderModel,
+    policy: RenderModelMergePolicy,
+    path_prefix: &str,
+) -> Result<(), TemplateModelError> {
+    merge_named_string_maps(
+        &mut target.asset_paths,
+        &overlay.asset_paths,
+        "asset_path",
+        policy,
+    )?;
+    merge_named_string_maps(
+        &mut target.translations,
+        &overlay.translations,
+        "translation",
+        policy,
+    )?;
+
+    for (key, value) in overlay.values {
+        let path = if path_prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{path_prefix}.{key}")
+        };
+        match target.values.remove(&key) {
+            None => {
+                target.values.insert(key, value);
+            }
+            Some(existing) => {
+                let merged = merge_render_value(existing, value, policy, path.as_str())?;
+                target.values.insert(key, merged);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn merge_render_value(
+    existing: RenderValue,
+    overlay: RenderValue,
+    policy: RenderModelMergePolicy,
+    path: &str,
+) -> Result<RenderValue, TemplateModelError> {
+    match (existing, overlay) {
+        (RenderValue::Object(mut existing), RenderValue::Object(overlay)) => {
+            merge_render_model_objects(&mut existing, overlay, policy, path)?;
+            Ok(RenderValue::object(existing))
+        }
+        (RenderValue::List(mut existing), RenderValue::List(overlay)) => match policy {
+            RenderModelMergePolicy::AppendLists => {
+                existing.extend(overlay);
+                Ok(RenderValue::list(existing))
+            }
+            RenderModelMergePolicy::ReplaceExisting => Ok(RenderValue::list(overlay)),
+            RenderModelMergePolicy::FailOnConflict => Err(
+                TemplateModelError::RenderModelConflict {
+                    path: path.to_string(),
+                    message: "list values conflict; use append_lists or replace_existing"
+                        .to_string(),
+                },
+            ),
+        },
+        (existing, overlay) if existing == overlay => Ok(existing),
+        (_existing, overlay) => match policy {
+            RenderModelMergePolicy::ReplaceExisting => Ok(overlay),
+            RenderModelMergePolicy::FailOnConflict | RenderModelMergePolicy::AppendLists => {
+                Err(TemplateModelError::RenderModelConflict {
+                    path: path.to_string(),
+                    message: "existing value differs from contribution".to_string(),
+                })
+            }
+        },
     }
 }
 

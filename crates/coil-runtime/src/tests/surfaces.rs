@@ -1,7 +1,8 @@
 use super::*;
 use coil_customer_sdk::{
     AuditFacade, AuthFacade, BackendError, CheckoutHooks, CommerceFacade, CustomerPluginDescriptor,
-    OrderDraft, OrderReviewDecision, RequestContext,
+    MergePolicy, OrderDraft, OrderReviewDecision, RenderModelContribution, RenderModelHooks,
+    RenderTarget, RequestContext,
 };
 use coil_i18n::MessageKey;
 use coil_storage::StoragePolicyOverride;
@@ -42,6 +43,12 @@ impl CustomerBackendPlugin for ExampleCheckoutPlugin {
 #[derive(Debug)]
 struct DuplicateCustomerPlugin;
 
+#[derive(Debug)]
+struct ExampleRenderModelPlugin;
+
+#[derive(Debug)]
+struct ExampleRenderModelHooks;
+
 impl CustomerBackendPlugin for DuplicateCustomerPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
         CustomerPluginDescriptor::new("shoppr-backend", "Shoppr Backend", "0.1.1")
@@ -49,6 +56,44 @@ impl CustomerBackendPlugin for DuplicateCustomerPlugin {
 
     fn register(&self, _registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
         Ok(())
+    }
+}
+
+impl RenderModelHooks for ExampleRenderModelHooks {
+    fn contribute_render_model(
+        &self,
+        _ctx: &RequestContext,
+        _target: &RenderTarget,
+        _repositories: &dyn coil_customer_sdk::RepositoryFacade,
+        _audit: &dyn AuditFacade,
+    ) -> Result<Vec<RenderModelContribution>, BackendError> {
+        Ok(vec![RenderModelContribution::merge(
+            "page",
+            RenderModel::new()
+                .with_value("customer_extension", coil_template::RenderValue::text("enabled"))
+                .map_err(|error| {
+                    BackendError::new(
+                        coil_customer_sdk::BackendErrorKind::Internal,
+                        "render_model.invalid",
+                        error.to_string(),
+                    )
+                })?,
+            MergePolicy::FailOnConflict,
+        )?])
+    }
+}
+
+impl CustomerBackendPlugin for ExampleRenderModelPlugin {
+    fn descriptor(&self) -> CustomerPluginDescriptor {
+        CustomerPluginDescriptor::new(
+            "customer-render-model-plugin",
+            "Customer Render Model Plugin",
+            "0.1.0",
+        )
+    }
+
+    fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
+        registry.register_render_model_hooks(Arc::new(ExampleRenderModelHooks))
     }
 }
 
@@ -76,8 +121,8 @@ fn write_customer_root_manifest(root: &Path, auth_package: &str, enabled_modules
         root.join("app.toml"),
         format!(
             r#"[app]
-name = "showcase-events"
-display_name = "Showcase Events"
+name = "customer-events"
+display_name = "Customer Events"
 
 [domains]
 canonical = "www.example.com"
@@ -89,7 +134,7 @@ supported_locales = ["en-GB", "fr-FR"]
 localized_routes = true
 
 [theme]
-active = "showcase"
+active = "customer"
 template_namespaces = ["customer-app"]
 asset_roots = []
 
@@ -105,9 +150,29 @@ enabled = [{enabled}]
     .unwrap();
 }
 
+fn customer_root_runtime_config() -> String {
+    let mut in_app = false;
+    VALID_CONFIG
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if trimmed == "[app]" {
+                in_app = true;
+                return line.to_string();
+            }
+            if in_app && trimmed.starts_with("name = ") {
+                in_app = false;
+                return "name = \"customer-events\"".to_string();
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn storage_host_applies_path_rules_for_sensitive_files() {
-    let config = single_node_valid_config();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_storage_policy_rule(
             PathPolicyRule::new(
@@ -145,7 +210,7 @@ fn storage_host_applies_path_rules_for_sensitive_files() {
 
 #[test]
 fn storage_host_publishes_deployment_releases_to_the_cdn_manifest() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
@@ -180,7 +245,7 @@ fn storage_host_publishes_deployment_releases_to_the_cdn_manifest() {
 
 #[test]
 fn runtime_builder_registers_linked_customer_plugins_through_sdk_hooks() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .register_customer_plugin(ExampleCheckoutPlugin)
         .build()
@@ -206,8 +271,24 @@ fn runtime_builder_registers_linked_customer_plugins_through_sdk_hooks() {
 }
 
 #[test]
+fn runtime_builder_registers_render_model_hooks_through_sdk_hooks() {
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .register_customer_plugin(ExampleRenderModelPlugin)
+        .build()
+        .unwrap();
+
+    assert_eq!(plan.customer_hooks.render_model.len(), 1);
+    assert_eq!(plan.linked_customer_plugins.len(), 1);
+    assert_eq!(
+        plan.linked_customer_plugins[0].registered_hooks,
+        vec![RegisteredHookKind::RenderModel]
+    );
+}
+
+#[test]
 fn runtime_builder_rejects_duplicate_linked_customer_plugins() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let error = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .register_customer_plugin(ExampleCheckoutPlugin)
         .register_customer_plugin(DuplicateCustomerPlugin)
@@ -223,7 +304,7 @@ fn runtime_builder_rejects_duplicate_linked_customer_plugins() {
 
 #[test]
 fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
-    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config().replace(
         "enabled = [\"cms-pages\", \"admin-shell\"]",
         "enabled = [\"cms\"]",
     ))
@@ -276,7 +357,7 @@ fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
 
 #[test]
 fn customer_root_runtime_builder_supports_register_aliases() {
-    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config().replace(
         "enabled = [\"cms-pages\", \"admin-shell\"]",
         "enabled = [\"cms\"]",
     ))
@@ -318,7 +399,7 @@ fn customer_root_runtime_builder_loads_config_and_auth_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG
+        customer_root_runtime_config()
             .replace(
                 "package = \"coil-default-auth\"",
                 "package = \"shoppr-auth\"",
@@ -372,7 +453,7 @@ fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG
+        customer_root_runtime_config()
             .replace(
                 "package = \"coil-default-auth\"",
                 "package = \"shoppr-auth\"",
@@ -394,7 +475,7 @@ fn customer_root_bootstrap_inputs_load_config_and_auth_from_paths() {
     fs::remove_dir_all(&customer_root).unwrap();
 
     assert_eq!(inputs.auth_package_name, "shoppr-auth");
-    assert_eq!(inputs.config.app.name, "showcase-events");
+    assert_eq!(inputs.config.app.name, "customer-events");
     assert!(inputs.config_path.ends_with("platform.toml"));
 }
 
@@ -411,7 +492,7 @@ fn customer_root_runtime_builder_reports_missing_auth_packages_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG
+        customer_root_runtime_config()
             .replace(
                 "package = \"coil-default-auth\"",
                 "package = \"missing-auth-package\"",
@@ -451,7 +532,7 @@ fn direct_builder_bootstraps_customer_root_from_paths() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG
+        customer_root_runtime_config()
             .replace(
                 "package = \"coil-default-auth\"",
                 "package = \"shoppr-auth\"",
@@ -501,7 +582,7 @@ title = "Checkout now"
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG.replace(
+        customer_root_runtime_config().replace(
             "enabled = [\"cms-pages\", \"admin-shell\"]",
             "enabled = [\"cms\"]",
         ),
@@ -510,8 +591,8 @@ title = "Checkout now"
     fs::write(
         customer_root.join("app.toml"),
         r#"[app]
-name = "showcase-events"
-display_name = "Showcase Events"
+name = "customer-events"
+display_name = "Customer Events"
 
 [domains]
 canonical = "www.example.com"
@@ -529,7 +610,7 @@ locale = "en-GB"
 path = "translations/en-GB.toml"
 
 [theme]
-active = "showcase"
+active = "customer"
 template_namespaces = ["customer-app"]
 asset_roots = []
 
@@ -573,7 +654,7 @@ fn direct_builder_uses_the_customer_manifest_to_enable_only_selected_modules() {
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG.replace(
+        customer_root_runtime_config().replace(
             "enabled = [\"cms-pages\", \"admin-shell\"]",
             "enabled = [\"cms\"]",
         ),
@@ -611,7 +692,7 @@ fn direct_builder_rejects_manifest_modules_not_linked_into_the_customer_binary()
     );
     fs::write(
         customer_root.join("platform.toml"),
-        VALID_CONFIG.replace(
+        customer_root_runtime_config().replace(
             "enabled = [\"cms-pages\", \"admin-shell\"]",
             "enabled = [\"admin\"]",
         ),
@@ -636,7 +717,7 @@ fn direct_builder_rejects_manifest_modules_not_linked_into_the_customer_binary()
 
 #[test]
 fn runtime_builder_run_from_env_requires_cookie_secret() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let previous_cookie = std::env::var("COIL_COOKIE_SECRET").ok();
     let previous_csrf = std::env::var("COIL_CSRF_SECRET").ok();
     unsafe {
@@ -665,7 +746,7 @@ fn runtime_builder_run_from_env_requires_cookie_secret() {
 
 #[test]
 fn customer_root_runtime_builder_requires_customer_root_before_build() {
-    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config().replace(
         "enabled = [\"cms-pages\", \"admin-shell\"]",
         "enabled = [\"cms\"]",
     ))
@@ -694,7 +775,7 @@ fn customer_root_runtime_builder_run_from_env_honors_manifest_module_filtering()
 </html>"#,
     );
     write_customer_root_manifest(&customer_root, "coil-default-auth", &["admin"]);
-    let config = PlatformConfig::from_toml_str(&VALID_CONFIG.replace(
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config().replace(
         "enabled = [\"cms-pages\", \"admin-shell\"]",
         "enabled = [\"admin\"]",
     ))
@@ -718,7 +799,7 @@ fn customer_root_runtime_builder_run_from_env_honors_manifest_module_filtering()
 
 #[test]
 fn customer_root_runtime_builder_preserves_runtime_builder_escape_hatch() {
-    let config = single_node_valid_config();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let customer_root = unique_temp_template_root("customer-root-builder-escape-hatch");
     write_template_file(
         &customer_root,
@@ -761,7 +842,7 @@ fn customer_root_runtime_builder_preserves_runtime_builder_escape_hatch() {
 
 #[test]
 fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
-    let config = single_node_valid_config();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_storage_policy_rule(
             PathPolicyRule::new(
@@ -846,7 +927,7 @@ fn storage_host_plans_managed_asset_revisions_and_delivery_modes() {
 
 #[test]
 fn search_host_exposes_visibility_and_invalidation_catalog() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
@@ -895,7 +976,7 @@ fn search_host_exposes_visibility_and_invalidation_catalog() {
 
 #[test]
 fn search_host_queues_full_reindex_through_ops_bulk_workflow() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(AdminModule::new())
         .with_module(OpsModule::new())
@@ -923,7 +1004,7 @@ fn search_host_queues_full_reindex_through_ops_bulk_workflow() {
 
 #[test]
 fn runtime_builder_materializes_module_http_surfaces() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(MediaModule::new())
         .build()
@@ -959,7 +1040,7 @@ fn runtime_builder_materializes_module_http_surfaces() {
 
 #[test]
 fn runtime_builder_matches_parameterized_module_routes() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(EventsModule::new())
         .build()
@@ -995,7 +1076,7 @@ fn runtime_builder_matches_parameterized_module_routes() {
 
 #[test]
 fn http_runtime_generates_named_paths_for_module_routes() {
-    let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
+    let config = PlatformConfig::from_toml_str(&customer_root_runtime_config()).unwrap();
     let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .with_module(EventsModule::new())
         .build()

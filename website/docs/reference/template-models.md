@@ -132,25 +132,23 @@ So for Gitly the template tie-in is clear:
 
 ### Important current boundary
 
-The checked-in demos do **not** currently show the same thing on the server side:
+There are now two supported server-side model-shaping lanes:
 
-- Shoppr demonstrates server-shaped route-specific models very clearly
-- Gitly demonstrates customer-owned route-to-template mapping very clearly
-- Gitly does **not** currently demonstrate a separate customer-app-owned Rust function that builds
-  a custom server-side `RenderModel` for `gitly/repository`
+- runtime-owned route bindings
+  - official modules shape the common storefront, account, admin, and operations models
+- customer-owned render-model hooks
+  - linked Rust can mount new top-level namespaces and merge fields into shared objects such as
+    `page`
 
-In practice that means the current demos show two patterns:
+That means the answer to "where does my customer Rust build a custom page model and bind it to my
+custom template?" is now explicit:
 
-- Shoppr
-  - official module routes with runtime-owned server-side model shaping
-- Gitly
-  - customer-owned routes and template selection, with page-specific demo data expressed mostly as
-    static markup, `data-*` attributes, and client-side enhancement
+1. your app still chooses the route and template
+2. Coil builds the standard request model
+3. your linked Rust render-model hook contributes additional model data
+4. the template consumes the combined model
 
-If you are looking specifically for "where does my customer Rust build a custom page model and bind
-it to my custom template?", the current docs must answer honestly: the route-to-template part is
-demonstrated in Gitly, but the checked-in custom server-side model-building example is still most
-visible in the runtime-owned Shoppr route bindings.
+Read the full contract in [Render Model Hooks](./render-model-hooks.md).
 
 ## Start With A Model And Its Template
 
@@ -229,7 +227,9 @@ These are the important rules:
   - reads from the model’s asset-path map
 
 If you need a branch such as “show this only for the French site,” shape a boolean or object in Rust
-first. Do not try to invent that logic in the template.
+first when that keeps the page contract simpler. Coil now also supports narrow view-level comparisons
+and block dispatch, so simple checks like `${site.locale == 'fr-FR'}` and `${block.type == 'hero_section'}`
+are valid when the branch genuinely belongs in the template.
 
 ## The Common Top-Level Request Model
 
@@ -259,6 +259,78 @@ Use objects when a group of values belongs together:
 <span coil:text="${site.brand_name}">Brand</span>
 <p coil:text="${page.summary}">Summary</p>
 ```
+
+## Runtime Block Dispatch In `coil:each`
+
+When a list item exposes a `type` field, Coil now augments that item at render time so the template
+can branch or dispatch on the block variant without extra customer-side shaping code.
+
+Given this model:
+
+```rust
+let page = RenderModel::new().with_list(
+    "blocks",
+    vec![
+        RenderModel::new()
+            .with_value("type", RenderValue::text("hero_section"))?
+            .with_object(
+                "fields",
+                RenderModel::new()
+                    .with_value("title", RenderValue::text("Hero title"))?,
+            )?,
+    ],
+)?;
+```
+
+this template:
+
+```html
+<div coil:each="block : ${blocks}">
+  <section coil:if="${block.is_hero_section}" coil:text="${block.fields.title}">
+    Fallback
+  </section>
+</div>
+```
+
+can read the derived block variant directly.
+
+Inside the loop item, Coil adds:
+
+- `block.is_<type>`
+- `block.render_fragment`
+- `block.render_fragment_shared`
+
+For a `pages/home` template and a block type of `hero_section`, those resolve to:
+
+- `block.is_hero_section = true`
+- `block.render_fragment = "pages/home/blocks/hero_section"`
+- `block.render_fragment_shared = "blocks/hero_section"`
+
+That means the model reaching the template is richer than the raw list entry. Coil is shaping a
+render-oriented view of the block at render time.
+
+## Rendering Block Fragments By Type
+
+Once a block loop item exposes `render_fragment`, the template can dispatch directly into a fragment:
+
+```html
+<div coil:each="block : ${page.blocks}">
+  <coil:block coil:replace-fragment="${block.render_fragment}"></coil:block>
+</div>
+```
+
+That is the preferred pattern for CMS-style page builders because it keeps each block variant in its
+own fragment file instead of building one very large `home.html`.
+
+Recommended fragment layout for a `pages/home` template:
+
+- `templates/pages/home.html`
+- `templates/pages/home/blocks/hero_section.html`
+- `templates/pages/home/blocks/featured_events.html`
+- `templates/blocks/<type>.html` for shared fallbacks when multiple pages reuse the same block
+
+Use `coil:switch` when you want the branching inline. Use `render_fragment` when the block wants its
+own template.
 
 ### Booleans
 
@@ -322,6 +394,25 @@ The runtime currently:
 - injects site and link objects
 - injects published asset URLs from the active manifest
 - adds route-specific data for storefront, account, admin, and other surfaces
+- applies linked Rust render-model contributions before template render
+
+That final step is the important customer handoff:
+
+- `mount("crm_page", ...)`
+  - creates a new namespaced top-level object
+- `merge("page", ..., MergePolicy::FailOnConflict)`
+  - extends the runtime-owned `page` object without silently overwriting keys
+
+Example:
+
+```rust
+let overlay = RenderModel::new()
+    .with_value("render_source", RenderValue::text("linked-rust"))?;
+
+let contributions = vec![
+    RenderModelContribution::merge("page", overlay, MergePolicy::FailOnConflict)?,
+];
+```
 
 This is the practical reason template-model docs matter: if the model is well-shaped, templates stay
 small.
@@ -336,9 +427,13 @@ Use the demos for these two different lessons:
 - Gitly
   - shows how a customer app adds its own routes and maps them to template names such as
     `gitly/repository` and `gitly/actions`
+- linked Rust render-model hooks
+  - show the supported customer-owned server-side handoff for mounting and merging page data before
+    render
 
-That distinction matters because readers often expect one demo to show both at once. Today the two
-examples split the lesson across the repo.
+That distinction matters because different examples prove different parts of the contract. The
+official modules prove runtime-owned shaping, while render-model hooks are the customer-owned
+extension point.
 
 ## Common Mistakes
 
@@ -355,9 +450,10 @@ Use the asset-path map through `asset('...')`.
 
 Shape booleans and nested objects in runtime code first.
 
-### Assuming every page template in the demos is backed by a customer-owned server-side model builder
+### Assuming customer page shaping is implicit
 
-That is not what the current examples do.
+It is not implicit. Customer-owned server-side page shaping now goes through
+`RenderModelHooks::contribute_render_model(...)`.
 
 Shoppr's strongest examples are runtime-shaped official-module routes. Gitly's strongest examples
 are customer-owned route and template registration. Read them that way.

@@ -66,11 +66,13 @@ In Shoppr, the runtime will effectively do this:
    - The CMS page route resolves the `home` page.
 4. Evaluate auth and visibility.
    - Public page reads are allowed without customer login.
-5. Build the render model.
-   - Site, locale, page content, navigation, storefront context, SEO metadata, and extension contributions are assembled.
-6. Execute render hooks.
+5. Build the base render model.
+   - Site, locale, page content, navigation, storefront context, and SEO metadata are assembled.
+6. Apply customer render-model contributions.
+   - Linked Rust can mount namespaced model data and merge fields into shared objects such as `page`.
+7. Execute render hooks.
    - Runtime-installed extensions can contribute to the render path.
-7. Render the template.
+8. Render the template.
    - The template engine turns the render model into the final HTML response.
 
 This is why the page route is not "just a template file". Host, site, locale, SEO, CMS content, auth, and extensions all participate before the final HTML is rendered.
@@ -137,11 +139,17 @@ And the product-detail template consumes those exact keys:
 </section>
 ```
 
+Linked Rust can now extend that model before final render through `RenderModelHooks`, for example by:
+
+- mounting a customer namespace such as `crm_page`
+- merging extra fields into `page`
+
 This is the actual lifecycle contract:
 
 - the route picks the template name
-- the runtime shapes the render model
-- the template reads only the shaped keys
+- the runtime shapes the base render model
+- linked Rust can contribute mount and merge operations
+- the template reads only the final shaped keys
 
 The template is not discovering data on its own. The runtime has already decided the page contract.
 
@@ -171,14 +179,13 @@ So the customer-owned part is explicit:
 - Gitly defines the template name
 - the runtime still performs the render step
 
-Important current limitation:
+Important distinction:
 
-- Gitly clearly demonstrates custom route-to-template mapping
-- Gitly does **not** currently demonstrate a separate customer-app-owned server-side `RenderModel`
-  builder for those custom routes
+- Gitly still demonstrates customer-owned route-to-template mapping clearly
+- customer-owned server-side page shaping is now done through linked Rust render-model hooks, not
+  by an implicit or magical template-side data source
 
-That is why Shoppr is currently the stronger server-side render-model example, while Gitly is the
-stronger customer-owned route-mapping example.
+That is why route ownership and model ownership should be thought of as separate concerns.
 
 ## Stateful Action Example: Cart Update
 

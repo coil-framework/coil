@@ -46,6 +46,36 @@ fn model_with_translations() -> RenderModel {
         .unwrap()
 }
 
+fn block_model() -> RenderModel {
+    RenderModel::new()
+        .with_list(
+            "blocks",
+            vec![
+                RenderModel::new()
+                    .with_value("type", RenderValue::text("hero_section"))
+                    .unwrap()
+                    .with_object(
+                        "fields",
+                        RenderModel::new()
+                            .with_value("title", RenderValue::text("Hero title"))
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                RenderModel::new()
+                    .with_value("type", RenderValue::text("featured_events"))
+                    .unwrap()
+                    .with_object(
+                        "fields",
+                        RenderModel::new()
+                            .with_value("title", RenderValue::text("Featured events"))
+                            .unwrap(),
+                    )
+                    .unwrap(),
+            ],
+        )
+        .unwrap()
+}
+
 fn base_registry() -> TemplateRegistry {
     let mut registry = TemplateRegistry::new();
 
@@ -331,6 +361,171 @@ fn translation_expressions_render_locale_aware_text_from_the_model() {
     assert!(html.contains("<h1>Bonjour &amp; bienvenue</h1>"));
     assert!(html.contains("title=\"Voir les nouveautes\""));
     assert!(html.contains(">Voir les nouveautes</a>"));
+}
+
+#[test]
+fn comparison_expressions_render_and_drive_conditionals() {
+    let parser = TemplateSourceParser::new();
+    let template = parser
+        .parse_fragment(
+            TemplateNamespace::new("core").unwrap(),
+            TemplateName::new("comparison").unwrap(),
+            r#"
+<section coil:fragment="comparison" xmlns:coil="https://coil.rs">
+  <span class="flag" coil:text="${headline == 'Book & Save'}">false</span>
+  <strong coil:if="${headline == 'Book & Save'}">matched</strong>
+  <em coil:unless="${headline != 'Book & Save'}">same</em>
+</section>
+"#,
+        )
+        .unwrap();
+
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+
+    let html = TemplateRuntime::new(registry)
+        .render_fragment(
+            &[TemplateNamespace::new("core").unwrap()],
+            FragmentRenderRequest::new(selector("comparison"), model()),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains(r#"<span class="flag">true</span>"#), "{html}");
+    assert!(html.contains("<strong>matched</strong>"), "{html}");
+    assert!(html.contains("<em>same</em>"), "{html}");
+}
+
+#[test]
+fn switch_case_renders_matching_branch_and_default() {
+    let parser = TemplateSourceParser::new();
+    let template = parser
+        .parse_fragment(
+            TemplateNamespace::new("core").unwrap(),
+            TemplateName::new("switcher").unwrap(),
+            r#"
+<div coil:fragment="switcher" xmlns:coil="https://coil.rs">
+  <div coil:switch="${headline}">
+    <section coil:case="'Miss'">miss</section>
+    <section coil:case="'Book & Save'">match</section>
+    <section coil:default>default</section>
+  </div>
+</div>
+"#,
+        )
+        .unwrap();
+
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+
+    let html = TemplateRuntime::new(registry)
+        .render_fragment(
+            &[TemplateNamespace::new("core").unwrap()],
+            FragmentRenderRequest::new(selector("switcher"), model()),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains("<section>match</section>"), "{html}");
+    assert!(!html.contains("<section>default</section>"), "{html}");
+}
+
+#[test]
+fn block_dispatch_exposes_variant_booleans_and_fragment_paths() {
+    let parser = TemplateSourceParser::new();
+    let template = parser
+        .parse_layout(
+            TemplateNamespace::new("customer-app").unwrap(),
+            TemplateName::new("pages/home").unwrap(),
+            r#"
+<!doctype html>
+<html xmlns:coil="https://coil.rs">
+<body>
+  <main>
+    <div coil:each="block : ${blocks}">
+      <section coil:if="${block.is_hero_section}" class="marker" coil:text="${block.fields.title}">title</section>
+      <coil:block coil:replace-fragment="${block.render_fragment}"></coil:block>
+    </div>
+  </main>
+</body>
+</html>
+"#,
+        )
+        .unwrap();
+    let hero_fragment = parser
+        .parse_fragment(
+            TemplateNamespace::new("customer-app").unwrap(),
+            TemplateName::new("pages/home/blocks/hero_section").unwrap(),
+            r#"
+<section coil:fragment="hero_section" xmlns:coil="https://coil.rs" class="hero">
+  <h2 coil:text="${block.fields.title}">Hero</h2>
+</section>
+"#,
+        )
+        .unwrap();
+    let featured_fragment = parser
+        .parse_fragment(
+            TemplateNamespace::new("customer-app").unwrap(),
+            TemplateName::new("pages/home/blocks/featured_events").unwrap(),
+            r#"
+<section coil:fragment="featured_events" xmlns:coil="https://coil.rs" class="events">
+  <h2 coil:text="${block.fields.title}">Events</h2>
+</section>
+"#,
+        )
+        .unwrap();
+
+    let mut registry = TemplateRegistry::new();
+    registry.register(template).unwrap();
+    registry.register(hero_fragment).unwrap();
+    registry.register(featured_fragment).unwrap();
+
+    let html = TemplateRuntime::new(registry)
+        .render_document(
+            &[TemplateNamespace::new("customer-app").unwrap()],
+            DocumentRenderRequest::new(selector("pages/home"), block_model()),
+        )
+        .unwrap()
+        .html;
+
+    assert!(html.contains(r#"<section class="marker">Hero title</section>"#), "{html}");
+    assert!(html.contains(r#"<section class="hero"><h2>Hero title</h2></section>"#), "{html}");
+    assert!(html.contains(r#"<section class="events"><h2>Featured events</h2></section>"#), "{html}");
+}
+
+#[test]
+fn runtime_block_dispatch_binds_nested_block_object_fields() {
+    let entry = RenderModel::new()
+        .with_value("type", RenderValue::text("hero_section"))
+        .unwrap()
+        .with_object(
+            "fields",
+            RenderModel::new()
+                .with_value("title", RenderValue::text("Hero title"))
+                .unwrap(),
+        )
+        .unwrap();
+    let current_template = TemplateName::new("pages/home").unwrap();
+    let dispatch_entry =
+        crate::runtime::augment_block_dispatch(&entry, &current_template, &[String::from("hero_section")])
+            .unwrap();
+    let loop_model = RenderModel::new()
+        .merged_with(&dispatch_entry)
+        .with_object("block", dispatch_entry)
+        .unwrap();
+
+    assert_eq!(
+        loop_model
+            .get_path("block.is_hero_section")
+            .and_then(|value| value.as_bool("block.is_hero_section").ok()),
+        Some(true)
+    );
+    assert_eq!(
+        loop_model
+            .get_path("block.render_fragment")
+            .and_then(|value| value.as_text("block.render_fragment").ok()),
+        Some("pages/home/blocks/hero_section")
+    );
 }
 
 #[test]

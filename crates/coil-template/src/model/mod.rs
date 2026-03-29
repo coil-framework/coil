@@ -8,11 +8,11 @@ mod template;
 mod tokens;
 
 pub use dom::{
-    AttributeNode, AttributeValue, ConditionExpression, ElementNode, Node, SlotNode,
-    TemplateBinding, TemplateExpression,
+    AttributeNode, AttributeValue, ComparisonOperator, ConditionExpression, ElementNode, Node,
+    SlotNode, SwitchCaseNode, TemplateBinding, TemplateExpression,
 };
 pub use error::TemplateModelError;
-pub use render::{RenderModel, RenderOutput, RenderValue, TrustedHtml};
+pub use render::{RenderModel, RenderModelMergePolicy, RenderOutput, RenderValue, TrustedHtml};
 pub use requests::{DocumentRenderRequest, FragmentRenderRequest, SlotFill};
 pub use template::{TemplateDefinition, TemplateKind, TemplateSelector};
 pub use tokens::{SlotName, TemplateKey, TemplateName, TemplateNamespace};

@@ -1,5 +1,6 @@
 use coil_customer_sdk::{
-    BackendError, CheckoutHooks, CmsHooks, VerifiedWebhookAssetHooks, VerifiedWebhookHooks,
+    BackendError, CheckoutHooks, CmsHooks, RenderModelHooks, VerifiedWebhookAssetHooks,
+    VerifiedWebhookHooks,
 };
 use std::fmt;
 use std::sync::Arc;
@@ -10,6 +11,7 @@ pub use coil_customer_sdk::{CustomerBackendPlugin, CustomerHookRegistry, Registe
 pub(crate) struct CustomerHookSet {
     pub(crate) checkout: Vec<Arc<dyn CheckoutHooks>>,
     pub(crate) cms: Vec<Arc<dyn CmsHooks>>,
+    pub(crate) render_model: Vec<Arc<dyn RenderModelHooks>>,
     pub(crate) verified_webhooks: Vec<Arc<dyn VerifiedWebhookHooks>>,
     pub(crate) verified_webhook_assets: Vec<Arc<dyn VerifiedWebhookAssetHooks>>,
 }
@@ -19,6 +21,7 @@ impl fmt::Debug for CustomerHookSet {
         f.debug_struct("CustomerHookSet")
             .field("checkout", &self.checkout.len())
             .field("cms", &self.cms.len())
+            .field("render_model", &self.render_model.len())
             .field("verified_webhooks", &self.verified_webhooks.len())
             .field(
                 "verified_webhook_assets",
@@ -62,6 +65,15 @@ impl CustomerHookRegistry for RuntimeCustomerHookRegistry {
         self.hooks.cms.push(hooks);
         self.registered_hooks
             .push(RegisteredHookKind::CmsPagePublish);
+        Ok(())
+    }
+
+    fn register_render_model_hooks(
+        &mut self,
+        hooks: Arc<dyn RenderModelHooks>,
+    ) -> Result<(), BackendError> {
+        self.hooks.render_model.push(hooks);
+        self.registered_hooks.push(RegisteredHookKind::RenderModel);
         Ok(())
     }
 

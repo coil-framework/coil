@@ -1,0 +1,98 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Recovery'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Recovery</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operations</p>
+        <h1 coil:text="${page.title}">Recovery</h1>
+        <p coil:text="${page.summary}">
+          Operator-run recovery workflows for full restore and derived-state rebuild scenarios.
+        </p>
+        <p>
+          This page exists for real incident follow-up. It should reflect the runbook, not replace
+          it. Queue workflows only when source-of-truth recovery state is already understood.
+        </p>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_flash_messages}">
+        <p class="admin-panel__eyebrow">Recent action</p>
+        <ul class="flash-list">
+          <li coil:each="message : ${flash_messages}" coil:text="${message.text}">Queued recovery workflow.</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Recovery summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total workflows</h2>
+            <p><strong coil:text="${recovery_stats.total}">0</strong> recovery workflows are currently registered.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Host-local restore</h2>
+            <p><strong coil:text="${recovery_stats.host_local}">0</strong> workflows may require explicit host-local sensitive data acknowledgement.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Derived-state only</h2>
+            <p><strong coil:text="${recovery_stats.derived_only}">0</strong> workflows focus on rebuilding disposable layers without restoring source-of-truth storage.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_recovery_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Recovery workflows</p>
+        <label class="admin-filter">
+          <span>Filter by workflow or stage</span>
+          <input type="search" placeholder="Filter by workflow, stage, or note..." data-admin-filter-input="" />
+        </label>
+        <div class="admin-card-grid">
+          <article class="admin-card" coil:each="row : ${recovery_rows}" data-admin-filter-item="">
+            <h2 coil:text="${row.workflow_name}">Full customer-app restore</h2>
+            <p coil:text="${row.workflow_summary}">
+              Restores source-of-truth state first, then rebuilds disposable layers and redeploys assets.
+            </p>
+            <p>
+              <strong coil:text="${row.stage_count}">6</strong>
+              stages:
+              <span coil:text="${row.stage_summary}">Restore database -> Validate readiness</span>
+            </p>
+            <p coil:text="${row.action_label}">
+              Use after source-of-truth restore is ready and the operator has confirmed host-local sensitive data handling.
+            </p>
+            <form action="/admin/recovery" method="post">
+              <input type="hidden" name="workflow_id" coil:attr="value=${row.workflow_id}" />
+              <label>
+                <input type="checkbox" name="local_only_sensitive_present" value="yes" />
+                Host-local sensitive data is part of this restore
+              </label>
+              <label coil:if="${row.requires_local_only_sensitive_ack == 'true'}">
+                <input type="checkbox" name="local_only_sensitive_acknowledged" value="yes" />
+                I acknowledge the host-local sensitive data restore steps are documented and ready
+              </label>
+              <button type="submit">Queue workflow</button>
+            </form>
+          </article>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

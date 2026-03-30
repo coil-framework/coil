@@ -1,0 +1,105 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Bulk Operations'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Bulk Operations</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operations</p>
+        <h1 coil:text="${page.title}">Bulk Operations</h1>
+        <p coil:text="${page.summary}">
+          Capability-gated bulk workflows for search reindex and queued export coordination.
+        </p>
+        <p>
+          Queue bulk workflows only after diagnostics, search-health, and operator runbooks say
+          the action is justified.
+        </p>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_flash_messages}">
+        <p class="admin-panel__eyebrow">Recent action</p>
+        <ul class="flash-list">
+          <li coil:each="message : ${flash_messages}" coil:text="${message.text}">Queued workflow.</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Workflow summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total workflows</h2>
+            <p><strong coil:text="${bulk_stats.total}">0</strong> bulk workflows are currently registered.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Search-scoped</h2>
+            <p><strong coil:text="${bulk_stats.search}">0</strong> workflows target search rebuild or index repair.</p>
+          </article>
+          <article class="admin-card">
+            <h2>System-scoped</h2>
+            <p><strong coil:text="${bulk_stats.system}">0</strong> workflows affect cross-cutting operator state.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_bulk_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Queued workflow entrypoints</p>
+        <label class="admin-filter">
+          <span>Filter by workflow, scope, or action</span>
+          <input type="search" placeholder="Filter by workflow, scope, or note..." data-admin-filter-input="" />
+        </label>
+        <div class="admin-card-grid">
+          <article class="admin-card" coil:each="row : ${bulk_rows}" data-admin-filter-item="">
+            <p class="admin-panel__eyebrow" coil:text="${row.scope_label}">Search</p>
+            <h2 coil:text="${row.operation_name}">Reindex search</h2>
+            <p>
+              <strong coil:text="${row.kind_label}">Reindex</strong>
+              workflow with a limit of
+              <strong coil:text="${row.target_limit_label}">100</strong>
+              targets per queued run.
+            </p>
+            <p coil:text="${row.scope_summary}">
+              Queues a coordinated rebuild across declared search indexes.
+            </p>
+            <p coil:text="${row.action_label}">
+              Queue this only after diagnostics and search-health review confirm browse drift.
+            </p>
+            <form action="/admin/bulk" method="post">
+              <input type="hidden" name="operation_id" coil:attr="value=${row.operation_id}" />
+              <label>
+                <span>Target count</span>
+                <input
+                  type="number"
+                  min="1"
+                  name="target_count"
+                  coil:attr="value=${row.recommended_target_count}"
+                />
+              </label>
+              <label>
+                <input type="checkbox" name="dry_run" value="yes" />
+                Dry run only
+              </label>
+              <button type="submit">Queue workflow</button>
+            </form>
+          </article>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

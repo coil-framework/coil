@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Navigation</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -41,8 +42,16 @@
         </ul>
       </section>
 
-      <section class="admin-panel">
+      <section class="admin-panel" data-admin-filter="">
         <p class="admin-panel__eyebrow">Primary navigation</p>
+        <label class="admin-filter">
+          <span>Filter navigation rows</span>
+          <input
+            type="search"
+            placeholder="Filter by label or href..."
+            data-admin-filter-input=""
+          />
+        </label>
         <form action="/admin/navigation/save" method="post">
           <table class="admin-table">
             <thead>
@@ -52,7 +61,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr coil:each="item : ${navigation_items}">
+              <tr coil:each="item : ${navigation_items}" data-admin-filter-item="">
                 <td>
                   <input type="text" coil:attr="name=${item.label_field},value=${item.label}" />
                 </td>

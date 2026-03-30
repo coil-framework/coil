@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Catalog Administration</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -89,10 +90,18 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${has_product_cards}">
+      <section class="admin-panel" coil:if="${has_product_cards}" data-admin-filter="">
         <p class="admin-panel__eyebrow">Products</p>
+        <label class="admin-filter">
+          <span>Filter product cards</span>
+          <input
+            type="search"
+            placeholder="Filter by product, collection, route, or visibility..."
+            data-admin-filter-input=""
+          />
+        </label>
         <div class="admin-card-grid">
-          <article class="admin-card" coil:each="product : ${product_cards}">
+          <article class="admin-card" coil:each="product : ${product_cards}" data-admin-filter-item="">
             <h2 coil:text="${product.name}">Harbor Cap</h2>
             <p class="admin-panel__eyebrow" coil:text="${product.visibility_label}">
               Visible in storefront
@@ -185,10 +194,18 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${has_catalog_sections}">
+      <section class="admin-panel" coil:if="${has_catalog_sections}" data-admin-filter="">
         <p class="admin-panel__eyebrow">Collections</p>
+        <label class="admin-filter">
+          <span>Filter collections</span>
+          <input
+            type="search"
+            placeholder="Filter by collection title, label, route, or visibility..."
+            data-admin-filter-input=""
+          />
+        </label>
         <div class="admin-card-grid">
-          <article class="admin-card" coil:each="section : ${catalog_sections}">
+          <article class="admin-card" coil:each="section : ${catalog_sections}" data-admin-filter-item="">
             <h2 coil:text="${section.title}">Featured</h2>
             <p class="admin-panel__eyebrow" coil:text="${section.visibility_label}">
               Visible in storefront

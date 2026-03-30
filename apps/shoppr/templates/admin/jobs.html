@@ -1,0 +1,128 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Jobs'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Jobs</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operations</p>
+        <h1 coil:text="${page.title}">Jobs</h1>
+        <p coil:text="${page.summary}">
+          Registered background jobs, triggers, queues, and retry envelopes available in the operator shell.
+        </p>
+        <p>
+          Use this page to confirm what the runtime can queue before debugging a missing follow-up in
+          reports, search, memberships, or events.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total jobs</h2>
+            <p><strong coil:text="${job_stats.total}">0</strong> runtime jobs are registered.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Operator-triggered</h2>
+            <p><strong coil:text="${job_stats.operator}">0</strong> jobs can be queued directly from operator actions.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Scheduled</h2>
+            <p><strong coil:text="${job_stats.scheduled}">0</strong> jobs are driven by time-based execution rather than request-time actions.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Event reactions</h2>
+            <p><strong coil:text="${job_stats.event_reactions}">0</strong> domain-event subscriptions currently route follow-up work into the jobs runtime.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Queue depth</h2>
+            <p><strong coil:text="${job_stats.queue_depth}">unavailable</strong> is the current observed queue depth metric.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_job_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Registered jobs</p>
+        <label class="admin-filter">
+          <span>Filter by module, trigger, or queue</span>
+          <input type="search" placeholder="Filter by module, queue, or trigger..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Job</th>
+              <th scope="col">Trigger</th>
+              <th scope="col">Queue</th>
+              <th scope="col">Retry envelope</th>
+              <th scope="col">Operator note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${job_rows}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${row.job_name}">ops.report.export</strong>
+                <p><code coil:text="${row.module_name}">ops</code></p>
+              </td>
+              <td>
+                <p coil:text="${row.trigger_label}">Operator</p>
+                <p coil:text="${row.idempotent_label}">Idempotent</p>
+              </td>
+              <td><code coil:text="${row.queue_name}">jobs.work</code></td>
+              <td coil:text="${row.retry_summary}">3 attempts, 15s backoff start, dead-letter to jobs.dead.</td>
+              <td coil:text="${row.description}">Runs asynchronous report exports and persists their output artifacts safely.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_job_subscription_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Domain event reactions</p>
+        <label class="admin-filter">
+          <span>Filter by event, module, or target job</span>
+          <input type="search" placeholder="Filter by event, module, or job..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Event</th>
+              <th scope="col">Target job</th>
+              <th scope="col">Trigger</th>
+              <th scope="col">Queue routing</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${job_subscription_rows}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${row.event_type}">cms.page.published</strong>
+                <p><code coil:text="${row.module_name}">ops</code></p>
+              </td>
+              <td><code coil:text="${row.job_name}">ops.search.rebuild</code></td>
+              <td coil:text="${row.trigger_label}">Domain event</td>
+              <td coil:text="${row.queue_summary}">Reaction queue jobs.domain-events -> target queue jobs.work.</td>
+              <td coil:text="${row.description}">Refreshes search projections after editorial publication changes.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

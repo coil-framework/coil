@@ -1,0 +1,189 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Passes and Credits'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Passes and Credits</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Membership operations</p>
+        <h1 coil:text="${page.title}">Passes and Credits</h1>
+        <p coil:text="${page.summary}">
+          Operator-facing pass and credit queue built from event-linked purchases, pending payment
+          state, and customer follow-up signals.
+        </p>
+        <p>
+          This page gives operators a clean pass-specific queue instead of forcing them to infer
+          event access from orders one record at a time. It is where support should answer whether
+          a pass is available, still pending activation, or blocked on a payment follow-up.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total visible records</h2>
+            <p>
+              <strong coil:text="${membership_pass_stats.total}">0</strong>
+              customer records currently carry pass-backed access or pending pass activation.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Available now</h2>
+            <p>
+              <strong coil:text="${membership_pass_stats.available}">0</strong>
+              customer records already have captured pass inventory available for booking.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Pending activation</h2>
+            <p>
+              <strong coil:text="${membership_pass_stats.pending}">0</strong>
+              customer records still need payment settlement before the pass becomes usable.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Needs follow-up</h2>
+            <p>
+              <strong coil:text="${membership_pass_stats.follow_up}">0</strong>
+              rows still need payment or order support before customer access is clear.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_membership_pass_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Live pass queue</p>
+        <label class="admin-filter">
+          <span>Filter by customer, pass title, state, email, or order</span>
+          <input
+            type="search"
+            placeholder="Filter by customer, pass title, state, email, order..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Customer</th>
+              <th scope="col">Pass state</th>
+              <th scope="col">Titles</th>
+              <th scope="col">Support state</th>
+              <th scope="col">Latest order</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="record : ${membership_pass_rows}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${record.display_name}">Customer</strong>
+                <div class="admin-copy-row" coil:if="${record.has_customer_email}">
+                  <span coil:text="${record.customer_email}">customer@example.com</span>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.customer_email}"
+                  >
+                    Copy email
+                  </button>
+                </div>
+                <div class="admin-copy-row" coil:if="${record.has_principal_id}">
+                  <code coil:text="${record.principal_id}">customer-live</code>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.principal_id}"
+                  >
+                    Copy principal
+                  </button>
+                </div>
+              </td>
+              <td>
+                <strong coil:text="${record.pass_state_label}">Passes available</strong>
+                <p coil:text="${record.pass_summary}">
+                  1 pass available across Spring Tasting Pass.
+                </p>
+              </td>
+              <td>
+                <p coil:text="${record.pass_titles}">Spring Tasting Pass</p>
+                <p>
+                  Quantity
+                  <strong coil:text="${record.pass_count}">1</strong>
+                </p>
+              </td>
+              <td coil:text="${record.support_state_label}">Needs payment follow-up</td>
+              <td>
+                <div class="admin-copy-row">
+                  <strong coil:text="${record.latest_order_reference}">ORD-10042</strong>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.latest_order_reference}"
+                  >
+                    Copy order
+                  </button>
+                </div>
+                <div coil:text="${record.latest_order_status}">Paid</div>
+                <div coil:text="${record.latest_order_total}">£45.00</div>
+              </td>
+              <td>
+                <a
+                  class="button button--secondary"
+                  href="/admin/orders/ORD-10042"
+                  coil:attr="href=${record.latest_order_href}"
+                >
+                  View order
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+          <a class="button button--secondary" href="/admin/events/bookings" coil:attr="href=${links.admin_event_bookings}">
+            Open event bookings
+          </a>
+          <a class="button button--secondary" href="/admin/memberships/subscriptions" coil:attr="href=${links.admin_membership_subscriptions}">
+            Review subscriptions
+          </a>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:unless="${has_membership_pass_rows}">
+        <p class="admin-panel__eyebrow">Live pass queue</p>
+        <h2>No pass-backed customer records yet</h2>
+        <p coil:text="${membership_pass_rows_empty_text}">
+          Complete an event-pass checkout so operator-visible pass and credit records can be
+          assembled.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
+            Open catalog admin
+          </a>
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+publisher = "harbor-marketplace"
+artifact = "shoppr-waitlist-ops-widget/shoppr-waitlist-ops-widget.wasm"
+artifact_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+source_wat = "shoppr-waitlist-ops-widget.wat"
+
+[manifest]
+id = "shoppr-waitlist-ops-widget"
+display_name = "Shoppr Waitlist Ops Widget"
+version = "0.1.0"
+host_api_version = "1.0.0"
+
+[[handlers]]
+id = "events.waitlist.summary"
+export = "exports.events_waitlist_summary"
+point = "admin-widget"
+target = "events.booking.summary"
+grants = []

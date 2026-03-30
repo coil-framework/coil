@@ -1,0 +1,140 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Integrations'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Integrations</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Platform seams</p>
+        <h1 coil:text="${page.title}">Integrations</h1>
+        <p coil:text="${page.summary}">
+          Module integration surfaces, approved outbound endpoints, and extension-facing platform seams.
+        </p>
+        <p>
+          Use this page to verify how first-party modules, customer code, and approved outbound systems
+          are wired together before introducing new runtime dependencies.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Integration summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total integration points</h2>
+            <p><strong coil:text="${integration_stats.total}">0</strong> integration points are declared across enabled modules.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Participating modules</h2>
+            <p><strong coil:text="${integration_stats.modules}">0</strong> modules contribute at least one integration surface.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Approved outbound endpoints</h2>
+            <p><strong coil:text="${integration_stats.outbound_endpoints}">0</strong> outbound HTTP endpoints are explicitly approved in the runtime plan.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Installed extensions and plugins</h2>
+            <p><strong coil:text="${integration_stats.extensions}">0</strong> extension or linked-plugin integration participants are visible to the runtime.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_integration_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Module integration points</p>
+        <label class="admin-filter">
+          <span>Filter by module, kind, or surface</span>
+          <input type="search" placeholder="Filter by module, surface, or kind..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Module</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Surface</th>
+              <th scope="col">Description</th>
+              <th scope="col">Operator note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${integration_rows}" data-admin-filter-item="">
+              <td><code coil:text="${row.module_name}">ops</code></td>
+              <td coil:text="${row.kind_label}">Admin workflow</td>
+              <td><code coil:text="${row.surface}">ops.bulk</code></td>
+              <td coil:text="${row.description}">Adds report export and bulk workflow surfaces into the shared admin shell.</td>
+              <td coil:text="${row.operator_note}">Participates in queueable or audited operator workflows.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_outbound_endpoint_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Approved outbound endpoints</p>
+        <label class="admin-filter">
+          <span>Filter by endpoint</span>
+          <input type="search" placeholder="Filter by endpoint name or URL..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Endpoint</th>
+              <th scope="col">URL</th>
+              <th scope="col">Operator note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${outbound_endpoint_rows}" data-admin-filter-item="">
+              <td><code coil:text="${row.endpoint_name}">stripe.api</code></td>
+              <td><code coil:text="${row.endpoint_url}">https://api.stripe.com</code></td>
+              <td coil:text="${row.operator_note}">Approved outbound endpoint declared in the runtime plan and available to modules or customer code.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_extension_participant_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Extension and plugin participants</p>
+        <label class="admin-filter">
+          <span>Filter by participant or id</span>
+          <input type="search" placeholder="Filter by participant, type, or hooks..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Participant</th>
+              <th scope="col">Id</th>
+              <th scope="col">Surface summary</th>
+              <th scope="col">Operator note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${extension_participant_rows}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${row.participant_name}">Waitlist Dashboard Widgets</strong>
+                <p coil:text="${row.participant_kind}">WASM extension</p>
+              </td>
+              <td><code coil:text="${row.participant_id}">admin.waitlist</code></td>
+              <td coil:text="${row.surface_summary}">1 handlers installed for customer app customer-app.</td>
+              <td coil:text="${row.operator_note}">Extension handlers run through declared slots and the shared host capability model.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

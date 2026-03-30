@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Redirects</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -41,8 +42,16 @@
         </ul>
       </section>
 
-      <section class="admin-panel">
+      <section class="admin-panel" data-admin-filter="">
         <p class="admin-panel__eyebrow">Redirect rules</p>
+        <label class="admin-filter">
+          <span>Filter redirect rules</span>
+          <input
+            type="search"
+            placeholder="Filter by from-path or destination..."
+            data-admin-filter-input=""
+          />
+        </label>
         <form action="/admin/redirects/save" method="post">
           <table class="admin-table">
             <thead>
@@ -53,7 +62,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr coil:each="redirect : ${redirects}">
+              <tr coil:each="redirect : ${redirects}" data-admin-filter-item="">
                 <td>
                   <input type="text" coil:attr="name=${redirect.from_field},value=${redirect.from}" />
                 </td>

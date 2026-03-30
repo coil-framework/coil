@@ -116,6 +116,31 @@
         </article>
       </section>
 
+      <section class="memberships-page__summary">
+        <article class="membership-card">
+          <p class="membership-card__eyebrow">Pass-backed access</p>
+          <h2>Passes and credit balances</h2>
+          <p coil:if="${account.has_pass_programs}">
+            Memberships answer recurring access. Passes and credits cover finite uses like tasting
+            seats, workshop bundles, or prepaid service balances.
+          </p>
+          <p coil:unless="${account.has_pass_programs}" coil:text="${account.pass_programs_empty_text}">
+            Passes and credit balances will appear here once the customer buys or redeems a
+            pass-backed experience.
+          </p>
+          <ul class="account-panel__list" coil:if="${account.has_pass_programs}">
+            <li coil:each="program : ${pass_programs}">
+              <strong coil:text="${program.title}">Spring Tasting Pass</strong>
+              <span coil:text="${program.state_label}">Available</span>
+              <p coil:text="${program.usage_summary}">
+                Remaining uses and qualifying redemptions appear here next to membership access.
+              </p>
+            </li>
+          </ul>
+          <a class="button" href="/account/passes" coil:attr="href=${links.passes}">View passes and credits</a>
+        </article>
+      </section>
+
       <div coil:replace="~{account/summary-panels :: panels}"></div>
     </main>
     <footer class="site-footer">

@@ -73,3 +73,13 @@ customer_app_id = "shoppr"
 [[extensions.handlers]]
 id = "home.waitlist.banner"
 grants = []
+
+[[extensions]]
+id = "shoppr-waitlist-ops-widget"
+package_version = "0.1.0"
+artifact_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+customer_app_id = "shoppr"
+
+[[extensions.handlers]]
+id = "events.waitlist.summary"
+grants = []

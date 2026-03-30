@@ -39,6 +39,30 @@
 
       <div coil:replace="~{commerce/collection-grid :: grid}"></div>
 
+      <section class="catalog-assurance" coil:if="${has_discovery_hubs}">
+        <article>
+          <h2>Discovery paths</h2>
+          <p>
+            These collection edits are not just merchandising buckets. Each one represents a
+            different customer journey through the storefront.
+          </p>
+        </article>
+        <article coil:each="hub : ${discovery_hubs}">
+          <p class="catalog-section__eyebrow" coil:text="${hub.label}">Featured edit</p>
+          <h2 coil:text="${hub.journey_title}">Merchandising discovery</h2>
+          <p coil:text="${hub.journey_summary}">
+            Use curated edits to narrow the customer from the full catalog into a tighter browse path.
+          </p>
+          <p>
+            <strong coil:text="${hub.product_count}">3</strong>
+            products currently support this discovery path.
+          </p>
+          <a class="button button--secondary" href="/en-GB/shop/collections/featured" coil:attr="href=${hub.href}">
+            Open collection
+          </a>
+        </article>
+      </section>
+
       <section class="catalog-assurance">
         <article>
           <h2>What changes on collection detail</h2>

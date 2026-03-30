@@ -1,0 +1,141 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Event Bookings'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Event Bookings</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Event operations</p>
+        <h1 coil:text="${page.title}">Event Bookings</h1>
+        <p coil:text="${page.summary}">
+          Operator booking queue for held reservations, confirmed attendees, and waitlist follow-up.
+        </p>
+        <p>
+          This queue gives operators one place to work reservation holds, waitlist pressure, and
+          confirmed bookings before those customers move into the on-site attendance lane.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total booking rows</h2>
+            <p>
+              <strong coil:text="${event_booking_stats.total}">0</strong>
+              operator-visible booking rows are currently in scope.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Reservation holds</h2>
+            <p>
+              <strong coil:text="${event_booking_stats.held}">0</strong>
+              bookings still need confirmation before the hold expires.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Confirmed attendees</h2>
+            <p>
+              <strong coil:text="${event_booking_stats.confirmed}">0</strong>
+              rows are already ready for the check-in lane.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Waitlisted attendees</h2>
+            <p>
+              <strong coil:text="${event_booking_stats.waitlisted}">0</strong>
+              rows currently need queue or promotion review.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_event_booking_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Booking queue</p>
+        <label class="admin-filter">
+          <span>Filter by customer, event, state, or audience</span>
+          <input
+            type="search"
+            placeholder="Filter by customer, event, state..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Customer</th>
+              <th scope="col">Event</th>
+              <th scope="col">State</th>
+              <th scope="col">Audience</th>
+              <th scope="col">Operator note</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="booking : ${event_booking_rows}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${booking.reference}">EVT-2001</strong>
+              </td>
+              <td>
+                <strong coil:text="${booking.customer_name}">Morgan Rowe</strong>
+                <div class="admin-copy-row">
+                  <span coil:text="${booking.customer_email}">morgan@example.com</span>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${booking.customer_email}"
+                  >
+                    Copy email
+                  </button>
+                </div>
+              </td>
+              <td>
+                <strong coil:text="${booking.event_title}">Spring Tasting Evening</strong>
+                <div coil:text="${booking.slot_label}">Early tasting</div>
+              </td>
+              <td coil:text="${booking.booking_state_label}">Reservation held</td>
+              <td coil:text="${booking.audience_label}">Gold member priority</td>
+              <td coil:text="${booking.support_note}">
+                Needs confirmation before hold expiry
+              </td>
+              <td>
+                <a
+                  class="button button--secondary"
+                  href="/en-GB/events/spring-tasting"
+                  coil:attr="href=${booking.event_preview_href}"
+                >
+                  Preview event
+                </a>
+                <a
+                  class="button button--secondary"
+                  href="/admin/events/check-in"
+                  coil:attr="href=${booking.check_in_href}"
+                >
+                  Open check-in
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

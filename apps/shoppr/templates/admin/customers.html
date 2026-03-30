@@ -1,0 +1,194 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Customer Operations'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Customer Operations</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Customer operations</p>
+        <h1 coil:text="${page.title}">Customer Operations</h1>
+        <p coil:text="${page.summary}">
+          Operator-facing customer records built from live orders, memberships, and event-linked purchases.
+        </p>
+        <p coil:if="${operator.has_principal}">
+          Signed in as <strong coil:text="${operator.display_name}">Current Operator</strong>.
+        </p>
+        <p>
+          This screen is the checked-in CRM baseline. It groups live customer order history into
+          one operator-facing record so support can see membership state, payment follow-up risk,
+          and the latest actionable order without leaving the admin shell.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total customer records</h2>
+            <p>
+              <strong coil:text="${customer_stats.total}">0</strong>
+              customer records are currently visible to operators.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Active memberships</h2>
+            <p>
+              <strong coil:text="${customer_stats.active_memberships}">0</strong>
+              records currently show an active paid or fulfilled membership order.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Pending activation</h2>
+            <p>
+              <strong coil:text="${customer_stats.pending_memberships}">0</strong>
+              records still need payment settlement before membership access becomes active.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Payment follow-up</h2>
+            <p>
+              <strong coil:text="${customer_stats.payment_follow_up}">0</strong>
+              records currently need payment or support follow-up.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_customer_records}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Customer records</p>
+        <label class="admin-filter">
+          <span>Filter customers</span>
+          <input
+            type="search"
+            placeholder="Filter by email, principal, membership, latest order, or support state..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Customer</th>
+              <th scope="col">Membership</th>
+              <th scope="col">Latest order</th>
+              <th scope="col">Signals</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="record : ${customer_records}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${record.display_name}">Buyer Example</strong>
+                <div class="admin-copy-row" coil:if="${record.has_customer_email}">
+                  <span coil:text="${record.customer_email}">buyer@example.com</span>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.customer_email}"
+                  >
+                    Copy email
+                  </button>
+                </div>
+                <div class="admin-copy-row" coil:if="${record.has_principal_id}">
+                  <code coil:text="${record.principal_id}">member-live</code>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.principal_id}"
+                  >
+                    Copy principal
+                  </button>
+                </div>
+                <div class="admin-copy-row">
+                  <code coil:text="${record.session_id}">session-live</code>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.session_id}"
+                  >
+                    Copy session
+                  </button>
+                </div>
+              </td>
+              <td>
+                <strong coil:text="${record.membership_state_label}">Pending activation</strong>
+                <p coil:text="${record.membership_summary}">
+                  Membership access is waiting for payment settlement.
+                </p>
+              </td>
+              <td>
+                <div class="admin-copy-row">
+                  <strong coil:text="${record.latest_order_reference}">ORD-10042</strong>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.latest_order_reference}"
+                  >
+                    Copy order
+                  </button>
+                </div>
+                <p>
+                  <span coil:text="${record.latest_order_status}">Pending Payment</span>
+                  for
+                  <span coil:text="${record.latest_order_total}">£89.00</span>
+                </p>
+                <p>
+                  <span coil:text="${record.order_count}">1</span>
+                  total orders
+                </p>
+              </td>
+              <td>
+                <p><strong coil:text="${record.support_state_label}">Needs payment follow-up</strong></p>
+                <p coil:text="${record.event_access_label}">No event-linked purchase</p>
+                <p coil:if="${record.has_refund_history}">
+                  <span coil:text="${record.refund_history_label}">Refund history present</span>
+                </p>
+              </td>
+              <td>
+                <a
+                  class="button button--secondary"
+                  href="/admin/orders/ORD-10042"
+                  coil:attr="href=${record.latest_order_href}"
+                >
+                  Open latest order
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" coil:unless="${has_customer_records}">
+        <p class="admin-panel__eyebrow">Customer records</p>
+        <h2>No customer records yet</h2>
+        <p coil:text="${customers_empty_text}">
+          Complete at least one checkout so operator-visible customer records can be assembled.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button" href="/shop" coil:attr="href=${links.catalog}">
+            Open storefront
+          </a>
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

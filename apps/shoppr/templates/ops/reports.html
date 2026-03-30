@@ -1,0 +1,99 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Reports'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Reports</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operations</p>
+        <h1 coil:text="${page.title}">Reports</h1>
+        <p coil:text="${page.summary}">
+          Operational report exports, delivery state, and queued follow-up work for system operators.
+        </p>
+        <p>
+          This surface keeps report exports tied to actual operator needs. Queue them when support,
+          audit, or launch workflows need an artifact, not as background noise.
+        </p>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_flash_messages}">
+        <p class="admin-panel__eyebrow">Recent action</p>
+        <ul class="flash-list">
+          <li coil:each="message : ${flash_messages}" coil:text="${message.text}">Queued export.</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Export summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total reports</h2>
+            <p><strong coil:text="${report_stats.total}">0</strong> report definitions are currently surfaced to operators.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Ready to export</h2>
+            <p><strong coil:text="${report_stats.ready}">0</strong> definitions are ready for operator-triggered export.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Queued follow-up</h2>
+            <p><strong coil:text="${report_stats.queued}">0</strong> definitions have active operational reasons to export now.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_report_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Report definitions</p>
+        <label class="admin-filter">
+          <span>Filter by report, delivery, or state</span>
+          <input type="search" placeholder="Filter by report, delivery, or operator note..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Report</th>
+              <th scope="col">Delivery</th>
+              <th scope="col">Job state</th>
+              <th scope="col">Scope</th>
+              <th scope="col">Operator note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${report_rows}" data-admin-filter-item="">
+              <td><strong coil:text="${row.report_name}">Search health</strong></td>
+              <td coil:text="${row.delivery_mode}">Signed URL</td>
+              <td coil:text="${row.job_state_label}">Ready to export</td>
+              <td>
+                <p coil:text="${row.scope_summary}">Use this before launch or migration cutover.</p>
+                <p coil:text="${row.output_summary}">The ops module stores generated report artifacts behind signed delivery.</p>
+              </td>
+              <td>
+                <p coil:text="${row.action_label}">Queue export when operators need an external handoff.</p>
+                <form action="/admin/reports/export" method="post">
+                  <input type="hidden" name="report_id" coil:attr="value=${row.report_id}" />
+                  <button type="submit">Queue export</button>
+                </form>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

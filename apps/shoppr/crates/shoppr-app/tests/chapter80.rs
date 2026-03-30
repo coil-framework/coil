@@ -1,7 +1,9 @@
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use coil_runtime::EnvironmentSecretResolver;
-use shoppr_app::{ShopprWorkspace, shoppr_waitlist_tools_demo_sha256};
+use shoppr_app::{
+    ShopprWorkspace, shoppr_waitlist_ops_widget_demo_sha256, shoppr_waitlist_tools_demo_sha256,
+};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -173,6 +175,17 @@ fn harbor_waitlist_tools_declares_the_real_demo_checksum() {
         app_manifest.contains(&format!("artifact_sha256 = \"{expected}\"")),
         "expected checksum {expected}\n{app_manifest}"
     );
+}
+
+#[test]
+fn waitlist_ops_widget_checksum_probe() {
+    let app_root = ShopprWorkspace::default()
+        .unwrap()
+        .app_root()
+        .to_path_buf();
+    let expected = shoppr_waitlist_ops_widget_demo_sha256(&app_root).unwrap();
+    println!("{expected}");
+    assert_eq!(expected.len(), 64);
 }
 
 #[test]

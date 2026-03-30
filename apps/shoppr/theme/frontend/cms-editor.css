@@ -1,0 +1,19 @@
+@import "./admin.css";
+
+.cms-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-card--collapsed > :not(:first-child):not(.admin-card__actions) {
+  display: none;
+}
+
+.admin-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}

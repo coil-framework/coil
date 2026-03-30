@@ -1,0 +1,212 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Membership Subscriptions'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Membership Subscriptions</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Membership operations</p>
+        <h1 coil:text="${page.title}">Membership Subscriptions</h1>
+        <p coil:text="${page.summary}">
+          Operator-facing subscription queue built from live membership orders and current customer state.
+        </p>
+        <p coil:if="${operator.has_principal}">
+          Signed in as <strong coil:text="${operator.display_name}">Current Operator</strong>.
+        </p>
+        <p>
+          This view reuses the live customer and order state already present in Shoppr. It is the
+          first operator lane for answering which customers are active, who is still pending
+          activation, and which records need support follow-up before entitlement-sensitive
+          journeys continue.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total visible subscriptions</h2>
+            <p>
+              <strong coil:text="${membership_subscription_stats.total}">0</strong>
+              membership-backed customer records are currently visible.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Active memberships</h2>
+            <p>
+              <strong coil:text="${membership_subscription_stats.active}">0</strong>
+              records have already moved into an active membership state.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Pending activation</h2>
+            <p>
+              <strong coil:text="${membership_subscription_stats.pending}">0</strong>
+              records are still waiting on payment capture or qualification.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Needs follow-up</h2>
+            <p>
+              <strong coil:text="${membership_subscription_stats.follow_up}">0</strong>
+              records still need payment or event-access review.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operator guidance</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Start with pending activation</h2>
+            <p>
+              Pending membership states usually mean a qualifying order exists but the payment
+              result has not fully settled into the storefront state yet.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Cross-check the latest order</h2>
+            <p>
+              Every row links back to the order detail screen so support can confirm payment,
+              email, and refund state before escalating a membership case.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Use event signals as a CRM clue</h2>
+            <p>
+              Event-linked purchases and passes are surfaced here as a quick way to identify
+              customers likely to need timing, access, or membership guidance.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_membership_subscriptions}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Live subscription queue</p>
+        <label class="admin-filter">
+          <span>Filter by customer, state, email, or order</span>
+          <input
+            type="search"
+            placeholder="Filter by customer, state, email, order..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Customer</th>
+              <th scope="col">Membership</th>
+              <th scope="col">Support state</th>
+              <th scope="col">Event signal</th>
+              <th scope="col">Latest order</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="record : ${membership_subscriptions}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${record.display_name}">Customer</strong>
+                <div class="admin-copy-row" coil:if="${record.has_customer_email}">
+                  <span coil:text="${record.customer_email}">customer@example.com</span>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.customer_email}"
+                  >
+                    Copy email
+                  </button>
+                </div>
+                <div class="admin-copy-row" coil:if="${record.has_principal_id}">
+                  <code coil:text="${record.principal_id}">customer-live</code>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.principal_id}"
+                  >
+                    Copy principal
+                  </button>
+                </div>
+              </td>
+              <td>
+                <strong coil:text="${record.membership_state_label}">Pending activation</strong>
+                <p coil:text="${record.membership_summary}">
+                  Membership summary.
+                </p>
+              </td>
+              <td coil:text="${record.support_state_label}">Needs payment follow-up</td>
+              <td coil:text="${record.event_access_label}">Has event-linked purchase</td>
+              <td>
+                <div class="admin-copy-row">
+                  <strong coil:text="${record.latest_order_reference}">ORD-10042</strong>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.latest_order_reference}"
+                  >
+                    Copy order
+                  </button>
+                </div>
+                <div coil:text="${record.latest_order_status}">Pending Payment</div>
+                <div coil:text="${record.latest_order_total}">GBP 89.00</div>
+              </td>
+              <td>
+                <a
+                  class="button button--secondary"
+                  href="/admin/orders/ORD-10042"
+                  coil:attr="href=${record.latest_order_href}"
+                >
+                  View order
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+          <a class="button button--secondary" href="/admin/customers" coil:attr="href=${links.admin_customers}">
+            Open customers
+          </a>
+          <a class="button button--secondary" href="/admin/memberships/tiers" coil:attr="href=${links.admin_membership_tiers}">
+            Review tiers
+          </a>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:unless="${has_membership_subscriptions}">
+        <p class="admin-panel__eyebrow">Live subscription queue</p>
+        <h2>No membership-backed customer records yet</h2>
+        <p coil:text="${membership_subscriptions_empty_text}">
+          Complete a membership checkout so operator-visible subscription records can be assembled.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button" href="/en-GB/shop/collections/memberships" coil:attr="href=${links.memberships_collection}">
+            Open membership collection
+          </a>
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

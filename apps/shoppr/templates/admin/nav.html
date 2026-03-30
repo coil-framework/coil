@@ -2,8 +2,14 @@
   <div class="admin-nav__group">
     <p class="admin-nav__label">Commerce</p>
     <a class="admin-nav__link" href="/admin" coil:attr="href=${links.admin_dashboard}">Dashboard</a>
+    <a class="admin-nav__link" href="/admin/customers" coil:attr="href=${links.admin_customers}">
+      Customers
+    </a>
     <a class="admin-nav__link" href="/admin/orders" coil:attr="href=${links.admin_orders}">
       Orders
+    </a>
+    <a class="admin-nav__link" href="/admin/payments" coil:attr="href=${links.admin_payments}">
+      Payments
     </a>
     <a
       class="admin-nav__link"
@@ -11,6 +17,53 @@
       coil:attr="href=${links.admin_catalog}"
     >
       Catalog
+    </a>
+  </div>
+  <div class="admin-nav__group">
+    <p class="admin-nav__label">Memberships</p>
+    <a
+      class="admin-nav__link"
+      href="/admin/memberships/subscriptions"
+      coil:attr="href=${links.admin_membership_subscriptions}"
+    >
+      Subscriptions
+    </a>
+    <a
+      class="admin-nav__link"
+      href="/admin/memberships/passes"
+      coil:attr="href=${links.admin_membership_passes}"
+    >
+      Passes
+    </a>
+    <a
+      class="admin-nav__link"
+      href="/admin/memberships/tiers"
+      coil:attr="href=${links.admin_membership_tiers}"
+    >
+      Tiers
+    </a>
+    <a class="admin-nav__link" href="/admin/passes">
+      Passes &amp; credits
+    </a>
+  </div>
+  <div class="admin-nav__group">
+    <p class="admin-nav__label">Events</p>
+    <a class="admin-nav__link" href="/admin/events" coil:attr="href=${links.admin_events}">
+      Events
+    </a>
+    <a
+      class="admin-nav__link"
+      href="/admin/events/bookings"
+      coil:attr="href=${links.admin_event_bookings}"
+    >
+      Bookings
+    </a>
+    <a
+      class="admin-nav__link"
+      href="/admin/events/check-in"
+      coil:attr="href=${links.admin_event_check_in}"
+    >
+      Check-in
     </a>
   </div>
   <div class="admin-nav__group">
@@ -41,6 +94,30 @@
     </a>
     <a class="admin-nav__link" href="/admin/audit" coil:attr="href=${links.admin_audit}">
       Audit
+    </a>
+  </div>
+  <div class="admin-nav__group">
+    <p class="admin-nav__label">Operations</p>
+    <a class="admin-nav__link" href="/admin/diagnostics" coil:attr="href=${links.admin_diagnostics}">
+      Diagnostics
+    </a>
+    <a class="admin-nav__link" href="/admin/jobs" coil:attr="href=${links.admin_jobs}">
+      Jobs
+    </a>
+    <a class="admin-nav__link" href="/admin/integrations" coil:attr="href=${links.admin_integrations}">
+      Integrations
+    </a>
+    <a class="admin-nav__link" href="/admin/search" coil:attr="href=${links.admin_search}">
+      Search
+    </a>
+    <a class="admin-nav__link" href="/admin/reports" coil:attr="href=${links.admin_reports}">
+      Reports
+    </a>
+    <a class="admin-nav__link" href="/admin/bulk" coil:attr="href=${links.admin_bulk}">
+      Bulk
+    </a>
+    <a class="admin-nav__link" href="/admin/recovery" coil:attr="href=${links.admin_recovery}">
+      Recovery
     </a>
   </div>
 </nav>

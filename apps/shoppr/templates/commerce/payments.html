@@ -1,0 +1,217 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Payment Operations'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Payment Operations</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Payment operations</p>
+        <h1 coil:text="${page.title}">Payment Operations</h1>
+        <p coil:text="${page.summary}">
+          Provider handoff, webhook confirmation, and downstream follow-up for live checkout activity.
+        </p>
+        <p coil:if="${operator.has_principal}">
+          Signed in as <strong coil:text="${operator.display_name}">Current Operator</strong>.
+        </p>
+        <p>
+          This queue separates pending provider confirmation from captured payments and refund follow-up.
+          Use it before escalating a checkout problem into raw provider logs or customer support back-and-forth.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total payment rows</h2>
+            <p>
+              <strong coil:text="${payment_operation_stats.total}">0</strong>
+              live orders currently expose provider or reconciliation state.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Awaiting confirmation</h2>
+            <p>
+              <strong coil:text="${payment_operation_stats.awaiting_confirmation}">0</strong>
+              rows still need signed provider confirmation before the order can move forward.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Captured payments</h2>
+            <p>
+              <strong coil:text="${payment_operation_stats.captured}">0</strong>
+              rows have already reconciled with the provider callback.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Refund follow-up</h2>
+            <p>
+              <strong coil:text="${payment_operation_stats.refund_follow_up}">0</strong>
+              rows already have refund history and still need reconciliation or customer messaging.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operator guidance</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Pending payment is still live</h2>
+            <p>
+              A pending payment means the checkout handoff completed but the signed provider webhook has
+              not settled local state yet. Do not treat that as an immediate checkout failure.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Captured means downstream work starts</h2>
+            <p>
+              Once the provider callback reconciles, use the next-step lane to confirm order confirmation,
+              fulfillment, or customer follow-up work is appropriate.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Refunds stay coupled to the order</h2>
+            <p>
+              Move into order detail for refund issuance or fulfillment. This page is for provider state,
+              webhook timing, and follow-up visibility, not deep order mutation.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_payment_operations}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Payment queue</p>
+        <label class="admin-filter">
+          <span>Filter by order, provider ref, customer, or state</span>
+          <input
+            type="search"
+            placeholder="Filter by order, provider ref, state, or customer..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Order</th>
+              <th scope="col">Provider handoff</th>
+              <th scope="col">Webhook state</th>
+              <th scope="col">Follow-up</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="payment : ${payment_operations}" data-admin-filter-item="">
+              <td>
+                <div class="admin-copy-row">
+                  <strong coil:text="${payment.reference}">ORD-10042</strong>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${payment.reference}"
+                  >
+                    Copy order
+                  </button>
+                </div>
+                <div coil:if="${payment.has_checkout_email}" class="admin-copy-row">
+                  <span coil:text="${payment.checkout_email}">buyer@example.com</span>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${payment.checkout_email}"
+                  >
+                    Copy email
+                  </button>
+                </div>
+                <p>Total <span coil:text="${payment.total}">£89.00</span></p>
+              </td>
+              <td>
+                <p>
+                  <strong coil:text="${payment.provider_label}">Stripe</strong>
+                  <span coil:text="${payment.provider_status_label}">Pending Payment</span>
+                </p>
+                <div coil:if="${payment.has_payment_reference}" class="admin-copy-row">
+                  <code coil:text="${payment.payment_reference}">PAY-50001</code>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${payment.payment_reference}"
+                  >
+                    Copy payment ref
+                  </button>
+                </div>
+                <p coil:unless="${payment.has_payment_reference}">Provider reference is not available yet.</p>
+              </td>
+              <td>
+                <strong coil:text="${payment.webhook_status_label}">Awaiting signed Stripe webhook</strong>
+                <p coil:text="${payment.integration_note}">
+                  Payment confirmation is pending. The order will move forward after the provider callback arrives.
+                </p>
+              </td>
+              <td>
+                <p coil:text="${payment.next_job_label}">
+                  Hold customer messaging until the payment-provider webhook confirms capture.
+                </p>
+                <p coil:if="${payment.has_refund_history}" coil:text="${payment.refund_history_label}">
+                  1 refund event recorded
+                </p>
+              </td>
+              <td>
+                <a
+                  class="button button--secondary"
+                  href="/admin/orders/ORD-10042"
+                  coil:attr="href=${payment.detail_href}"
+                >
+                  Open order
+                </a>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  coil:attr="data-copy-text=${payment.session_id}"
+                >
+                  Copy session
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" coil:unless="${has_payment_operations}">
+        <p class="admin-panel__eyebrow">Payment queue</p>
+        <h2>No payment operations yet</h2>
+        <p coil:text="${payment_operations_empty_text}">
+          Complete at least one checkout so provider handoff and webhook reconciliation become visible to operators.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button" href="/shop" coil:attr="href=${links.catalog}">
+            Open storefront
+          </a>
+          <a class="button button--secondary" href="/checkout" coil:attr="href=${links.checkout}">
+            Open checkout
+          </a>
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

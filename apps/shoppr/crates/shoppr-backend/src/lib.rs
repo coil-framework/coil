@@ -69,6 +69,14 @@ impl CustomerHookRegistry for RecordingRegistry {
         Ok(())
     }
 
+    fn register_render_model_hooks(
+        &mut self,
+        _hooks: Arc<dyn coil_customer_sdk::RenderModelHooks>,
+    ) -> Result<(), BackendError> {
+        self.hook_kinds.push(RegisteredHookKind::RenderModel);
+        Ok(())
+    }
+
     fn register_verified_webhook_hooks(
         &mut self,
         _hooks: Arc<dyn VerifiedWebhookHooks>,

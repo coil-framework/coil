@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Shoppr Admin</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -51,15 +52,31 @@
           <strong coil:text="${order_count}">2</strong>
         </article>
         <article class="admin-metric">
+          <p class="admin-metric__label">Customer records</p>
+          <strong coil:text="${customer_count}">2</strong>
+        </article>
+        <article class="admin-metric">
+          <p class="admin-metric__label">Events in rotation</p>
+          <strong coil:text="${event_count}">3</strong>
+        </article>
+        <article class="admin-metric">
           <p class="admin-metric__label">Content routes</p>
           <strong coil:text="${content_count}">6</strong>
         </article>
       </section>
 
-      <section class="admin-panel">
+      <section class="admin-panel" data-admin-filter="">
         <p class="admin-panel__eyebrow">Day-one tasks</p>
+        <label class="admin-filter">
+          <span>Filter tasks and control-room cards</span>
+          <input
+            type="search"
+            placeholder="Filter by orders, catalog, content, launch, storefront..."
+            data-admin-filter-input=""
+          />
+        </label>
         <div class="admin-card-grid">
-          <article class="admin-card">
+          <article class="admin-card" data-admin-filter-item="">
             <h2>Review storefront orders</h2>
             <p>
               Check whether checkout is producing a visible order queue with the same reference,
@@ -69,7 +86,17 @@
               Open orders
             </a>
           </article>
-          <article class="admin-card">
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Monitor payment handoff</h2>
+            <p>
+              Work the provider-facing queue for pending confirmations, signed webhook arrival, and
+              downstream follow-up before support cases spill into manual diagnostics.
+            </p>
+            <a class="button" href="/admin/payments" coil:attr="href=${links.admin_payments}">
+              Open payments
+            </a>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
             <h2>Manage live catalog copy</h2>
             <p>
               Update product titles, summaries, prices, and collection placement from the admin
@@ -79,7 +106,17 @@
               Open catalog
             </a>
           </article>
-          <article class="admin-card">
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Review customer state</h2>
+            <p>
+              Inspect the operator-facing customer record built from live orders, membership
+              entitlement, and event-linked purchases before escalating support or concierge work.
+            </p>
+            <a class="button" href="/admin/customers" coil:attr="href=${links.admin_customers}">
+              Open customers
+            </a>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
             <h2>Check content inventory</h2>
             <p>
               Review the live route set, navigation, and redirect readiness before traffic or
@@ -89,10 +126,108 @@
               Open content
             </a>
           </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Review membership subscriptions</h2>
+            <p>
+              Work the live membership queue from paid, pending, and follow-up states without
+              leaving the checked-in operator shell.
+            </p>
+            <a
+              class="button"
+              href="/admin/memberships/subscriptions"
+              coil:attr="href=${links.admin_membership_subscriptions}"
+            >
+              Open subscriptions
+            </a>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Work pass and credit queues</h2>
+            <p>
+              Review prepaid pass programs, remaining balances, expiring credits, and redemption
+              exceptions before support escalations reach manual order-by-order triage.
+            </p>
+            <a
+              class="button"
+              href="/admin/memberships/passes"
+              coil:attr="href=${links.admin_membership_passes}"
+            >
+              Open passes and credits
+            </a>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Run event operations</h2>
+            <p>
+              Review the live event slate, booking queue, and check-in lane so operators can work
+              waitlist pressure and attendance readiness from the shared admin shell.
+            </p>
+            <a class="button" href="/admin/events" coil:attr="href=${links.admin_events}">
+              Open event ops
+            </a>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Inspect search and reports</h2>
+            <p>
+              Check search freshness and report-export readiness before launch, migration, or
+              reconciliation work leaves the shared operator shell.
+            </p>
+            <div class="admin-copy-row">
+              <a class="button" href="/admin/search" coil:attr="href=${links.admin_search}">
+                Open search
+              </a>
+              <a class="button button--secondary" href="/admin/reports" coil:attr="href=${links.admin_reports}">
+                Open reports
+              </a>
+            </div>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Queue bulk and recovery workflows</h2>
+            <p>
+              Open the bulk and recovery lanes when the runbook calls for reindex, export, or
+              recovery coordination from the shared operator shell.
+            </p>
+            <div class="admin-copy-row">
+              <a class="button" href="/admin/bulk" coil:attr="href=${links.admin_bulk}">
+                Open bulk
+              </a>
+              <a class="button button--secondary" href="/admin/recovery" coil:attr="href=${links.admin_recovery}">
+                Open recovery
+              </a>
+            </div>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Open diagnostics</h2>
+            <p>
+              Review readiness, metrics, and recent traces before dropping into raw health or
+              diagnostics endpoints.
+            </p>
+            <a class="button" href="/admin/diagnostics" coil:attr="href=${links.admin_diagnostics}">
+              Open diagnostics
+            </a>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Review jobs and queues</h2>
+            <p>
+              Confirm which jobs are registered, how they are triggered, and which queue or
+              retry envelope they will use before debugging follow-up work.
+            </p>
+            <a class="button" href="/admin/jobs" coil:attr="href=${links.admin_jobs}">
+              Open jobs
+            </a>
+          </article>
+          <article class="admin-card" data-admin-filter-item="">
+            <h2>Review integration seams</h2>
+            <p>
+              Check module integration points and approved outbound endpoints before adding a new
+              external dependency or customer extension.
+            </p>
+            <a class="button" href="/admin/integrations" coil:attr="href=${links.admin_integrations}">
+              Open integrations
+            </a>
+          </article>
         </div>
       </section>
 
-      <section class="admin-panel">
+      <section class="admin-panel" data-admin-filter="">
         <p class="admin-panel__eyebrow">Three-site demo</p>
         <h2>Host-to-journey mapping</h2>
         <p>
@@ -100,8 +235,16 @@
           flagship store, a French editorial storefront, and a Polish assortment with localized
           merchandising and memberships.
         </p>
+        <label class="admin-filter">
+          <span>Filter journeys</span>
+          <input
+            type="search"
+            placeholder="Filter by UK, FR, PL, product, storefront..."
+            data-admin-filter-input=""
+          />
+        </label>
         <div class="admin-card-grid">
-          <article class="admin-card">
+          <article class="admin-card" data-admin-filter-item="">
             <h3>shoppr-uk</h3>
             <p>
               Validate the main browse loop from catalog to collection to product detail to cart on
@@ -111,7 +254,7 @@
               Open shop route
             </a>
           </article>
-          <article class="admin-card">
+          <article class="admin-card" data-admin-filter-item="">
             <h3>shoppr-fr</h3>
             <p>
               Validate the French storefront journey and localized editorial merchandising without
@@ -120,8 +263,11 @@
             <a class="button" href="/fr-FR/shop">
               Open FR storefront
             </a>
+            <button class="button button--secondary" type="button" data-copy-text="/fr-FR/shop">
+              Copy FR route
+            </button>
           </article>
-          <article class="admin-card">
+          <article class="admin-card" data-admin-filter-item="">
             <h3>shoppr-pl</h3>
             <p>
               Validate the PL-specific assortment and localized merchandising path, including
@@ -130,6 +276,13 @@
             <a class="button" href="/pl-PL/shop/products/harbor-scarf">
               Open PL product
             </a>
+            <button
+              class="button button--secondary"
+              type="button"
+              data-copy-text="/pl-PL/shop/products/harbor-scarf"
+            >
+              Copy PL route
+            </button>
           </article>
         </div>
       </section>
@@ -152,10 +305,45 @@
             </p>
           </article>
           <article class="admin-card">
+            <h2>Payment-provider reconciliation</h2>
+            <p>
+              Use the payments screen to distinguish pending provider confirmation from captured
+              payments and refund follow-up before escalating checkout incidents.
+            </p>
+          </article>
+          <article class="admin-card">
             <h2>Cutover content checks</h2>
             <p>
               Use pages, navigation, and redirects to confirm that live routes are present and
               legacy URL protection is accounted for before traffic switch.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Membership lifecycle checks</h2>
+            <p>
+              Confirm active and pending membership states, event-linked purchase signals, and
+              the tiers currently exposed to support and operations.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Event booking readiness</h2>
+            <p>
+              Use events, bookings, and check-in to confirm slot pressure, waitlist follow-up, and
+              on-site attendance handling before event-led campaigns go live.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Search freshness and report exports</h2>
+            <p>
+              Use search and reports to confirm projection health and export readiness before
+              cutover, audit handoff, or bulk operational follow-up.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Runtime diagnostics</h2>
+            <p>
+              Use diagnostics to confirm health, queue visibility, and recent trace output before
+              escalating to lower-level runtime investigation.
             </p>
           </article>
         </div>
@@ -225,6 +413,30 @@
         <div class="admin-page__actions">
           <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
             Orders
+          </a>
+          <a
+            class="button button--secondary"
+            href="/admin/memberships/subscriptions"
+            coil:attr="href=${links.admin_membership_subscriptions}"
+          >
+            Subscriptions
+          </a>
+          <a
+            class="button button--secondary"
+            href="/admin/memberships/tiers"
+            coil:attr="href=${links.admin_membership_tiers}"
+          >
+            Tiers
+          </a>
+          <a class="button button--secondary" href="/admin/events" coil:attr="href=${links.admin_events}">
+            Events
+          </a>
+          <a
+            class="button button--secondary"
+            href="/admin/events/bookings"
+            coil:attr="href=${links.admin_event_bookings}"
+          >
+            Event bookings
           </a>
           <a class="button button--secondary" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
             Catalog

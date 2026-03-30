@@ -1,0 +1,20 @@
+{
+  "name": "shoppr-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./theme/build/build.mjs",
+    "watch": "node ./theme/build/build.mjs --watch"
+  },
+  "dependencies": {
+    "@hotwired/stimulus": "^3.2.2",
+    "@hotwired/turbo": "^8.0.12"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.25.0",
+    "postcss": "^8.5.3",
+    "postcss-import": "^16.1.0",
+    "postcss-nesting": "^13.0.2"
+  }
+}

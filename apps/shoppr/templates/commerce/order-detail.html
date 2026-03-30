@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Order Detail</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -58,14 +59,44 @@
           <article class="admin-card">
             <h2>Customer</h2>
             <p coil:if="${selected_order.has_checkout_email}">
-              Receipt email <strong coil:text="${selected_order.checkout_email}">member@example.com</strong>
+              Receipt email
+              <span class="admin-copy-row">
+                <strong coil:text="${selected_order.checkout_email}">member@example.com</strong>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  coil:attr="data-copy-text=${selected_order.checkout_email}"
+                >
+                  Copy email
+                </button>
+              </span>
             </p>
             <p coil:unless="${selected_order.has_checkout_email}">Receipt email has not been captured yet.</p>
             <p coil:if="${selected_order.has_principal_id}">
-              Principal <code coil:text="${selected_order.principal_id}">member-live</code>
+              Principal
+              <span class="admin-copy-row">
+                <code coil:text="${selected_order.principal_id}">member-live</code>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  coil:attr="data-copy-text=${selected_order.principal_id}"
+                >
+                  Copy principal
+                </button>
+              </span>
             </p>
             <p>
-              Session <code coil:text="${selected_order.session_id}">session-live</code>
+              Session
+              <span class="admin-copy-row">
+                <code coil:text="${selected_order.session_id}">session-live</code>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  coil:attr="data-copy-text=${selected_order.session_id}"
+                >
+                  Copy session
+                </button>
+              </span>
             </p>
           </article>
           <article class="admin-card">
@@ -81,13 +112,37 @@
         <p class="admin-panel__eyebrow">Payment</p>
         <div class="admin-card-grid">
           <article class="admin-card">
+            <h2>Provider handoff</h2>
+            <p>
+              <strong coil:text="${selected_order.payment_provider_label}">Stripe webhook confirmation</strong>
+            </p>
+            <p coil:text="${selected_order.payment_provider_summary}">
+              This checkout uses the installed Stripe payment provider. The order stays visible until the signed Stripe webhook confirms the payment result.
+            </p>
+            <p coil:text="${selected_order.payment_next_step}">
+              Stripe has not confirmed this payment yet. The order will move forward after the signed Stripe webhook arrives.
+            </p>
+          </article>
+          <article class="admin-card">
             <h2>Payment trace</h2>
             <p coil:text="${selected_order.payment_summary}">
               Card ending 4242, reference PAY-50001
             </p>
             <p coil:if="${selected_order.has_payment_reference}">
               Provider reference
-              <code coil:text="${selected_order.payment_reference}">PAY-50001</code>
+              <span class="admin-copy-row">
+                <code coil:text="${selected_order.payment_reference}">PAY-50001</code>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  coil:attr="data-copy-text=${selected_order.payment_reference}"
+                >
+                  Copy payment ref
+                </button>
+              </span>
+            </p>
+            <p coil:if="${selected_order.needs_payment_follow_up}">
+              This order still needs provider confirmation before refund or fulfillment should proceed.
             </p>
           </article>
           <article class="admin-card">

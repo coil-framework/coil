@@ -1,0 +1,117 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Event Check-In'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Event Check-In</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Event operations</p>
+        <h1 coil:text="${page.title}">Event Check-In</h1>
+        <p coil:text="${page.summary}">
+          Operator check-in lane for attendance readiness, reconciliation, and on-site follow-up.
+        </p>
+        <p>
+          Use this page once a booking is ready to become an attendance workflow. It keeps the
+          checked-in app honest about which attendees are ready now and which rows have already
+          been reconciled by operators.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Check-in summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total check-in rows</h2>
+            <p>
+              <strong coil:text="${event_check_in_stats.total}">0</strong>
+              rows are currently visible in the operator attendance lane.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Ready now</h2>
+            <p>
+              <strong coil:text="${event_check_in_stats.ready}">0</strong>
+              attendees can be checked in immediately.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Already checked in</h2>
+            <p>
+              <strong coil:text="${event_check_in_stats.completed}">0</strong>
+              attendance rows are already reconciled.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Need booking review</h2>
+            <p>
+              Start from the bookings queue when a reservation is still held or waitlisted.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_event_check_in_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Attendance lane</p>
+        <label class="admin-filter">
+          <span>Filter by attendee, event, or attendance state</span>
+          <input
+            type="search"
+            placeholder="Filter by attendee, event, state..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Booking</th>
+              <th scope="col">Attendee</th>
+              <th scope="col">Event</th>
+              <th scope="col">Slot</th>
+              <th scope="col">Attendance state</th>
+              <th scope="col">Operator note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${event_check_in_rows}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${row.booking_reference}">EVT-2003</strong>
+              </td>
+              <td coil:text="${row.attendee_name}">Jordan Lee</td>
+              <td coil:text="${row.event_title}">Fit Clinic Appointments</td>
+              <td coil:text="${row.slot_label}">Morning appointment</td>
+              <td coil:text="${row.attendance_state_label}">Ready to check in</td>
+              <td coil:text="${row.operator_note}">
+                Pass-backed attendee. Confirm stylist assignment before scanning in.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/events/bookings" coil:attr="href=${links.admin_event_bookings}">
+            Back to bookings
+          </a>
+          <a class="button button--secondary" href="/admin/events" coil:attr="href=${links.admin_events}">
+            Back to event slate
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

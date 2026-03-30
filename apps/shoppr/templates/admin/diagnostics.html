@@ -1,0 +1,129 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Diagnostics'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Diagnostics</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operations</p>
+        <h1 coil:text="${page.title}">Diagnostics</h1>
+        <p coil:text="${page.summary}">
+          Readiness, metrics, trace samples, and privileged diagnostics entry points for operators.
+        </p>
+        <p>
+          This page is the operator-facing summary. Use the linked raw endpoints only when the
+          summarized state here says deeper investigation is necessary.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Probe summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Liveness</h2>
+            <p><strong coil:text="${diagnostic_status.liveness}">Healthy</strong></p>
+          </article>
+          <article class="admin-card">
+            <h2>Readiness</h2>
+            <p><strong coil:text="${diagnostic_status.readiness}">Healthy</strong></p>
+          </article>
+          <article class="admin-card">
+            <h2>Metrics enabled</h2>
+            <p><strong coil:text="${diagnostic_status.metrics_enabled}">true</strong></p>
+          </article>
+          <article class="admin-card">
+            <h2>Trace capture enabled</h2>
+            <p><strong coil:text="${diagnostic_status.trace_enabled}">true</strong></p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Raw endpoints</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Health probes</h2>
+            <div class="admin-copy-row">
+              <a class="button button--secondary" href="/health" coil:attr="href=${diagnostic_status.health_href}">Open /health</a>
+              <a class="button button--secondary" href="/ready" coil:attr="href=${diagnostic_status.readiness_href}">Open /ready</a>
+            </div>
+          </article>
+          <article class="admin-card">
+            <h2>Metrics and diagnostics</h2>
+            <div class="admin-copy-row">
+              <a class="button button--secondary" href="/metrics" coil:attr="href=${diagnostic_status.metrics_href}">Open /metrics</a>
+              <a class="button button--secondary" href="/diagnostics" coil:attr="href=${diagnostic_status.diagnostics_href}">Open /diagnostics</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Key metrics</p>
+        <label class="admin-filter">
+          <span>Filter metrics</span>
+          <input type="search" placeholder="Filter by metric name or value..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Metric</th>
+              <th scope="col">Name</th>
+              <th scope="col">Current reading</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="metric : ${diagnostic_metrics}" data-admin-filter-item="">
+              <td coil:text="${metric.metric_label}">HTTP requests</td>
+              <td><code coil:text="${metric.metric_name}">coil.http.requests.total</code></td>
+              <td coil:text="${metric.metric_value}">1</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Recent traces</p>
+        <label class="admin-filter">
+          <span>Filter traces</span>
+          <input type="search" placeholder="Filter by trace id, span, or outcome..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Trace id</th>
+              <th scope="col">Span</th>
+              <th scope="col">Outcome</th>
+              <th scope="col">Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="trace : ${diagnostic_traces}" data-admin-filter-item="">
+              <td><code coil:text="${trace.trace_id}">trace-1</code></td>
+              <td coil:text="${trace.span}">http.request</td>
+              <td coil:text="${trace.outcome}">ok</td>
+              <td><span coil:text="${trace.duration_ms}">42</span> ms</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

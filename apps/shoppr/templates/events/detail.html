@@ -1,0 +1,111 @@
+<!doctype html>
+<html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}" lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Event detail · Shoppr</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor events">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main">
+      <section class="home-page events-page" coil:if="${has_event}">
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow" coil:text="${event.eyebrow}">Event</p>
+          <h1 coil:text="${event.title}">Spring Tasting Evening</h1>
+          <p coil:text="${event.summary}">
+            Event summary.
+          </p>
+          <p>
+            <strong coil:text="${event.day_label}">Thursday 11 April</strong>
+            ·
+            <span coil:text="${event.time_range_label}">18:30 to 20:30</span>
+          </p>
+          <p>
+            <span coil:text="${event.venue_name}">Shoppr Townhouse</span>
+            ·
+            <span coil:text="${event.venue_city}">London</span>
+            ·
+            <span coil:text="${event.venue_mode}">In store</span>
+          </p>
+          <p coil:text="${event.availability_label}">
+            Priority booking window open
+          </p>
+          <p coil:text="${event.audience_label}">
+            Gold members book first
+          </p>
+          <p coil:text="${event.priority_note}">
+            Priority note.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/en-GB/events" coil:attr="href=${links.events}">Back to events</a>
+            <a class="button button--secondary" href="/account" coil:attr="href=${links.account}">
+              Open account
+            </a>
+            <a class="button button--secondary" href="/account/memberships" coil:attr="href=${links.memberships}">
+              Review memberships
+            </a>
+          </div>
+        </article>
+
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow">Timeslots</p>
+          <h2>Choose the right session before booking starts</h2>
+          <ol class="account-panel__list" coil:if="${event.has_timeslots}">
+            <li coil:each="timeslot : ${event.timeslots}">
+              <div>
+                <strong coil:text="${timeslot.label}">Early tasting</strong>
+                <span coil:text="${timeslot.starts_at_label}">18:30</span>
+                to
+                <span coil:text="${timeslot.ends_at_label}">19:15</span>
+              </div>
+              <p coil:text="${timeslot.availability_label}">
+                4 seats remaining
+              </p>
+              <p coil:text="${timeslot.booking_status_label}">
+                Priority reservation available
+              </p>
+              <p coil:text="${timeslot.audience_label}">
+                Gold members
+              </p>
+              <p coil:text="${timeslot.capacity_note}">
+                Capacity note.
+              </p>
+              <div class="checkout-actions">
+                <a class="button" href="/account" coil:attr="href=${links.account}" coil:text="${timeslot.booking_cta_label}">
+                  Reserve seat
+                </a>
+                <a class="button button--secondary" href="/account/memberships" coil:attr="href=${links.memberships}">
+                  Check eligibility
+                </a>
+              </div>
+            </li>
+          </ol>
+        </article>
+      </section>
+
+      <section class="home-page events-page" coil:unless="${has_event}">
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow">Event detail</p>
+          <h1>Event unavailable</h1>
+          <p>
+            The requested event slug is not currently available for this site or locale.
+          </p>
+          <p>
+            Missing slug:
+            <strong coil:text="${missing_event_slug}">unknown-event</strong>
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/en-GB/events" coil:attr="href=${links.events}">Back to events</a>
+            <a class="button button--secondary" href="/en-GB/shop/collections/events" coil:attr="href=${links.events_collection}">
+              Browse event-linked offers
+            </a>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

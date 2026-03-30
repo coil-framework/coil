@@ -1,0 +1,117 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Membership Tiers'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Membership Tiers</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Membership operations</p>
+        <h1 coil:text="${page.title}">Membership Tiers</h1>
+        <p coil:text="${page.summary}">
+          Operator view of the checked-in membership offers, entitlements, and storefront availability.
+        </p>
+        <p>
+          This page uses the current storefront catalog to show the membership offers that are
+          actually visible to customers right now. It gives operators one place to confirm the
+          offer title, entitlement key, price, and site coverage before moving into deeper
+          lifecycle work.
+        </p>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_membership_tiers}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Membership offers</p>
+        <label class="admin-filter">
+          <span>Filter by title, SKU, entitlement, or site</span>
+          <input
+            type="search"
+            placeholder="Filter by title, SKU, entitlement, site..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <div class="admin-card-grid">
+          <article class="admin-card" coil:each="tier : ${membership_tiers}" data-admin-filter-item="">
+            <div class="admin-copy-row">
+              <p class="admin-page__eyebrow" coil:text="${tier.sku}">membership-gold</p>
+              <button
+                class="button button--secondary"
+                type="button"
+                coil:attr="data-copy-text=${tier.sku}"
+              >
+                Copy SKU
+              </button>
+            </div>
+            <h2 coil:text="${tier.title}">Gold Membership</h2>
+            <p coil:text="${tier.summary}">
+              Membership summary.
+            </p>
+            <p>
+              Price:
+              <strong coil:text="${tier.price}">GBP 89.00</strong>
+            </p>
+            <p>
+              Variant:
+              <span coil:text="${tier.variant_title}">Annual</span>
+            </p>
+            <p coil:if="${tier.has_entitlement_key}">
+              Entitlement:
+              <code coil:text="${tier.entitlement_key}">membership.gold</code>
+              <button
+                class="button button--secondary"
+                type="button"
+                coil:attr="data-copy-text=${tier.entitlement_key}"
+              >
+                Copy entitlement
+              </button>
+            </p>
+            <p coil:unless="${tier.has_entitlement_key}">
+              This offer does not currently expose an entitlement key.
+            </p>
+            <p coil:text="${tier.site_summary}">Visible in 2 sites</p>
+            <p>
+              Sites:
+              <span coil:text="${tier.sites}">shoppr-uk, shoppr-pl</span>
+            </p>
+            <div class="admin-page__actions">
+              <a class="button button--secondary" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
+                Open catalog admin
+              </a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:unless="${has_membership_tiers}">
+        <p class="admin-panel__eyebrow">Membership offers</p>
+        <h2>No membership-backed products are visible yet</h2>
+        <p coil:text="${membership_tiers_empty_text}">
+          No membership-backed products are visible in the checked-in catalog yet.
+        </p>
+        <div class="admin-page__actions">
+          <a class="button" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
+            Open catalog admin
+          </a>
+          <a class="button button--secondary" href="/admin" coil:attr="href=${links.admin_dashboard}">
+            Back to dashboard
+          </a>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

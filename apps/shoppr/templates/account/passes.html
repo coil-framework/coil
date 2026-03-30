@@ -1,0 +1,134 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Passes and credits'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Passes and credits</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main account-page">
+      <section class="account-page__intro">
+        <p class="account-page__eyebrow">Customer account</p>
+        <h1>Passes and credits</h1>
+        <p coil:text="${pass_wallet.summary}">
+          Use this page to answer three questions quickly: what pass-backed access exists on this
+          account, how much balance is still available, and which event inventory those passes are
+          meant to unlock.
+        </p>
+        <p coil:if="${account.has_principal}">
+          Signed in as <strong coil:text="${customer.display_name}">Member Live</strong>.
+        </p>
+        <p coil:unless="${account.has_principal}">
+          This pass and credit view currently follows the browser session you are using right now.
+        </p>
+        <div coil:if="${account.has_customer_email}">
+          <p coil:if="${account.has_principal}">
+            Account email: <strong coil:text="${customer.email}">member@example.com</strong>.
+          </p>
+          <p coil:unless="${account.has_principal}">
+            Receipt email on this browser session:
+            <strong coil:text="${customer.email}">member@example.com</strong>.
+          </p>
+        </div>
+      </section>
+
+      <nav class="account-page__nav" coil:replace="~{account/nav :: nav}"></nav>
+
+      <section class="account-page__cards">
+        <article class="account-card">
+          <h2>Active pass programs</h2>
+          <ul class="account-panel__list" coil:if="${account.has_pass_programs}">
+            <li coil:each="program : ${pass_programs}">
+              <strong coil:text="${program.title}">Spring Tasting Pass</strong>
+              <span coil:text="${program.state_label}">Available</span>
+              <p>
+                Balance
+                <strong coil:text="${program.balance_label}">1 available</strong>
+              </p>
+              <p coil:text="${program.usage_summary}">
+                Use this pass when booking seasonal tasting slots from the event calendar.
+              </p>
+              <a
+                class="button button--secondary"
+                href="/en-GB/events"
+                coil:attr="href=${program.product_href}"
+              >
+                Open product
+              </a>
+              <a class="button button--secondary" href="/account/orders" coil:attr="href=${program.order_href}">
+                Review order history
+              </a>
+            </li>
+          </ul>
+          <div coil:unless="${account.has_pass_programs}">
+            <p coil:text="${account.pass_programs_empty_text}">
+              Pass programs will appear here once the customer buys or redeems a pass-backed
+              experience.
+            </p>
+            <a
+              class="button"
+              href="/en-GB/events"
+              coil:attr="href=${account.passes_cta_url}"
+            >
+              Browse event passes
+            </a>
+          </div>
+        </article>
+
+        <article class="account-card">
+          <h2>Wallet summary</h2>
+          <p>
+            Available
+            <strong coil:text="${pass_wallet.available}">1</strong>
+          </p>
+          <p>
+            Pending activation
+            <strong coil:text="${pass_wallet.pending}">0</strong>
+          </p>
+          <p coil:text="${pass_wallet.summary}">
+            1 pass currently available for event-linked bookings.
+          </p>
+        </article>
+      </section>
+
+      <section class="account-orders">
+        <article class="account-panel">
+          <p class="account-panel__eyebrow">Event bookings</p>
+          <h2>Bookings that can consume pass-backed access</h2>
+          <ul class="account-panel__list" coil:if="${account.has_event_bookings}">
+            <li coil:each="event : ${event_bookings}">
+              <a href="/en-GB/events/example" coil:attr="href=${event.href}">
+                <strong coil:text="${event.event_title}">Spring tasting evening</strong>
+              </a>
+              <span coil:text="${event.status_label}">Confirmed</span>
+              <p><strong coil:text="${event.slot_label}">Early tasting</strong></p>
+              <p coil:text="${event.day_label}">Thursday 11 April</p>
+              <p coil:text="${event.summary}">
+                Customer used one pass-backed credit and retained priority booking access.
+              </p>
+            </li>
+          </ul>
+          <div coil:unless="${account.has_event_bookings}">
+            <p>
+              Event redemptions will appear here once a pass or credit balance is consumed against
+              a qualifying booking.
+            </p>
+          </div>
+        </article>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

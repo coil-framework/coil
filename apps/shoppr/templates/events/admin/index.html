@@ -1,0 +1,137 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Event Operations'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Event Operations</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Event operations</p>
+        <h1 coil:text="${page.title}">Event Operations</h1>
+        <p coil:text="${page.summary}">
+          Operator overview of live events, slot pressure, and booking or waitlist actions.
+        </p>
+        <p coil:if="${operator.has_principal}">
+          Signed in as <strong coil:text="${operator.display_name}">Current Operator</strong>.
+        </p>
+        <p>
+          This page turns the checked-in event fixtures into an operator-ready slate. Use it to
+          review venue mode, capacity shape, and whether the next operational step belongs in the
+          bookings queue or the on-site check-in lane.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Operations summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total events</h2>
+            <p>
+              <strong coil:text="${event_admin_stats.total}">0</strong>
+              event surfaces are currently visible to operators.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Active slots</h2>
+            <p>
+              <strong coil:text="${event_admin_stats.slot_total}">0</strong>
+              slots are currently exposed across the live event slate.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Waitlist pressure</h2>
+            <p>
+              <strong coil:text="${event_admin_stats.waitlist_events}">0</strong>
+              events currently require waitlist-aware operator follow-up.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Appointment-led events</h2>
+            <p>
+              <strong coil:text="${event_admin_stats.appointment_events}">0</strong>
+              events currently run as appointment-style operations.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_event_admin_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Live event slate</p>
+        <label class="admin-filter">
+          <span>Filter by event, venue, state, or audience</span>
+          <input
+            type="search"
+            placeholder="Filter by title, venue, audience, state..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <div class="admin-card-grid">
+          <article class="admin-card" coil:each="event : ${event_admin_rows}" data-admin-filter-item="">
+            <p class="admin-page__eyebrow" coil:text="${event.eyebrow}">Member event</p>
+            <h2 coil:text="${event.title}">Spring Tasting Evening</h2>
+            <p>
+              <strong coil:text="${event.day_label}">Thursday 11 April</strong>
+              ·
+              <span coil:text="${event.time_range_label}">18:30 to 20:30</span>
+            </p>
+            <p>
+              <span coil:text="${event.venue_name}">Shoppr Townhouse</span>
+              ·
+              <span coil:text="${event.venue_city}">London</span>
+              ·
+              <span coil:text="${event.venue_mode}">In store</span>
+            </p>
+            <p coil:text="${event.slot_summary}">2 active slots</p>
+            <p coil:text="${event.availability_label}">Priority booking window open</p>
+            <p coil:text="${event.audience_label}">Gold members book first</p>
+            <p>
+              <strong coil:text="${event.operational_state_label}">Multi-slot event</strong>
+            </p>
+            <p coil:text="${event.next_action_label}">
+              Confirm member priority windows
+            </p>
+            <div class="admin-page__actions">
+              <a
+                class="button button--secondary"
+                href="/en-GB/events/spring-tasting"
+                coil:attr="href=${event.preview_href}"
+              >
+                Preview event
+              </a>
+              <a
+                class="button button--secondary"
+                href="/admin/events/bookings"
+                coil:attr="href=${event.bookings_href}"
+              >
+                Open bookings
+              </a>
+              <a
+                class="button button--secondary"
+                href="/admin/events/check-in"
+                coil:attr="href=${event.check_in_href}"
+              >
+                Open check-in
+              </a>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

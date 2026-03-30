@@ -114,6 +114,50 @@
               Browse storefront
             </a>
           </article>
+          <article class="account-card">
+            <h2>Event bookings</h2>
+            <p coil:if="${account.has_event_bookings}">
+              Review confirmed seats, held reservations, and waitlist movement without leaving the
+              same account surface.
+            </p>
+            <p coil:unless="${account.has_event_bookings}" coil:text="${account.event_bookings_empty_text}">
+              Event reservations and confirmed bookings will appear here once the customer starts
+              booking timed experiences.
+            </p>
+            <a
+              class="button"
+              href="/en-GB/events"
+              coil:attr="href=${account.event_bookings_cta_url}"
+              coil:text="${account.event_bookings_cta_label}"
+            >
+              Browse event calendar
+            </a>
+            <a class="button button--secondary" href="/account/memberships">
+              Check membership access
+            </a>
+          </article>
+          <article class="account-card">
+            <h2>Passes and credits</h2>
+            <p coil:if="${account.has_pass_programs}">
+              Track event passes, remaining credits, and redemption history from the same customer
+              view used for memberships and orders.
+            </p>
+            <p coil:unless="${account.has_pass_programs}" coil:text="${account.pass_programs_empty_text}">
+              Pass programs and credit balances will appear here once the customer buys or redeems
+              a pass-backed experience.
+            </p>
+            <a class="button" href="/account/passes" coil:attr="href=${links.passes}">
+              View passes and credits
+            </a>
+            <a
+              class="button button--secondary"
+              href="/en-GB/events"
+              coil:attr="href=${account.passes_cta_url}"
+              coil:text="${account.passes_cta_label}"
+            >
+              Browse eligible events
+            </a>
+          </article>
         </div>
         <div coil:replace="~{account/summary-panels :: panels}"></div>
       </section>

@@ -410,36 +410,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "coil"
-version = "0.1.0"
-dependencies = [
- "coil-admin",
- "coil-app",
- "coil-auth",
- "coil-cms",
- "coil-commerce",
- "coil-config",
- "coil-core",
- "coil-customer-sdk",
- "coil-events",
- "coil-media",
- "coil-memberships",
- "coil-ops",
- "coil-runtime",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
 name = "coil-a11y"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-i18n",
 ]
 
 [[package]]
 name = "coil-admin"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-auth",
  "coil-core",
@@ -450,7 +429,7 @@ dependencies = [
 
 [[package]]
 name = "coil-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-assets",
  "coil-auth",
@@ -471,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "coil-assets"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-auth",
  "coil-storage",
@@ -481,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "coil-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-config",
  "coil-data",
@@ -492,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "coil-cache"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "redis",
@@ -502,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "coil-cms"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-auth",
  "coil-core",
@@ -512,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "coil-commerce"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-auth",
  "coil-config",
@@ -524,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "coil-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ipnet",
  "serde",
@@ -535,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "coil-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -560,11 +539,14 @@ dependencies = [
 
 [[package]]
 name = "coil-customer-sdk"
-version = "0.1.0"
+version = "0.1.1"
+dependencies = [
+ "coil-template",
+]
 
 [[package]]
 name = "coil-data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-config",
  "sqlx",
@@ -573,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "coil-events"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-auth",
  "coil-commerce",
@@ -585,14 +567,14 @@ dependencies = [
 
 [[package]]
 name = "coil-i18n"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "coil-jobs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-config",
  "serde",
@@ -603,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "coil-media"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-assets",
  "coil-auth",
@@ -614,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "coil-memberships"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-auth",
  "coil-commerce",
@@ -625,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "coil-observability"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-config",
  "thiserror 1.0.69",
@@ -633,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "coil-ops"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-auth",
  "coil-config",
@@ -645,15 +627,36 @@ dependencies = [
 
 [[package]]
 name = "coil-report"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
 ]
 
 [[package]]
+name = "coil-rs"
+version = "0.1.1"
+dependencies = [
+ "coil-admin",
+ "coil-app",
+ "coil-auth",
+ "coil-cms",
+ "coil-commerce",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-events",
+ "coil-media",
+ "coil-memberships",
+ "coil-ops",
+ "coil-runtime",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "coil-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "coil-assets",
@@ -692,14 +695,14 @@ dependencies = [
 
 [[package]]
 name = "coil-seo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "coil-i18n",
 ]
 
 [[package]]
 name = "coil-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "coil-config",
@@ -716,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "coil-template"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "html5ever",
  "markup5ever",
@@ -725,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "coil-tls"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -745,7 +748,7 @@ dependencies = [
 
 [[package]]
 name = "coil-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "sha2",
@@ -3486,7 +3489,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "coil",
+ "coil-rs",
  "serde",
  "serde_json",
  "shoppr-app",
@@ -3500,12 +3503,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "coil",
  "coil-app",
  "coil-auth",
  "coil-config",
  "coil-customer-sdk",
  "coil-data",
+ "coil-rs",
  "coil-runtime",
  "coil-wasm",
  "hex",
@@ -5553,6 +5556,8 @@ dependencies = [
 [[package]]
 name = "zanzibar"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1ffeb3d5a8e03a8763503a214b245310ce9ea16c3ec2ebe35d4ee28ede65a10"
 dependencies = [
  "anyhow",
  "async-trait",

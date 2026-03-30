@@ -17,12 +17,71 @@
     </header>
     <main class="site-main">
       <article class="page-shell">
-        <p class="catalog-section__eyebrow">CMS Page</p>
+        <p
+          class="catalog-section__eyebrow"
+          coil:text="${cms_page.requires_membership ? 'Members guide' : 'CMS Page'}"
+        >
+          CMS Page
+        </p>
         <h1 coil:text="${cms_page.content.title}">Shoppr</h1>
         <p coil:text="${cms_page.content.summary}">
           Server-rendered CMS page.
         </p>
-        <div class="cms-page-blocks" coil:if="${cms_page.has_structured_blocks}">
+        <section class="page-shell" coil:if="${cms_page.requires_membership and show_membership_gated_content}">
+          <p class="catalog-section__eyebrow">Membership access</p>
+          <h2>Member access unlocked</h2>
+          <p>
+            Current membership state:
+            <strong coil:text="${audience.membership_state_label}">Active</strong>
+          </p>
+          <p coil:text="${audience.membership_summary}">
+            This page now uses the active membership entitlement attached to the current request.
+          </p>
+        </section>
+        <section class="page-shell" coil:if="${show_membership_pending_gate}">
+          <p class="catalog-section__eyebrow">Membership access</p>
+          <h2 coil:text="${audience.membership_title}">Membership activation pending</h2>
+          <p coil:text="${audience.membership_summary}">
+            Membership access only becomes available after the qualifying order finishes payment
+            capture.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/account/orders" coil:attr="href=${links.orders}">
+              Review order history
+            </a>
+            <a
+              class="button button--secondary"
+              href="/account/memberships"
+              coil:attr="href=${links.memberships}"
+            >
+              View memberships
+            </a>
+          </div>
+        </section>
+        <section class="page-shell" coil:if="${show_membership_teaser_gate}">
+          <p class="catalog-section__eyebrow">Membership required</p>
+          <h2 coil:text="${audience.membership_title}">Membership preview</h2>
+          <p coil:text="${audience.membership_summary}">
+            Join from the storefront to unlock the full guide and member-only editorial content.
+          </p>
+          <div class="checkout-actions">
+            <a
+              class="button"
+              href="/en-GB/shop/collections/memberships"
+              coil:attr="href=${audience.membership_cta_url}"
+              coil:text="${audience.membership_cta_label}"
+            >
+              Explore memberships
+            </a>
+            <a class="button button--secondary" href="/account" coil:attr="href=${links.account}">
+              Open account
+            </a>
+          </div>
+        </section>
+        <div
+          class="cms-page-blocks"
+          coil:if="${cms_page.has_structured_blocks and (show_membership_gated_content or not cms_page.requires_membership)}"
+        >
           <coil:block coil:each="block : ${cms_page.blocks}">
             <coil:block coil:switch="${block.type_id}">
               <div coil:case="'hero'" coil:replace="~{cms/blocks/hero :: block}"></div>
@@ -46,7 +105,10 @@
             </coil:block>
           </coil:block>
         </div>
-        <div coil:unless="${cms_page.has_structured_blocks}" coil:utext="${cms_page.body_html}">
+        <div
+          coil:if="${(not cms_page.has_structured_blocks) and (show_membership_gated_content or not cms_page.requires_membership)}"
+          coil:utext="${cms_page.body_html}"
+        >
           <p>Page body.</p>
         </div>
         <div class="checkout-actions">

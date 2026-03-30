@@ -1,10 +1,10 @@
 use anyhow::{Context, Result, bail};
 use coil_app::CustomerExtension;
 use coil_wasm::{
-    ContractVersion, ExtensionArtifactSource, ExtensionConfigSchema, ExtensionInstallation,
-    ExtensionManifest, ExtensionPackage, ExtensionPoint, ExtensionPointKind, HandlerId,
-    HandlerInstallation, HandlerManifest, HostGrantSet, RenderHookExtensionPoint, ResourceLimits,
-    TypedExecutionOutput, TypedMetadata,
+    AdminWidgetExtensionPoint, ContractVersion, ExtensionArtifactSource, ExtensionConfigSchema,
+    ExtensionInstallation, ExtensionManifest, ExtensionPackage, ExtensionPoint,
+    ExtensionPointKind, HandlerId, HandlerInstallation, HandlerManifest, HostGrantSet,
+    RenderHookExtensionPoint, ResourceLimits, TypedExecutionOutput, TypedMetadata,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -226,25 +226,44 @@ fn compile_demo_artifact(
     if document.handlers.len() != 1 {
         bail!("Shoppr demo extension currently supports exactly one installed handler");
     }
-    if !handler.point.eq_ignore_ascii_case("render-hook") {
+    if !handler.point.eq_ignore_ascii_case("render-hook")
+        && !handler.point.eq_ignore_ascii_case("render_hook")
+        && !handler.point.eq_ignore_ascii_case("admin-widget")
+        && !handler.point.eq_ignore_ascii_case("admin_widget")
+    {
         bail!(
-            "Shoppr demo extension compiler currently supports render-hook handlers only, got `{}`",
+            "Shoppr demo extension compiler currently supports render-hook and admin-widget handlers only, got `{}`",
             handler.point
         );
     }
 
-    let typed_output = TypedExecutionOutput::render_hook(
-        200,
-        format!(
-            "<aside data-extension=\"{}\">Shoppr Waitlist Tools is active through the bounded runtime-installed WASM path.</aside>",
-            document.manifest.id
-        ),
-        TypedMetadata::new()
-            .with_description("Shoppr runtime-installed WASM render hook output")
-            .expect("static Shoppr metadata should be valid"),
-        None,
-    )
-    .expect("static Shoppr render hook output should be valid");
+    let typed_output = match handler.point.to_ascii_lowercase().as_str() {
+        "render-hook" | "render_hook" => TypedExecutionOutput::render_hook(
+            200,
+            format!(
+                "<aside data-extension=\"{}\">Shoppr Waitlist Tools is active through the bounded runtime-installed WASM path.</aside>",
+                document.manifest.id
+            ),
+            TypedMetadata::new()
+                .with_description("Shoppr runtime-installed WASM render hook output")
+                .expect("static Shoppr metadata should be valid"),
+            None,
+        )
+        .expect("static Shoppr render hook output should be valid"),
+        "admin-widget" | "admin_widget" => TypedExecutionOutput::admin_widget(
+            200,
+            format!(
+                "<section class=\"admin-card\" data-widget=\"waitlist-ops\" data-extension=\"{}\"><h2>Waitlist operations widget</h2><p>Review held reservations, waitlist pressure, and promotion readiness from the installed Shoppr extension path.</p></section>",
+                document.manifest.id
+            ),
+            TypedMetadata::new()
+                .with_description("Shoppr runtime-installed WASM admin widget output")
+                .expect("static Shoppr metadata should be valid"),
+            None,
+        )
+        .expect("static Shoppr admin widget output should be valid"),
+        other => bail!("unsupported Shoppr demo extension point `{other}`"),
+    };
     let typed_output_bytes = typed_output
         .encode()
         .context("failed to encode Shoppr render hook typed output")?;
@@ -287,6 +306,10 @@ fn compile_demo_artifact(
 
 fn parse_extension_point(point: &str, target: &str) -> Result<ExtensionPoint> {
     match point.to_ascii_lowercase().as_str() {
+        "admin-widget" | "admin_widget" => Ok(ExtensionPoint::AdminWidget(
+            AdminWidgetExtensionPoint::new(target)
+                .context("invalid Shoppr admin-widget extension target")?,
+        )),
         "render-hook" | "render_hook" => Ok(ExtensionPoint::RenderHook(
             RenderHookExtensionPoint::new(target)
                 .context("invalid Shoppr render-hook extension target")?,

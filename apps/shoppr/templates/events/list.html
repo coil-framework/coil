@@ -1,0 +1,94 @@
+<!doctype html>
+<html xmlns:coil="https://coil.rs" coil:attr="lang=${locale}" lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Events · Shoppr</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor events">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{navigation/primary}"></nav>
+    </header>
+    <main class="site-main">
+      <section class="home-page events-page">
+        <article class="catalog-section">
+          <p class="catalog-section__eyebrow">Events</p>
+          <h1>Event discovery now lives in the same product as memberships and editorial pages.</h1>
+          <p>
+            This route is no longer a placeholder. It now exposes real event cards, venue context,
+            and timeslot summaries so the customer can understand what happens before booking begins.
+          </p>
+          <div class="checkout-actions">
+            <a class="button" href="/account/memberships" coil:attr="href=${links.memberships}">
+              Review memberships
+            </a>
+            <a
+              class="button button--secondary"
+              href="/en-GB/shop/collections/events"
+              coil:attr="href=${links.events_collection}"
+            >
+              Browse event-linked offers
+            </a>
+          </div>
+        </article>
+
+        <section class="collection-grid__list" coil:if="${has_events}">
+          <article class="catalog-section collection-grid__item" coil:each="event : ${events}">
+            <p class="catalog-section__eyebrow" coil:text="${event.eyebrow}">Event</p>
+            <h2>
+              <a href="/en-GB/events/spring-tasting" coil:attr="href=${event.href}" coil:text="${event.title}">
+                Spring Tasting Evening
+              </a>
+            </h2>
+            <p coil:text="${event.summary}">
+              Event summary.
+            </p>
+            <p>
+              <strong coil:text="${event.day_label}">Thursday 11 April</strong>
+              ·
+              <span coil:text="${event.time_range_label}">18:30 to 20:30</span>
+            </p>
+            <p>
+              <span coil:text="${event.venue_name}">Shoppr Townhouse</span>
+              ·
+              <span coil:text="${event.venue_city}">London</span>
+              ·
+              <span coil:text="${event.venue_mode}">In store</span>
+            </p>
+            <p coil:text="${event.availability_label}">
+              Priority booking window open
+            </p>
+            <p coil:text="${event.audience_label}">
+              Gold members book first
+            </p>
+            <p coil:text="${event.priority_note}">
+              Priority note.
+            </p>
+            <div class="checkout-actions">
+              <a class="button" href="/en-GB/events/spring-tasting" coil:attr="href=${event.href}">
+                View event
+              </a>
+              <a
+                class="button button--secondary"
+                href="/account/memberships"
+                coil:attr="href=${links.memberships}"
+              >
+                Membership access
+              </a>
+            </div>
+          </article>
+        </section>
+
+        <article class="catalog-section" coil:unless="${has_events}">
+          <p class="catalog-section__eyebrow">Events</p>
+          <h2>No events are currently visible</h2>
+          <p>
+            This route is live, but there are no current event cards to render for this audience.
+          </p>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

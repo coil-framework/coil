@@ -1,0 +1,105 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Search Operations'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Search Operations</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Operations</p>
+        <h1 coil:text="${page.title}">Search Operations</h1>
+        <p coil:text="${page.summary}">
+          Search index freshness, rebuild pressure, and projection drift across the operator-visible catalog.
+        </p>
+        <p>
+          Use this surface before a bulk reindex. The goal is to prove whether browse drift exists,
+          not to rebuild search blindly.
+        </p>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_flash_messages}">
+        <p class="admin-panel__eyebrow">Recent action</p>
+        <ul class="flash-list">
+          <li coil:each="message : ${flash_messages}" coil:text="${message.text}">Queued workflow.</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Search health</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Total indexes</h2>
+            <p><strong coil:text="${search_stats.total}">0</strong> operator-visible search indexes are in scope.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Healthy</h2>
+            <p><strong coil:text="${search_stats.healthy}">0</strong> indexes currently look ready.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Watching</h2>
+            <p><strong coil:text="${search_stats.watching}">0</strong> indexes are waiting on publication or rebuild follow-up.</p>
+          </article>
+          <article class="admin-card">
+            <h2>Queue full reindex</h2>
+            <p>
+              Use the bulk workflow only after the index detail below confirms drift or rebuild pressure.
+            </p>
+            <form action="/admin/bulk" method="post">
+              <input type="hidden" name="operation_id" value="bulk.search.reindex" />
+              <input type="hidden" name="target_count" coil:attr="value=${search_stats.total}" />
+              <label>
+                <input type="checkbox" name="dry_run" value="yes" />
+                Dry run only
+              </label>
+              <button type="submit">Queue full reindex</button>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_search_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Index detail</p>
+        <label class="admin-filter">
+          <span>Filter by index or state</span>
+          <input type="search" placeholder="Filter by index, freshness, or action..." data-admin-filter-input="" />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Index</th>
+              <th scope="col">Freshness</th>
+              <th scope="col">Drift summary</th>
+              <th scope="col">Trigger</th>
+              <th scope="col">Operator note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="row : ${search_rows}" data-admin-filter-item="">
+              <td><strong coil:text="${row.index_name}">catalog.products</strong></td>
+              <td coil:text="${row.freshness_label}">Fresh</td>
+              <td coil:text="${row.drift_summary}">0 products need rebuild review.</td>
+              <td coil:text="${row.trigger_summary}">Rebuilt by publication events.</td>
+              <td coil:text="${row.action_label}">Rebuild only if browse drift is confirmed.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Audit Log</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -44,8 +45,16 @@
         </p>
       </section>
 
-      <section class="admin-panel" coil:if="${has_audit_entries}">
+      <section class="admin-panel" coil:if="${has_audit_entries}" data-admin-filter="">
         <p class="admin-panel__eyebrow">Audit entries</p>
+        <label class="admin-filter">
+          <span>Filter audit rows</span>
+          <input
+            type="search"
+            placeholder="Filter by actor, action, capability, resource..."
+            data-admin-filter-input=""
+          />
+        </label>
         <table class="admin-table">
           <thead>
             <tr>
@@ -59,7 +68,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="entry : ${audit_entries}">
+            <tr coil:each="entry : ${audit_entries}" data-admin-filter-item="">
               <td coil:text="${entry.when}">1764223200</td>
               <td coil:text="${entry.actor}">operator-live-1</td>
               <td coil:text="${entry.action}">Issue refund</td>
@@ -106,6 +115,30 @@
               Open catalog
             </a>
           </article>
+          <article class="admin-card">
+            <h3>Capture a membership action</h3>
+            <p>
+              Open the subscription and tier views to verify membership lifecycle and entitlement
+              handling before those states gain deeper operator mutations.
+            </p>
+            <a
+              class="button"
+              href="/admin/memberships/subscriptions"
+              coil:attr="href=${links.admin_membership_subscriptions}"
+            >
+              Open subscriptions
+            </a>
+          </article>
+          <article class="admin-card">
+            <h3>Capture an event operation</h3>
+            <p>
+              Use the events, bookings, and check-in surfaces to verify event inventory, booking
+              pressure, and attendance workflows before event-led campaigns go live.
+            </p>
+            <a class="button" href="/admin/events" coil:attr="href=${links.admin_events}">
+              Open event ops
+            </a>
+          </article>
         </div>
         <div class="admin-page__actions">
           <a class="button button--secondary" href="/admin" coil:attr="href=${links.admin_dashboard}">
@@ -113,6 +146,16 @@
           </a>
           <a class="button button--secondary" href="/admin/navigation" coil:attr="href=${links.admin_navigation}">
             Review navigation
+          </a>
+          <a
+            class="button button--secondary"
+            href="/admin/memberships/tiers"
+            coil:attr="href=${links.admin_membership_tiers}"
+          >
+            Review tiers
+          </a>
+          <a class="button button--secondary" href="/admin/events/bookings" coil:attr="href=${links.admin_event_bookings}">
+            Review event bookings
           </a>
         </div>
       </section>

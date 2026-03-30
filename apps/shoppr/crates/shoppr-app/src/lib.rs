@@ -294,6 +294,10 @@ pub fn shoppr_waitlist_tools_demo_sha256(app_root: impl AsRef<Path>) -> Result<S
     extensions::compiled_demo_artifact_sha256(app_root.as_ref(), "shoppr-waitlist-tools")
 }
 
+pub fn shoppr_waitlist_ops_widget_demo_sha256(app_root: impl AsRef<Path>) -> Result<String> {
+    extensions::compiled_demo_artifact_sha256(app_root.as_ref(), "shoppr-waitlist-ops-widget")
+}
+
 fn discover_workspace_root(start: Option<&Path>) -> Option<PathBuf> {
     let mut current = start?.to_path_buf();
     loop {

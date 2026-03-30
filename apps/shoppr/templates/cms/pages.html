@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Pages</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/cms-editor.css" coil:href="asset('theme/assets/cms-editor.css')" />
+    <script src="/theme/assets/cms-editor.js" coil:src="asset('theme/assets/cms-editor.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -58,8 +59,16 @@
         </ul>
       </section>
 
-      <section class="admin-panel" coil:if="${has_content_pages}">
+      <section class="admin-panel" coil:if="${has_content_pages}" data-admin-filter="">
         <p class="admin-panel__eyebrow">Managed pages</p>
+        <label class="admin-filter">
+          <span>Filter pages</span>
+          <input
+            type="search"
+            placeholder="Filter by title, route, summary, or status..."
+            data-admin-filter-input=""
+          />
+        </label>
         <table class="admin-table">
           <thead>
             <tr>
@@ -71,20 +80,28 @@
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="page_record : ${content_pages}">
+            <tr coil:each="page_record : ${content_pages}" data-admin-filter-item="">
               <td>
                 <strong coil:text="${page_record.title}">Visit Harbor</strong>
               </td>
               <td coil:text="${page_record.status_label}">Published</td>
               <td>
-                <a
-                  coil:if="${page_record.has_live_path}"
-                  href="/pages/visit-harbor"
-                  coil:attr="href=${page_record.live_path}"
-                  coil:text="${page_record.live_path}"
-                >
-                  /pages/visit-harbor
-                </a>
+                <span class="admin-copy-row" coil:if="${page_record.has_live_path}">
+                  <a
+                    href="/pages/visit-harbor"
+                    coil:attr="href=${page_record.live_path}"
+                    coil:text="${page_record.live_path}"
+                  >
+                    /pages/visit-harbor
+                  </a>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${page_record.live_path}"
+                  >
+                    Copy route
+                  </button>
+                </span>
                 <span coil:unless="${page_record.has_live_path}">Not live</span>
               </td>
               <td coil:text="${page_record.summary}">Page summary</td>
@@ -181,9 +198,18 @@
             </p>
             <p coil:if="${selected_content_page.has_live_path}">
               Live route:
-              <a href="/pages/visit-harbor" coil:attr="href=${selected_content_page.live_path}" coil:text="${selected_content_page.live_path}">
-                /pages/visit-harbor
-              </a>
+              <span class="admin-copy-row">
+                <a href="/pages/visit-harbor" coil:attr="href=${selected_content_page.live_path}" coil:text="${selected_content_page.live_path}">
+                  /pages/visit-harbor
+                </a>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  coil:attr="data-copy-text=${selected_content_page.live_path}"
+                >
+                  Copy route
+                </button>
+              </span>
             </p>
             <p coil:if="${selected_content_page.has_previous_live}">
               Previous live revision:
@@ -193,13 +219,22 @@
           <article class="admin-card">
             <h3>Preview path</h3>
             <p coil:if="${selected_content_page.has_preview_path}">
-              <a
-                href="/admin/pages/preview?page=page-visit-harbor"
-                coil:attr="href=${selected_content_page.preview_path}"
-                coil:text="${selected_content_page.preview_path}"
-              >
-                /admin/pages/preview?page=page-visit-harbor
-              </a>
+              <span class="admin-copy-row">
+                <a
+                  href="/admin/pages/preview?page=page-visit-harbor"
+                  coil:attr="href=${selected_content_page.preview_path}"
+                  coil:text="${selected_content_page.preview_path}"
+                >
+                  /admin/pages/preview?page=page-visit-harbor
+                </a>
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  coil:attr="data-copy-text=${selected_content_page.preview_path}"
+                >
+                  Copy preview path
+                </button>
+              </span>
             </p>
             <p coil:unless="${selected_content_page.has_preview_path}">
               Save the draft first to get a stable preview endpoint.
@@ -323,12 +358,31 @@ SEO description
           The runtime now exposes the structured block list directly. Review the live draft state
           below, then use the replacement form to submit an indexed block list for the draft.
         </p>
+        <div class="cms-editor-toolbar" coil:if="${selected_content_page.has_blocks}">
+          <p data-cms-block-summary="">0 blocks</p>
+          <button class="button button--secondary" type="button" data-action="click->cms--editor#expandAll">
+            Expand all
+          </button>
+          <button class="button button--secondary" type="button" data-action="click->cms--editor#collapseAll">
+            Collapse all
+          </button>
+        </div>
         <div class="admin-card-grid" coil:if="${selected_content_page.has_blocks}">
-          <article class="admin-card" coil:each="block : ${selected_content_page.blocks}">
+          <article
+            class="admin-card"
+            coil:each="block : ${selected_content_page.blocks}"
+            data-block-card=""
+            data-collapsed="false"
+            coil:attr="data-block-enabled=${block.is_enabled ? 'true' : 'false'}"
+          >
             <p class="admin-panel__eyebrow" coil:text="${block.kind}">inline</p>
             <h3 coil:text="${block.label}">Block label</h3>
             <p><strong>ID</strong> <span coil:text="${block.id}">block-id</span></p>
             <p><strong>Type</strong> <span coil:text="${block.type_id}">hero</span></p>
+            <p>
+              <strong>Status</strong>
+              <span coil:text="${block.is_enabled ? 'Enabled' : 'Disabled'}">Enabled</span>
+            </p>
             <p coil:if="${block.is_shared}">
               <strong>Shared block</strong>
               <span coil:text="${block.shared_block_id}">shared-store-hours</span>
@@ -343,6 +397,21 @@ SEO description
             </dl>
             <div coil:if="${block.has_html}" coil:utext="${block.html}">
               <p>Rendered HTML</p>
+            </div>
+            <div class="admin-card__actions">
+              <button
+                class="button button--secondary"
+                type="button"
+                data-block-toggle=""
+                data-action="click->cms--editor#toggleBlock"
+              >
+                Collapse
+              </button>
+              <form action="/admin/pages/blocks/duplicate" method="post">
+                <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
+                <input type="hidden" name="block_id" coil:attr="value=${block.id}" />
+                <button class="button button--secondary" type="submit">Duplicate block</button>
+              </form>
             </div>
           </article>
         </div>
@@ -404,6 +473,31 @@ SEO description
                   name="block_label"
                   coil:attr="name=${block.label_field}, value=${block.label}"
                 />
+              </label>
+              <label>
+                <span class="admin-panel__eyebrow">Enabled</span>
+                <input
+                  type="checkbox"
+                  name="block_enabled"
+                  value="true"
+                  coil:if="${block.is_enabled}"
+                  checked="checked"
+                  coil:attr="name=${block.enabled_field}"
+                />
+                <input
+                  type="checkbox"
+                  name="block_enabled"
+                  value="true"
+                  coil:unless="${block.is_enabled}"
+                  coil:attr="name=${block.enabled_field}"
+                />
+                <input
+                  type="hidden"
+                  name="block_enabled"
+                  value="false"
+                  coil:attr="name=${block.enabled_field}"
+                />
+                <span>Disable a block without deleting it from the draft.</span>
               </label>
               <label coil:unless="${block.is_shared}" coil:each="field : ${block.field_entries}">
                 <span class="admin-panel__eyebrow">

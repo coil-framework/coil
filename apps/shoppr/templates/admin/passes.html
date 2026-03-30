@@ -1,0 +1,206 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Passes and credits'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Passes and credits</title>
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Pass and credit operations</p>
+        <h1 coil:text="${page.title}">Passes and credits</h1>
+        <p coil:text="${page.summary}">
+          Operator queue for prepaid access, finite balances, and redemption exceptions.
+        </p>
+        <p>
+          Use this screen when support needs to answer whether a customer still has usable credits,
+          which pass program granted access, and whether a recent event redemption consumed the
+          expected balance.
+        </p>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Queue summary</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Pass programs</h2>
+            <p>
+              <strong coil:text="${pass_program_count}">0</strong>
+              visible pass-backed customer records are currently in scope.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Credit ledgers</h2>
+            <p>
+              <strong coil:text="${credit_ledger_count}">0</strong>
+              ledgers currently expose remaining balance or recent usage.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Redeemed events</h2>
+            <p>
+              <strong coil:text="${redeemed_event_count}">0</strong>
+              event redemptions are available for operator review.
+            </p>
+          </article>
+          <article class="admin-card">
+            <h2>Operator queues</h2>
+            <p>
+              <strong coil:text="${operator_queue_count}">0</strong>
+              queues currently need pass or credit follow-up.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_operator_queues}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Follow-up queues</p>
+        <label class="admin-filter">
+          <span>Filter queues</span>
+          <input
+            type="search"
+            placeholder="Filter by queue, status, balance, event..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <div class="admin-card-grid">
+          <article class="admin-card" coil:each="queue : ${operator_queues}" data-admin-filter-item="">
+            <h2 coil:text="${queue.queue_name}">Expiring credits</h2>
+            <p coil:text="${queue.summary}">
+              Customers in this queue need outreach before balances expire or a redemption fails.
+            </p>
+            <p>
+              <strong coil:text="${queue.count_label}">3 records</strong>
+              <span coil:text="${queue.status_label}">Needs review</span>
+            </p>
+            <a
+              class="button button--secondary"
+              href="/admin/passes"
+              coil:attr="href=${queue.href}"
+              coil:text="${queue.action_label}"
+            >
+              Review queue
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_pass_programs}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Pass program records</p>
+        <label class="admin-filter">
+          <span>Filter customer records</span>
+          <input
+            type="search"
+            placeholder="Filter by customer, program, order, status..."
+            data-admin-filter-input=""
+          />
+        </label>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Customer</th>
+              <th scope="col">Program</th>
+              <th scope="col">Balance</th>
+              <th scope="col">Latest redemption</th>
+              <th scope="col">Support state</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr coil:each="program : ${pass_programs}" data-admin-filter-item="">
+              <td>
+                <strong coil:text="${program.customer_name}">Customer</strong>
+                <div coil:if="${program.has_customer_email}" coil:text="${program.customer_email}">
+                  customer@example.com
+                </div>
+              </td>
+              <td>
+                <strong coil:text="${program.program_name}">Studio sessions</strong>
+                <p coil:text="${program.summary}">
+                  Pass-backed access summary.
+                </p>
+              </td>
+              <td>
+                <span coil:text="${program.available_balance_label}">3 credits</span>
+                <div coil:text="${program.status_label}">Active</div>
+              </td>
+              <td coil:text="${program.latest_redemption_label}">
+                Redeemed against Spring tasting evening
+              </td>
+              <td coil:text="${program.support_state_label}">Needs review</td>
+              <td>
+                <a
+                  class="button button--secondary"
+                  href="/admin/orders/ORD-10042"
+                  coil:if="${program.has_order_reference}"
+                  coil:attr="href=${program.order_href}"
+                >
+                  View order
+                </a>
+                <a
+                  class="button button--secondary"
+                  href="/admin/customers"
+                  coil:attr="href=${program.customer_href}"
+                >
+                  View customer
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_credit_ledgers}">
+        <p class="admin-panel__eyebrow">Credit ledgers</p>
+        <div class="admin-card-grid">
+          <article class="admin-card" coil:each="ledger : ${credit_ledgers}">
+            <h2 coil:text="${ledger.label}">Guided tasting credits</h2>
+            <p>
+              Available
+              <strong coil:text="${ledger.available_balance_label}">3 credits</strong>
+            </p>
+            <p coil:if="${ledger.has_used_balance}">
+              Used
+              <span coil:text="${ledger.used_balance_label}">1 credit</span>
+            </p>
+            <p coil:if="${ledger.has_last_activity}">
+              Last activity
+              <span coil:text="${ledger.last_activity_label}">Redeemed on 14 May</span>
+            </p>
+            <p coil:if="${ledger.has_expiry}">
+              Expires
+              <span coil:text="${ledger.expiry_label}">30 June</span>
+            </p>
+            <p coil:text="${ledger.summary}">
+              Ledger summary for support and reconciliation.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" coil:unless="${has_pass_programs}">
+        <p class="admin-panel__eyebrow">Pass program records</p>
+        <h2>No pass or credit records yet</h2>
+        <p>
+          Once customers start buying pass-backed access or redeeming credits against events, this
+          queue becomes the operator view for balances, redemptions, and manual follow-up.
+        </p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

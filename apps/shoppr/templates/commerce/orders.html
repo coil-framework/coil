@@ -9,7 +9,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title coil:text="${page_title}">Orders</title>
-    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
+    <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
@@ -67,6 +68,13 @@
               orders have already moved through the refund workflow.
             </p>
           </article>
+          <article class="admin-card">
+            <h2>Stripe follow-up</h2>
+            <p>
+              <strong coil:text="${order_stats.payment_follow_up}">0</strong>
+              orders still need provider confirmation before operators should treat payment as settled.
+            </p>
+          </article>
         </div>
       </section>
 
@@ -97,26 +105,50 @@
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${has_recent_orders}">
+      <section class="admin-panel" coil:if="${has_recent_orders}" data-admin-filter="">
         <p class="admin-panel__eyebrow">Recent orders</p>
+        <label class="admin-filter">
+          <span>Filter the support queue</span>
+          <input
+            type="search"
+            placeholder="Filter by order, status, payment, or customer..."
+            data-admin-filter-input=""
+          />
+        </label>
         <table class="admin-table">
           <thead>
             <tr>
               <th scope="col">Order</th>
               <th scope="col">Status</th>
               <th scope="col">Payment</th>
+              <th scope="col">Support state</th>
               <th scope="col">Customer</th>
               <th scope="col">Total</th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="order : ${recent_orders}">
+            <tr coil:each="order : ${recent_orders}" data-admin-filter-item="">
               <td>
-                <strong coil:text="${order.reference}">ORD-10042</strong>
+                <div class="admin-copy-row">
+                  <strong coil:text="${order.reference}">ORD-10042</strong>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${order.reference}"
+                  >
+                    Copy
+                  </button>
+                </div>
               </td>
               <td coil:text="${order.status}">Paid</td>
               <td coil:text="${order.payment_status}">Captured</td>
+              <td>
+                <strong coil:text="${order.support_state_label}">No payment follow-up required</strong>
+                <div coil:if="${order.has_payment_reference}">
+                  <code coil:text="${order.payment_reference}">PAY-50001</code>
+                </div>
+              </td>
               <td>
                 <span coil:if="${order.has_customer_email}" coil:text="${order.customer_email}">
                   member@example.com

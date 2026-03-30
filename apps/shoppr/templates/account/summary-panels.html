@@ -99,5 +99,66 @@
         <li><a href="/en-GB/shop" coil:attr="href=${links.catalog}">Continue shopping</a></li>
       </ul>
     </article>
+
+    <article class="account-panel">
+      <p class="account-panel__eyebrow">Event bookings</p>
+      <h2>Timed experiences and reservation state</h2>
+      <ul class="account-panel__list" coil:if="${account.has_event_bookings}">
+        <li coil:each="booking : ${event_bookings}">
+          <a href="/en-GB/events/spring-tasting" coil:attr="href=${booking.href}">
+            <strong coil:text="${booking.event_title}">Spring Tasting Evening</strong>
+          </a>
+          <span coil:text="${booking.status_label}">Confirmed</span>
+          <span coil:text="${booking.day_label}">Thursday 11 April</span>
+          <p>
+            <strong coil:text="${booking.slot_label}">Early tasting</strong>
+          </p>
+          <p coil:text="${booking.summary}">
+            Seat confirmed. Arrive ten minutes early for the guided tasting.
+          </p>
+        </li>
+      </ul>
+      <div coil:unless="${account.has_event_bookings}">
+        <p coil:text="${account.event_bookings_empty_text}">
+          Event reservations and confirmed bookings will appear here once the customer starts booking
+          timed experiences.
+        </p>
+        <a
+          class="button"
+          href="/en-GB/events"
+          coil:attr="href=${account.event_bookings_cta_url}"
+          coil:text="${account.event_bookings_cta_label}"
+        >
+          Browse event calendar
+        </a>
+      </div>
+    </article>
+
+    <article class="account-panel">
+      <p class="account-panel__eyebrow">Passes and credits</p>
+      <h2>Reusable access and balance state</h2>
+      <ul class="account-panel__list" coil:if="${account.has_pass_programs}">
+        <li coil:each="program : ${pass_programs}">
+          <strong coil:text="${program.title}">Spring Tasting Pass</strong>
+          <span coil:text="${program.state_label}">Available</span>
+          <p coil:text="${program.usage_summary}">
+            Use this pass when reserving tasting sessions or member-priority event slots.
+          </p>
+          <p>
+            Remaining balance
+            <strong coil:text="${program.balance_label}">1 available</strong>
+          </p>
+        </li>
+      </ul>
+      <div coil:unless="${account.has_pass_programs}">
+        <p coil:text="${account.pass_programs_empty_text}">
+          Passes and credit balances will appear here once the customer buys or redeems a
+          pass-backed experience.
+        </p>
+      </div>
+      <a class="button" href="/account/passes" coil:attr="href=${links.passes}">
+        View passes and credits
+      </a>
+    </article>
   </div>
 </section>

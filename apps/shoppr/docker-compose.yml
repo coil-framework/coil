@@ -56,7 +56,7 @@ services:
       POSTGRES_PASSWORD: devpass
       POSTGRES_DB: coil_shoppr
     ports:
-      - "5438:5432"
+      - "15432:5432"
     volumes:
       - coil-shoppr-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -69,7 +69,7 @@ services:
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "16379:6379"
     volumes:
       - coil-shoppr-redis:/data
     healthcheck:

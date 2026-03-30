@@ -410,6 +410,352 @@ dependencies = [
 ]
 
 [[package]]
+name = "coil-a11y"
+version = "0.1.1"
+dependencies = [
+ "coil-i18n",
+]
+
+[[package]]
+name = "coil-admin"
+version = "0.1.1"
+dependencies = [
+ "coil-auth",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "coil-wasm",
+]
+
+[[package]]
+name = "coil-app"
+version = "0.1.1"
+dependencies = [
+ "coil-assets",
+ "coil-auth",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-data",
+ "coil-i18n",
+ "coil-jobs",
+ "coil-report",
+ "coil-runtime",
+ "coil-template",
+ "coil-wasm",
+ "serde",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "coil-assets"
+version = "0.1.1"
+dependencies = [
+ "coil-auth",
+ "coil-storage",
+ "sha2",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-auth"
+version = "0.1.1"
+dependencies = [
+ "coil-config",
+ "coil-data",
+ "serde",
+ "toml",
+ "zanzibar",
+]
+
+[[package]]
+name = "coil-cache"
+version = "0.1.1"
+dependencies = [
+ "bincode",
+ "redis",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "coil-cms"
+version = "0.1.1"
+dependencies = [
+ "coil-auth",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+]
+
+[[package]]
+name = "coil-commerce"
+version = "0.1.1"
+dependencies = [
+ "coil-auth",
+ "coil-config",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "toml",
+]
+
+[[package]]
+name = "coil-config"
+version = "0.1.1"
+dependencies = [
+ "ipnet",
+ "serde",
+ "thiserror 1.0.69",
+ "toml",
+ "url",
+]
+
+[[package]]
+name = "coil-core"
+version = "0.1.1"
+dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
+ "coil-a11y",
+ "coil-auth",
+ "coil-cache",
+ "coil-config",
+ "coil-data",
+ "coil-i18n",
+ "coil-jobs",
+ "coil-observability",
+ "coil-seo",
+ "coil-template",
+ "coil-tls",
+ "coil-wasm",
+ "hmac",
+ "rand 0.8.5",
+ "sha2",
+ "thiserror 1.0.69",
+ "toml",
+]
+
+[[package]]
+name = "coil-customer-sdk"
+version = "0.1.1"
+dependencies = [
+ "coil-template",
+]
+
+[[package]]
+name = "coil-data"
+version = "0.1.1"
+dependencies = [
+ "coil-config",
+ "sqlx",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-events"
+version = "0.1.1"
+dependencies = [
+ "coil-auth",
+ "coil-commerce",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "coil-memberships",
+]
+
+[[package]]
+name = "coil-i18n"
+version = "0.1.1"
+dependencies = [
+ "toml",
+]
+
+[[package]]
+name = "coil-jobs"
+version = "0.1.1"
+dependencies = [
+ "coil-config",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
+name = "coil-media"
+version = "0.1.1"
+dependencies = [
+ "coil-assets",
+ "coil-auth",
+ "coil-core",
+ "coil-data",
+ "coil-storage",
+]
+
+[[package]]
+name = "coil-memberships"
+version = "0.1.1"
+dependencies = [
+ "coil-auth",
+ "coil-commerce",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+]
+
+[[package]]
+name = "coil-observability"
+version = "0.1.1"
+dependencies = [
+ "coil-config",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-ops"
+version = "0.1.1"
+dependencies = [
+ "coil-auth",
+ "coil-config",
+ "coil-core",
+ "coil-data",
+ "coil-jobs",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-report"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "coil-rs"
+version = "0.1.1"
+dependencies = [
+ "coil-admin",
+ "coil-app",
+ "coil-auth",
+ "coil-cms",
+ "coil-commerce",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-events",
+ "coil-media",
+ "coil-memberships",
+ "coil-ops",
+ "coil-runtime",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "coil-runtime"
+version = "0.1.1"
+dependencies = [
+ "axum",
+ "coil-assets",
+ "coil-auth",
+ "coil-cache",
+ "coil-commerce",
+ "coil-config",
+ "coil-core",
+ "coil-customer-sdk",
+ "coil-data",
+ "coil-i18n",
+ "coil-jobs",
+ "coil-memberships",
+ "coil-observability",
+ "coil-ops",
+ "coil-seo",
+ "coil-storage",
+ "coil-template",
+ "coil-tls",
+ "coil-wasm",
+ "hmac",
+ "ipnet",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tower",
+ "ureq",
+ "url",
+ "zanzibar",
+]
+
+[[package]]
+name = "coil-seo"
+version = "0.1.1"
+dependencies = [
+ "coil-i18n",
+]
+
+[[package]]
+name = "coil-storage"
+version = "0.1.1"
+dependencies = [
+ "bytes",
+ "coil-config",
+ "futures",
+ "object_store",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "url",
+]
+
+[[package]]
+name = "coil-template"
+version = "0.1.1"
+dependencies = [
+ "html5ever",
+ "markup5ever",
+ "markup5ever_rcdom",
+]
+
+[[package]]
+name = "coil-tls"
+version = "0.1.1"
+dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "coil-config",
+ "coil-data",
+ "lers",
+ "openssl",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "coil-wasm"
+version = "0.1.1"
+dependencies = [
+ "hex",
+ "sha2",
+ "wasmtime",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -702,349 +1048,6 @@ name = "data-encoding"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
-
-[[package]]
-name = "coil-a11y"
-version = "0.1.0"
-dependencies = [
- "coil-i18n",
-]
-
-[[package]]
-name = "coil-admin"
-version = "0.1.0"
-dependencies = [
- "coil-auth",
- "coil-core",
- "coil-data",
- "coil-jobs",
- "coil-wasm",
-]
-
-[[package]]
-name = "coil"
-version = "0.1.0"
-dependencies = [
- "coil-admin",
- "coil-app",
- "coil-auth",
- "coil-cms",
- "coil-commerce",
- "coil-config",
- "coil-core",
- "coil-customer-sdk",
- "coil-events",
- "coil-media",
- "coil-memberships",
- "coil-ops",
- "coil-runtime",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "coil-app"
-version = "0.1.0"
-dependencies = [
- "coil-assets",
- "coil-auth",
- "coil-config",
- "coil-core",
- "coil-customer-sdk",
- "coil-data",
- "coil-i18n",
- "coil-jobs",
- "coil-report",
- "coil-runtime",
- "coil-template",
- "coil-wasm",
- "serde",
- "thiserror 2.0.18",
- "toml",
-]
-
-[[package]]
-name = "coil-assets"
-version = "0.1.0"
-dependencies = [
- "coil-auth",
- "coil-storage",
- "sha2",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "coil-auth"
-version = "0.1.0"
-dependencies = [
- "coil-config",
- "coil-data",
- "serde",
- "toml",
- "zanzibar",
-]
-
-[[package]]
-name = "coil-cache"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "redis",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "coil-cms"
-version = "0.1.0"
-dependencies = [
- "coil-auth",
- "coil-core",
- "coil-data",
- "coil-jobs",
-]
-
-[[package]]
-name = "coil-commerce"
-version = "0.1.0"
-dependencies = [
- "coil-auth",
- "coil-config",
- "coil-core",
- "coil-data",
- "coil-jobs",
- "toml",
-]
-
-[[package]]
-name = "coil-config"
-version = "0.1.0"
-dependencies = [
- "ipnet",
- "serde",
- "thiserror 1.0.69",
- "toml",
- "url",
-]
-
-[[package]]
-name = "coil-core"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "base64 0.22.1",
- "coil-a11y",
- "coil-auth",
- "coil-cache",
- "coil-config",
- "coil-data",
- "coil-i18n",
- "coil-jobs",
- "coil-observability",
- "coil-seo",
- "coil-template",
- "coil-tls",
- "coil-wasm",
- "hmac",
- "rand 0.8.5",
- "sha2",
- "thiserror 1.0.69",
- "toml",
-]
-
-[[package]]
-name = "coil-customer-sdk"
-version = "0.1.0"
-
-[[package]]
-name = "coil-data"
-version = "0.1.0"
-dependencies = [
- "coil-config",
- "sqlx",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "coil-events"
-version = "0.1.0"
-dependencies = [
- "coil-auth",
- "coil-commerce",
- "coil-core",
- "coil-data",
- "coil-jobs",
- "coil-memberships",
-]
-
-[[package]]
-name = "coil-i18n"
-version = "0.1.0"
-dependencies = [
- "toml",
-]
-
-[[package]]
-name = "coil-jobs"
-version = "0.1.0"
-dependencies = [
- "coil-config",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
-]
-
-[[package]]
-name = "coil-media"
-version = "0.1.0"
-dependencies = [
- "coil-assets",
- "coil-auth",
- "coil-core",
- "coil-data",
- "coil-storage",
-]
-
-[[package]]
-name = "coil-memberships"
-version = "0.1.0"
-dependencies = [
- "coil-auth",
- "coil-commerce",
- "coil-core",
- "coil-data",
- "coil-jobs",
-]
-
-[[package]]
-name = "coil-observability"
-version = "0.1.0"
-dependencies = [
- "coil-config",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "coil-ops"
-version = "0.1.0"
-dependencies = [
- "coil-auth",
- "coil-config",
- "coil-core",
- "coil-data",
- "coil-jobs",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "coil-report"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "coil-runtime"
-version = "0.1.0"
-dependencies = [
- "axum",
- "coil-assets",
- "coil-auth",
- "coil-cache",
- "coil-commerce",
- "coil-config",
- "coil-core",
- "coil-customer-sdk",
- "coil-data",
- "coil-i18n",
- "coil-jobs",
- "coil-memberships",
- "coil-observability",
- "coil-ops",
- "coil-seo",
- "coil-storage",
- "coil-template",
- "coil-tls",
- "coil-wasm",
- "hmac",
- "ipnet",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "tower",
- "ureq",
- "url",
- "zanzibar",
-]
-
-[[package]]
-name = "coil-seo"
-version = "0.1.0"
-dependencies = [
- "coil-i18n",
-]
-
-[[package]]
-name = "coil-storage"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "coil-config",
- "futures",
- "object_store",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "url",
-]
-
-[[package]]
-name = "coil-template"
-version = "0.1.0"
-dependencies = [
- "html5ever",
- "markup5ever",
- "markup5ever_rcdom",
-]
-
-[[package]]
-name = "coil-tls"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "async-trait",
- "coil-config",
- "coil-data",
- "lers",
- "openssl",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "coil-wasm"
-version = "0.1.0"
-dependencies = [
- "hex",
- "sha2",
- "wasmtime",
-]
 
 [[package]]
 name = "debugid"
@@ -1500,7 +1503,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "coil",
+ "coil-rs",
  "gitly-app",
  "gitly-backend",
  "serde",
@@ -1514,13 +1517,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "coil",
  "coil-app",
  "coil-auth",
  "coil-config",
  "coil-core",
  "coil-customer-sdk",
  "coil-data",
+ "coil-rs",
  "coil-runtime",
  "coil-wasm",
  "gitly-backend",
@@ -5542,6 +5545,8 @@ dependencies = [
 [[package]]
 name = "zanzibar"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1ffeb3d5a8e03a8763503a214b245310ce9ea16c3ec2ebe35d4ee28ede65a10"
 dependencies = [
  "anyhow",
  "async-trait",

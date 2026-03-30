@@ -1,0 +1,56 @@
+[project]
+name = "shoppr"
+display_name = "Shoppr"
+product = "storefront"
+
+[modules]
+enabled = [
+  "cms",
+  "media",
+  "commerce",
+  "commerce-payments-stripe",
+  "memberships",
+  "events",
+  "admin",
+  "ops",
+]
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
+localized_routes = true
+
+[[sites]]
+id = "shoppr-uk"
+display_name = "Shoppr UK"
+brand_name = "Shoppr"
+canonical_domain = "uk.localhost"
+additional_domains = ["www.localhost", "shop.example.com", "www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
+
+[[sites]]
+id = "shoppr-fr"
+display_name = "Shoppr France"
+brand_name = "Shoppr Paris"
+canonical_domain = "fr.localhost"
+additional_domains = ["fr-store.localhost"]
+default_locale = "fr-FR"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
+
+[[sites]]
+id = "shoppr-pl"
+display_name = "Shoppr Polska"
+brand_name = "Shoppr Studio"
+canonical_domain = "pl.localhost"
+additional_domains = ["pl-store.localhost"]
+default_locale = "pl-PL"
+supported_locales = ["en-GB", "fr-FR", "pl-PL"]
+
+[tooling]
+framework_version = "0.1.0"
+linked_rust_backend = true
+wasm_directory = true
+
+[tooling.dependency_source]
+kind = "crates_io"

@@ -21,6 +21,16 @@ From this folder:
 
 ```bash
 ./scripts/prepare-local-dev.sh
+cargo coil dev
+```
+
+`cargo coil dev` is the managed local loop for this app root. It starts Postgres and Redis through
+the checked-in `docker-compose.yml`, injects the standard development environment variables, and
+runs the `gitly` customer binary from this nested workspace.
+
+If you want the full Docker stack instead of the managed host loop, you can still run:
+
+```bash
 docker compose up --build
 ```
 
@@ -157,11 +167,11 @@ extension boundary.
 The default local stack publishes:
 
 - the app on `gitly.localhost:58080`
-- MinIO asset delivery on `localhost:9002`
-- the MinIO console on `localhost:9003`
+- MinIO asset delivery on `localhost:9000`
+- the MinIO console on `localhost:9001`
 
 Theme assets are published through the configured CDN base URL, so in local development you should
-expect hashed CSS and JS asset URLs under `http://localhost:9002/gitly/...`.
+expect hashed CSS and JS asset URLs under `http://localhost:9000/gitly/...`.
 
 ## Running Without Docker
 
@@ -169,9 +179,7 @@ If you already have Postgres, Redis, and object storage available:
 
 ```bash
 ./scripts/prepare-local-dev.sh
-cargo run -p gitly -- validate
-cargo run -p gitly -- migrate apply --dry-run
-cargo run -p gitly -- up
+cargo coil dev --skip-infra
 ```
 
 For direct local runs, the important runtime inputs are still the same ones used by Compose:

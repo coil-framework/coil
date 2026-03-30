@@ -179,10 +179,20 @@ From this folder:
 
 ```bash
 cp .env.example .env
-docker compose up --build
+./scripts/prepare-local-dev.sh
+cargo coil dev
 ```
 
-That is the honest customer-project path. It builds Shoppr from this folder only.
+That is the managed customer-app path. `cargo coil dev` uses the checked-in app root, starts
+Postgres and Redis from the local `docker-compose.yml`, injects the standard development
+environment variables, and runs the `shoppr` customer binary from this nested workspace.
+
+If you want the full Docker stack instead of the managed host loop, you can still run:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
 
 If you are a Coil maintainer building Shoppr from inside this repository before upstream
 crate publication, use the explicit repo override:
@@ -230,7 +240,7 @@ You can run the same end-to-end lifecycle directly from the customer workspace:
 
 ```bash
 ./scripts/prepare-local-dev.sh
-cargo run -p shoppr -- up
+cargo coil dev
 ```
 
 The committed Cargo workspace stays upstream-clean. The default checked-in `docker compose up`
@@ -318,6 +328,7 @@ handoff behaviour. They are not required for the default end-to-end local custom
 Most customer-facing work in Shoppr lives in:
 
 - `templates/`
+- `theme/frontend/`
 - `theme/assets/`
 - `content/page-types/`
 - `auth/shoppr-auth/`
@@ -326,11 +337,37 @@ Typical edits:
 
 - change storefront layout in `templates/layouts/`
 - change page templates in `templates/pages/` or module-specific folders
-- change CSS in `theme/assets/site.css`
+- change CSS sources in `theme/frontend/`
+- change Stimulus/Turbo entrypoints in `theme/frontend/*.ts`
+- let the build emit compiled assets into `theme/assets/`
 - add logos or images in `theme/assets/`
 - adjust customer auth bindings in `auth/shoppr-auth/capabilities.toml`
 
-After code or template changes, rebuild and restart:
+Build the frontend assets from the checked-in Shoppr sources:
+
+```bash
+cd apps/shoppr
+npm install
+npm run build
+```
+
+Use the watcher while working on templates, controllers, or CSS:
+
+```bash
+cd apps/shoppr
+npm run watch
+```
+
+The current asset split is:
+
+- `theme/frontend/site.ts` and `theme/frontend/site.css`
+  Storefront shell enhancements and styling.
+- `theme/frontend/admin.ts` and `theme/frontend/admin.css`
+  Operator/admin-only filters, copy helpers, and admin styling.
+- `theme/frontend/cms-editor.ts` and `theme/frontend/cms-editor.css`
+  CMS editor behavior such as block inventory controls and admin content tools.
+
+After backend, code, or template changes, rebuild and restart:
 
 ```bash
 docker compose up --build
@@ -341,17 +378,16 @@ If you want to use the nested Shoppr workspace directly instead of Docker Compos
 ```bash
 cd apps/shoppr
 ./scripts/prepare-local-dev.sh
-cargo run -p shoppr -- describe
-DATABASE_URL=postgres://coil:devpass@127.0.0.1:5438/coil_shoppr \
-REDIS_URL=redis://127.0.0.1:6379 \
-OBJECT_STORE_URL='endpoint_url="http://127.0.0.1:9000"
-bucket="shoppr"
-region="us-east-1"
-access_key_id="minio"
-secret_access_key="minio123"' \
-COIL_COOKIE_SECRET=01234567012345670123456701234567 \
-COIL_CSRF_SECRET=76543210765432107654321076543210 \
-cargo run -p shoppr -- up --config platform.dev.toml
+cargo coil dev
+```
+
+If Postgres and Redis are already running and you only want the managed host loop without Compose,
+use:
+
+```bash
+cd apps/shoppr
+./scripts/prepare-local-dev.sh
+cargo coil dev --skip-infra
 ```
 
 The linked customer backend currently surfaces in three honest places:
@@ -368,9 +404,19 @@ During bootstrap, Coil publishes `theme/assets/*` through the asset pipeline and
 
 For third-party developers, the important rule is simple:
 
-- put stable source assets in `theme/assets/`
-- reference them from templates through the template asset helper
-- let Coil publish and fingerprint them
+- author source code in `theme/frontend/`
+- run the Shoppr frontend build to emit compiled files into `theme/assets/`
+- keep images, logos, and other static binaries in `theme/assets/`
+- reference compiled files from templates through the template asset helper
+- let Coil publish and fingerprint the final `theme/assets/*` outputs
+
+The current Shoppr architecture is deliberately SSR-first:
+
+- templates and fragments own the HTML
+- Turbo enhances navigation and HTML-over-the-wire updates
+- Stimulus attaches local controller behavior to rendered markup
+- PostCSS and esbuild compile the final asset graph
+- admin and CMS pages load their own bundles instead of forcing one global script onto every surface
 
 ## Adding A Customer Extension
 
@@ -513,8 +559,8 @@ docker compose up --build
 If ports are already in use, the defaults are:
 
 - app: `8080`
-- Postgres: `5438`
-- Redis: `6379`
+- Postgres: `15432`
+- Redis: `16379`
 - MinIO API: `9000`
 - MinIO console: `9001`
 

@@ -40,7 +40,7 @@ services:
       POSTGRES_PASSWORD: devpass
       POSTGRES_DB: coil_gitly
     ports:
-      - "${GITLY_POSTGRES_PORT:-55438}:5432"
+      - "${GITLY_POSTGRES_PORT:-15432}:5432"
     volumes:
       - coil-gitly-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -53,7 +53,7 @@ services:
   redis:
     image: redis:7
     ports:
-      - "${GITLY_REDIS_PORT:-56380}:6379"
+      - "${GITLY_REDIS_PORT:-16379}:6379"
     volumes:
       - coil-gitly-redis:/data
     healthcheck:
@@ -70,8 +70,8 @@ services:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: minio123
     ports:
-      - "${GITLY_MINIO_PORT:-9002}:9000"
-      - "${GITLY_MINIO_CONSOLE_PORT:-9003}:9001"
+      - "${GITLY_MINIO_PORT:-9000}:9000"
+      - "${GITLY_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - coil-gitly-minio:/data
     restart: unless-stopped

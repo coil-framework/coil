@@ -1,4 +1,7 @@
-/.cargo/
-/.coil/
+/.cargo/*
+!/.cargo/config.toml
+/.coil/*
+!/.coil/project.toml
 /.env
+/node_modules
 /target

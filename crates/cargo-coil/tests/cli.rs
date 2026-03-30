@@ -198,6 +198,7 @@ fn dev_no_watch_runs_docker_infra_and_customer_binary_with_expected_env() {
     assert!(log.contains("ARGS:run -p my-store -- --config platform.dev.toml up"));
     assert!(log.contains("ENV:DATABASE_URL=postgres://coil:coil@127.0.0.1:15432/my-store"));
     assert!(log.contains("ENV:REDIS_URL=redis://127.0.0.1:16379/0"));
+    assert!(log.contains("ENV:OBJECT_STORE_URL=endpoint_url=\"http://127.0.0.1:9000\""));
     assert!(log.contains("ENV:COIL_COOKIE_SECRET=local-development-cookie-secret"));
     assert!(log.contains("ENV:COIL_CSRF_SECRET=local-development-csrf-secret"));
 }
@@ -269,6 +270,7 @@ fn write_fake_tool(dir: &Path, name: &str) -> PathBuf {
 echo \"ARGS:$*\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:DATABASE_URL=$DATABASE_URL\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:REDIS_URL=$REDIS_URL\" >> \"$COIL_TEST_LOG\"\n\
+echo \"ENV:OBJECT_STORE_URL=$OBJECT_STORE_URL\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:COIL_COOKIE_SECRET=$COIL_COOKIE_SECRET\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:COIL_CSRF_SECRET=$COIL_CSRF_SECRET\" >> \"$COIL_TEST_LOG\"\n\
 exit 0\n"
@@ -286,6 +288,7 @@ fn write_failing_cargo_tool(dir: &Path) -> PathBuf {
 echo \"ARGS:$*\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:DATABASE_URL=$DATABASE_URL\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:REDIS_URL=$REDIS_URL\" >> \"$COIL_TEST_LOG\"\n\
+echo \"ENV:OBJECT_STORE_URL=$OBJECT_STORE_URL\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:COIL_COOKIE_SECRET=$COIL_COOKIE_SECRET\" >> \"$COIL_TEST_LOG\"\n\
 echo \"ENV:COIL_CSRF_SECRET=$COIL_CSRF_SECRET\" >> \"$COIL_TEST_LOG\"\n\
 if [ \"$1\" = \"run\" ]; then\n\

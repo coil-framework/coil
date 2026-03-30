@@ -1,0 +1,29 @@
+[project]
+name = "gitly"
+display_name = "Gitly"
+product = "storefront"
+
+[modules]
+enabled = ["admin", "cms", "media", "gitly-showcase"]
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+localized_routes = true
+
+[[sites]]
+id = "default"
+display_name = "Gitly"
+brand_name = "Gitly"
+canonical_domain = "gitly.localhost"
+additional_domains = ["www.localhost", "gitly.example.com", "www.example.com"]
+default_locale = "en-GB"
+supported_locales = ["en-GB", "fr-FR", "de-DE"]
+
+[tooling]
+framework_version = "0.1.0"
+linked_rust_backend = true
+wasm_directory = true
+
+[tooling.dependency_source]
+kind = "crates_io"

@@ -559,13 +559,19 @@ fn cargo_program() -> OsString {
 }
 
 fn run_docker_compose_up(root: &Path) -> Result<()> {
-    let args = [
+    let mut args = vec![
         OsString::from("compose"),
         OsString::from("up"),
         OsString::from("-d"),
         OsString::from("postgres"),
         OsString::from("redis"),
     ];
+    let services = read_compose_services(root);
+    for service in ["minio", "minio-init"] {
+        if services.iter().any(|candidate| candidate == service) {
+            args.push(OsString::from(service));
+        }
+    }
     run_process(&docker_program(), &args, root, &[]).context("failed to start local infra")?;
     Ok(())
 }
@@ -575,24 +581,79 @@ fn dev_environment(descriptor: &ProjectDescriptor) -> Vec<(String, String)> {
     vec![
         (
             "DATABASE_URL".to_string(),
-            std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| format!("postgres://coil:coil@127.0.0.1:15432/{slug}")),
+            env_var_or_default("DATABASE_URL", || {
+                format!("postgres://coil:coil@127.0.0.1:15432/{slug}")
+            }),
         ),
         (
             "REDIS_URL".to_string(),
-            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:16379/0".to_string()),
+            env_var_or_default("REDIS_URL", || "redis://127.0.0.1:16379/0".to_string()),
         ),
         (
             "COIL_COOKIE_SECRET".to_string(),
-            std::env::var("COIL_COOKIE_SECRET")
-                .unwrap_or_else(|_| "local-development-cookie-secret".to_string()),
+            env_var_or_default("COIL_COOKIE_SECRET", || {
+                "local-development-cookie-secret".to_string()
+            }),
         ),
         (
             "COIL_CSRF_SECRET".to_string(),
-            std::env::var("COIL_CSRF_SECRET")
-                .unwrap_or_else(|_| "local-development-csrf-secret".to_string()),
+            env_var_or_default("COIL_CSRF_SECRET", || {
+                "local-development-csrf-secret".to_string()
+            }),
+        ),
+        (
+            "OBJECT_STORE_URL".to_string(),
+            env_var_or_default("OBJECT_STORE_URL", || default_object_store_url(&slug)),
         ),
     ]
+}
+
+fn env_var_or_default(
+    key: &str,
+    default: impl FnOnce() -> String,
+) -> String {
+    match std::env::var(key) {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => default(),
+    }
+}
+
+fn default_object_store_url(slug: &str) -> String {
+    format!(
+        "endpoint_url=\"http://127.0.0.1:9000\"\nbucket=\"{slug}\"\nregion=\"us-east-1\"\naccess_key_id=\"minio\"\nsecret_access_key=\"minio123\""
+    )
+}
+
+fn read_compose_services(root: &Path) -> Vec<String> {
+    let compose_path = root.join("docker-compose.yml");
+    let Ok(contents) = fs::read_to_string(compose_path) else {
+        return Vec::new();
+    };
+
+    let mut services = Vec::new();
+    let mut in_services = false;
+    for line in contents.lines() {
+        let trimmed_end = line.trim_end();
+        if trimmed_end == "services:" {
+            in_services = true;
+            continue;
+        }
+        if !in_services {
+            continue;
+        }
+        if trimmed_end.is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            break;
+        }
+        if let Some(name) = line.strip_prefix("  ").and_then(|rest| rest.strip_suffix(':')) {
+            if !name.contains(' ') {
+                services.push(name.to_string());
+            }
+        }
+    }
+    services
 }
 
 fn run_process(
@@ -855,5 +916,40 @@ mod tests {
         assert!(!should_ignore_watch_path(Path::new(
             "templates/pages/home.html"
         )));
+    }
+
+    #[test]
+    fn dev_environment_defaults_object_store_url() {
+        let descriptor = ProjectDescriptor::new(
+            "my-store".to_string(),
+            "My Store".to_string(),
+            "en-GB".to_string(),
+        );
+        let env = dev_environment(&descriptor);
+        let object_store = env
+            .iter()
+            .find(|(key, _)| key == "OBJECT_STORE_URL")
+            .map(|(_, value)| value.as_str())
+            .unwrap();
+        assert!(object_store.contains("endpoint_url=\"http://127.0.0.1:9000\""));
+        assert!(object_store.contains("bucket=\"my-store\""));
+    }
+
+    #[test]
+    fn read_compose_services_extracts_top_level_service_names() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("docker-compose.yml"),
+            "services:\n  postgres:\n    image: postgres:16\n  redis:\n    image: redis:7\n  minio:\n    image: minio/minio:latest\nvolumes:\n  data:\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_compose_services(dir.path()),
+            vec![
+                "postgres".to_string(),
+                "redis".to_string(),
+                "minio".to_string()
+            ]
+        );
     }
 }

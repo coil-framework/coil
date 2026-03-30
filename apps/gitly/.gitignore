@@ -1,5 +1,6 @@
-/.cargo/
-/.coil/
+/.cargo/*
+!/.cargo/config.toml
+/.coil/*
+!/.coil/project.toml
 /.env
 /target
-**/.coil/

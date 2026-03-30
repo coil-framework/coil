@@ -132,11 +132,7 @@ impl CoilBuilder {
                     reason: other.to_string(),
                 },
             })?;
-        self.run_from_paths(
-            app_root,
-            bootstrap.config_path,
-            env::var("COIL_BIND").ok(),
-        )
+        self.run_from_paths(app_root, bootstrap.config_path, env::var("COIL_BIND").ok())
     }
 
     pub fn run_from_paths(
@@ -247,9 +243,7 @@ pub fn official_modules_from_enabled(
     Ok(modules)
 }
 
-pub fn official_module(
-    module: impl AsRef<str>,
-) -> Result<Box<dyn PlatformModule>, CoilError> {
+pub fn official_module(module: impl AsRef<str>) -> Result<Box<dyn PlatformModule>, CoilError> {
     let module = module.as_ref();
     let boxed: Box<dyn PlatformModule> = match module {
         "admin" => Box::new(modules::admin()),

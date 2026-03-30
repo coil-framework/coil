@@ -43,6 +43,26 @@ pub(super) fn build_manifest(module: &AdminModule) -> ModuleManifest {
         .with_route_surfaces(vec![
             RouteSurface::new("admin.dashboard", RouteSurfaceKind::AdminPage, "/admin")
                 .gated_by(Capability::AdminShellAccess),
+            RouteSurface::new(
+                "admin.customers",
+                RouteSurfaceKind::AdminPage,
+                "/admin/customers",
+            )
+            .gated_by(Capability::AdminShellAccess),
+            RouteSurface::new(
+                "admin.diagnostics",
+                RouteSurfaceKind::AdminPage,
+                "/admin/diagnostics",
+            )
+            .gated_by(Capability::AdminAuditRead),
+            RouteSurface::new("admin.jobs", RouteSurfaceKind::AdminPage, "/admin/jobs")
+                .gated_by(Capability::AdminAuditRead),
+            RouteSurface::new(
+                "admin.integrations",
+                RouteSurfaceKind::AdminPage,
+                "/admin/integrations",
+            )
+            .gated_by(Capability::AdminAuditRead),
             RouteSurface::new("admin.audit", RouteSurfaceKind::AdminPage, "/admin/audit")
                 .gated_by(Capability::AdminAuditRead),
         ])
@@ -86,6 +106,34 @@ pub(super) fn build_manifest(module: &AdminModule) -> ModuleManifest {
                 "admin/dashboard",
             )
             .gated_by(Capability::AdminShellAccess),
+            HttpSurfaceContribution::page(
+                "admin.customers",
+                HttpSurfaceArea::Admin,
+                "/admin/customers",
+                "admin/customers",
+            )
+            .gated_by(Capability::AdminShellAccess),
+            HttpSurfaceContribution::page(
+                "admin.diagnostics",
+                HttpSurfaceArea::Admin,
+                "/admin/diagnostics",
+                "admin/diagnostics",
+            )
+            .gated_by(Capability::AdminAuditRead),
+            HttpSurfaceContribution::page(
+                "admin.jobs",
+                HttpSurfaceArea::Admin,
+                "/admin/jobs",
+                "admin/jobs",
+            )
+            .gated_by(Capability::AdminAuditRead),
+            HttpSurfaceContribution::page(
+                "admin.integrations",
+                HttpSurfaceArea::Admin,
+                "/admin/integrations",
+            "admin/integrations",
+            )
+            .gated_by(Capability::AdminAuditRead),
             HttpSurfaceContribution::page(
                 "admin.audit",
                 HttpSurfaceArea::Admin,

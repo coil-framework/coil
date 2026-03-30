@@ -155,8 +155,7 @@ mod tests {
 
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&app_root).unwrap();
-        let resolved =
-            resolve_customer_app_root(Path::new("platform.dev.toml"), "shoppr").unwrap();
+        let resolved = resolve_customer_app_root(Path::new("platform.dev.toml"), "shoppr").unwrap();
         std::env::set_current_dir(original_dir).unwrap();
         let expected = app_root.canonicalize().unwrap();
         let _ = fs::remove_dir_all(&temp_root);

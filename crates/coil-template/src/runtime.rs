@@ -193,16 +193,14 @@ impl TemplateRuntime {
                             surface,
                         )?);
                     } else if let Some(fallback) = &slot.fallback {
-                        rendered.push_str(
-                            &self.render_nodes(
-                                namespaces,
-                                current_template,
-                                model,
-                                slots,
-                                fallback,
-                                surface,
-                            )?,
-                        );
+                        rendered.push_str(&self.render_nodes(
+                            namespaces,
+                            current_template,
+                            model,
+                            slots,
+                            fallback,
+                            surface,
+                        )?);
                     } else {
                         return Err(TemplateModelError::MissingSlotFill {
                             slot: slot.name.clone(),
@@ -215,16 +213,14 @@ impl TemplateRuntime {
                         let value = self.evaluate_expression(model, &binding.expression)?;
                         extended = extended.with_value(binding.key.clone(), value)?;
                     }
-                    rendered.push_str(
-                        &self.render_nodes(
-                            namespaces,
-                            current_template,
-                            &extended,
-                            slots,
-                            children,
-                            surface,
-                        )?,
-                    );
+                    rendered.push_str(&self.render_nodes(
+                        namespaces,
+                        current_template,
+                        &extended,
+                        slots,
+                        children,
+                        surface,
+                    )?);
                 }
                 Node::Conditional {
                     condition,
@@ -235,16 +231,14 @@ impl TemplateRuntime {
                     let enabled = if *negated { !enabled } else { enabled };
 
                     if enabled {
-                        rendered.push_str(
-                            &self.render_nodes(
-                                namespaces,
-                                current_template,
-                                model,
-                                slots,
-                                children,
-                                surface,
-                            )?,
-                        );
+                        rendered.push_str(&self.render_nodes(
+                            namespaces,
+                            current_template,
+                            model,
+                            slots,
+                            children,
+                            surface,
+                        )?);
                     }
                 }
                 Node::Switch {
@@ -256,7 +250,11 @@ impl TemplateRuntime {
                     let mut matched = false;
                     for case in cases {
                         let case_value = self.evaluate_expression(model, &case.expression)?;
-                        if render_values_equal(&switch_value, &case_value, expression_label(expression))? {
+                        if render_values_equal(
+                            &switch_value,
+                            &case_value,
+                            expression_label(expression),
+                        )? {
                             rendered.push_str(&self.render_nodes(
                                 namespaces,
                                 current_template,
@@ -287,7 +285,8 @@ impl TemplateRuntime {
                     return Err(TemplateModelError::ParseError {
                         line: 0,
                         column: 0,
-                        message: "coil:case and coil:default may only appear inside coil:switch".to_string(),
+                        message: "coil:case and coil:default may only appear inside coil:switch"
+                            .to_string(),
                     });
                 }
                 Node::Each {
@@ -399,16 +398,14 @@ impl TemplateRuntime {
                     surface,
                 )
             }
-            SlotFill::Nodes(nodes) => {
-                self.render_nodes(
-                    namespaces,
-                    current_template,
-                    model,
-                    &BTreeMap::new(),
-                    nodes,
-                    surface,
-                )
-            }
+            SlotFill::Nodes(nodes) => self.render_nodes(
+                namespaces,
+                current_template,
+                model,
+                &BTreeMap::new(),
+                nodes,
+                surface,
+            ),
         }
     }
 
@@ -436,7 +433,9 @@ impl TemplateRuntime {
                 .ok_or_else(|| TemplateModelError::MissingTranslation { key: key.clone() }),
             TemplateExpression::Not(expression) => {
                 let value = self.evaluate_expression(model, expression)?;
-                Ok(RenderValue::bool(!value.as_bool(&expression_label(expression))?))
+                Ok(RenderValue::bool(
+                    !value.as_bool(&expression_label(expression))?,
+                ))
             }
             TemplateExpression::Logical {
                 left,
@@ -476,16 +475,20 @@ impl TemplateRuntime {
                         &right_value,
                         expression_label(expression),
                     )?,
-                    ComparisonOperator::GreaterThan => render_values_compare(
-                        &left_value,
-                        &right_value,
-                        expression_label(expression),
-                    )? == Ordering::Greater,
-                    ComparisonOperator::LessThan => render_values_compare(
-                        &left_value,
-                        &right_value,
-                        expression_label(expression),
-                    )? == Ordering::Less,
+                    ComparisonOperator::GreaterThan => {
+                        render_values_compare(
+                            &left_value,
+                            &right_value,
+                            expression_label(expression),
+                        )? == Ordering::Greater
+                    }
+                    ComparisonOperator::LessThan => {
+                        render_values_compare(
+                            &left_value,
+                            &right_value,
+                            expression_label(expression),
+                        )? == Ordering::Less
+                    }
                     ComparisonOperator::GreaterOrEqual => matches!(
                         render_values_compare(
                             &left_value,
@@ -693,11 +696,9 @@ fn expression_label(expression: &TemplateExpression) -> String {
                 expression_label(right)
             )
         }
-        TemplateExpression::Elvis { left, right } => format!(
-            "{} ?: {}",
-            expression_label(left),
-            expression_label(right)
-        ),
+        TemplateExpression::Elvis { left, right } => {
+            format!("{} ?: {}", expression_label(left), expression_label(right))
+        }
         TemplateExpression::Conditional {
             condition,
             then_expression,
@@ -722,14 +723,18 @@ fn render_values_equal(
             Ok(left.as_str() == right.as_str())
         }
         (RenderValue::Bool(left), RenderValue::Bool(right)) => Ok(left == right),
-        (RenderValue::List(_), _) | (_, RenderValue::List(_)) => Err(TemplateModelError::ValueTypeMismatch {
-            key,
-            expected: "scalar",
-        }),
-        (RenderValue::Object(_), _) | (_, RenderValue::Object(_)) => Err(TemplateModelError::ValueTypeMismatch {
-            key,
-            expected: "scalar",
-        }),
+        (RenderValue::List(_), _) | (_, RenderValue::List(_)) => {
+            Err(TemplateModelError::ValueTypeMismatch {
+                key,
+                expected: "scalar",
+            })
+        }
+        (RenderValue::Object(_), _) | (_, RenderValue::Object(_)) => {
+            Err(TemplateModelError::ValueTypeMismatch {
+                key,
+                expected: "scalar",
+            })
+        }
         _ => Ok(false),
     }
 }
@@ -745,14 +750,18 @@ fn render_values_compare(
             Ok(left.as_str().cmp(right.as_str()))
         }
         (RenderValue::Bool(left), RenderValue::Bool(right)) => Ok(left.cmp(right)),
-        (RenderValue::List(_), _) | (_, RenderValue::List(_)) => Err(TemplateModelError::ValueTypeMismatch {
-            key,
-            expected: "scalar",
-        }),
-        (RenderValue::Object(_), _) | (_, RenderValue::Object(_)) => Err(TemplateModelError::ValueTypeMismatch {
-            key,
-            expected: "scalar",
-        }),
+        (RenderValue::List(_), _) | (_, RenderValue::List(_)) => {
+            Err(TemplateModelError::ValueTypeMismatch {
+                key,
+                expected: "scalar",
+            })
+        }
+        (RenderValue::Object(_), _) | (_, RenderValue::Object(_)) => {
+            Err(TemplateModelError::ValueTypeMismatch {
+                key,
+                expected: "scalar",
+            })
+        }
         _ => Err(TemplateModelError::ValueTypeMismatch {
             key,
             expected: "comparable_scalar",

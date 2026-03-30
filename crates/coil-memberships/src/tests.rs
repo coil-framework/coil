@@ -262,11 +262,11 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
             .contains(&CoreServiceDependency::Jobs)
     );
     assert_eq!(manifest.migrations.len(), 4);
-    assert_eq!(manifest.route_surfaces.len(), 4);
-    assert_eq!(manifest.http_surfaces.len(), 4);
+    assert_eq!(manifest.route_surfaces.len(), 6);
+    assert_eq!(manifest.http_surfaces.len(), 6);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
-    assert_eq!(manifest.admin_resources.len(), 2);
+    assert_eq!(manifest.admin_resources.len(), 3);
     assert_eq!(manifest.search_contributions.len(), 1);
     assert_eq!(manifest.report_definitions.len(), 1);
     assert!(
@@ -283,6 +283,14 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
             .iter()
             .any(|surface| surface.name == "memberships.account"
                 && surface.path == "/account/memberships"
+                && surface.capability.is_none())
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "memberships.account.passes"
+                && surface.path == "/account/passes"
                 && surface.capability.is_none())
     );
     assert!(manifest.http_surfaces.iter().any(|surface| surface.name
@@ -306,6 +314,20 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
                     &surface.response,
                     HttpResponseContract::Page { template, status }
                         if template == "memberships/account" && *status == 200
+                )
+                && surface.capability.is_none())
+    );
+    assert!(
+        manifest
+            .http_surfaces
+            .iter()
+            .any(|surface| surface.name == "memberships.account.passes"
+                && surface.area == HttpSurfaceArea::Account
+                && surface.path == "/account/passes"
+                && matches!(
+                    &surface.response,
+                    HttpResponseContract::Page { template, status }
+                        if template == "account/passes" && *status == 200
                 )
                 && surface.capability.is_none())
     );
@@ -361,5 +383,18 @@ fn memberships_module_exposes_private_customer_account_surfaces_without_capabili
         &memberships.response,
         HttpResponseContract::Page { template, status }
             if template == "memberships/account" && *status == 200
+    ));
+
+    let passes = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "memberships.account.passes")
+        .expect("memberships account passes surface");
+    assert_eq!(passes.area, HttpSurfaceArea::Account);
+    assert!(passes.capability.is_none());
+    assert!(matches!(
+        &passes.response,
+        HttpResponseContract::Page { template, status }
+            if template == "account/passes" && *status == 200
     ));
 }

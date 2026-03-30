@@ -42,13 +42,7 @@ impl RuntimeHostServiceExecutor {
         }
     }
 
-    fn record_observability(
-        &self,
-        span: &str,
-        trace_id: &str,
-        outcome: &str,
-        duration_ms: u64,
-    ) {
+    fn record_observability(&self, span: &str, trace_id: &str, outcome: &str, duration_ms: u64) {
         let telemetry = &self.plan.observability.telemetry;
         let _ = telemetry.record_histogram("coil.extension.runtime_ms", duration_ms);
         let now = SystemTime::now()

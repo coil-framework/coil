@@ -2,126 +2,287 @@
 title: Customer Project Layout
 ---
 
-Coil's preferred shape is a customer-owned Rust workspace that depends on Coil as upstream crates.
+Coil’s preferred shape is a customer-owned Rust workspace that depends on Coil as upstream crates.
 
-That point is structural, not cosmetic. The customer project is the composition root. It owns the binary, the app manifest, the theme, the customer backend logic, and the decision about which official modules are linked.
+This page is for the moment when you want the exact project shape, not another abstract reminder
+that “the customer workspace matters.”
 
-## What It Is
+## The Layout To Copy
 
-A Coil customer project usually contains:
-
-- one binary crate that starts the application
-- one or more customer-owned Rust crates
-- an application root with `app.toml`, platform config, templates, theme assets, auth package files, and optional extensions
-
-At a high level, the layout looks like this:
+Use a workspace that looks like this:
 
 ```text
-customer-product/
+tutorial-app/
   Cargo.toml
+  app.toml
+  platform.dev.toml
+  docker-compose.yml
   crates/
-    my-product-app/
-    my-product-backend/
-    my-product-bin/
-  app/
-    app.toml
-    platform.toml
-    templates/
-    theme/
-    auth/
-    extensions/
+    tutorial-app-app/
+      Cargo.toml
+      src/lib.rs
+    tutorial-app-backend/
+      Cargo.toml
+      src/lib.rs
+    tutorial-app-bin/
+      Cargo.toml
+      src/main.rs
+  templates/
+    layouts/
+    pages/
+    components/
+  theme/
+    assets/
+  auth/
+    tutorial-auth/
 ```
 
-The exact folder names can vary, but the responsibilities should stay recognizable.
+## The Root Workspace File
 
-## How To Use This Page
+`Cargo.toml` should look like a normal Rust workspace, not a framework-owned monorepo stub:
 
-Use this page when you already accept the customer-root model and need to answer:
+```toml
+[workspace]
+members = [
+  "crates/tutorial-app-app",
+  "crates/tutorial-app-backend",
+  "crates/tutorial-app-bin",
+]
+resolver = "2"
 
-- what folders and crates should exist
-- what belongs in the app root versus the Rust workspace
-- where to look next for exact `app.toml`, platform config, module composition, and deploy guidance
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
 
-If you are still deciding whether linked customer Rust should exist at all, read
-[Linked Rust backends](linked-rust-backends.md) next. If you need the exact architecture model
-behind this layout, jump to
-[Customer-root workspace](../core-concepts/customer-root-workspace.md).
+[workspace.dependencies]
+coil-all = "0.1"
+coil-customer-sdk = "0.1"
+serde = { version = "1", features = ["derive"] }
+```
 
-## Why This Shape Exists
+That one file already answers a key question: the customer project is the composition root, and
+Coil is an upstream dependency.
 
-This layout solves a few recurring problems in Rust web applications.
+## The Three Crates
 
-### It keeps the customer binary in charge
+### `crates/tutorial-app-bin/Cargo.toml`
 
-The customer app, not the framework, decides which modules are linked, which customer plugins are registered, and how the runtime is started.
+```toml
+[package]
+name = "tutorial-app-bin"
+version.workspace = true
+edition.workspace = true
 
-### It keeps upgrades honest
+[dependencies]
+tutorial-app-app = { path = "../tutorial-app-app" }
+```
 
-Because the customer project depends on Coil as ordinary crates, upgrading Coil looks like a dependency upgrade, not a hidden fork of the framework.
+### `crates/tutorial-app-app/Cargo.toml`
 
-### It gives customer Rust a first-party path
+```toml
+[package]
+name = "tutorial-app-app"
+version.workspace = true
+edition.workspace = true
 
-Customer-specific backend logic does not need to hide in an external sidecar or a pile of runtime scripting. It can live in ordinary Rust crates, compiled and tested with the rest of the app.
+[dependencies]
+coil-all.workspace = true
+coil-config = "0.1"
+tutorial-app-backend = { path = "../tutorial-app-backend" }
+```
 
-## How It Works
+### `crates/tutorial-app-backend/Cargo.toml`
 
-There are three layers to keep straight.
+```toml
+[package]
+name = "tutorial-app-backend"
+version.workspace = true
+edition.workspace = true
 
-### 1. The customer workspace
+[dependencies]
+coil-customer-sdk.workspace = true
+```
 
-This is the Rust project you own. It contains your binary and your customer-specific code.
+## The App-Root Files
 
-### 2. The application root
+### `app.toml`
 
-This is where Coil's runtime-facing application inputs live:
+This is the app contract:
 
-- `app.toml`
-- platform config
-- templates
-- theme assets
-- auth package files
-- optional extension artifacts
+```toml
+name = "tutorial-app"
+display_name = "Tutorial App"
 
-### 3. Coil crates
+[domains]
+canonical = "www.127.0.0.1.nip.io"
+additional = []
 
-These are the upstream crates that provide the runtime, official modules, customer SDK, and supporting batteries.
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB"]
 
-The customer binary ties those three layers together.
+[theme]
+asset_roots = ["theme/assets"]
 
-## A Concrete Example
+[auth]
+package = "tutorial-auth"
 
-The repo includes two customer-root examples:
+[[modules]]
+name = "admin"
 
-- `apps/shoppr`
-- `apps/gitly`
+[[modules]]
+name = "cms"
 
-Use them to see how the workspace, app root, and runtime fit together in a real application instead of a stripped-down tutorial.
+[[modules]]
+name = "commerce"
+```
 
-Practical follow-on pages for those examples:
+### `platform.dev.toml`
 
-- [Shoppr overview](../use-cases/shoppr/overview.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
-- [Project organization](../operations/project-organization.md)
+This is environment/runtime configuration:
 
-## Common Mistakes
+```toml
+[app]
+name = "tutorial-app"
+environment = "development"
 
-### Treating the app root as the whole project
+[server]
+bind = "127.0.0.1:8080"
 
-`app.toml`, templates, and theme files are important, but they are not the full customer application. The binary and linked Rust crates matter just as much.
+[database]
+mode = "postgres"
+url = "postgres://postgres:postgres@127.0.0.1:5432/tutorial_app"
 
-### Treating customer code as a plugin afterthought
+[cache]
+mode = "redis"
+url = "redis://127.0.0.1:6379"
 
-Coil does support bounded extension points, but customer-owned Rust is not supposed to look like a third-party plugin. It is part of the application.
+[storage]
+mode = "local"
+local_root = ".coil/state"
+```
 
-### Hiding product decisions in ad hoc startup code
+### `docker-compose.yml`
 
-If module composition, site configuration, or customer hooks are difficult to identify in the customer binary, the project shape is starting to drift.
+This is the local dependency surface:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tutorial_app
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+```
+
+## The Full App Crate File
+
+The app crate is where the workspace and the app root meet:
+
+```rust
+use coil_all::modules;
+use coil_config::PlatformConfig;
+
+pub fn run_from_args(
+    args: impl IntoIterator<Item = String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = args.into_iter();
+    let _program = args.next();
+    match args.next().as_deref() {
+        Some("validate") => {
+            let _config = PlatformConfig::from_file("platform.dev.toml")?;
+            Ok(())
+        }
+        Some("serve") => {
+            coil_all::builder()
+                .with_customer_plugin(tutorial_app_backend::TutorialAppPlugin)
+                .with_module(modules::admin())
+                .with_module(modules::cms())
+                .with_module(modules::commerce())
+                .run_from_env()?;
+            Ok(())
+        }
+        other => Err(format!("unknown command: {:?}", other).into()),
+    }
+}
+```
+
+If your runtime composition is hard to find, the project shape is drifting.
+
+## The Full Binary File
+
+The binary should stay thin:
+
+```rust
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    match tutorial_app_app::run_from_args(std::env::args()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+```
+
+The binary owns lifecycle entry. The app crate owns composition.
+
+## The Full Backend File
+
+The backend crate should be present even before it contains much logic:
+
+```rust
+use coil_customer_sdk::{CustomerBackendPlugin, CustomerHookRegistry};
+
+pub struct TutorialAppPlugin;
+
+impl CustomerBackendPlugin for TutorialAppPlugin {
+    fn register(
+        &self,
+        _registry: &mut dyn CustomerHookRegistry,
+    ) -> Result<(), coil_customer_sdk::BackendError> {
+        Ok(())
+    }
+}
+```
+
+## Checkpoint
+
+At this point a reviewer should be able to copy these files and produce the same workspace shape:
+
+```text
+Cargo.toml
+app.toml
+platform.dev.toml
+docker-compose.yml
+crates/tutorial-app-bin/Cargo.toml
+crates/tutorial-app-bin/src/main.rs
+crates/tutorial-app-app/Cargo.toml
+crates/tutorial-app-app/src/lib.rs
+crates/tutorial-app-backend/Cargo.toml
+crates/tutorial-app-backend/src/lib.rs
+```
+
+They should also be able to run the workspace through the customer binary:
+
+```bash
+docker compose up -d
+cargo run -p tutorial-app-bin -- validate
+cargo run -p tutorial-app-bin -- serve
+```
 
 ## What To Read Next
 
 - [Linked Rust backends](linked-rust-backends.md)
 - [Customer-root workspace](../core-concepts/customer-root-workspace.md)
 - [Runtime and module composition](../core-concepts/runtime-and-module-composition.md)
-- [Composition and coil](../reference/composition.md)
 - [Build and deploy](../operations/build-and-deploy.md)
-- [Configuration and secrets](../operations/configuration-and-secrets.md)

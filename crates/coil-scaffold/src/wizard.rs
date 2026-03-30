@@ -64,14 +64,26 @@ pub fn run_wizard(target: &Path) -> Result<WizardInput> {
         }
     }
 
-    let module_ids = ["cms", "media", "commerce", "admin", "ops", "memberships", "events"];
+    let module_ids = [
+        "cms",
+        "media",
+        "commerce",
+        "admin",
+        "ops",
+        "memberships",
+        "events",
+    ];
     let selected = MultiSelect::with_theme(&theme)
         .with_prompt("Official modules")
         .items(&module_ids)
         .defaults(&[true, true, true, true, true, false, false])
         .interact()?;
     let modules = if selected.is_empty() {
-        vec!["cms".to_string(), "commerce".to_string(), "admin".to_string()]
+        vec![
+            "cms".to_string(),
+            "commerce".to_string(),
+            "admin".to_string(),
+        ]
     } else {
         selected
             .into_iter()

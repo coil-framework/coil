@@ -145,10 +145,7 @@ fn bootstrap_registers_core_services() {
     assert_eq!(bootstrap.browser.csrf.field_name, "_csrf");
     assert!(bootstrap.cli.customer_app == "showcase-events");
     assert_eq!(bootstrap.cli.baseline_command_count, 4);
-    assert_eq!(
-        bootstrap.data.driver,
-        coil_config::DatabaseDriver::Postgres
-    );
+    assert_eq!(bootstrap.data.driver, coil_config::DatabaseDriver::Postgres);
     assert_eq!(bootstrap.data.schema, "public");
     assert_eq!(bootstrap.data.migrations_table, "_coil_migrations");
     assert_eq!(bootstrap.jobs.backend, coil_config::JobBackend::Redis);
@@ -346,14 +343,16 @@ fn bootstrap_core_services_merges_customer_translation_catalogs() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
     let bootstrap = bootstrap_core_services_with_translation_catalogs(
         &config,
-        vec![TranslationCatalog::new(
-            LocaleTag::new("fr-FR").unwrap(),
-            vec![(
-                MessageKey::new("checkout.title").unwrap(),
-                "Paiement".to_string(),
-            )],
-        )
-        .unwrap()],
+        vec![
+            TranslationCatalog::new(
+                LocaleTag::new("fr-FR").unwrap(),
+                vec![(
+                    MessageKey::new("checkout.title").unwrap(),
+                    "Paiement".to_string(),
+                )],
+            )
+            .unwrap(),
+        ],
     )
     .unwrap();
 

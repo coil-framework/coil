@@ -57,9 +57,7 @@ pub(crate) async fn authorize_live_request(
         RequestPrincipalKind::ServiceAccount => coil_auth::DefaultSubject::entity(
             coil_auth::Entity::service_account(principal_id.to_string()),
         ),
-        _ => coil_auth::DefaultSubject::entity(coil_auth::Entity::user(
-            principal_id.to_string(),
-        )),
+        _ => coil_auth::DefaultSubject::entity(coil_auth::Entity::user(principal_id.to_string())),
     };
     let started_at = Instant::now();
     let allowed = state
@@ -78,7 +76,11 @@ pub(crate) async fn authorize_live_request(
         .as_secs();
     let _ = state.plan.observability.telemetry.record_trace(
         coil_observability::TraceRecord::new(
-            format!("auth:{}:{}", matched.resolved.route_name, capability.as_str()),
+            format!(
+                "auth:{}:{}",
+                matched.resolved.route_name,
+                capability.as_str()
+            ),
             "auth.check",
             if allowed { "allowed" } else { "denied" },
             now,

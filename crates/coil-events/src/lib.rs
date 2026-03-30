@@ -2,9 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::time::Duration;
 
-use coil_auth::{
-    Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation,
-};
+use coil_auth::{Capability, DefaultSubject, DefaultTuple, DefaultTupleUpdate, Entity, Relation};
 use coil_commerce::OrderId;
 use coil_core::{
     AdminContributionKind, AdminNavigationSection, AdminResourceContribution,

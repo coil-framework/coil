@@ -38,9 +38,7 @@ fn execution_context() -> InvocationContext {
             .unwrap(),
         PrincipalRef::user("alice").unwrap(),
         TraceContext::new("trace-network").unwrap(),
-        InvocationInput::Api(
-            ApiInvocation::new("/network", coil_wasm::HttpMethod::Get).unwrap(),
-        ),
+        InvocationInput::Api(ApiInvocation::new("/network", coil_wasm::HttpMethod::Get).unwrap()),
     )
 }
 

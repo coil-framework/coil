@@ -36,6 +36,9 @@
           <a class="button button--secondary" href="/admin/redirects" coil:attr="href=${links.admin_redirects}">
             Edit redirects
           </a>
+          <a class="button button--secondary" href="/admin/options" coil:attr="href=${links.admin_options}">
+            Edit settings
+          </a>
         </div>
       </section>
 
@@ -89,6 +92,10 @@
                 <a class="button button--secondary" href="/admin/pages" coil:attr="href=${page_record.edit_href}">
                   Edit draft
                 </a>
+                <p coil:if="${page_record.has_scheduled_publish}">
+                  Scheduled:
+                  <span coil:text="${page_record.scheduled_publish_at}">0</span>
+                </p>
               </td>
             </tr>
           </tbody>
@@ -143,9 +150,21 @@
             <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
             <button class="button" type="submit">Publish live page</button>
           </form>
+          <form action="/admin/pages/schedule" method="post">
+            <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
+            <label>
+              <span class="admin-panel__eyebrow">Publish at unix seconds</span>
+              <input type="number" name="page_schedule_publish_at" min="1" />
+            </label>
+            <button class="button button--secondary" type="submit">Schedule publication</button>
+          </form>
           <form action="/admin/pages/unpublish" method="post">
             <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
             <button class="button button--secondary" type="submit">Unpublish</button>
+          </form>
+          <form action="/admin/pages/rollback" method="post" coil:if="${selected_content_page.can_rollback}">
+            <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
+            <button class="button button--secondary" type="submit">Rollback to previous live revision</button>
           </form>
         </div>
         <p coil:unless="${has_persisted_content_page}">
@@ -156,11 +175,19 @@
           <article class="admin-card">
             <h3>Status</h3>
             <p coil:text="${selected_content_page.status_label}">Published</p>
+            <p coil:if="${selected_content_page.has_scheduled_publish}">
+              Scheduled publish:
+              <span coil:text="${selected_content_page.scheduled_publish_at}">0</span>
+            </p>
             <p coil:if="${selected_content_page.has_live_path}">
               Live route:
               <a href="/pages/visit-harbor" coil:attr="href=${selected_content_page.live_path}" coil:text="${selected_content_page.live_path}">
                 /pages/visit-harbor
               </a>
+            </p>
+            <p coil:if="${selected_content_page.has_previous_live}">
+              Previous live revision:
+              <span coil:text="${selected_content_page.previous_live_title}">Previous page</span>
             </p>
           </article>
           <article class="admin-card">
@@ -182,12 +209,350 @@
         </div>
       </section>
 
+      <section class="admin-panel" coil:if="${has_persisted_content_page}">
+        <p class="admin-panel__eyebrow">Structured settings</p>
+        <h2>Page settings and options</h2>
+        <p>
+          These settings now sit alongside the draft body HTML so the CMS can evolve toward a
+          structured page-builder model without dropping the checked-in draft and publish workflow.
+        </p>
+        <form action="/admin/pages/settings" method="post">
+          <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
+          <div class="admin-card-grid">
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Page type</span>
+              <input
+                type="text"
+                name="page_settings_page_type"
+                coil:attr="value=${selected_content_page.settings.page_type}"
+              />
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Template</span>
+              <input
+                type="text"
+                name="page_settings_template"
+                coil:attr="value=${selected_content_page.settings.template}"
+              />
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">SEO title</span>
+              <input
+                type="text"
+                name="page_settings_seo_title"
+                coil:attr="value=${selected_content_page.settings.seo_title}"
+              />
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">SEO description</span>
+              <textarea
+                name="page_settings_seo_description"
+                rows="3"
+                coil:text="${selected_content_page.settings.seo_description}"
+              >
+SEO description
+              </textarea>
+            </label>
+          </div>
+          <div class="admin-card-grid">
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Show in navigation</span>
+              <input
+                type="checkbox"
+                name="page_option_show_in_navigation"
+                value="true"
+                coil:if="${selected_content_page.settings.show_in_navigation}"
+                checked="checked"
+              />
+              <input
+                type="checkbox"
+                name="page_option_show_in_navigation"
+                value="true"
+                coil:unless="${selected_content_page.settings.show_in_navigation}"
+              />
+              <input type="hidden" name="page_option_show_in_navigation" value="false" />
+              <span>Promote this page into the primary storefront navigation.</span>
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Allow indexing</span>
+              <input
+                type="checkbox"
+                name="page_option_allow_indexing"
+                value="true"
+                coil:if="${selected_content_page.settings.allow_indexing}"
+                checked="checked"
+              />
+              <input
+                type="checkbox"
+                name="page_option_allow_indexing"
+                value="true"
+                coil:unless="${selected_content_page.settings.allow_indexing}"
+              />
+              <input type="hidden" name="page_option_allow_indexing" value="false" />
+              <span>Allow search engines and sitemap generation for this page.</span>
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Localized</span>
+              <input
+                type="checkbox"
+                name="page_option_localized"
+                value="true"
+                coil:if="${selected_content_page.settings.localized}"
+                checked="checked"
+              />
+              <input
+                type="checkbox"
+                name="page_option_localized"
+                value="true"
+                coil:unless="${selected_content_page.settings.localized}"
+              />
+              <input type="hidden" name="page_option_localized" value="false" />
+              <span>Treat this page as locale-sensitive content.</span>
+            </label>
+          </div>
+          <div class="admin-page__actions">
+            <button class="button button--secondary" type="submit">Save settings</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_persisted_content_page}">
+        <p class="admin-panel__eyebrow">Structured blocks</p>
+        <h2>Current draft block inventory</h2>
+        <p>
+          The runtime now exposes the structured block list directly. Review the live draft state
+          below, then use the replacement form to submit an indexed block list for the draft.
+        </p>
+        <div class="admin-card-grid" coil:if="${selected_content_page.has_blocks}">
+          <article class="admin-card" coil:each="block : ${selected_content_page.blocks}">
+            <p class="admin-panel__eyebrow" coil:text="${block.kind}">inline</p>
+            <h3 coil:text="${block.label}">Block label</h3>
+            <p><strong>ID</strong> <span coil:text="${block.id}">block-id</span></p>
+            <p><strong>Type</strong> <span coil:text="${block.type_id}">hero</span></p>
+            <p coil:if="${block.is_shared}">
+              <strong>Shared block</strong>
+              <span coil:text="${block.shared_block_id}">shared-store-hours</span>
+            </p>
+            <dl coil:if="${block.has_label}">
+              <dt>Label</dt>
+              <dd coil:text="${block.label}">Hero</dd>
+            </dl>
+            <dl coil:each="field : ${block.field_entries}">
+              <dt coil:text="${field.key}">heading</dt>
+              <dd coil:text="${field.value}">Value</dd>
+            </dl>
+            <div coil:if="${block.has_html}" coil:utext="${block.html}">
+              <p>Rendered HTML</p>
+            </div>
+          </article>
+        </div>
+        <p coil:unless="${selected_content_page.has_blocks}">
+          No structured blocks are stored for this draft yet.
+        </p>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_persisted_content_page}">
+        <p class="admin-panel__eyebrow">Replace draft blocks</p>
+        <h2>Submit current draft blocks</h2>
+        <p>
+          This form now binds directly to the current draft block list. Saving still replaces the
+          full block array, but the field names come from the runtime model instead of a fixed
+          three-slot scaffold.
+        </p>
+        <form action="/admin/pages/blocks" method="post">
+          <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
+          <div class="admin-card-grid" coil:if="${selected_content_page.has_blocks}">
+            <article class="admin-card" coil:each="block : ${selected_content_page.blocks}">
+              <p class="admin-panel__eyebrow" coil:text="${block.kind}">inline</p>
+              <h3 coil:text="${block.label}">Block label</h3>
+              <label>
+                <span class="admin-panel__eyebrow">Kind</span>
+                <input
+                  type="text"
+                  name="block_kind"
+                  coil:attr="name=${block.kind_field}, value=${block.kind}"
+                />
+              </label>
+              <label>
+                <span class="admin-panel__eyebrow">Block ID</span>
+                <input
+                  type="text"
+                  name="block_id"
+                  coil:attr="name=${block.id_field}, value=${block.id}"
+                />
+              </label>
+              <label coil:unless="${block.is_shared}">
+                <span class="admin-panel__eyebrow">Type</span>
+                <input
+                  type="text"
+                  name="block_type"
+                  coil:attr="name=${block.type_field}, value=${block.type_id}"
+                />
+              </label>
+              <label coil:if="${block.is_shared}">
+                <span class="admin-panel__eyebrow">Shared block ID</span>
+                <input
+                  type="text"
+                  name="block_shared_block_id"
+                  coil:attr="name=${block.shared_block_id_field}, value=${block.shared_block_id}"
+                />
+              </label>
+              <label>
+                <span class="admin-panel__eyebrow">Label</span>
+                <input
+                  type="text"
+                  name="block_label"
+                  coil:attr="name=${block.label_field}, value=${block.label}"
+                />
+              </label>
+              <label coil:unless="${block.is_shared}" coil:each="field : ${block.field_entries}">
+                <span class="admin-panel__eyebrow">
+                  Field:
+                  <span coil:text="${field.key}">heading</span>
+                </span>
+                <textarea
+                  name="block_field"
+                  rows="4"
+                  coil:attr="name=${field.field_name}"
+                  coil:text="${field.value}"
+                >
+Value
+                </textarea>
+              </label>
+              <div coil:if="${block.is_shared}">
+                <p>
+                  Shared block content is sourced from the shared block library below. Update the
+                  shared block there, then keep this form focused on the reference link, label, and
+                  ordering state.
+                </p>
+                <dl coil:each="field : ${block.field_entries}">
+                  <dt coil:text="${field.key}">heading</dt>
+                  <dd coil:text="${field.value}">Value</dd>
+                </dl>
+              </div>
+            </article>
+          </div>
+          <p coil:unless="${selected_content_page.has_blocks}">
+            The current draft has no structured blocks yet, so there are no block-bound field names
+            to submit from this form.
+          </p>
+          <div class="admin-page__actions">
+            <button class="button button--secondary" type="submit" coil:if="${selected_content_page.has_blocks}">
+              Save blocks
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_persisted_content_page}">
+        <p class="admin-panel__eyebrow">Shared block library</p>
+        <h2>Reusable editorial blocks</h2>
+        <p>
+          Shared blocks are saved independently, then referenced from structured page-builder
+          blocks by shared block ID.
+        </p>
+        <div class="admin-card-grid" coil:if="${has_shared_blocks}">
+          <article class="admin-card" coil:each="shared_block : ${shared_blocks}">
+            <p><strong>ID</strong> <span coil:text="${shared_block.id}">shared-store-hours</span></p>
+            <p><strong>Label</strong> <span coil:text="${shared_block.label}">Store hours</span></p>
+            <p><strong>Type</strong> <span coil:text="${shared_block.type_id}">callout</span></p>
+            <dl coil:each="field : ${shared_block.field_entries}">
+              <dt coil:text="${field.key}">heading</dt>
+              <dd coil:text="${field.value}">Value</dd>
+            </dl>
+          </article>
+        </div>
+        <p coil:unless="${has_shared_blocks}">
+          No shared blocks have been saved yet. Create one below and then reference it from the
+          indexed block replacement form.
+        </p>
+        <article class="admin-card">
+          <h3>Save or update shared block</h3>
+          <form action="/admin/shared-blocks/save" method="post">
+            <input type="hidden" name="page_id" coil:attr="value=${selected_content_page.id}" />
+            <label>
+              <span class="admin-panel__eyebrow">Shared block ID</span>
+              <input type="text" name="shared_block_id" coil:attr="value=${shared_block_editor.id}" />
+            </label>
+            <label>
+              <span class="admin-panel__eyebrow">Label</span>
+              <input type="text" name="shared_block_label" coil:attr="value=${shared_block_editor.label}" />
+            </label>
+            <label>
+              <span class="admin-panel__eyebrow">Type</span>
+              <input type="text" name="shared_block_type" coil:attr="value=${shared_block_editor.type_id}" />
+            </label>
+            <label>
+              <span class="admin-panel__eyebrow">Field: heading</span>
+              <input
+                type="text"
+                name="shared_block_field_heading"
+                coil:attr="value=${shared_block_editor.fields.heading ?: ''}"
+              />
+            </label>
+            <label>
+              <span class="admin-panel__eyebrow">Field: body</span>
+              <textarea name="shared_block_field_body" rows="4" coil:text="${shared_block_editor.fields.body ?: ''}"></textarea>
+            </label>
+            <label>
+              <span class="admin-panel__eyebrow">Field: html</span>
+              <textarea name="shared_block_field_html" rows="4" coil:text="${shared_block_editor.fields.html ?: ''}"></textarea>
+            </label>
+            <label>
+              <span class="admin-panel__eyebrow">Field: cta_href</span>
+              <input
+                type="text"
+                name="shared_block_field_cta_href"
+                coil:attr="value=${shared_block_editor.fields.cta_href ?: ''}"
+              />
+            </label>
+            <div class="admin-page__actions">
+              <button class="button button--secondary" type="submit">Save shared block</button>
+            </div>
+          </form>
+        </article>
+      </section>
+
+      <section class="admin-panel" coil:if="${is_creating_content_page}">
+        <p class="admin-panel__eyebrow">Structured editor</p>
+        <h2>Save the draft first</h2>
+        <p>
+          The structured settings, block replacement, and shared-block save actions all need a
+          stable page ID. Save the draft above first, then return here to manage structured editor
+          state.
+        </p>
+      </section>
+
       <section class="admin-panel" coil:if="${has_selected_content_page}">
         <p class="admin-panel__eyebrow">Draft preview</p>
         <article class="page-shell">
           <h2 coil:text="${selected_content_page.title}">Visit Harbor</h2>
           <p coil:text="${selected_content_page.summary}">Summary</p>
-          <div coil:utext="${selected_content_page.body_html}">
+          <div class="cms-page-blocks" coil:if="${selected_content_page.has_blocks}">
+            <coil:block coil:each="block : ${selected_content_page.blocks}">
+              <coil:block coil:switch="${block.type_id}">
+                <div coil:case="'hero'" coil:replace="~{cms/blocks/hero :: block}"></div>
+                <div coil:case="'rich_text'" coil:replace="~{cms/blocks/rich_text :: block}"></div>
+                <div coil:case="'legacy_html_body'" coil:replace="~{cms/blocks/rich_text :: block}"></div>
+                <div coil:case="'callout'" coil:replace="~{cms/blocks/callout :: block}"></div>
+                <div coil:case="'editorial_callout'" coil:replace="~{cms/blocks/callout :: block}"></div>
+                <section coil:default class="page-shell">
+                  <p class="catalog-section__eyebrow" coil:text="${block.type_id}">Block</p>
+                  <h3 coil:if="${block.has_label}" coil:text="${block.label}">Block label</h3>
+                  <div coil:if="${block.has_html}" coil:utext="${block.html}">
+                    <p>Preview body.</p>
+                  </div>
+                  <dl coil:unless="${block.has_html}">
+                    <div coil:each="field : ${block.field_entries}">
+                      <dt coil:text="${field.key}">field</dt>
+                      <dd coil:text="${field.value}">value</dd>
+                    </div>
+                  </dl>
+                </section>
+              </coil:block>
+            </coil:block>
+          </div>
+          <div coil:unless="${selected_content_page.has_blocks}" coil:utext="${selected_content_page.body_html}">
             <p>Preview body.</p>
           </div>
         </article>

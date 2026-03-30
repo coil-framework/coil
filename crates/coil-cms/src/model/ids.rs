@@ -9,6 +9,16 @@ macro_rules! token_type {
             pub fn new(value: impl Into<String>) -> Result<Self, CmsModelError> {
                 Ok(Self(validate_token($field, value.into())?))
             }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
         }
     };
 }
@@ -52,6 +62,10 @@ impl fmt::Display for RevisionId {
 }
 
 token_type!(NavigationId, "navigation_id");
+token_type!(BlockTypeId, "block_type_id");
+token_type!(BlockFieldId, "block_field_id");
+token_type!(BlockInstanceId, "block_instance_id");
+token_type!(SharedBlockId, "shared_block_id");
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NavigationItemId(String);

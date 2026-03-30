@@ -144,15 +144,29 @@ fn telemetry_catalog_records_live_counter_gauge_and_histogram_values() {
     let runtime =
         ObservabilityRuntime::baseline(&config, coil_config::Environment::Development).unwrap();
 
-    assert!(runtime.telemetry.increment_counter("coil.http.requests.total", 1));
-    assert!(runtime.telemetry.adjust_gauge("coil.http.requests.in_flight", 1));
-    assert!(runtime.telemetry.record_histogram("coil.http.request.latency_ms", 27));
+    assert!(
+        runtime
+            .telemetry
+            .increment_counter("coil.http.requests.total", 1)
+    );
+    assert!(
+        runtime
+            .telemetry
+            .adjust_gauge("coil.http.requests.in_flight", 1)
+    );
+    assert!(
+        runtime
+            .telemetry
+            .record_histogram("coil.http.request.latency_ms", 27)
+    );
     assert!(runtime.telemetry.set_gauge("coil.queue.depth", 5));
-    assert!(runtime.telemetry.record_trace(
-        TraceRecord::new("trace-1", "http.request", "ok", 42)
-            .with_field("route", "home")
-            .with_field("status", "200")
-    ));
+    assert!(
+        runtime.telemetry.record_trace(
+            TraceRecord::new("trace-1", "http.request", "ok", 42)
+                .with_field("route", "home")
+                .with_field("status", "200")
+        )
+    );
 
     assert_eq!(
         runtime.telemetry.metric_reading("coil.http.requests.total"),
@@ -182,5 +196,8 @@ fn telemetry_catalog_records_live_counter_gauge_and_histogram_values() {
     assert_eq!(traces.len(), 1);
     assert_eq!(traces[0].trace_id, "trace-1");
     assert_eq!(traces[0].span, "http.request");
-    assert_eq!(traces[0].fields.get("route").map(String::as_str), Some("home"));
+    assert_eq!(
+        traces[0].fields.get("route").map(String::as_str),
+        Some("home")
+    );
 }

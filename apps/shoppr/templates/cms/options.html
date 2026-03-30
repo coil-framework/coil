@@ -1,0 +1,143 @@
+<!doctype html>
+<html
+  xmlns:coil="https://coil.rs"
+  coil:with="page_title='Global Settings'"
+  lang="en-GB"
+  coil:attr="lang=${locale}"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title coil:text="${page_title}">Global Settings</title>
+    <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+  </head>
+  <body class="harbor harbor--admin">
+    <header class="site-header">
+      <a href="/" class="brand">Shoppr</a>
+      <nav coil:replace="~{admin/nav}"></nav>
+    </header>
+    <main class="site-main admin-page">
+      <section class="admin-page__intro">
+        <p class="admin-page__eyebrow">Content operations</p>
+        <h1 coil:text="${page.title}">Global Settings</h1>
+        <p coil:text="${page.summary}">
+          Shared storefront content and contact settings used across public templates.
+        </p>
+        <p>
+          These values are the first-class CMS-backed global settings surface for the checked-in
+          Shoppr app. They are exposed to templates under <code>site.settings.*</code>.
+        </p>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_flash_messages}">
+        <ul class="flash-list">
+          <li coil:each="message : ${flash_messages}" coil:text="${message.text}">Saved.</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel" coil:if="${has_errors}">
+        <h2>Settings errors</h2>
+        <p coil:text="${error_summary}">Update the settings and save again.</p>
+        <ul class="flash-list">
+          <li coil:each="error : ${errors}" coil:text="${error.message}">Error</li>
+        </ul>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Storefront settings</p>
+        <form action="/admin/options/save" method="post">
+          <div class="admin-card-grid">
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Footer heading</span>
+              <input
+                type="text"
+                name="footer_heading"
+                coil:attr="name=${global_settings.footer_heading_field}, value=${global_settings.footer_heading}"
+              />
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Contact email</span>
+              <input
+                type="email"
+                name="contact_email"
+                coil:attr="name=${global_settings.contact_email_field}, value=${global_settings.contact_email}"
+              />
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Contact phone</span>
+              <input
+                type="text"
+                name="contact_phone"
+                coil:attr="name=${global_settings.contact_phone_field}, value=${global_settings.contact_phone}"
+              />
+            </label>
+            <label class="admin-card">
+              <span class="admin-panel__eyebrow">Announcement title</span>
+              <input
+                type="text"
+                name="announcement_title"
+                coil:attr="name=${global_settings.announcement_title_field}, value=${global_settings.announcement_title}"
+              />
+            </label>
+          </div>
+
+          <label class="admin-card">
+            <span class="admin-panel__eyebrow">Footer body</span>
+            <textarea
+              name="footer_body"
+              rows="4"
+              coil:attr="name=${global_settings.footer_body_field}"
+              coil:text="${global_settings.footer_body}"
+            >
+Footer body
+            </textarea>
+          </label>
+
+          <label class="admin-card">
+            <span class="admin-panel__eyebrow">Announcement body</span>
+            <textarea
+              name="announcement_body"
+              rows="4"
+              coil:attr="name=${global_settings.announcement_body_field}"
+              coil:text="${global_settings.announcement_body}"
+            >
+Announcement body
+            </textarea>
+          </label>
+
+          <div class="admin-page__actions">
+            <button class="button" type="submit">Save global settings</button>
+            <a class="button button--secondary" href="/admin/pages" coil:attr="href=${links.admin_pages}">
+              Back to pages
+            </a>
+          </div>
+        </form>
+      </section>
+
+      <section class="admin-panel">
+        <p class="admin-panel__eyebrow">Template contract</p>
+        <div class="admin-card-grid">
+          <article class="admin-card">
+            <h2>Public render model</h2>
+            <p><code>site.settings.footer_heading</code></p>
+            <p><code>site.settings.footer_body</code></p>
+            <p><code>site.settings.contact_email</code></p>
+            <p><code>site.settings.contact_phone</code></p>
+            <p><code>site.settings.announcement_title</code></p>
+            <p><code>site.settings.announcement_body</code></p>
+          </article>
+          <article class="admin-card">
+            <h2>Current values</h2>
+            <p><strong>Footer heading</strong> <span coil:text="${global_settings.footer_heading}">Heading</span></p>
+            <p><strong>Contact email</strong> <span coil:text="${global_settings.contact_email}">hello@example.com</span></p>
+            <p><strong>Contact phone</strong> <span coil:text="${global_settings.contact_phone}">+44</span></p>
+            <p><strong>Announcement title</strong> <span coil:text="${global_settings.announcement_title}">Announcement</span></p>
+          </article>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <small>Shoppr</small>
+    </footer>
+  </body>
+</html>

@@ -4,6 +4,10 @@ title: Template Models
 
 Coil templates render against a typed `RenderModel`, not an unstructured JSON blob.
 
+If you are trying to understand where that model comes from, read
+[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md)
+alongside this page.
+
 ## How A Route Actually Reaches A Template
 
 The missing connection for most readers is usually not "what is a `RenderModel`?" but "where does
@@ -198,6 +202,13 @@ That is the core contract:
 - runtime shapes typed values
 - templates read those values declaratively
 
+What templates do **not** do automatically:
+
+- load CMS content instances by themselves
+- turn content schema into `page.blocks`
+- infer customer-owned request data because a field name appears in markup
+- fetch live data for dynamic sections on their own
+
 ## What Types Exist?
 
 The core types are:
@@ -212,6 +223,9 @@ The core types are:
 
 This matters because templates are not dynamically evaluating arbitrary JSON. They are reading a
 small, typed value model.
+
+That typed model is the request-time output of the render pipeline, not a direct dump of app
+manifest files or content schema definitions.
 
 ## How Templates Consume The Model
 
@@ -248,6 +262,9 @@ Coil’s runtime request model usually starts with keys like:
 - `flash_messages`
 
 That is why templates can usually stay simple: the runtime has already done the shaping work.
+
+The important boundary is that Coil only renders what the request-time model exposes. If `page`,
+`product`, or `page.blocks` are missing, the template does not go and compute them.
 
 ## Lists, Nested Objects, And Booleans
 
@@ -308,6 +325,10 @@ For a `pages/home` template and a block type of `hero_section`, those resolve to
 
 That means the model reaching the template is richer than the raw list entry. Coil is shaping a
 render-oriented view of the block at render time.
+
+That does not mean Coil automatically resolved the block from schema. It means the request-time
+model already included block-shaped data and the template runtime added render-oriented helpers on
+top.
 
 ## Rendering Block Fragments By Type
 
@@ -417,6 +438,41 @@ let contributions = vec![
 This is the practical reason template-model docs matter: if the model is well-shaped, templates stay
 small.
 
+## Customer Namespaces Vs Framework Namespaces
+
+Coil already owns shared namespaces such as:
+
+- `page`
+- `site`
+- `links`
+- `navigation`
+
+Customer code should generally mount its own namespaces for customer-owned request data:
+
+- `crm_page`
+- `campaigns`
+- `customer_extension`
+
+Merge into framework-owned objects only when the field genuinely belongs to a shared public
+contract. For that rule, read [Render model hooks](./render-model-hooks.md).
+
+## Dynamic Blocks And Live Sections
+
+If a template renders a block list or a live section, remember that the template is still only
+rendering the final request-time values it was given.
+
+Coil does not automatically turn:
+
+- a block schema
+- a page-builder declaration
+- or a content model entry in `app.toml`
+
+into a fully resolved live block payload.
+
+For that boundary, read
+[Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections.md)
+and [CMS page builder model](./cms-page-builder-model.md).
+
 ## What The Demos Prove Today
 
 Use the demos for these two different lessons:
@@ -483,3 +539,6 @@ Full implementation:
 - [Theme Asset Delivery](./theme-asset-delivery.md)
 - [Internationalisation](./internationalization.md)
 - [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
+- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
+- [Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md)
+- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks.md)

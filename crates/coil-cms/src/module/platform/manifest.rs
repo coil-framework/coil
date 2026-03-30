@@ -1,5 +1,7 @@
 use super::super::core::CmsModule;
-use super::super::support::{cms_live_pages_repository, default_retry_policy};
+use super::super::support::{
+    cms_live_pages_repository, cms_shared_blocks_repository, default_retry_policy,
+};
 use coil_auth::Capability;
 use coil_core::{
     BulkOperationDefinition, BulkOperationKind, BulkOperationScope, CapabilityContract,
@@ -71,7 +73,12 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                 MigrationContract::new(
                     "cms.pages",
                     10,
-                    "Creates localized page, revision, and publication workflow tables",
+                    "Creates localized page, revision, page settings, and publication workflow tables",
+                ),
+                MigrationContract::new(
+                    "cms.page_builder",
+                    15,
+                    "Creates structured block schemas, page block instances, and reusable shared block tables",
                 ),
                 MigrationContract::new(
                     "cms.navigation",
@@ -108,9 +115,33 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                 )
                 .gated_by(Capability::CmsPageEdit),
                 RouteSurface::new(
+                    "cms.options.index",
+                    RouteSurfaceKind::AdminPage,
+                    "/admin/options",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
                     "cms.pages.save-draft",
                     RouteSurfaceKind::AdminAction,
                     "/admin/pages/draft",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
+                    "cms.pages.save-settings",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/settings",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
+                    "cms.pages.save-blocks",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/blocks",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
+                    "cms.pages.duplicate-block",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/blocks/duplicate",
                 )
                 .gated_by(Capability::CmsPageEdit),
                 RouteSurface::new(
@@ -120,9 +151,21 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                 )
                 .gated_by(Capability::CmsPagePublish),
                 RouteSurface::new(
+                    "cms.pages.schedule",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/schedule",
+                )
+                .gated_by(Capability::CmsPagePublish),
+                RouteSurface::new(
                     "cms.pages.unpublish",
                     RouteSurfaceKind::AdminAction,
                     "/admin/pages/unpublish",
+                )
+                .gated_by(Capability::CmsPagePublish),
+                RouteSurface::new(
+                    "cms.pages.rollback",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/pages/rollback",
                 )
                 .gated_by(Capability::CmsPagePublish),
                 RouteSurface::new(
@@ -135,6 +178,18 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                     "cms.redirects.save",
                     RouteSurfaceKind::AdminAction,
                     "/admin/redirects/save",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
+                    "cms.shared-blocks.save",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/shared-blocks/save",
+                )
+                .gated_by(Capability::CmsPageEdit),
+                RouteSurface::new(
+                    "cms.options.save",
+                    RouteSurfaceKind::AdminAction,
+                    "/admin/options/save",
                 )
                 .gated_by(Capability::CmsPageEdit),
             ])
@@ -173,7 +228,7 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                 IntegrationPoint::new(
                     IntegrationKind::FrontendRendering,
                     "page.render",
-                    "Owns page composition on top of the shared HTML-first template engine",
+                    "Owns page composition on top of the shared HTML-first template engine, including structured block-oriented content",
                 ),
                 IntegrationPoint::new(
                     IntegrationKind::SeoMetadata,
@@ -204,12 +259,12 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                 ExtensionSlotDescriptor::new(
                     ExtensionSlotKind::AdminWidget,
                     "cms.page.editor.sidebar",
-                    "Allows customer app widgets to augment the page editor without owning the editor runtime",
+                    "Allows customer app widgets to augment the page editor and structured page-builder workflow without owning the editor runtime",
                 ),
                 ExtensionSlotDescriptor::new(
                     ExtensionSlotKind::RenderHook,
                     "cms.page.render",
-                    "Allows bounded content embellishments during page rendering",
+                    "Allows bounded content embellishments during page rendering across legacy HTML and structured block content",
                 ),
             ])
             .with_admin_resources(module.admin_resources.clone())
@@ -229,6 +284,20 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                     SearchFieldContribution::new(
                         "body",
                         "body_html",
+                        SearchFieldRole::Body,
+                        false,
+                        true,
+                    ),
+                    SearchFieldContribution::new(
+                        "summary",
+                        "summary",
+                        SearchFieldRole::Summary,
+                        true,
+                        true,
+                    ),
+                    SearchFieldContribution::new(
+                        "blocks",
+                        "structured_blocks",
                         SearchFieldRole::Body,
                         false,
                         true,
@@ -281,7 +350,10 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                     true,
                 ),
             ])
-            .with_data_repositories(vec![cms_live_pages_repository()])
+            .with_data_repositories(vec![
+                cms_live_pages_repository(),
+                cms_shared_blocks_repository(),
+            ])
             .with_http_surfaces(vec![
                 HttpSurfaceContribution::page(
                     "cms.page",
@@ -318,11 +390,45 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                     "cms/redirects",
                 )
                 .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::page(
+                    "cms.options.index",
+                    HttpSurfaceArea::Admin,
+                    "/admin/options",
+                    "cms/options",
+                )
+                .gated_by(Capability::CmsPageEdit),
                 HttpSurfaceContribution::redirect(
                     "cms.pages.save-draft",
                     coil_core::HttpSurfaceMethod::Post,
                     HttpSurfaceArea::Admin,
                     "/admin/pages/draft",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.pages.save-settings",
+                    coil_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/settings",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.pages.save-blocks",
+                    coil_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/blocks",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.pages.duplicate-block",
+                    coil_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/blocks/duplicate",
                     "/admin/pages",
                     303,
                 )
@@ -337,10 +443,28 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                 )
                 .gated_by(Capability::CmsPagePublish),
                 HttpSurfaceContribution::redirect(
+                    "cms.pages.schedule",
+                    coil_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/schedule",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPagePublish),
+                HttpSurfaceContribution::redirect(
                     "cms.pages.unpublish",
                     coil_core::HttpSurfaceMethod::Post,
                     HttpSurfaceArea::Admin,
                     "/admin/pages/unpublish",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPagePublish),
+                HttpSurfaceContribution::redirect(
+                    "cms.pages.rollback",
+                    coil_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/pages/rollback",
                     "/admin/pages",
                     303,
                 )
@@ -360,6 +484,24 @@ pub(super) fn build_manifest(module: &CmsModule) -> ModuleManifest {
                     HttpSurfaceArea::Admin,
                     "/admin/redirects/save",
                     "/admin/redirects",
+                    303,
+                )
+                .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.shared-blocks.save",
+                    coil_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/shared-blocks/save",
+                    "/admin/pages",
+                    303,
+                )
+                .gated_by(Capability::CmsPageEdit),
+                HttpSurfaceContribution::redirect(
+                    "cms.options.save",
+                    coil_core::HttpSurfaceMethod::Post,
+                    HttpSurfaceArea::Admin,
+                    "/admin/options/save",
+                    "/admin/options",
                     303,
                 )
                 .gated_by(Capability::CmsPageEdit),

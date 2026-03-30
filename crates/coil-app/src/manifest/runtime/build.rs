@@ -373,10 +373,8 @@ impl CustomerAppManifest {
             return Ok(None);
         }
 
-        let release_id = coil_assets::ReleaseId::new(format!(
-            "{}-{}-theme-assets",
-            self.id, self.theme.active
-        ))?;
+        let release_id =
+            coil_assets::ReleaseId::new(format!("{}-{}-theme-assets", self.id, self.theme.active))?;
         let publication = self.theme.publication_plan(release_id, app_root)?;
         let resolver = coil_runtime::EnvironmentSecretResolver;
         let object_store = runtime
@@ -411,8 +409,7 @@ fn load_customer_translation_catalogs(
                 AppModelError::RuntimeBuild {
                     message: format!(
                         "failed to load customer translation catalog `{}` for locale `{}`: {error}",
-                        catalog.path,
-                        catalog.locale
+                        catalog.path, catalog.locale
                     ),
                 }
             })

@@ -3,8 +3,8 @@ use std::fs;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::process::Command;
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
@@ -78,13 +78,25 @@ fn init_apply_module_site_and_locale_commands_work_non_interactively() {
 
     cargo_coil()
         .current_dir(workspace.path())
-        .args(["module", "add", "--root", root.to_str().unwrap(), "memberships"])
+        .args([
+            "module",
+            "add",
+            "--root",
+            root.to_str().unwrap(),
+            "memberships",
+        ])
         .assert()
         .success();
 
     cargo_coil()
         .current_dir(workspace.path())
-        .args(["module", "remove", "--root", root.to_str().unwrap(), "memberships"])
+        .args([
+            "module",
+            "remove",
+            "--root",
+            root.to_str().unwrap(),
+            "memberships",
+        ])
         .assert()
         .success();
 
@@ -232,7 +244,10 @@ fn dev_watch_surfaces_customer_binary_stderr() {
         .spawn()
         .unwrap();
 
-    wait_for_log_contains(&log_path, "ARGS:run -p my-store -- --config platform.dev.toml up");
+    wait_for_log_contains(
+        &log_path,
+        "ARGS:run -p my-store -- --config platform.dev.toml up",
+    );
     thread::sleep(Duration::from_secs(1));
     child.kill().ok();
     let mut stderr = String::new();
@@ -293,7 +308,10 @@ fn wait_for_log_contains(log_path: &Path, needle: &str) {
                 return;
             }
         }
-        assert!(Instant::now() < deadline, "timed out waiting for log entry `{needle}`");
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for log entry `{needle}`"
+        );
         thread::sleep(Duration::from_millis(100));
     }
 }

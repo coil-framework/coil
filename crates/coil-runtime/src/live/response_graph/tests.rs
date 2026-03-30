@@ -83,10 +83,7 @@ fn response_composition_materializes_typed_annotations_once() {
         "Demo"
     );
     assert_eq!(
-        response
-            .headers()
-            .get("x-coil-wasm-cache-control")
-            .unwrap(),
+        response.headers().get("x-coil-wasm-cache-control").unwrap(),
         "public,max-age=60"
     );
     assert_eq!(

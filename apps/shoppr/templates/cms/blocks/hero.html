@@ -1,0 +1,9 @@
+<section class="page-shell" xmlns:coil="https://coil.rs" coil:fragment="block">
+  <p class="catalog-section__eyebrow" coil:text="${block.label ?: 'Hero'}">Hero</p>
+  <h2 coil:text="${block.fields.heading ?: block.fields.title ?: block.label ?: 'Editorial highlight'}">
+    Editorial highlight
+  </h2>
+  <p coil:text="${block.fields.body ?: block.fields.summary ?: ''}">
+    Hero body.
+  </p>
+</section>

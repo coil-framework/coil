@@ -86,10 +86,8 @@ cdn_base_url = "https://cdn.example.com"
 "#;
 
 fn config_with_auth_package(package: &str) -> coil_config::PlatformConfig {
-    coil_config::PlatformConfig::from_toml_str(
-        &TEST_CONFIG.replace("coil-default-auth", package),
-    )
-    .unwrap()
+    coil_config::PlatformConfig::from_toml_str(&TEST_CONFIG.replace("coil-default-auth", package))
+        .unwrap()
 }
 
 #[derive(Debug, Clone)]
@@ -121,9 +119,7 @@ impl coil_auth::AuthModelPackage for TestAuthModelPackage {
         &self.schema
     }
 
-    fn capability_bindings(
-        &self,
-    ) -> &HashMap<coil_auth::Capability, coil_auth::CapabilityBinding> {
+    fn capability_bindings(&self) -> &HashMap<coil_auth::Capability, coil_auth::CapabilityBinding> {
         &self.capability_bindings
     }
 }
@@ -343,8 +339,7 @@ fn invocation_context(principal_id: &str) -> InvocationContext {
 
 #[test]
 fn runtime_auth_backend_new_accepts_replacement_packages_without_hard_failing() {
-    let package =
-        TestAuthModelPackage::new("coil-extended-auth", coil_auth::PackageMode::Replace);
+    let package = TestAuthModelPackage::new("coil-extended-auth", coil_auth::PackageMode::Replace);
     let plan = RuntimeBuilder::new(config_with_auth_package("coil-extended-auth"), package)
         .build()
         .unwrap();

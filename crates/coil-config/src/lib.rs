@@ -10,8 +10,8 @@ mod validation;
 
 pub use app::{AppConfig, Environment, ServerConfig};
 pub use customer_app::{
-    CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError,
-    CustomerAppBootstrapSite, CustomerAppBootstrapTranslationCatalog,
+    CustomerAppBootstrapManifest, CustomerAppBootstrapManifestError, CustomerAppBootstrapSite,
+    CustomerAppBootstrapTranslationCatalog,
 };
 pub use http::{
     CookieConfig, CookieProtection, CsrfConfig, HttpConfig, SameSitePolicy, SessionConfig,

@@ -59,10 +59,7 @@ fn runtime_can_create_a_lazy_postgres_client() {
         let client = runtime.connect_lazy_postgres().unwrap();
 
         assert_eq!(client.runtime.driver, DatabaseDriver::Postgres);
-        assert_eq!(
-            client.connection_url,
-            "postgres://coil:coil@localhost/coil"
-        );
+        assert_eq!(client.connection_url, "postgres://coil:coil@localhost/coil");
 
         match previous {
             Some(value) => unsafe {

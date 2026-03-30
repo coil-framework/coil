@@ -1,208 +1,184 @@
 ---
-title: Quickstart
+title: Getting Started Tutorial
 ---
 
-This quickstart is written for Rust web developers who want to bootstrap a real Coil application
-before reading the deeper architecture material.
+This tutorial builds one customer-owned Coil application in stages.
 
-The goal is not just to "get the server running." The goal is to see the three things Coil is built around:
+The rule for this section is simple: when a chapter introduces a file, the chapter should show you
+the file.
 
-- the customer-root workspace shape
-- HTML-first product surfaces backed by a native runtime
-- explicit boundaries between customer code, official modules, and extensions
+## The Tutorial App
 
-## Prerequisites
+The examples use a generic workspace named `tutorial-app`.
 
-You need:
+The first working checkpoint looks like this:
 
-- Rust 1.85 or newer
-- Docker with Compose
-- Node.js 20 or newer if you also want to run the docs site locally
+```text
+tutorial-app/
+  Cargo.toml
+  app.toml
+  platform.dev.toml
+  docker-compose.yml
+  crates/
+    tutorial-app-app/
+    tutorial-app-backend/
+    tutorial-app-bin/
+  templates/
+  theme/
+  auth/
+```
 
-You do not need to understand the whole architecture before starting. Generate a real customer app
-first, then read the concept pages with a working picture in mind.
+The generated root `Cargo.toml` should already look like a real Rust workspace:
 
-## Create A Store With `cargo coil`
+```toml
+[workspace]
+members = [
+  "crates/tutorial-app-app",
+  "crates/tutorial-app-backend",
+  "crates/tutorial-app-bin",
+]
+resolver = "2"
 
-Install the Cargo subcommand first:
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+coil-all = "0.1"
+coil-customer-sdk = "0.1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+```
+
+The generated `app.toml` should already look like an app contract, not a placeholder:
+
+```toml
+name = "tutorial-app"
+display_name = "Tutorial App"
+
+[domains]
+canonical = "www.127.0.0.1.nip.io"
+additional = []
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB"]
+
+[theme]
+asset_roots = ["theme/assets"]
+
+[auth]
+package = "tutorial-auth"
+
+[[modules]]
+name = "admin"
+
+[[modules]]
+name = "cms"
+
+[[modules]]
+name = "commerce"
+```
+
+The matching `platform.dev.toml` should already be runnable:
+
+```toml
+[app]
+name = "tutorial-app"
+environment = "development"
+
+[server]
+bind = "127.0.0.1:8080"
+
+[i18n]
+default_locale = "en-GB"
+supported_locales = ["en-GB"]
+localized_routes = true
+
+[seo]
+canonical_host = "www.127.0.0.1.nip.io:8080"
+
+[database]
+mode = "postgres"
+url = "postgres://postgres:postgres@127.0.0.1:5432/tutorial_app"
+
+[cache]
+mode = "redis"
+url = "redis://127.0.0.1:6379"
+
+[jobs]
+mode = "postgres"
+
+[storage]
+mode = "local"
+local_root = ".coil/state"
+```
+
+## The Working Loop
+
+Throughout the tutorial you will repeat this loop:
+
+```bash
+docker compose up -d
+cargo run -p tutorial-app-bin -- validate
+cargo run -p tutorial-app-bin -- serve
+```
+
+When a chapter adds or changes a file, rerun that loop before moving on.
+
+## Where To Begin
+
+Read these chapters in order:
+
+- [What You Are Building](what-you-are-building.md)
+- [Create the Project](create-the-project.md)
+- [Understand the Runtime Shape](understand-the-runtime-shape.md)
+- [Build the Base Theme](build-the-base-theme.md)
+- [Add Sites, Markets, and Locales](add-sites-markets-and-locales.md)
+- [Add a Real Content Model](add-a-real-content-model.md)
+- [Build Reusable Blocks](build-reusable-blocks.md)
+- [Add Dynamic Blocks](add-dynamic-blocks.md)
+
+Supporting pages:
+
+- [Customer Project Layout](customer-project-layout.md)
+- [Linked Rust Backends](linked-rust-backends.md)
+
+## Fast Bootstrap
+
+If you only want the shortest smoke test:
 
 ```bash
 cargo install cargo-coil --locked
-```
-
-Then generate a customer workspace:
-
-```bash
-cargo coil new my-store
-```
-
-Interactive mode is the default. The wizard asks for:
-
-- project name
-- display name
-- default locale
-- additional locales
-- official modules
-- optional extra sites
-
-When it finishes, Coil writes a customer-root workspace under `my-store/`.
-
-## Start The Local Dependencies
-
-The generated starter uses Postgres and Redis:
-
-```bash
-cd my-store
+cargo coil new tutorial-app
+cd tutorial-app
 docker compose up -d
+cargo run -p tutorial-app-bin -- validate
+cargo run -p tutorial-app-bin -- serve
 ```
 
-## Export The Required Environment
+That gets you a running app. The rest of this section is where the file ownership and runtime
+shape become understandable.
+
+## Checkpoint
+
+From a fresh generated workspace, these commands should all succeed:
 
 ```bash
-export DATABASE_URL=postgres://coil:coil@127.0.0.1:5432/my-store
-export REDIS_URL=redis://127.0.0.1:6379/0
-export COIL_COOKIE_SECRET=replace-me-with-a-long-random-secret
-export COIL_CSRF_SECRET=replace-me-with-a-long-random-secret
+docker compose up -d
+cargo run -p tutorial-app-bin -- validate
+cargo run -p tutorial-app-bin -- serve
 ```
 
-## Validate And Run The Generated App
+At this point you should have a running app and these concrete files on disk:
 
-```bash
-cargo run -p my-store -- validate
-cargo run -p my-store -- serve
+```text
+Cargo.toml
+app.toml
+platform.dev.toml
+docker-compose.yml
+crates/tutorial-app-app/src/lib.rs
+crates/tutorial-app-backend/src/lib.rs
+crates/tutorial-app-bin/src/main.rs
 ```
-
-Open:
-
-- `http://my-store.localhost:8080/`
-- `http://www.my-store.localhost:8080/`
-- `http://localhost:8080/admin`
-- `http://localhost:8080/__dev`
-
-What to inspect:
-
-- the generated customer workspace shape
-- the linked Rust backend crate
-- the templates and translations
-- the admin and dev surfaces
-- the way the customer binary owns the app lifecycle
-
-## Add Another Site And Locale
-
-The generator is descriptor-backed, so you can evolve the project structure safely:
-
-```bash
-cargo coil site add eu \
-  --root ./my-store \
-  --display-name "EU Store" \
-  --brand-name "My Store EU" \
-  --canonical-domain eu.my-store.localhost \
-  --default-locale fr-FR
-```
-
-```bash
-cargo coil locale add pl-PL --root ./my-store --site eu
-```
-
-Then validate again:
-
-```bash
-cd my-store
-cargo run -p my-store -- validate
-```
-
-This is the normal development split:
-
-- `cargo coil` shapes the workspace
-- the customer binary validates and serves the app
-- the root `coil` CLI handles deeper platform operations
-
-## Then Inspect Shoppr And Gitly
-
-Once the generated starter feels clear, move to the richer examples.
-
-Shoppr is the reference ecommerce app:
-
-```bash
-cd ../apps/shoppr
-cp .env.example .env
-docker compose -f docker-compose.yml -f docker-compose.repo.yml up --build
-```
-
-Open:
-
-- `http://uk.localhost:8080/`
-- `http://fr.localhost:8080/`
-- `http://pl.localhost:8080/`
-- `http://localhost:8080/__dev`
-
-Gitly exists to show that Coil is not an ecommerce-only framework.
-
-```bash
-cd apps/gitly
-cp .env.example .env
-docker compose up --build
-```
-
-Use Gitly to compare the same runtime model against a different product shape. The point is not feature parity with Shoppr. The point is to see that the composition model remains the same even when the domain changes.
-
-Open:
-
-- `http://gitly.localhost:58080/`
-- `http://gitly.localhost:58080/explore`
-
-Like Shoppr's `*.localhost` market hosts, `gitly.localhost` resolves locally without external DNS
-or `/etc/hosts` edits.
-
-## Run The Docs Site
-
-If you want the docs locally:
-
-```bash
-cd website
-npm install
-npm run start
-```
-
-## What To Look For During Evaluation
-
-When you run the generated starter and the demos, pay attention to these questions:
-
-- How much of the app shape came from `cargo coil`?
-- Where does the customer application's own Rust code live?
-- Which behaviours come from official modules versus customer code?
-- How much of the public UI is plain server-rendered HTML?
-- How do site, locale, and route resolution show up in the running app?
-- What would need to change if you replaced the example product with your own?
-
-Those questions matter more than whether you personally like the demo copy or visual design. Coil is about getting the product and runtime boundaries right.
-
-## Common First-Run Mistakes
-
-### Treating the generated workspace as disposable output
-
-The generated workspace is part of Coil’s intended development model. `.coil/project.toml` is a
-public lifecycle file, not an internal implementation detail.
-
-### Looking only at the browser
-
-The runtime model becomes much clearer if you also inspect the customer app workspace while it is
-running.
-
-### Expecting a single generic extension story
-
-Coil intentionally separates:
-
-- official modules
-- linked customer Rust
-- bounded WASM extensions
-
-If you flatten those together mentally, the rest of the architecture will feel inconsistent.
-
-## What To Read Next
-
-- [Cargo Coil Overview](../reference/cargo-coil-overview.md)
-- [Customer project layout](customer-project-layout.md)
-- [Linked Rust backends](linked-rust-backends.md)
-- [Glossary and mental model](../core-concepts/glossary-and-mental-model.md)
-- [Customer-root workspace](../core-concepts/customer-root-workspace.md)

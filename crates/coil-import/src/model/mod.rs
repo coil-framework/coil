@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
-use coil_report::{
-    CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus,
-};
+use coil_report::{CommandReport, DiagnosticRecord, DiagnosticSeverity, ReportRow, ReportStatus};
 
 use super::validation::{ImportModelError, require_non_empty, validate_token};
 

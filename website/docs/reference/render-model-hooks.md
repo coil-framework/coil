@@ -12,6 +12,9 @@ This is the supported answer to both of these needs:
 - mount a customer-owned namespace such as `crm_page` or `customer_extension`
 - merge customer-owned fields into a shared runtime object such as `page`
 
+If you need the full request-time context first, read
+[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md).
+
 ## What Problem This Solves
 
 Without this hook, a customer can read the `RenderModel` type in the docs, but there is no public
@@ -23,6 +26,9 @@ handoff path that answers:
 - how do I intentionally participate in the existing `page` contract?
 
 This hook makes that handoff explicit.
+
+It does not replace route ownership, CMS storage, or the framework base model. It is the customer
+contribution step in the existing render pipeline.
 
 ## The Hook Trait
 
@@ -110,6 +116,13 @@ That is the full handoff path:
 5. Coil applies them deterministically
 6. the final template render reads the combined model
 
+What this hook does **not** do automatically:
+
+- create routes
+- create CMS page or block instances
+- turn schema declarations into live `page.blocks`
+- let customer code silently overwrite framework contracts unless merge policy allows it
+
 ## The Render Target
 
 The hook receives a `RenderTarget` that tells you what is being rendered:
@@ -159,6 +172,8 @@ Use mount when:
 - the data should not collide with runtime-owned keys
 - you want clear namespacing
 
+Mount is the default choice for customer-specific request data.
+
 ### Merge
 
 Use `RenderModelContribution::merge(...)` when customer code should intentionally participate in a
@@ -186,6 +201,8 @@ Use merge when:
 - the field belongs in an existing public contract
 - the customer model should feel like part of the page model
 - you want conflicts to be checked explicitly instead of silently overwritten
+
+Merge is a narrower tool. Use it when the shared object really is the right public boundary.
 
 ## Conflict Policy
 
@@ -230,6 +247,26 @@ Rules:
 - conflicting scalar values still fail
 
 Use this for list-shaped page composition such as block collections.
+
+## Shared Contract Vs Customer Namespace
+
+Use this rule of thumb:
+
+- if the data is customer-specific and not already part of a framework contract, mount it
+- if the data belongs inside a shared object such as `page`, merge it explicitly
+
+Do not treat `page` as a general customer scratch space. That makes upgrades harder and blurs the
+public contract.
+
+## Schema And Dynamic Block Reminder
+
+Render-model hooks work on the request-time model. They do not replace the distinction between:
+
+- content schema
+- content instances
+- request-time shaping
+
+If your hook is contributing dynamic blocks or page-builder data, keep those layers explicit.
 
 ## End-To-End Example
 
@@ -464,3 +501,7 @@ Use `merge(...)` when:
 - [Template Models](./template-models.md)
 - [Template Language](./template-language.md)
 - [Request And Render Lifecycle](../core-concepts/request-and-render-lifecycle.md)
+- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
+- [Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections.md)
+- [CMS page builder model](./cms-page-builder-model.md)
+- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks.md)

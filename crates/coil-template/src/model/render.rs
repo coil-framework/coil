@@ -219,7 +219,12 @@ impl RenderModel {
         policy: RenderModelMergePolicy,
     ) -> Result<Self, TemplateModelError> {
         let segments = validate_render_model_path(path.as_ref())?;
-        merge_named_string_maps(&mut self.asset_paths, &value.asset_paths, "asset_path", policy)?;
+        merge_named_string_maps(
+            &mut self.asset_paths,
+            &value.asset_paths,
+            "asset_path",
+            policy,
+        )?;
         merge_named_string_maps(
             &mut self.translations,
             &value.translations,
@@ -434,13 +439,13 @@ fn merge_render_value(
                 Ok(RenderValue::list(existing))
             }
             RenderModelMergePolicy::ReplaceExisting => Ok(RenderValue::list(overlay)),
-            RenderModelMergePolicy::FailOnConflict => Err(
-                TemplateModelError::RenderModelConflict {
+            RenderModelMergePolicy::FailOnConflict => {
+                Err(TemplateModelError::RenderModelConflict {
                     path: path.to_string(),
                     message: "list values conflict; use append_lists or replace_existing"
                         .to_string(),
-                },
-            ),
+                })
+            }
         },
         (existing, overlay) if existing == overlay => Ok(existing),
         (_existing, overlay) => match policy {

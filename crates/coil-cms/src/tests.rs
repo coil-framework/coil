@@ -23,6 +23,48 @@ fn revision(id: &str, slug: &str) -> PageRevision {
     .with_media_reference(AssetReference::new("asset:hero").unwrap())
 }
 
+fn hero_schema() -> BlockTypeSchema {
+    BlockTypeSchema::new(
+        BlockTypeId::new("hero").unwrap(),
+        "Hero",
+        vec![
+            BlockFieldSchema::new(
+                BlockFieldId::new("heading").unwrap(),
+                "Heading",
+                BlockFieldValueKind::PlainText,
+                true,
+                false,
+            )
+            .unwrap(),
+            BlockFieldSchema::new(
+                BlockFieldId::new("body").unwrap(),
+                "Body",
+                BlockFieldValueKind::RichText,
+                false,
+                false,
+            )
+            .unwrap(),
+            BlockFieldSchema::new(
+                BlockFieldId::new("artwork").unwrap(),
+                "Artwork",
+                BlockFieldValueKind::AssetReference,
+                false,
+                false,
+            )
+            .unwrap(),
+            BlockFieldSchema::new(
+                BlockFieldId::new("cta_paths").unwrap(),
+                "Call to action paths",
+                BlockFieldValueKind::Path,
+                false,
+                true,
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap()
+}
+
 #[test]
 fn cms_module_manifest_declares_expected_capabilities_and_registers_services() {
     let module = CmsModule::new();
@@ -52,13 +94,62 @@ fn cms_module_manifest_declares_expected_capabilities_and_registers_services() {
             .optional_capabilities
             .contains(&Capability::AssetRead)
     );
-    assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 10);
-    assert_eq!(manifest.http_surfaces.len(), 10);
+    assert_eq!(manifest.migrations.len(), 4);
+    assert_eq!(manifest.route_surfaces.len(), 18);
+    assert_eq!(manifest.http_surfaces.len(), 18);
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.pages.save-settings")
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.pages.save-blocks")
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.shared-blocks.save")
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.options.index")
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.options.save")
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.pages.schedule")
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.pages.rollback")
+    );
+    assert!(
+        manifest
+            .route_surfaces
+            .iter()
+            .any(|surface| surface.name == "cms.pages.duplicate-block")
+    );
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 1);
     assert_eq!(manifest.bulk_operations.len(), 2);
+    assert_eq!(manifest.data_repositories.len(), 2);
     assert!(
         manifest
             .module_dependencies
@@ -85,9 +176,299 @@ fn cms_module_manifest_declares_expected_capabilities_and_registers_services() {
     assert!(
         registry
             .services()
+            .any(|service| service.id == "module.cms.page_builder")
+    );
+    assert!(
+        registry
+            .services()
             .any(|service| service.id == "module.cms.media_refs")
     );
+    assert!(
+        registry
+            .services()
+            .any(|service| service.id == "module.cms.shared_blocks")
+    );
+    assert!(
+        manifest
+            .search_contributions[0]
+            .fields
+            .iter()
+            .any(|field| field.id == "summary" && field.role == coil_core::SearchFieldRole::Summary)
+    );
+    assert!(
+        manifest.search_contributions[0]
+            .fields
+            .iter()
+            .any(|field| field.id == "blocks" && field.source_path == "structured_blocks")
+    );
+    assert!(
+        manifest
+            .data_repositories
+            .iter()
+            .any(|repository| repository.id == "cms.shared_blocks")
+    );
     assert_eq!(module.admin_resources().len(), 3);
+}
+
+#[test]
+fn block_type_schema_rejects_duplicate_fields_and_empty_labels() {
+    assert_eq!(
+        BlockFieldSchema::new(
+            BlockFieldId::new("heading").unwrap(),
+            "",
+            BlockFieldValueKind::PlainText,
+            true,
+            false,
+        )
+        .unwrap_err(),
+        CmsModelError::EmptyField {
+            field: "block_field_label",
+        }
+    );
+
+    assert_eq!(
+        BlockTypeSchema::new(
+            BlockTypeId::new("hero").unwrap(),
+            "Hero",
+            vec![
+                BlockFieldSchema::new(
+                    BlockFieldId::new("heading").unwrap(),
+                    "Heading",
+                    BlockFieldValueKind::PlainText,
+                    true,
+                    false,
+                )
+                .unwrap(),
+                BlockFieldSchema::new(
+                    BlockFieldId::new("heading").unwrap(),
+                    "Heading again",
+                    BlockFieldValueKind::PlainText,
+                    false,
+                    false,
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap_err(),
+        CmsModelError::DuplicateBlockFieldSchema {
+            block_type_id: "hero".to_string(),
+            field_id: "heading".to_string(),
+        }
+    );
+}
+
+#[test]
+fn block_type_schema_distinguishes_schema_from_content_instances() {
+    let schema = hero_schema();
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        BlockFieldId::new("heading").unwrap(),
+        vec![BlockFieldValue::plain_text("Welcome aboard").unwrap()],
+    );
+    fields.insert(
+        BlockFieldId::new("body").unwrap(),
+        vec![BlockFieldValue::rich_text("<p>Structured body</p>").unwrap()],
+    );
+    fields.insert(
+        BlockFieldId::new("artwork").unwrap(),
+        vec![BlockFieldValue::asset_reference(
+            AssetReference::new("asset:hero").unwrap(),
+        )],
+    );
+    fields.insert(
+        BlockFieldId::new("cta_paths").unwrap(),
+        vec![
+            BlockFieldValue::path("/shop").unwrap(),
+            BlockFieldValue::path("/memberships").unwrap(),
+        ],
+    );
+
+    let instance = schema
+        .instantiate(BlockInstanceId::new("hero-1").unwrap(), fields)
+        .unwrap();
+
+    assert_eq!(instance.block_type.as_str(), "hero");
+    assert_eq!(schema.fields().len(), 4);
+    assert_eq!(instance.fields.len(), 4);
+}
+
+#[test]
+fn block_type_schema_rejects_invalid_content_instances() {
+    let schema = hero_schema();
+
+    let mut missing_required = BTreeMap::new();
+    missing_required.insert(
+        BlockFieldId::new("body").unwrap(),
+        vec![BlockFieldValue::rich_text("<p>Body only</p>").unwrap()],
+    );
+    assert_eq!(
+        schema
+            .instantiate(
+                BlockInstanceId::new("hero-missing").unwrap(),
+                missing_required,
+            )
+            .unwrap_err(),
+        CmsModelError::MissingRequiredBlockField {
+            block_type_id: "hero".to_string(),
+            field_id: "heading".to_string(),
+        }
+    );
+
+    let mut wrong_kind = BTreeMap::new();
+    wrong_kind.insert(
+        BlockFieldId::new("heading").unwrap(),
+        vec![BlockFieldValue::boolean(true)],
+    );
+    assert_eq!(
+        schema
+            .instantiate(BlockInstanceId::new("hero-wrong-kind").unwrap(), wrong_kind)
+            .unwrap_err(),
+        CmsModelError::InvalidBlockFieldValueKind {
+            block_type_id: "hero".to_string(),
+            field_id: "heading".to_string(),
+            expected: BlockFieldValueKind::PlainText,
+            actual: BlockFieldValueKind::Boolean,
+        }
+    );
+
+    let mut unknown_field = BTreeMap::new();
+    unknown_field.insert(
+        BlockFieldId::new("heading").unwrap(),
+        vec![BlockFieldValue::plain_text("Hello").unwrap()],
+    );
+    unknown_field.insert(
+        BlockFieldId::new("unknown").unwrap(),
+        vec![BlockFieldValue::plain_text("Mystery").unwrap()],
+    );
+    assert_eq!(
+        schema
+            .instantiate(BlockInstanceId::new("hero-unknown").unwrap(), unknown_field)
+            .unwrap_err(),
+        CmsModelError::UnknownBlockField {
+            block_type_id: "hero".to_string(),
+            field_id: "unknown".to_string(),
+        }
+    );
+
+    let mut too_many_values = BTreeMap::new();
+    too_many_values.insert(
+        BlockFieldId::new("heading").unwrap(),
+        vec![
+            BlockFieldValue::plain_text("One").unwrap(),
+            BlockFieldValue::plain_text("Two").unwrap(),
+        ],
+    );
+    assert_eq!(
+        schema
+            .instantiate(
+                BlockInstanceId::new("hero-multiple-headings").unwrap(),
+                too_many_values,
+            )
+            .unwrap_err(),
+        CmsModelError::BlockFieldDoesNotAllowMultiple {
+            block_type_id: "hero".to_string(),
+            field_id: "heading".to_string(),
+        }
+    );
+}
+
+#[test]
+fn page_revision_supports_settings_inline_blocks_and_shared_block_references() {
+    let schema = hero_schema();
+    let inline_block = schema
+        .instantiate(
+            BlockInstanceId::new("hero-inline").unwrap(),
+            BTreeMap::from([(
+                BlockFieldId::new("heading").unwrap(),
+                vec![BlockFieldValue::plain_text("Inline hero").unwrap()],
+            )]),
+        )
+        .unwrap();
+    let shared_block = SharedBlock::new(
+        SharedBlockId::new("shared-footer-callout").unwrap(),
+        "Footer callout",
+        schema
+            .instantiate(
+                BlockInstanceId::new("shared-hero").unwrap(),
+                BTreeMap::from([(
+                    BlockFieldId::new("heading").unwrap(),
+                    vec![BlockFieldValue::plain_text("Shared hero").unwrap()],
+                )]),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+
+    let settings = PageSettings::new(PageOptions {
+        show_in_navigation: false,
+        allow_indexing: true,
+        include_in_sitemap: false,
+    })
+    .with_navigation_label("Campaign landing")
+    .unwrap()
+    .with_layout_variant("marketing.hero")
+    .unwrap();
+
+    let revision = revision("rev-hero", "launch")
+        .with_settings(settings.clone())
+        .with_inline_block(inline_block.clone())
+        .unwrap()
+        .with_shared_block_reference(
+            shared_block.reference(BlockInstanceId::new("footer").unwrap()),
+        )
+        .unwrap();
+
+    assert_eq!(revision.settings, settings);
+    assert_eq!(revision.blocks.len(), 2);
+    assert_eq!(revision.blocks[0].instance_id().as_str(), "hero-inline");
+    assert_eq!(revision.blocks[0].block_type().as_str(), "hero");
+    assert_eq!(revision.blocks[1].instance_id().as_str(), "footer");
+    assert_eq!(revision.blocks[1].block_type().as_str(), "hero");
+}
+
+#[test]
+fn page_revision_rejects_duplicate_block_instances_and_shared_blocks_preserve_content_identity() {
+    let schema = hero_schema();
+    let inline_block = schema
+        .instantiate(
+            BlockInstanceId::new("hero-inline").unwrap(),
+            BTreeMap::from([(
+                BlockFieldId::new("heading").unwrap(),
+                vec![BlockFieldValue::plain_text("Inline hero").unwrap()],
+            )]),
+        )
+        .unwrap();
+    let shared_block = SharedBlock::new(
+        SharedBlockId::new("shared-hero").unwrap(),
+        "Reusable hero",
+        inline_block.clone(),
+    )
+    .unwrap();
+
+    assert_eq!(shared_block.block.id.as_str(), "hero-inline");
+    assert_eq!(
+        revision("rev-duplicate", "duplicate")
+            .with_inline_block(inline_block)
+            .unwrap()
+            .with_shared_block_reference(
+                shared_block.reference(BlockInstanceId::new("hero-inline").unwrap())
+            )
+            .unwrap_err(),
+        CmsModelError::DuplicatePageBlockInstance {
+            instance_id: "hero-inline".to_string(),
+        }
+    );
+}
+
+#[test]
+fn page_settings_default_to_searchable_navigation_friendly_options() {
+    let settings = PageSettings::default();
+
+    assert_eq!(settings.navigation_label, None);
+    assert_eq!(settings.layout_variant, None);
+    assert!(settings.options.show_in_navigation);
+    assert!(settings.options.allow_indexing);
+    assert!(settings.options.include_in_sitemap);
 }
 
 #[test]
@@ -304,6 +685,24 @@ fn cms_module_exposes_queries_migrations_and_transaction_plans() {
         QueryCacheScope::UserScoped
     );
 
+    let page_builder = module
+        .page_builder_inventory_query("editor-7", Some("en-GB"))
+        .unwrap();
+    assert_eq!(
+        page_builder.query.context.principal_id.as_deref(),
+        Some("editor-7")
+    );
+    assert_eq!(
+        page_builder.query.context.cache_scope,
+        QueryCacheScope::UserScoped
+    );
+    assert_eq!(page_builder.query.filters[0].field.as_str(), "content_kind");
+    assert_eq!(
+        page_builder.query.filters[0].values,
+        vec!["structured".to_string(), "hybrid".to_string()]
+    );
+    assert_eq!(page_builder.query.sort[0].field.as_str(), "updated_at");
+
     let redirect = module
         .redirect_lookup_query("/legacy/home", Some("en-GB"))
         .unwrap();
@@ -313,7 +712,7 @@ fn cms_module_exposes_queries_migrations_and_transaction_plans() {
     );
 
     let migrations = module.migration_plan().unwrap();
-    assert_eq!(migrations.ordered_steps().len(), 4);
+    assert_eq!(migrations.ordered_steps().len(), 5);
     assert_eq!(
         migrations.ordered_steps()[0].owner,
         MigrationOwner::Module("cms".to_string())
@@ -322,10 +721,26 @@ fn cms_module_exposes_queries_migrations_and_transaction_plans() {
         migrations.ordered_steps()[0]
             .statements
             .iter()
-            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS cms_pages"))
+            .any(|statement| {
+                statement.contains("CREATE TABLE IF NOT EXISTS cms_pages")
+                    && statement.contains("page_settings TEXT")
+                    && statement.contains("content_kind TEXT")
+            })
     );
     assert!(
-        migrations.ordered_steps()[3]
+        migrations.ordered_steps()[1]
+            .statements
+            .iter()
+            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS cms_shared_blocks"))
+    );
+    assert!(
+        migrations.ordered_steps()[1]
+            .statements
+            .iter()
+            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS cms_page_blocks"))
+    );
+    assert!(
+        migrations.ordered_steps()[4]
             .statements
             .iter()
             .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS cms_preview_tokens"))

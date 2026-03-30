@@ -354,11 +354,8 @@ fn runtime_host_service_executor_denies_unbound_secrets_without_env_fallback() {
 }
 
 fn shared_state_root(label: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "coil-wasm-host-{}-{}",
-        std::process::id(),
-        label
-    ));
+    let path =
+        std::env::temp_dir().join(format!("coil-wasm-host-{}-{}", std::process::id(), label));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
     path

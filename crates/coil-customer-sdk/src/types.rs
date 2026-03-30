@@ -261,9 +261,7 @@ fn validate_render_model_path(path: String) -> Result<String, BackendError> {
             return Err(BackendError::new(
                 BackendErrorKind::InvalidInput,
                 "render_model.path.invalid",
-                format!(
-                    "Render model path `{path}` contains an invalid segment `{segment}`."
-                ),
+                format!("Render model path `{path}` contains an invalid segment `{segment}`."),
             ));
         }
     }

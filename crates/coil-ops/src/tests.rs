@@ -304,8 +304,8 @@ fn search_and_report_definitions_are_registry_ready() {
             .any(|dependency| dependency.module == "admin")
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 4);
-    assert_eq!(manifest.http_surfaces.len(), 4);
+    assert_eq!(manifest.route_surfaces.len(), 5);
+    assert_eq!(manifest.http_surfaces.len(), 7);
     assert_eq!(manifest.jobs.len(), 4);
     assert_eq!(manifest.event_subscriptions.len(), 3);
     assert_eq!(manifest.admin_resources.len(), 4);

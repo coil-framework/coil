@@ -10,8 +10,8 @@ use coil_customer_sdk::{
     OutboundHttpFacade, RepositoryFacade, RepositoryFacadeExt, RequestContext, VerifiedWebhook,
     VerifiedWebhookAssetHooks, VerifiedWebhookHooks, WebhookHandlingResult,
 };
-use coil_i18n::TranslationCatalog;
 use coil_i18n::LocaleTag;
+use coil_i18n::TranslationCatalog;
 use coil_jobs::{JobId, JobInstant, JobName, JobSpec};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -316,11 +316,7 @@ impl CheckoutHooks for RejectMembershipCheckoutHooks {
 
 impl CustomerBackendPlugin for RejectMembershipCheckoutPlugin {
     fn descriptor(&self) -> CustomerPluginDescriptor {
-        CustomerPluginDescriptor::new(
-            "shoppr-checkout-policy",
-            "Shoppr Checkout Policy",
-            "0.1.0",
-        )
+        CustomerPluginDescriptor::new("shoppr-checkout-policy", "Shoppr Checkout Policy", "0.1.0")
     }
 
     fn register(&self, registry: &mut dyn CustomerHookRegistry) -> Result<(), BackendError> {
@@ -1266,6 +1262,173 @@ fn checked_in_harbor_shop_translation_catalogs() -> Vec<TranslationCatalog> {
     .collect()
 }
 
+fn checked_in_harbor_shop_server_with_structured_cms_actions(
+    app_name: &str,
+) -> (
+    HttpServerHost,
+    std::path::PathBuf,
+    crate::browser::BrowserHost,
+) {
+    let config = checked_in_harbor_shop_config(app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in shoppr auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(OpsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let state_root = plan.shared_state_root().clone();
+    let browser = plan.browser_host().unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    (server, state_root, browser)
+}
+
+fn issue_operator_session_cookie(server: &HttpServerHost) -> (String, String) {
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    (
+        issued.record.session_id.clone(),
+        format!("coil_session={}", issued.cookie_value),
+    )
+}
+
+fn load_cms_admin_workspace(state_root: &std::path::Path) -> crate::cms_admin::CmsAdminWorkspace {
+    let bytes = std::fs::read(state_root.join("cms-admin-workspace.json"))
+        .expect("CMS admin workspace file should exist");
+    serde_json::from_slice(&bytes).expect("CMS admin workspace should decode")
+}
+
+fn checked_in_harbor_shop_server_with_cms_memberships(
+    app_name: &str,
+) -> (RuntimePlan, HttpServerHost, std::path::PathBuf) {
+    let mut config = with_payment_webhook_secret(checked_in_harbor_shop_config(app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in shoppr auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(coil_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let state_root = plan.shared_state_root().clone();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    (plan, server, state_root)
+}
+
+async fn publish_membership_guide_as_member_only_page(
+    server: &HttpServerHost,
+    operator_cookie: &str,
+) {
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let settings_token =
+        response_header(&admin_response, "x-coil-cms-csrf-cms-pages-save-settings");
+    let publish_token = response_header(&admin_response, "x-coil-cms-csrf-cms-pages-publish");
+
+    let settings_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &settings_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("page_settings_page_type", "membership_guide")
+        .append_pair("page_settings_template", "pages/membership-guide")
+        .append_pair("page_settings_seo_title", "Membership Guide")
+        .append_pair(
+            "page_settings_seo_description",
+            "Member-only editorial guidance for active Shoppr memberships.",
+        )
+        .append_pair("page_option_show_in_navigation", "false")
+        .append_pair("page_option_allow_indexing", "true")
+        .append_pair("page_option_localized", "false")
+        .finish();
+    let settings_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/settings")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", operator_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(settings_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(settings_response.status(), StatusCode::SEE_OTHER);
+
+    let publish_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &publish_token)
+        .append_pair("page_id", "page-membership-guide")
+        .finish();
+    let publish_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/publish")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", operator_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(publish_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_response.status(), StatusCode::SEE_OTHER);
+}
+
 #[tokio::test]
 async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
     let config = PlatformConfig::from_toml_str(VALID_CONFIG).unwrap();
@@ -1356,7 +1519,10 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
         )
         .await
         .unwrap();
-    assert_ne!(storefront_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_ne!(
+        storefront_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
 
     let mut jobs = plan.jobs_host("observability-probe").unwrap();
     jobs.enqueue_spec(
@@ -1383,7 +1549,10 @@ async fn server_router_keeps_public_probes_open_and_diagnostics_privileged() {
         .await
         .unwrap();
     assert_eq!(
-        metrics.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        metrics
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
         Some("text/plain; version=0.0.4; charset=utf-8")
     );
     let metrics_body = String::from_utf8(
@@ -1443,15 +1612,14 @@ async fn readiness_marks_unreachable_object_store_endpoint_unhealthy() {
     let mut plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
         .build()
         .unwrap();
-    plan.observability.readiness = coil_observability::HealthReport::new(
-        coil_observability::HealthProbeKind::Readiness,
-    )
-    .with_dependency(
-        coil_observability::DependencyKind::ObjectStore,
-        true,
-        coil_observability::DependencyStatus::Healthy,
-    )
-    .unwrap();
+    plan.observability.readiness =
+        coil_observability::HealthReport::new(coil_observability::HealthProbeKind::Readiness)
+            .with_dependency(
+                coil_observability::DependencyKind::ObjectStore,
+                true,
+                coil_observability::DependencyStatus::Healthy,
+            )
+            .unwrap();
 
     let unreachable_object_store_secret = r#"
 endpoint_url = "https://127.0.0.1:9"
@@ -1462,14 +1630,15 @@ secret_access_key = "runtime-secret"
 signed_url_ttl_secs = 900
 "#;
 
-    let resolver = live_backend_secret_resolver_with_object_store_secret(unreachable_object_store_secret)
-        .with_secret(
-            coil_config::SecretRef::Env {
-                var: "COIL_PAYMENT_WEBHOOK_SECRET".to_string(),
-            },
-            PAYMENT_WEBHOOK_SECRET,
-        )
-        .unwrap();
+    let resolver =
+        live_backend_secret_resolver_with_object_store_secret(unreachable_object_store_secret)
+            .with_secret(
+                coil_config::SecretRef::Env {
+                    var: "COIL_PAYMENT_WEBHOOK_SECRET".to_string(),
+                },
+                PAYMENT_WEBHOOK_SECRET,
+            )
+            .unwrap();
     let server = plan
         .server_host(
             &resolver,
@@ -1753,8 +1922,7 @@ async fn server_router_serves_live_auth_explain_when_enabled_and_authorized() {
     let backends = plan.shared_backend_clients(&resolver).unwrap();
     let package = DefaultAuthModelPackage::default();
     let capability = Capability::CmsPageRead;
-    let subject =
-        coil_auth::DefaultSubject::entity(coil_auth::Entity::user("operator-live-1"));
+    let subject = coil_auth::DefaultSubject::entity(coil_auth::Entity::user("operator-live-1"));
     let resource = coil_auth::Entity::page("homepage");
     let explanation = coil_auth::CapabilityExplanation {
         manifest: package.manifest().clone(),
@@ -1852,8 +2020,7 @@ async fn server_router_uses_live_auth_explainer_when_enabled() {
         .unwrap();
     let resolver = live_backend_secret_resolver();
     let backends = plan.shared_backend_clients(&resolver).unwrap();
-    let subject =
-        coil_auth::DefaultSubject::entity(coil_auth::Entity::user("operator-live-1"));
+    let subject = coil_auth::DefaultSubject::entity(coil_auth::Entity::user("operator-live-1"));
     let authorizer = Arc::new(StaticLiveRouteCapabilityAuthorizer::new().allowing(
         subject.clone(),
         Capability::AdminAuditRead,
@@ -2290,9 +2457,7 @@ async fn server_host_authorizes_capability_routes_through_live_authorizer() {
     assert_eq!(
         authorizer.checks(),
         vec![LiveAuthorizationCheck {
-            subject: coil_auth::DefaultSubject::entity(coil_auth::Entity::user(
-                "editor-live-1",
-            )),
+            subject: coil_auth::DefaultSubject::entity(coil_auth::Entity::user("editor-live-1",)),
             capability: Capability::CmsPageRead,
             object: coil_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
         }]
@@ -3340,10 +3505,8 @@ async fn server_host_executes_storefront_add_to_cart_checkout_and_confirmation_f
         )
         .await
         .unwrap();
-    let payment_status = response_header(
-        &confirmation_response,
-        "x-coil-storefront-payment-status",
-    );
+    let payment_status =
+        response_header(&confirmation_response, "x-coil-storefront-payment-status");
     let payment_reference = response_header(
         &confirmation_response,
         "x-coil-storefront-payment-reference",
@@ -5454,6 +5617,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
     assert!(account_body.contains("Account overview"), "{account_body}");
     assert!(account_body.contains("Order history"), "{account_body}");
     assert!(account_body.contains("Memberships"), "{account_body}");
+    assert!(account_body.contains("Event bookings"), "{account_body}");
     assert!(
         account_body.contains("End browser session"),
         "{account_body}"
@@ -5462,6 +5626,10 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
     assert!(account_body.contains("Continue shopping"), "{account_body}");
     assert!(
         account_body.contains("Explore memberships"),
+        "{account_body}"
+    );
+    assert!(
+        account_body.contains("Browse event calendar"),
         "{account_body}"
     );
 
@@ -7059,10 +7227,7 @@ async fn server_host_runs_sdk_verified_webhook_hooks_in_live_payment_webhook_flo
         Some("payment.captured")
     );
     assert_eq!(
-        recorded[0]
-            .headers
-            .get("x-coil-route")
-            .map(String::as_str),
+        recorded[0].headers.get("x-coil-route").map(String::as_str),
         Some("commerce.payment-provider-webhook")
     );
 }
@@ -9992,10 +10157,24 @@ async fn server_host_renders_honest_checked_in_harbor_shop_events_surfaces() {
     .unwrap();
     assert_eq!(events_status, StatusCode::OK, "{events_body}");
     assert!(
-        events_body.contains("Events are enabled, but the sample catalog is still being wired."),
+        events_body.contains(
+            "Event discovery now lives in the same product as memberships and editorial pages."
+        ),
         "{events_body}"
     );
-    assert!(events_body.contains("events.list"), "{events_body}");
+    assert!(
+        events_body.contains("Spring Tasting Evening"),
+        "{events_body}"
+    );
+    assert!(events_body.contains("Summer Gala Preview"), "{events_body}");
+    assert!(
+        events_body.contains("Fit Clinic Appointments"),
+        "{events_body}"
+    );
+    assert!(
+        events_body.contains("Gold members book first"),
+        "{events_body}"
+    );
     assert!(
         events_body.contains("Browse event-linked offers"),
         "{events_body}"
@@ -10026,12 +10205,28 @@ async fn server_host_renders_honest_checked_in_harbor_shop_events_surfaces() {
     .unwrap();
     assert_eq!(event_detail_status, StatusCode::OK, "{event_detail_body}");
     assert!(
-        event_detail_body.contains("spring-tasting"),
+        event_detail_body.contains("Spring Tasting Evening"),
         "{event_detail_body}"
     );
     assert!(
-        event_detail_body
-            .contains("Event records are not published in the checked-in Shoppr sample yet"),
+        event_detail_body.contains("Shoppr Townhouse"),
+        "{event_detail_body}"
+    );
+    assert!(
+        event_detail_body.contains("Timeslots"),
+        "{event_detail_body}"
+    );
+    assert!(
+        event_detail_body.contains("Early tasting"),
+        "{event_detail_body}"
+    );
+    assert!(event_detail_body.contains("18:30"), "{event_detail_body}");
+    assert!(
+        event_detail_body.contains("Priority reservation available"),
+        "{event_detail_body}"
+    );
+    assert!(
+        event_detail_body.contains("Reserve seat"),
         "{event_detail_body}"
     );
     assert!(
@@ -10249,10 +10444,7 @@ async fn server_host_executes_page_extensions_during_live_requests() {
         headers.get("x-coil-wasm-request-handler").unwrap(),
         "account-dashboard"
     );
-    assert_eq!(
-        headers.get("x-coil-wasm-request-outcome").unwrap(),
-        "Page"
-    );
+    assert_eq!(headers.get("x-coil-wasm-request-outcome").unwrap(), "Page");
     assert_eq!(
         headers.get("x-coil-wasm-metadata-title").unwrap(),
         "Account Runtime Extension"
@@ -10398,10 +10590,7 @@ async fn server_host_executes_render_hooks_during_html_render() {
     .unwrap();
 
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        headers.get("x-coil-wasm-render-hook-count").unwrap(),
-        "1"
-    );
+    assert_eq!(headers.get("x-coil-wasm-render-hook-count").unwrap(), "1");
     assert_eq!(
         headers.get("x-coil-wasm-render-hook-handlers").unwrap(),
         "loyalty-badge"
@@ -10475,10 +10664,7 @@ async fn server_host_executes_admin_widget_extensions_during_live_requests() {
     )
     .unwrap();
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        headers.get("x-coil-wasm-admin-widget-count").unwrap(),
-        "1"
-    );
+    assert_eq!(headers.get("x-coil-wasm-admin-widget-count").unwrap(), "1");
     assert_eq!(
         headers.get("x-coil-wasm-admin-widget-handlers").unwrap(),
         "waitlist-summary"
@@ -10500,6 +10686,7 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
         .with_module(CmsModule::new())
         .with_module(CommerceModule::new())
         .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(OpsModule::new())
         .with_template_root(&template_root)
         .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
         .build()
@@ -10514,6 +10701,7 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
         Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
     )
     .unwrap();
+    let csrf_secret = b"76543210765432107654321076543210";
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -10531,12 +10719,22 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
 
     for (route, expected) in [
         ("/admin", "Shoppr Admin"),
+        ("/admin/customers", "Customer Operations"),
+        ("/admin/diagnostics", "Diagnostics"),
+        ("/admin/jobs", "Jobs"),
+        ("/admin/integrations", "Integrations"),
         ("/admin/audit", "Audit Log"),
         ("/admin/orders", "Orders"),
+        ("/admin/payments", "Payment Operations"),
+        ("/admin/search", "Search Operations"),
+        ("/admin/reports", "Reports"),
+        ("/admin/bulk", "Bulk Operations"),
+        ("/admin/recovery", "Recovery"),
         ("/admin/catalog/products", "Catalog Administration"),
         ("/admin/pages", "Pages"),
         ("/admin/navigation", "Navigation"),
         ("/admin/redirects", "Redirects"),
+        ("/admin/options", "Global Settings"),
     ] {
         let response = server
             .respond(
@@ -10582,6 +10780,30 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
                 assert!(body.contains("Capture a support action"), "{route}: {body}");
                 assert!(body.contains("Open pages"), "{route}: {body}");
             }
+            "/admin/customers" => {
+                assert!(body.contains("Customer records"), "{route}: {body}");
+                assert!(body.contains("Payment follow-up"), "{route}: {body}");
+                assert!(body.contains("No customer records yet"), "{route}: {body}");
+            }
+            "/admin/diagnostics" => {
+                assert!(body.contains("Probe summary"), "{route}: {body}");
+                assert!(body.contains("Key metrics"), "{route}: {body}");
+                assert!(body.contains("Recent traces"), "{route}: {body}");
+                assert!(body.contains("/health"), "{route}: {body}");
+                assert!(body.contains("/metrics"), "{route}: {body}");
+            }
+            "/admin/jobs" => {
+                assert!(body.contains("Queue summary"), "{route}: {body}");
+                assert!(body.contains("Registered jobs"), "{route}: {body}");
+                assert!(body.contains("ops.report.export"), "{route}: {body}");
+                assert!(body.contains("Domain event reactions"), "{route}: {body}");
+            }
+            "/admin/integrations" => {
+                assert!(body.contains("Integration summary"), "{route}: {body}");
+                assert!(body.contains("Module integration points"), "{route}: {body}");
+                assert!(body.contains("Approved outbound endpoints"), "{route}: {body}");
+                assert!(body.contains("Installed extensions and plugins"), "{route}: {body}");
+            }
             "/admin/orders" => {
                 assert!(body.contains("Support first"), "{route}: {body}");
                 assert!(
@@ -10589,6 +10811,33 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
                     "{route}: {body}"
                 );
                 assert!(body.contains("Refund boundary"), "{route}: {body}");
+            }
+            "/admin/payments" => {
+                assert!(body.contains("Awaiting confirmation"), "{route}: {body}");
+                assert!(body.contains("Captured payments"), "{route}: {body}");
+                assert!(body.contains("Pending payment is still live"), "{route}: {body}");
+            }
+            "/admin/search" => {
+                assert!(body.contains("Search health"), "{route}: {body}");
+                assert!(body.contains("Index detail"), "{route}: {body}");
+                assert!(body.contains("catalog.products"), "{route}: {body}");
+                assert!(body.contains("Queue full reindex"), "{route}: {body}");
+            }
+            "/admin/reports" => {
+                assert!(body.contains("Export summary"), "{route}: {body}");
+                assert!(body.contains("Report definitions"), "{route}: {body}");
+                assert!(body.contains("Search health"), "{route}: {body}");
+                assert!(body.contains("Queue export"), "{route}: {body}");
+            }
+            "/admin/bulk" => {
+                assert!(body.contains("Workflow summary"), "{route}: {body}");
+                assert!(body.contains("Queued workflow entrypoints"), "{route}: {body}");
+                assert!(body.contains("Reindex search"), "{route}: {body}");
+            }
+            "/admin/recovery" => {
+                assert!(body.contains("Recovery summary"), "{route}: {body}");
+                assert!(body.contains("Recovery workflows"), "{route}: {body}");
+                assert!(body.contains("Full customer-app restore"), "{route}: {body}");
             }
             "/admin/catalog/products" => {
                 assert!(body.contains("Save product"), "{route}: {body}");
@@ -10610,9 +10859,181 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
                 assert!(body.contains("Redirect rules"), "{route}: {body}");
                 assert!(body.contains("Save redirects"), "{route}: {body}");
             }
+            "/admin/options" => {
+                assert!(body.contains("Storefront settings"), "{route}: {body}");
+                assert!(
+                    body.contains("site.settings.footer_heading"),
+                    "{route}: {body}"
+                );
+                assert!(body.contains("Save global settings"), "{route}: {body}");
+            }
             _ => {}
         }
     }
+}
+
+#[tokio::test]
+async fn server_host_queues_checked_in_harbor_shop_report_export_from_admin_reports() {
+    let app_name = unique_app_name("shoppr-runtime-admin-report-export");
+    let (server, _state_root, _browser) =
+        checked_in_harbor_shop_server_with_structured_cms_actions(&app_name);
+    let (_session_id, operator_cookie) = issue_operator_session_cookie(&server);
+
+    let reports_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/reports")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let reports_body = String::from_utf8(
+        to_bytes(reports_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(reports_body.contains("Queue export"), "{reports_body}");
+    let export_token = cms_form_csrf_token_from_body(&reports_body, "/admin/reports/export");
+
+    let export_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &export_token)
+        .append_pair("report_id", "report.ops.search-health")
+        .finish();
+    let export_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/reports/export")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("cookie", &operator_cookie)
+                .body(Body::from(export_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(export_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&export_response, "location"), "/admin/reports");
+
+    let flash_cookie = cookie_pair_from_response(&export_response, "coil_flash")
+        .expect("report export should set a flash cookie");
+    let reports_cookie = format!("{operator_cookie}; {flash_cookie}");
+
+    let redirected_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/reports")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &reports_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let redirected_body = String::from_utf8(
+        to_bytes(redirected_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        redirected_body.contains("Queued report export for Search health."),
+        "{redirected_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_queues_checked_in_harbor_shop_bulk_reindex_from_admin_search() {
+    let app_name = unique_app_name("shoppr-runtime-admin-bulk-reindex");
+    let (server, _state_root, _browser) =
+        checked_in_harbor_shop_server_with_structured_cms_actions(&app_name);
+    let (_session_id, operator_cookie) = issue_operator_session_cookie(&server);
+
+    let search_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/search")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let search_body = String::from_utf8(
+        to_bytes(search_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(search_body.contains("Queue full reindex"), "{search_body}");
+    let bulk_token = cms_form_csrf_token_from_body(&search_body, "/admin/bulk");
+
+    let bulk_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &bulk_token)
+        .append_pair("operation_id", "bulk.search.reindex")
+        .append_pair("target_count", "3")
+        .append_pair("dry_run", "yes")
+        .finish();
+    let bulk_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/bulk")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("cookie", &operator_cookie)
+                .body(Body::from(bulk_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bulk_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response_header(&bulk_response, "location"), "/admin/bulk");
+
+    let flash_cookie = cookie_pair_from_response(&bulk_response, "coil_flash")
+        .expect("bulk execution should set a flash cookie");
+    let bulk_cookie = format!("{operator_cookie}; {flash_cookie}");
+
+    let redirected_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/bulk")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &bulk_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let redirected_body = String::from_utf8(
+        to_bytes(redirected_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        redirected_body.contains("Queued bulk workflow for Reindex search."),
+        "{redirected_body}"
+    );
 }
 
 #[tokio::test]
@@ -10641,6 +11062,7 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
         Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
     )
     .unwrap();
+    let csrf_secret = b"76543210765432107654321076543210";
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -10738,10 +11160,7 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
         )
         .await
         .unwrap();
-    let publish_token = response_header(
-        &draft_admin_response,
-        "x-coil-cms-csrf-cms-pages-publish",
-    );
+    let publish_token = response_header(&draft_admin_response, "x-coil-cms-csrf-cms-pages-publish");
     let draft_admin_body = String::from_utf8(
         to_bytes(draft_admin_response.into_body(), usize::MAX)
             .await
@@ -10856,6 +11275,223 @@ async fn server_host_executes_checked_in_harbor_shop_cms_page_draft_and_publish_
 }
 
 #[tokio::test]
+async fn server_host_executes_checked_in_harbor_shop_structured_cms_admin_mutation_routes() {
+    let app_name = unique_app_name("shoppr-runtime-cms-structured-admin");
+    let (server, state_root, browser) =
+        checked_in_harbor_shop_server_with_structured_cms_actions(&app_name);
+    let csrf_secret = b"76543210765432107654321076543210";
+    let (session_id, session_cookie) = issue_operator_session_cookie(&server);
+    let settings_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.pages.save-settings")
+        .unwrap();
+    let blocks_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.pages.save-blocks")
+        .unwrap();
+    let shared_block_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.shared-blocks.save")
+        .unwrap();
+
+    let shared_block_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &shared_block_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("shared_block_id", "shared-editorial-callout")
+        .append_pair("shared_block_label", "Editorial callout")
+        .append_pair("shared_block_type", "editorial_callout")
+        .append_pair("shared_block_field_heading", "Plan your first visit")
+        .append_pair(
+            "shared_block_field_body",
+            "Shared callout content should stay consistent across editorial pages.",
+        )
+        .finish();
+    let shared_block_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/shared-blocks/save")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(shared_block_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(shared_block_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&shared_block_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+
+    let settings_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &settings_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("page_settings_page_type", "guide_page")
+        .append_pair("page_settings_template", "pages/editorial-guide")
+        .append_pair("page_settings_seo_title", "Membership guide | Shoppr")
+        .append_pair(
+            "page_settings_seo_description",
+            "Structured settings for the membership guide draft.",
+        )
+        .append_pair("page_option_show_in_navigation", "true")
+        .append_pair("page_option_allow_indexing", "true")
+        .append_pair("page_option_localized", "true")
+        .finish();
+    let settings_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/settings")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(settings_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(settings_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&settings_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+
+    let blocks_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &blocks_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("block_kind_0", "instance")
+        .append_pair("block_id_0", "hero-membership-guide")
+        .append_pair("block_type_0", "hero")
+        .append_pair("block_label_0", "Guide hero")
+        .append_pair("block_field_0_heading", "Membership access")
+        .append_pair(
+            "block_field_0_body",
+            "Structured block content now drives the editorial draft.",
+        )
+        .append_pair("block_kind_1", "shared_reference")
+        .append_pair("block_id_1", "shared-editorial-callout-reference")
+        .append_pair("block_shared_block_id_1", "shared-editorial-callout")
+        .append_pair("block_label_1", "Shared editorial callout")
+        .finish();
+    let blocks_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/blocks")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(blocks_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(blocks_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&blocks_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+
+    let workspace = load_cms_admin_workspace(&state_root);
+    let page = workspace
+        .pages
+        .iter()
+        .find(|page| page.id == "page-membership-guide")
+        .expect("page should exist");
+    assert_eq!(page.draft.settings.page_type, "guide_page");
+    assert_eq!(
+        page.draft.settings.template.as_deref(),
+        Some("pages/editorial-guide")
+    );
+    assert_eq!(
+        page.draft.settings.seo_title.as_deref(),
+        Some("Membership guide | Shoppr")
+    );
+    assert_eq!(
+        page.draft.settings.seo_description.as_deref(),
+        Some("Structured settings for the membership guide draft.")
+    );
+    assert!(page.draft.settings.options.show_in_navigation);
+    assert!(page.draft.settings.options.allow_indexing);
+    assert!(page.draft.settings.options.localized);
+    assert_eq!(page.draft.blocks.len(), 2);
+    assert!(matches!(
+        &page.draft.blocks[0],
+        crate::cms_admin::CmsAdminPageBlock::Instance(instance)
+            if instance.id == "hero-membership-guide"
+                && instance.block_type == "hero"
+                && instance.fields.get("heading").map(String::as_str) == Some("Membership access")
+    ));
+    assert!(matches!(
+        &page.draft.blocks[1],
+        crate::cms_admin::CmsAdminPageBlock::SharedReference(reference)
+            if reference.id == "shared-editorial-callout-reference"
+                && reference.shared_block_id == "shared-editorial-callout"
+    ));
+    let shared_block = workspace
+        .shared_blocks
+        .iter()
+        .find(|block| block.id == "shared-editorial-callout")
+        .expect("shared block should exist");
+    assert_eq!(shared_block.label, "Editorial callout");
+    assert_eq!(shared_block.block_type, "editorial_callout");
+    assert_eq!(
+        shared_block.fields.get("heading").map(String::as_str),
+        Some("Plan your first visit")
+    );
+}
+
+#[tokio::test]
+async fn server_host_rejects_structured_cms_block_save_when_shared_block_target_is_missing() {
+    let app_name = unique_app_name("shoppr-runtime-cms-structured-admin-invalid");
+    let (server, state_root, browser) =
+        checked_in_harbor_shop_server_with_structured_cms_actions(&app_name);
+    let csrf_secret = b"76543210765432107654321076543210";
+    let (session_id, session_cookie) = issue_operator_session_cookie(&server);
+    let blocks_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.pages.save-blocks")
+        .unwrap();
+
+    let blocks_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &blocks_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("block_kind_0", "shared_reference")
+        .append_pair("block_id_0", "missing-reference")
+        .append_pair("block_shared_block_id_0", "shared-missing")
+        .append_pair("block_label_0", "Missing shared block")
+        .finish();
+    let blocks_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/blocks")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(blocks_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(blocks_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&blocks_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+    assert!(
+        cookie_pair_from_response(&blocks_response, "coil_flash").is_some(),
+        "invalid block save should preserve form state"
+    );
+    assert!(
+        !state_root.join("cms-admin-workspace.json").exists(),
+        "invalid structured block save should not persist the workspace"
+    );
+}
+
+#[tokio::test]
 async fn server_host_allows_linked_cms_hooks_to_rewrite_the_draft_before_publish() {
     let app_name = unique_app_name("shoppr-runtime-cms-rewrite-publish");
     let config = checked_in_harbor_shop_config(&app_name);
@@ -10882,6 +11518,7 @@ async fn server_host_allows_linked_cms_hooks_to_rewrite_the_draft_before_publish
         Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
     )
     .unwrap();
+    let csrf_secret = b"76543210765432107654321076543210";
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -10998,6 +11635,7 @@ async fn server_host_runs_sdk_cms_publish_hooks_before_live_publish() {
         Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
     )
     .unwrap();
+    let csrf_secret: &[u8] = b"76543210765432107654321076543210";
     let now = BrowserInstant::from_unix_seconds(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -11027,10 +11665,7 @@ async fn server_host_runs_sdk_cms_publish_hooks_before_live_publish() {
         )
         .await
         .unwrap();
-    let draft_token = response_header(
-        &new_page_response,
-        "x-coil-cms-csrf-cms-pages-save-draft",
-    );
+    let draft_token = response_header(&new_page_response, "x-coil-cms-csrf-cms-pages-save-draft");
     let draft_body = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("_csrf", &draft_token)
         .append_pair("page_title", "SDK Hook Review Page")
@@ -11216,10 +11851,7 @@ async fn server_host_creates_and_publishes_new_checked_in_harbor_shop_cms_page()
         )
         .await
         .unwrap();
-    let draft_token = response_header(
-        &new_page_response,
-        "x-coil-cms-csrf-cms-pages-save-draft",
-    );
+    let draft_token = response_header(&new_page_response, "x-coil-cms-csrf-cms-pages-save-draft");
     let new_page_body = String::from_utf8(
         to_bytes(new_page_response.into_body(), usize::MAX)
             .await
@@ -11280,10 +11912,7 @@ async fn server_host_creates_and_publishes_new_checked_in_harbor_shop_cms_page()
         )
         .await
         .unwrap();
-    let publish_token = response_header(
-        &saved_admin_response,
-        "x-coil-cms-csrf-cms-pages-publish",
-    );
+    let publish_token = response_header(&saved_admin_response, "x-coil-cms-csrf-cms-pages-publish");
     let saved_admin_body = String::from_utf8(
         to_bytes(saved_admin_response.into_body(), usize::MAX)
             .await
@@ -11421,10 +12050,7 @@ async fn server_host_allows_linked_cms_hooks_to_update_navigation_and_redirects_
         )
         .await
         .unwrap();
-    let draft_token = response_header(
-        &new_page_response,
-        "x-coil-cms-csrf-cms-pages-save-draft",
-    );
+    let draft_token = response_header(&new_page_response, "x-coil-cms-csrf-cms-pages-save-draft");
 
     let draft_body = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("_csrf", &draft_token)
@@ -11472,10 +12098,7 @@ async fn server_host_allows_linked_cms_hooks_to_update_navigation_and_redirects_
         )
         .await
         .unwrap();
-    let publish_token = response_header(
-        &saved_admin_response,
-        "x-coil-cms-csrf-cms-pages-publish",
-    );
+    let publish_token = response_header(&saved_admin_response, "x-coil-cms-csrf-cms-pages-publish");
 
     let publish_body = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("_csrf", &publish_token)
@@ -11950,6 +12573,1174 @@ async fn server_host_applies_checked_in_harbor_shop_redirect_rules_from_cms_admi
         "{audit_body}"
     );
     assert!(audit_body.contains("cms.page.edit"), "{audit_body}");
+}
+
+#[tokio::test]
+async fn server_host_applies_checked_in_harbor_shop_global_settings_from_cms_admin() {
+    let app_name = unique_app_name("shoppr-runtime-cms-options");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-1")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/options")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let save_token = response_header(&admin_response, "x-coil-cms-csrf-cms-options-save");
+
+    let save_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &save_token)
+        .append_pair("footer_heading", "Plan an in-store visit")
+        .append_pair(
+            "footer_body",
+            "Store hours, event support, and membership help are all available here.",
+        )
+        .append_pair("contact_email", "concierge@example.com")
+        .append_pair("contact_phone", "+44 20 7000 0000")
+        .append_pair("announcement_title", "Members week")
+        .append_pair("announcement_body", "Priority booking opens on Monday.")
+        .finish();
+    let save_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/options/save")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(save_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&save_response, "location"),
+        "/admin/options"
+    );
+
+    let home_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let home_body = String::from_utf8(
+        to_bytes(home_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(home_body.contains("Plan an in-store visit"), "{home_body}");
+    assert!(
+        home_body
+            .contains("Store hours, event support, and membership help are all available here."),
+        "{home_body}"
+    );
+
+    let audit_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/audit")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let audit_body = String::from_utf8(
+        to_bytes(audit_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(audit_body.contains("Save global settings"), "{audit_body}");
+    assert!(audit_body.contains("cms.page.edit"), "{audit_body}");
+    assert!(
+        audit_body.contains("cms-options:global-settings"),
+        "{audit_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_schedules_checked_in_harbor_shop_publication_and_promotes_when_due() {
+    let app_name = unique_app_name("shoppr-runtime-cms-schedule");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let state_root = std::path::PathBuf::from(&config.storage.local_root).join("shared-state");
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let (_, session_cookie) = issue_operator_session_cookie(&server);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let schedule_token = response_header(&admin_response, "x-coil-cms-csrf-cms-pages-schedule");
+
+    let publish_at = now + 86_400;
+    let schedule_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &schedule_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("page_schedule_publish_at", &publish_at.to_string())
+        .finish();
+    let schedule_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/schedule")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(schedule_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(schedule_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&schedule_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+
+    let mut workspace = load_cms_admin_workspace(&state_root);
+    let page = workspace
+        .pages
+        .iter()
+        .find(|page| page.id == "page-membership-guide")
+        .expect("scheduled page should exist");
+    assert_eq!(page.scheduled_publish_at, Some(publish_at));
+
+    let page_mut = workspace
+        .pages
+        .iter_mut()
+        .find(|page| page.id == "page-membership-guide")
+        .expect("scheduled page should exist");
+    page_mut.scheduled_publish_at = Some(now.saturating_sub(1));
+    std::fs::write(
+        state_root.join("cms-admin-workspace.json"),
+        serde_json::to_vec_pretty(&workspace).unwrap(),
+    )
+    .unwrap();
+
+    let live_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let live_body = String::from_utf8(
+        to_bytes(live_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(live_body.contains("Membership Guide"), "{live_body}");
+    assert!(
+        !live_body.contains("This CMS page is not published yet"),
+        "{live_body}"
+    );
+
+    let audit_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/audit")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let audit_body = String::from_utf8(
+        to_bytes(audit_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        audit_body.contains("Schedule page publication"),
+        "{audit_body}"
+    );
+    assert!(
+        audit_body.contains("page:page-membership-guide"),
+        "{audit_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_rolls_back_checked_in_harbor_shop_page_to_previous_live_revision() {
+    let app_name = unique_app_name("shoppr-runtime-cms-rollback");
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let (_, session_cookie) = issue_operator_session_cookie(&server);
+
+    let admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let publish_token = response_header(&admin_response, "x-coil-cms-csrf-cms-pages-publish");
+    let draft_token = response_header(&admin_response, "x-coil-cms-csrf-cms-pages-save-draft");
+
+    let publish_initial = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &publish_token)
+        .append_pair("page_id", "page-membership-guide")
+        .finish();
+    let publish_initial_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/publish")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(publish_initial))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_initial_response.status(), StatusCode::SEE_OTHER);
+
+    let save_draft_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &draft_token)
+        .append_pair("page_id", "page-membership-guide")
+        .append_pair("page_title", "Membership Guide Updated")
+        .append_pair("page_slug", "membership-guide")
+        .append_pair("page_summary", "Updated membership summary")
+        .append_pair("page_body_html", "<p>Updated membership guidance.</p>")
+        .finish();
+    let save_draft_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/draft")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(save_draft_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_draft_response.status(), StatusCode::SEE_OTHER);
+
+    let admin_after_draft = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let republish_token = response_header(&admin_after_draft, "x-coil-cms-csrf-cms-pages-publish");
+    let rollback_token = response_header(&admin_after_draft, "x-coil-cms-csrf-cms-pages-rollback");
+
+    let publish_updated = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &republish_token)
+        .append_pair("page_id", "page-membership-guide")
+        .finish();
+    let publish_updated_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/publish")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(publish_updated))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_updated_response.status(), StatusCode::SEE_OTHER);
+
+    let updated_live_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let updated_live_body = String::from_utf8(
+        to_bytes(updated_live_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        updated_live_body.contains("Membership Guide Updated"),
+        "{updated_live_body}"
+    );
+
+    let rollback_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("_csrf", &rollback_token)
+        .append_pair("page_id", "page-membership-guide")
+        .finish();
+    let rollback_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/rollback")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(rollback_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rollback_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&rollback_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+
+    let rolled_back_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let rolled_back_body = String::from_utf8(
+        to_bytes(rolled_back_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        rolled_back_body.contains("Membership Guide"),
+        "{rolled_back_body}"
+    );
+    assert!(
+        !rolled_back_body.contains("Membership Guide Updated"),
+        "{rolled_back_body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_teases_member_only_cms_page_for_anonymous_audience() {
+    let app_name = unique_app_name("shoppr-runtime-cms-membership-guide-teaser");
+    let (_plan, server, _state_root) =
+        checked_in_harbor_shop_server_with_cms_memberships(&app_name);
+    let (_, operator_cookie) = issue_operator_session_cookie(&server);
+    publish_membership_guide_as_member_only_page(&server, &operator_cookie).await;
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Membership required"), "{body}");
+    assert!(body.contains("Membership preview"), "{body}");
+    assert!(body.contains("Explore memberships"), "{body}");
+    assert!(body.contains("Open account"), "{body}");
+    assert!(
+        !body.contains("Membership purchases appear in the account area after checkout and become active when payment capture completes."),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_shows_pending_gate_for_member_only_cms_page_when_membership_order_is_pending()
+{
+    let app_name = unique_app_name("shoppr-runtime-cms-membership-guide-pending");
+    let (plan, server, _state_root) = checked_in_harbor_shop_server_with_cms_memberships(&app_name);
+    let (_, operator_cookie) = issue_operator_session_cookie(&server);
+    publish_membership_guide_as_member_only_page(&server, &operator_cookie).await;
+
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-cms-membership-pending";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("member@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert!(body.contains("Membership activation pending"), "{body}");
+    assert!(body.contains("Review order history"), "{body}");
+    assert!(body.contains("View memberships"), "{body}");
+    assert!(body.contains("Included with order ORD-10042."), "{body}");
+    assert!(
+        !body.contains("Membership purchases appear in the account area after checkout and become active when payment capture completes."),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_reveals_member_only_cms_page_after_membership_activation() {
+    let app_name = unique_app_name("shoppr-runtime-cms-membership-guide-active");
+    let (plan, server, _state_root) = checked_in_harbor_shop_server_with_cms_memberships(&app_name);
+    let (_, operator_cookie) = issue_operator_session_cookie(&server);
+    publish_membership_guide_as_member_only_page(&server, &operator_cookie).await;
+
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "member-live-cms-membership-active";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("member@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+    store
+        .apply_payment_webhook("PAY-50001", "payment.captured", 103)
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/en-GB/pages/membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert!(body.contains("Member access unlocked"), "{body}");
+    assert!(body.contains("Active"), "{body}");
+    assert!(
+        body.contains("Membership purchases appear in the account area after checkout and become active when payment capture completes."),
+        "{body}"
+    );
+    assert!(!body.contains("Membership preview"), "{body}");
+    assert!(!body.contains("Membership activation pending"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_updates_checked_in_harbor_shop_structured_page_builder_from_cms_admin() {
+    let app_name = unique_app_name("shoppr-runtime-cms-page-builder");
+    let csrf_secret = b"76543210765432107654321076543210";
+    let config = checked_in_harbor_shop_config(&app_name);
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let plan_for_assertions = plan.clone();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-cms-page-builder")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_id = issued.record.session_id.clone();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+    let browser = plan_for_assertions.browser_host().unwrap();
+    let settings_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.pages.save-settings")
+        .unwrap();
+    let shared_block_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.shared-blocks.save")
+        .unwrap();
+
+    let wrong_action_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/blocks")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("_csrf", &settings_token)
+                        .append_pair("page_id", "page-membership-guide")
+                        .append_pair("block_kind_0", "instance")
+                        .append_pair("block_id_0", "block-ignored")
+                        .append_pair("block_type_0", "hero")
+                        .append_pair("block_label_0", "Ignored")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(wrong_action_response.status(), StatusCode::FORBIDDEN);
+
+    let invalid_shared_block_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/shared-blocks/save")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("_csrf", &shared_block_token)
+                        .append_pair("page_id", "page-membership-guide")
+                        .append_pair("shared_block_id", "shared-membership-cta")
+                        .append_pair("shared_block_label", "")
+                        .append_pair("shared_block_type", "callout")
+                        .append_pair(
+                            "shared_block_field_heading",
+                            "Join Shoppr+ membership today",
+                        )
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        invalid_shared_block_response.status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        response_header(&invalid_shared_block_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+    let invalid_flash = cookie_pair_from_response(&invalid_shared_block_response, "coil_flash")
+        .expect("invalid shared block save should set a flash cookie");
+
+    let invalid_retry_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("{session_cookie}; {invalid_flash}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let invalid_retry_body = String::from_utf8(
+        to_bytes(invalid_retry_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        invalid_retry_body.contains("`shared_block.label` cannot be empty"),
+        "{invalid_retry_body}"
+    );
+    assert!(
+        crate::cms_admin::CmsAdminWorkspace::load(&plan_for_assertions)
+            .unwrap()
+            .shared_blocks
+            .iter()
+            .all(|block| block.id != "shared-membership-cta"),
+        "invalid shared block save should not persist"
+    );
+
+    let saved_shared_block_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/shared-blocks/save")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("_csrf", &shared_block_token)
+                        .append_pair("page_id", "page-membership-guide")
+                        .append_pair("shared_block_id", "shared-membership-cta")
+                        .append_pair("shared_block_label", "Membership CTA")
+                        .append_pair("shared_block_type", "callout")
+                        .append_pair(
+                            "shared_block_field_heading",
+                            "Join Shoppr+ membership today",
+                        )
+                        .append_pair(
+                            "shared_block_field_body",
+                            "Membership unlocks account access after payment capture.",
+                        )
+                        .append_pair("shared_block_field_cta_href", "/en-GB/shop")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved_shared_block_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&saved_shared_block_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+    let shared_block_flash = cookie_pair_from_response(&saved_shared_block_response, "coil_flash")
+        .expect("shared block save should set a flash cookie");
+
+    let shared_block_saved_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("{session_cookie}; {shared_block_flash}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let shared_block_saved_body = String::from_utf8(
+        to_bytes(shared_block_saved_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        shared_block_saved_body.contains("Shared block saved for reuse across structured pages."),
+        "{shared_block_saved_body}"
+    );
+    let updated_shared_block_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.shared-blocks.save")
+        .unwrap();
+    let updated_shared_block_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/shared-blocks/save")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("_csrf", &updated_shared_block_token)
+                        .append_pair("page_id", "page-membership-guide")
+                        .append_pair("shared_block_id", "shared-membership-cta")
+                        .append_pair("shared_block_label", "Membership CTA")
+                        .append_pair("shared_block_type", "callout")
+                        .append_pair("shared_block_field_heading", "Join Shoppr+ today")
+                        .append_pair(
+                            "shared_block_field_body",
+                            "Benefits unlock in account as soon as payment capture completes.",
+                        )
+                        .append_pair("shared_block_field_cta_href", "/en-GB/account")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        updated_shared_block_response.status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        response_header(&updated_shared_block_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+    let updated_shared_block_flash =
+        cookie_pair_from_response(&updated_shared_block_response, "coil_flash")
+            .expect("shared block update should set a flash cookie");
+
+    let settings_admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header(
+                    "cookie",
+                    format!("{session_cookie}; {updated_shared_block_flash}"),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let settings_admin_body = String::from_utf8(
+        to_bytes(settings_admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        settings_admin_body.contains("Shared block saved for reuse across structured pages."),
+        "{settings_admin_body}"
+    );
+    let updated_settings_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.pages.save-settings")
+        .unwrap();
+
+    let save_settings_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/settings")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("_csrf", &updated_settings_token)
+                        .append_pair("page_id", "page-membership-guide")
+                        .append_pair("page_settings_page_type", "membership_guide")
+                        .append_pair("page_settings_template", "pages/membership-guide")
+                        .append_pair("page_settings_seo_title", "Membership Guide | Shoppr")
+                        .append_pair(
+                            "page_settings_seo_description",
+                            "Everything customers unlock after payment capture.",
+                        )
+                        .append_pair("page_option_show_in_navigation", "yes")
+                        .append_pair("page_option_allow_indexing", "no")
+                        .append_pair("page_option_localized", "yes")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_settings_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&save_settings_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+    let settings_flash = cookie_pair_from_response(&save_settings_response, "coil_flash")
+        .expect("page settings save should set a flash cookie");
+
+    let blocks_admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("{session_cookie}; {settings_flash}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let blocks_admin_body = String::from_utf8(
+        to_bytes(blocks_admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        blocks_admin_body.contains("Page settings saved for this draft."),
+        "{blocks_admin_body}"
+    );
+    let updated_blocks_token = browser
+        .issue_csrf_token(csrf_secret, &session_id, "cms.pages.save-blocks")
+        .unwrap();
+
+    let save_blocks_response = server
+        .respond(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/pages/blocks")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("_csrf", &updated_blocks_token)
+                        .append_pair("page_id", "page-membership-guide")
+                        .append_pair("block_kind_0", "instance")
+                        .append_pair("block_id_0", "block-membership-hero")
+                        .append_pair("block_type_0", "hero")
+                        .append_pair("block_label_0", "Membership hero")
+                        .append_pair("block_field_0_heading", "Membership Guide")
+                        .append_pair(
+                            "block_field_0_body",
+                            "Explore the member journey from checkout to activation.",
+                        )
+                        .append_pair("block_kind_1", "shared")
+                        .append_pair("block_id_1", "block-membership-cta")
+                        .append_pair("block_shared_block_id_1", "shared-membership-cta")
+                        .append_pair("block_label_1", "Shared CTA")
+                        .finish(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_blocks_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response_header(&save_blocks_response, "location"),
+        "/admin/pages?page=page-membership-guide"
+    );
+    let blocks_flash = cookie_pair_from_response(&save_blocks_response, "coil_flash")
+        .expect("page blocks save should set a flash cookie");
+
+    let final_admin_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/pages?page=page-membership-guide")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", format!("{session_cookie}; {blocks_flash}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let final_admin_body = String::from_utf8(
+        to_bytes(final_admin_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        final_admin_body.contains("Structured page blocks saved for this draft."),
+        "{final_admin_body}"
+    );
+
+    let workspace = crate::cms_admin::CmsAdminWorkspace::load(&plan_for_assertions)
+        .expect("structured CMS workspace should persist");
+    let page = workspace
+        .pages
+        .iter()
+        .find(|page| page.id == "page-membership-guide")
+        .expect("membership guide page should exist");
+    assert_eq!(page.draft.settings.page_type, "membership_guide");
+    assert_eq!(
+        page.draft.settings.template.as_deref(),
+        Some("pages/membership-guide")
+    );
+    assert_eq!(
+        page.draft.settings.seo_title.as_deref(),
+        Some("Membership Guide | Shoppr")
+    );
+    assert_eq!(
+        page.draft.settings.seo_description.as_deref(),
+        Some("Everything customers unlock after payment capture.")
+    );
+    assert!(page.draft.settings.options.show_in_navigation);
+    assert!(!page.draft.settings.options.allow_indexing);
+    assert!(page.draft.settings.options.localized);
+    assert_eq!(page.draft.blocks.len(), 2);
+    assert!(matches!(
+        &page.draft.blocks[0],
+        crate::cms_admin::CmsAdminPageBlock::Instance(instance)
+            if instance.id == "block-membership-hero"
+                && instance.block_type == "hero"
+                && instance.label.as_deref() == Some("Membership hero")
+                && instance.fields.get("heading").map(String::as_str)
+                    == Some("Membership Guide")
+    ));
+    assert!(matches!(
+        &page.draft.blocks[1],
+        crate::cms_admin::CmsAdminPageBlock::SharedReference(reference)
+            if reference.id == "block-membership-cta"
+                && reference.shared_block_id == "shared-membership-cta"
+                && reference.label.as_deref() == Some("Shared CTA")
+    ));
+    let shared_block = workspace
+        .shared_blocks
+        .iter()
+        .find(|block| block.id == "shared-membership-cta")
+        .expect("shared CTA block should persist");
+    assert_eq!(shared_block.label, "Membership CTA");
+    assert_eq!(shared_block.block_type, "callout");
+    assert_eq!(
+        shared_block.fields.get("heading").map(String::as_str),
+        Some("Join Shoppr+ today")
+    );
+    assert_eq!(
+        shared_block.fields.get("body").map(String::as_str),
+        Some("Benefits unlock in account as soon as payment capture completes.")
+    );
+    assert_eq!(
+        shared_block.fields.get("cta_href").map(String::as_str),
+        Some("/en-GB/account")
+    );
+    assert_eq!(
+        workspace
+            .shared_blocks
+            .iter()
+            .filter(|block| block.id == "shared-membership-cta")
+            .count(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -12645,6 +14436,389 @@ async fn server_host_renders_live_completed_orders_on_checked_in_admin_orders_su
 }
 
 #[tokio::test]
+async fn server_host_highlights_stripe_payment_follow_up_on_admin_orders_surface() {
+    let app_name = unique_app_name("shoppr-runtime-admin-order-payment-follow-up");
+    let mut config = with_stripe_payment_provider(config_with_app_name(&app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "operator-live-payment-follow-up";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("payments@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/orders")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Stripe follow-up"), "{body}");
+    assert!(body.contains("Awaiting Stripe confirmation"), "{body}");
+    assert!(body.contains("PAY-50001"), "{body}");
+    assert!(body.contains("payments@example.com"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_explains_stripe_provider_handoff_on_pending_order_detail() {
+    let app_name = unique_app_name("shoppr-runtime-admin-order-provider-handoff");
+    let mut config = with_stripe_payment_provider(config_with_app_name(&app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let customer_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-payment-handoff")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-payment-handoff")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_cookie = format!("coil_session={}", operator_session.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &customer_session.record.session_id,
+            Some("member-live-payment-handoff"),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(
+            &customer_session.record.session_id,
+            Some("member-live-payment-handoff"),
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_complete(
+            &customer_session.record.session_id,
+            Some("member-live-payment-handoff"),
+            &StorefrontPaymentInput::card("handoff@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/orders/ORD-10042")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Provider handoff"), "{body}");
+    assert!(body.contains("Stripe webhook confirmation"), "{body}");
+    assert!(body.contains("signed Stripe webhook"), "{body}");
+    assert!(
+        body.contains("This order still needs provider confirmation"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_event_operations_surfaces() {
+    let template_root = checked_in_harbor_shop_root();
+    let mut config = config_with_app_name(&unique_app_name("shoppr-runtime-admin-events"));
+    config.auth.package = "shoppr-auth".to_string();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(EventsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-events")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let cookie = format!("coil_session={}", issued.cookie_value);
+
+    for (route, expected) in [
+        ("/admin/events", "Event Operations"),
+        ("/admin/events/bookings", "Event Bookings"),
+        ("/admin/events/check-in", "Event Check-In"),
+    ] {
+        let response = server
+            .respond(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("host", "www.example.com")
+                    .header("x-forwarded-proto", "https")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+
+        assert_eq!(status, StatusCode::OK, "{route}: {body}");
+        assert!(body.contains(expected), "{route}: {body}");
+        assert!(body.contains("/admin/events"), "{route}: {body}");
+        assert!(body.contains("/admin/events/bookings"), "{route}: {body}");
+        assert!(body.contains("/admin/events/check-in"), "{route}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_customer_operations_surface() {
+    let app_name = unique_app_name("shoppr-runtime-admin-customers");
+    let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(coil_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "customer-ops-live";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "tasting-pass",
+            1,
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 102)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("crm@example.com", "4242", "PAY-50001").unwrap(),
+            103,
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/customers")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Customer Operations"), "{body}");
+    assert!(body.contains("crm@example.com"), "{body}");
+    assert!(body.contains("ORD-10042"), "{body}");
+    assert!(body.contains("Pending activation"), "{body}");
+    assert!(body.contains("Has event-linked purchase"), "{body}");
+    assert!(body.contains("Needs payment follow-up"), "{body}");
+}
+
+#[tokio::test]
 async fn server_host_supports_checked_in_harbor_shop_order_detail_and_refund_flow() {
     let app_name = unique_app_name("shoppr-runtime-admin-order-detail-refund");
     let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
@@ -12873,6 +15047,715 @@ async fn server_host_supports_checked_in_harbor_shop_order_detail_and_refund_flo
     assert!(audit_body.contains("Issue refund"), "{audit_body}");
     assert!(audit_body.contains("order:ORD-10042"), "{audit_body}");
     assert!(audit_body.contains("customer_support"), "{audit_body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_payment_operations_surface() {
+    let app_name = unique_app_name("shoppr-runtime-admin-payment-operations");
+    let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(coil_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let customer_session_one = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-payment-ops-one")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let customer_session_two = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("member-live-payment-ops-two")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-payment-ops")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_cookie = format!("coil_session={}", operator_session.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+
+    store
+        .add_to_cart(
+            &customer_session_one.record.session_id,
+            Some("member-live-payment-ops-one"),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(
+            &customer_session_one.record.session_id,
+            Some("member-live-payment-ops-one"),
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_complete(
+            &customer_session_one.record.session_id,
+            Some("member-live-payment-ops-one"),
+            &StorefrontPaymentInput::card("pending@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+
+    store
+        .add_to_cart(
+            &customer_session_two.record.session_id,
+            Some("member-live-payment-ops-two"),
+            "gold-membership",
+            1,
+            110,
+        )
+        .unwrap();
+    store
+        .checkout_start(
+            &customer_session_two.record.session_id,
+            Some("member-live-payment-ops-two"),
+            111,
+        )
+        .unwrap();
+    store
+        .checkout_complete(
+            &customer_session_two.record.session_id,
+            Some("member-live-payment-ops-two"),
+            &StorefrontPaymentInput::card("captured@example.com", "4242", "PAY-50002").unwrap(),
+            112,
+        )
+        .unwrap();
+    store
+        .apply_payment_webhook("PAY-50002", "payment.captured", 113)
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/payments")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Payment Operations"), "{body}");
+    assert!(body.contains("pending@example.com"), "{body}");
+    assert!(body.contains("captured@example.com"), "{body}");
+    assert!(body.contains("PAY-50001"), "{body}");
+    assert!(body.contains("PAY-50002"), "{body}");
+    assert!(body.contains("Awaiting signed"), "{body}");
+    assert!(body.contains("webhook"), "{body}");
+    assert!(body.contains("Provider callback reconciled"), "{body}");
+    assert!(
+        body.contains("Queue order confirmation and operational follow-up from the captured payment."),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_membership_subscription_operations() {
+    let app_name = unique_app_name("shoppr-runtime-admin-membership-subscriptions");
+    let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CmsModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(coil_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "membership-ops-live";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "gold-membership",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "tasting-pass",
+            1,
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 102)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("crm@example.com", "4242", "PAY-50001").unwrap(),
+            103,
+        )
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/memberships/subscriptions")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Membership Subscriptions"), "{body}");
+    assert!(body.contains("crm@example.com"), "{body}");
+    assert!(body.contains("Pending activation"), "{body}");
+    assert!(body.contains("Has event-linked purchase"), "{body}");
+    assert!(body.contains("ORD-10042"), "{body}");
+    assert!(body.contains("View order"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_account_passes_surface() {
+    let app_name = unique_app_name("shoppr-runtime-account-passes");
+    let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(coil_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let principal_id = "account-pass-live";
+    let issued = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let session_cookie = format!("coil_session={}", issued.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(&issued.record.session_id, Some(principal_id), "tasting-pass", 1, 100)
+        .unwrap();
+    store
+        .checkout_start(&issued.record.session_id, Some(principal_id), 101)
+        .unwrap();
+    store
+        .checkout_complete(
+            &issued.record.session_id,
+            Some(principal_id),
+            &StorefrontPaymentInput::card("passes@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+    store
+        .apply_payment_webhook("PAY-50001", "payment.captured", 103)
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/account/passes")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &session_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Passes and credits"), "{body}");
+    assert!(body.contains("Spring Tasting Pass"), "{body}");
+    assert!(body.contains("1 pass available"), "{body}");
+    assert!(body.contains("passes@example.com"), "{body}");
+    assert!(body.contains("/account/orders"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_membership_tiers_and_admin_navigation() {
+    let mut config = config_with_app_name("shoppr-runtime-admin-membership-tiers");
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let operator_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-membership-tiers")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_cookie = format!("coil_session={}", operator_session.cookie_value);
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/memberships/tiers")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Membership Tiers"), "{body}");
+    assert!(body.contains("Gold Membership"), "{body}");
+    assert!(body.contains("membership.gold"), "{body}");
+    assert!(body.contains("Subscriptions"), "{body}");
+    assert!(body.contains("/admin/memberships/subscriptions"), "{body}");
+    assert!(body.contains("Passes"), "{body}");
+    assert!(body.contains("/admin/memberships/passes"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_membership_pass_operations() {
+    let app_name = unique_app_name("shoppr-runtime-admin-membership-passes");
+    let mut config = with_payment_webhook_secret(config_with_app_name(&app_name));
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(CommerceModule::new())
+        .with_module(coil_commerce::CommercePaymentsStripeModule::new())
+        .with_module(coil_memberships::MembershipsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver_with_payment_webhook();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan.clone(),
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let customer_principal_id = "membership-pass-ops-live";
+    let customer_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal(customer_principal_id)
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-membership-passes")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_cookie = format!("coil_session={}", operator_session.cookie_value);
+    let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
+    store
+        .add_to_cart(
+            &customer_session.record.session_id,
+            Some(customer_principal_id),
+            "tasting-pass",
+            1,
+            100,
+        )
+        .unwrap();
+    store
+        .checkout_start(
+            &customer_session.record.session_id,
+            Some(customer_principal_id),
+            101,
+        )
+        .unwrap();
+    store
+        .checkout_complete(
+            &customer_session.record.session_id,
+            Some(customer_principal_id),
+            &StorefrontPaymentInput::card("crm-pass@example.com", "4242", "PAY-50001").unwrap(),
+            102,
+        )
+        .unwrap();
+    store
+        .apply_payment_webhook("PAY-50001", "payment.captured", 103)
+        .unwrap();
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/memberships/passes")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Passes and Credits"), "{body}");
+    assert!(body.contains("crm-pass@example.com"), "{body}");
+    assert!(body.contains("Passes available"), "{body}");
+    assert!(body.contains("Spring Tasting Pass"), "{body}");
+    assert!(body.contains("/admin/orders/ORD-10042"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_event_booking_operations() {
+    let mut config = config_with_app_name("shoppr-runtime-admin-event-bookings");
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(coil_events::EventsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let operator_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-event-bookings")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_cookie = format!("coil_session={}", operator_session.cookie_value);
+
+    let response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/events/bookings")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("Event Bookings"), "{body}");
+    assert!(body.contains("Morgan Rowe"), "{body}");
+    assert!(body.contains("Waitlisted"), "{body}");
+    assert!(body.contains("EVT-2003"), "{body}");
+    assert!(body.contains("Open check-in"), "{body}");
+    assert!(body.contains("/admin/events/check-in"), "{body}");
+}
+
+#[tokio::test]
+async fn server_host_renders_checked_in_harbor_shop_event_slate_and_check_in_lane() {
+    let mut config = config_with_app_name("shoppr-runtime-admin-event-check-in");
+    config.auth.package = "shoppr-auth".to_string();
+    let template_root = checked_in_harbor_shop_root();
+    let auth_package = coil_auth::load_auth_model_package_at("shoppr-auth", &template_root)
+        .expect("checked-in harbor auth package should load");
+    let plan = RuntimeBuilder::new(config, auth_package)
+        .with_module(AdminModule::new())
+        .with_module(coil_events::EventsModule::new())
+        .with_template_root(&template_root)
+        .with_translation_catalogs(checked_in_harbor_shop_translation_catalogs())
+        .build()
+        .unwrap();
+    let resolver = live_backend_secret_resolver();
+    let backends = plan.shared_backend_clients(&resolver).unwrap();
+    let server = HttpServerHost::new_with_authorizer(
+        plan,
+        backends,
+        b"01234567012345670123456701234567".to_vec(),
+        b"76543210765432107654321076543210".to_vec(),
+        Arc::new(PermissiveLiveRouteCapabilityAuthorizer),
+    )
+    .unwrap();
+    let now = BrowserInstant::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    );
+    let operator_session = server
+        .issue_session(
+            SessionIssueRequest::new()
+                .for_principal("operator-live-event-check-in")
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+    let operator_cookie = format!("coil_session={}", operator_session.cookie_value);
+
+    let events_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/events")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let events_body = String::from_utf8(
+        to_bytes(events_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(events_body.contains("Event Operations"), "{events_body}");
+    assert!(
+        events_body.contains("Spring Tasting Evening"),
+        "{events_body}"
+    );
+    assert!(events_body.contains("Waitlist pressure"), "{events_body}");
+    assert!(
+        events_body.contains("/admin/events/bookings"),
+        "{events_body}"
+    );
+
+    let check_in_response = server
+        .respond(
+            Request::builder()
+                .method("GET")
+                .uri("/admin/events/check-in")
+                .header("host", "www.example.com")
+                .header("x-forwarded-proto", "https")
+                .header("cookie", &operator_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let check_in_status = check_in_response.status();
+    let check_in_body = String::from_utf8(
+        to_bytes(check_in_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(check_in_status, StatusCode::OK, "{check_in_body}");
+    assert!(check_in_body.contains("Event Check-In"), "{check_in_body}");
+    assert!(check_in_body.contains("Jordan Lee"), "{check_in_body}");
+    assert!(
+        check_in_body.contains("Already checked in"),
+        "{check_in_body}"
+    );
+    assert!(check_in_body.contains("/admin/events"), "{check_in_body}");
+    assert!(
+        check_in_body.contains("/admin/events/bookings"),
+        "{check_in_body}"
+    );
 }
 
 #[tokio::test]
@@ -13593,9 +16476,7 @@ async fn server_host_rejects_capability_routes_when_live_authorizer_denies() {
     assert_eq!(
         authorizer.checks(),
         vec![LiveAuthorizationCheck {
-            subject: coil_auth::DefaultSubject::entity(coil_auth::Entity::user(
-                "editor-live-2",
-            )),
+            subject: coil_auth::DefaultSubject::entity(coil_auth::Entity::user("editor-live-2",)),
             capability: Capability::CmsPageRead,
             object: coil_auth::Entity::page("http.surface.module.cms.page.cms.preview"),
         }]

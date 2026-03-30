@@ -285,9 +285,9 @@ impl JobsHost {
         reason: DeadLetterReason,
         error_message: impl Into<String>,
     ) -> Result<JobFailureDisposition, RuntimeJobsError> {
-        let outcome = self
-            .coordinator
-            .acknowledge_failed(lease, now, reason, error_message.into())?;
+        let outcome =
+            self.coordinator
+                .acknowledge_failed(lease, now, reason, error_message.into())?;
         self.refresh_observability(
             "jobs.acknowledge_failed",
             "ok",

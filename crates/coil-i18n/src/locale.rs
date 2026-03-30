@@ -112,7 +112,9 @@ impl TranslationCatalog {
     }
 
     pub fn messages(&self) -> impl Iterator<Item = (&MessageKey, &str)> {
-        self.messages.iter().map(|(key, value)| (key, value.as_str()))
+        self.messages
+            .iter()
+            .map(|(key, value)| (key, value.as_str()))
     }
 
     pub fn from_toml_file(

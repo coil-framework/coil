@@ -17,6 +17,10 @@ It describes the product-facing shape of an app:
 
 It is not the place for infrastructure secrets, runtime connection strings, or deployment-only tuning. Those belong in `platform.toml` or `platform.dev.toml`.
 
+It is also not a request-time content payload. Declaring content models, sites, or extensions here
+does not automatically populate CMS page instances, `page.blocks`, or customer-specific render-model
+data.
+
 ## Why This File Exists
 
 Coil separates product composition from runtime operations.
@@ -36,6 +40,9 @@ In practice, `app.toml` is the file a product developer edits when they need to:
 - install a runtime extension
 
 If the change is about what the app is, it usually belongs here. If it is about how the app connects to infrastructure, it usually belongs in platform config instead.
+
+If the change is about what a specific request should render right now, it usually does **not**
+belong here.
 
 ## Shoppr As A Concrete Example
 
@@ -111,6 +118,8 @@ enabled = ["cms", "commerce", "admin"]
 
 This is enough to express a single-site product shape. It does not yet describe runtime concerns such as the database URL, storage backend, or TLS mode.
 
+It also does not create page records, block instances, or template-facing request data by itself.
+
 ## Multi-Site Example
 
 The moment you need per-market hostnames, branding, or locale defaults, `[[sites]]` becomes the primary model:
@@ -175,6 +184,10 @@ The extension package itself lives here:
 
 If you need the full extension lifecycle, packaging, or handler model, read [Customer Rust vs third-party WASM](customer-vs-wasm.md).
 
+The presence of an extension entry here does not mean that extension automatically shapes every page
+model. Execution still depends on the runtime integration path and the specific handler or host API
+surface involved.
+
 ## `[app]`
 
 `[app]` defines the customer app identity.
@@ -237,6 +250,8 @@ When explicit `[[sites]]` are present, app-level domains become compatibility de
 - `[[sites]]` is the real source of truth for per-site hosts
 - `[domains]` remains useful as a top-level summary and compatibility layer
 
+This is still site composition, not request-time page data.
+
 ## `[i18n]`
 
 `[i18n]` defines app-wide locale policy.
@@ -273,6 +288,8 @@ localized_routes = true
 - `localized_routes = true` is the normal choice for public multi-lingual apps
 
 For translation files, fallback chains, and template syntax, read [Internationalisation](internationalization.md).
+
+This section sets locale policy. It does not translate templates or content automatically.
 
 ## `[[sites]]`
 
@@ -482,6 +499,12 @@ Supported field types:
 
 This is where a customer app declares additional structured content it owns beyond the official module defaults.
 
+That distinction matters:
+
+- `[[content_models]]` is schema and ownership
+- CMS records are instances and stored content
+- request-time model shaping decides what templates actually receive
+
 ### Narrative Guidance
 
 Do not think of `[[content_models]]` as just a field list. Think of it as the public contract for customer-managed structured content. The field list matters because it drives:
@@ -492,6 +515,10 @@ Do not think of `[[content_models]]` as just a field list. Think of it as the pu
 - routing or lookup patterns when slugs are involved
 
 If you add a model such as `lookbook_entry` or `campaign_page`, document its intended editor workflow as well as its field list.
+
+If this boundary is fuzzy, read
+[Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
+and [CMS page builder model](./cms-page-builder-model.md).
 
 ## `[[customer_migrations]]`
 
@@ -532,6 +559,8 @@ The runtime plan and operator tooling can then surface these as customer-owned m
 - Using site-local locales that are not also listed in the app-wide supported locale set.
 - Using `display_name` or `brand_name` as stable ids. They are presentation fields, not durable identifiers.
 - Letting extension checksums drift from the built artifact.
+- Treating `app.toml` as live page content. It does not create page instances or populate `page.blocks`.
+- Treating content schema as a full render contract. Request-time render data still has to be shaped explicitly by framework code, official modules, or customer hooks.
 
 ## Practical Rule
 
@@ -543,5 +572,9 @@ If the change is about environment wiring, secrets, scaling, or infrastructure, 
 
 - [platform.toml and platform.dev.toml](platform-config.md)
 - [Sites, locales, and markets](../core-concepts/sites-locales-and-markets.md)
+- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
+- [Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md)
+- [CMS page builder model](./cms-page-builder-model.md)
+- [Getting Started: Add a Real Content Model](../getting-started/add-a-real-content-model.md)
 - [Theme structure](theme-structure.md)
 - [Official modules](modules.md)

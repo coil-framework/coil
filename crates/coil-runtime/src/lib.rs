@@ -41,8 +41,8 @@ use coil_storage::{
 };
 use coil_tls::{
     CertificateId, CertificateInventory, CertificateProviderKind, CertificateRecord,
-    ChallengeTicket, EdgeMode, HotReloadEvent, IssuancePlan, RenewalPlan,
-    TlsControlPlaneRuntime, TlsInstant, TlsModelError,
+    ChallengeTicket, EdgeMode, HotReloadEvent, IssuancePlan, RenewalPlan, TlsControlPlaneRuntime,
+    TlsInstant, TlsModelError,
 };
 use coil_wasm::{
     AdminWidgetInvocation, ApiInvocation, CompiledWasmModule, ContractVersion, CustomerAppContext,

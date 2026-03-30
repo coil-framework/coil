@@ -30,6 +30,15 @@ impl MembershipsModule {
                     AdminContributionKind::ResourceIndex,
                     Capability::MembershipSubscriptionManage,
                 ),
+                AdminResourceContribution::new(
+                    "memberships.passes",
+                    "/admin/memberships/passes",
+                    "Passes and credits",
+                    "Passes",
+                    AdminNavigationSection::Memberships,
+                    AdminContributionKind::ResourceIndex,
+                    Capability::MembershipSubscriptionManage,
+                ),
             ],
         }
     }

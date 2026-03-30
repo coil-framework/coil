@@ -2,12 +2,14 @@ use coil_data::{DataModelError, DomainWrite, QuerySpec, TransactionIsolation, Tr
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+mod blocks;
 mod error;
 mod ids;
 mod navigation;
 mod page;
 mod validate;
 
+pub use blocks::*;
 pub use error::*;
 pub use ids::*;
 pub use navigation::*;

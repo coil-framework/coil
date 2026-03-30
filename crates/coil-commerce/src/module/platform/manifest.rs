@@ -199,6 +199,12 @@ fn route_surfaces() -> Vec<RouteSurface> {
         )
         .gated_by(Capability::OrderRead),
         RouteSurface::new(
+            "commerce.payment-operations",
+            RouteSurfaceKind::AdminPage,
+            "/admin/payments",
+        )
+        .gated_by(Capability::OrderRead),
+        RouteSurface::new(
             "commerce.order-detail",
             RouteSurfaceKind::AdminPage,
             "/admin/orders/{order_id}",
@@ -502,6 +508,13 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             HttpSurfaceArea::Admin,
             "/admin/orders",
             "commerce/orders",
+        )
+        .gated_by(Capability::OrderRead),
+        HttpSurfaceContribution::page(
+            "commerce.payment-operations",
+            HttpSurfaceArea::Admin,
+            "/admin/payments",
+            "commerce/payments",
         )
         .gated_by(Capability::OrderRead),
         HttpSurfaceContribution::page(

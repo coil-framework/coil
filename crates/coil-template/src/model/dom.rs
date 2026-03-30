@@ -265,10 +265,7 @@ impl Node {
         }
     }
 
-    pub fn conditional_expression_not(
-        expression: TemplateExpression,
-        children: Vec<Node>,
-    ) -> Self {
+    pub fn conditional_expression_not(expression: TemplateExpression, children: Vec<Node>) -> Self {
         Self::Conditional {
             condition: ConditionExpression::Expression(expression),
             negated: true,

@@ -113,6 +113,11 @@ fn route_surfaces() -> Vec<RouteSurface> {
             "/account/memberships",
         ),
         RouteSurface::new(
+            "memberships.account.passes",
+            RouteSurfaceKind::FrontendPage,
+            "/account/passes",
+        ),
+        RouteSurface::new(
             "memberships.tiers",
             RouteSurfaceKind::AdminPage,
             "/admin/memberships/tiers",
@@ -122,6 +127,12 @@ fn route_surfaces() -> Vec<RouteSurface> {
             "memberships.subscriptions",
             RouteSurfaceKind::AdminPage,
             "/admin/memberships/subscriptions",
+        )
+        .gated_by(Capability::MembershipSubscriptionManage),
+        RouteSurface::new(
+            "memberships.passes",
+            RouteSurfaceKind::AdminPage,
+            "/admin/memberships/passes",
         )
         .gated_by(Capability::MembershipSubscriptionManage),
     ]
@@ -175,6 +186,11 @@ fn integration_points() -> Vec<IntegrationPoint> {
             IntegrationKind::FrontendRendering,
             "account.memberships",
             "Provides the member account experience and entitlement visibility surface",
+        ),
+        IntegrationPoint::new(
+            IntegrationKind::FrontendRendering,
+            "account.passes",
+            "Provides pass-backed access, credit balance, and event-linked entitlement visibility in the customer account",
         ),
     ]
 }
@@ -245,6 +261,12 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             "memberships/account",
         ),
         HttpSurfaceContribution::page(
+            "memberships.account.passes",
+            HttpSurfaceArea::Account,
+            "/account/passes",
+            "account/passes",
+        ),
+        HttpSurfaceContribution::page(
             "memberships.tiers",
             HttpSurfaceArea::Admin,
             "/admin/memberships/tiers",
@@ -256,6 +278,13 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
             HttpSurfaceArea::Admin,
             "/admin/memberships/subscriptions",
             "memberships/subscriptions",
+        )
+        .gated_by(Capability::MembershipSubscriptionManage),
+        HttpSurfaceContribution::page(
+            "memberships.passes",
+            HttpSurfaceArea::Admin,
+            "/admin/memberships/passes",
+            "memberships/passes",
         )
         .gated_by(Capability::MembershipSubscriptionManage),
     ]

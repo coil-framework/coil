@@ -282,20 +282,17 @@ where
 }
 
 impl RuntimeBuilder<coil_auth::LoadedAuthModelPackage> {
-    pub fn for_customer_root_from_env() -> Result<
-        CustomerRootRuntimeBuilder<coil_auth::LoadedAuthModelPackage>,
-        RuntimeBootstrapError,
-    > {
+    pub fn for_customer_root_from_env()
+    -> Result<CustomerRootRuntimeBuilder<coil_auth::LoadedAuthModelPackage>, RuntimeBootstrapError>
+    {
         CustomerRootRuntimeBuilder::from_env()
     }
 
     pub fn for_customer_root_from_paths(
         app_root: impl AsRef<std::path::Path>,
         config_path: impl AsRef<std::path::Path>,
-    ) -> Result<
-        CustomerRootRuntimeBuilder<coil_auth::LoadedAuthModelPackage>,
-        RuntimeBootstrapError,
-    > {
+    ) -> Result<CustomerRootRuntimeBuilder<coil_auth::LoadedAuthModelPackage>, RuntimeBootstrapError>
+    {
         CustomerRootRuntimeBuilder::from_paths(app_root, config_path)
     }
 }

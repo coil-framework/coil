@@ -2,120 +2,162 @@
 title: Linked Rust Backends
 ---
 
-Coil's preferred customization model is linked customer Rust.
+Coil’s preferred customization model is linked customer Rust.
 
-That means customer-specific backend behaviour lives in ordinary Rust crates that are compiled into the customer application, not in a separate API service by default.
+This page shows the actual files you should expect to write when the tutorial starts introducing
+customer-owned backend rules.
 
-## How To Use This Page
+## The Smallest Linked Backend
 
-Use this page as the launch point for the customer-owned backend lane.
+Start with a dedicated crate.
 
-- Read it if you want to know when Coil expects linked Rust instead of an external service.
-- From here, jump into the customer-root workspace model, the reference boundary between customer
-  Rust and WASM, and the checked-in Shoppr and Gitly examples.
-- If you are already convinced and just need the app shape, go back to
-  [Customer project layout](customer-project-layout.md).
+### `crates/tutorial-app-backend/Cargo.toml`
 
-## What It Is
+```toml
+[package]
+name = "tutorial-app-backend"
+version.workspace = true
+edition.workspace = true
 
-A linked Rust backend is customer-owned code that plugs into Coil through supported public APIs and hook/facade boundaries.
+[dependencies]
+coil-customer-sdk.workspace = true
+```
 
-Typical responsibilities include:
+### `crates/tutorial-app-backend/src/lib.rs`
 
-- product-specific checkout rules
-- CMS publish validation
-- request-time page and block shaping through render-model hooks
-- verified webhook handling
-- customer-specific admin or integration behaviour
+```rust
+use coil_customer_sdk::{CustomerBackendPlugin, CustomerHookRegistry};
 
-The exact extension points are intentionally explicit. Coil does not expose the whole runtime as an ambient bag of internals.
+pub struct TutorialAppPlugin;
 
-## Why It Exists
+impl CustomerBackendPlugin for TutorialAppPlugin {
+    fn register(
+        &self,
+        _registry: &mut dyn CustomerHookRegistry,
+    ) -> Result<(), coil_customer_sdk::BackendError> {
+        Ok(())
+    }
+}
+```
 
-Coil makes this the primary customization path because it keeps the application honest.
+That crate exists before you need complicated logic. It gives the customer-owned backend lane a
+real place in the project.
 
-### You get compile-time integration
+## The App Crate That Links It
 
-Your product logic is built, typed, and tested together with the application instead of floating in a separate service boundary.
+The app crate wires it into runtime composition.
 
-### You avoid unnecessary infrastructure
+### `crates/tutorial-app-app/src/lib.rs`
 
-Many teams default to "add another API" because their framework has no good first-party customization path. Coil is trying to remove that pressure.
+```rust
+use coil_all::modules;
+use coil_config::PlatformConfig;
 
-### You keep trust boundaries explicit
+pub fn run_from_args(
+    args: impl IntoIterator<Item = String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = args.into_iter();
+    let _program = args.next();
+    match args.next().as_deref() {
+        Some("validate") => {
+            let _config = PlatformConfig::from_file("platform.dev.toml")?;
+            Ok(())
+        }
+        Some("serve") => {
+            coil_all::builder()
+                .with_customer_plugin(tutorial_app_backend::TutorialAppPlugin)
+                .with_module(modules::admin())
+                .with_module(modules::cms())
+                .with_module(modules::commerce())
+                .run_from_env()?;
+            Ok(())
+        }
+        other => Err(format!("unknown command: {:?}", other).into()),
+    }
+}
+```
 
-Customer-owned Rust has a different trust model from third-party extensions. Coil treats those as different things on purpose.
+The important point is visible in code: customer logic is linked and registered explicitly. It is
+not a hidden plugin directory or an ambient runtime script.
 
-## How It Works
+## Replace The Backend File With A Real Hook
 
-At a high level:
+Once you need customer rules, the same crate grows into hook implementations.
 
-1. The customer binary links Coil crates plus customer-owned crates.
-2. The customer backend implements supported plugin or hook traits.
-3. The runtime exposes stable facades instead of leaking arbitrary internals.
-4. Request-time or lifecycle-time hooks are invoked through those public surfaces.
+### `crates/tutorial-app-backend/src/lib.rs`
 
-This model is strong enough to let customer code participate in first-party behaviour while still preserving a stable runtime boundary.
+```rust
+use coil_customer_sdk::{
+    CmsHooks, CmsPageDraft, CmsPublishDecision, CustomerBackendPlugin, CustomerHookRegistry,
+};
 
-## Where To See This In Practice
+#[derive(Default)]
+struct TutorialCmsHooks;
 
-Use these pages together rather than in isolation:
+impl CmsHooks for TutorialCmsHooks {
+    fn validate_page_publish(
+        &self,
+        draft: &CmsPageDraft,
+    ) -> Result<CmsPublishDecision, coil_customer_sdk::BackendError> {
+        if draft.slug.starts_with("internal-") {
+            return Ok(CmsPublishDecision::reject(
+                "internal pages cannot be published to the public site",
+            ));
+        }
+        Ok(CmsPublishDecision::allow())
+    }
+}
 
-- [Customer-root workspace](../core-concepts/customer-root-workspace.md)
-- [Render Model Hooks](../reference/render-model-hooks.md)
-- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
-- [Shoppr overview](../use-cases/shoppr/overview.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
+pub struct TutorialAppPlugin;
 
-Operationally relevant follow-ons:
+impl CustomerBackendPlugin for TutorialAppPlugin {
+    fn register(
+        &self,
+        registry: &mut dyn CustomerHookRegistry,
+    ) -> Result<(), coil_customer_sdk::BackendError> {
+        registry.register_cms_hooks(Box::new(TutorialCmsHooks::default()));
+        Ok(())
+    }
+}
+```
 
-- [Jobs and schedulers](../operations/jobs-and-schedulers.md)
-- [Observability, monitoring, and audit](../operations/observability.md)
-- [Webhooks and integrations](../operations/webhooks-and-integrations.md)
+This is the pattern the tutorial eventually builds toward:
 
-## When Not To Use It
+- customer code lives in a normal crate
+- the app crate registers it
+- the runtime calls it through stable facades and hook traits
 
-Do not force everything into linked Rust.
+The same pattern is what later chapters use for dynamic blocks and CMS editorial rules. When the
+CMS admin starts exposing page settings, ordered blocks, and reusable shared blocks, the linked
+backend remains the place for product-specific publish validation and runtime shaping.
 
-You may still want:
+## Checkpoint
 
-- a separate service when the boundary is operationally real
-- a third-party WASM extension when the code is lower-trust or marketplace-style
-- plain HTTP integration when the dependency should remain external
+At this point the linked-backend story should be visible in these concrete files:
 
-The point is not "everything must be linked." The point is that Coil has a clear default path when the code is truly customer-owned application logic.
+```text
+crates/tutorial-app-backend/Cargo.toml
+crates/tutorial-app-backend/src/lib.rs
+crates/tutorial-app-app/src/lib.rs
+```
 
-## One Important Current Capability
+A reviewer should be able to answer:
 
-If you need customer-owned server-side page shaping, use linked Rust render-model hooks.
+- where customer-owned Rust lives
+- where it gets linked into the app
+- which file owns product-specific publish rules
 
-That is the supported path for:
+They should also be able to run the app with the linked backend in place:
 
-- mounting your own top-level model prefix such as `crm_page`
-- merging fields into `page`
-- shaping block-driven pages at request time before template render
-
-Read [Render Model Hooks](../reference/render-model-hooks.md) for the exact API and merge rules.
-
-## Common Mistakes
-
-### Recreating a sidecar by habit
-
-If the code is product-specific and needs first-party access to application behaviour, starting with an external service is usually the wrong default.
-
-### Expecting runtime internals as the API
-
-The supported contract is the customer SDK and stable facades, not direct access to every internal runtime type.
-
-### Confusing customer Rust with third-party extensions
-
-Linked customer Rust and bounded WASM extensions serve different goals and operate under different trust assumptions.
+```bash
+docker compose up -d
+cargo run -p tutorial-app-bin -- validate
+cargo run -p tutorial-app-bin -- serve
+```
 
 ## What To Read Next
 
+- [Customer project layout](customer-project-layout.md)
 - [Customer-root workspace](../core-concepts/customer-root-workspace.md)
-- [Customer apps vs official modules](../core-concepts/customer-apps-vs-official-modules.md)
+- [Render Model Hooks](../reference/render-model-hooks.md)
 - [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
-- [Shoppr overview](../use-cases/shoppr/overview.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
-- [Observability, monitoring, and audit](../operations/observability.md)

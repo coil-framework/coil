@@ -18,6 +18,8 @@ They are written as product requirements, not implementation detail notes. The g
   Breaks the work into staged platform deliveries so the capability set can be built without losing coherence.
 - [06-getting-started-as-an-end-to-end-product-tutorial.md](./06-getting-started-as-an-end-to-end-product-tutorial.md)
   Defines the documentation strategy for turning Getting Started into a full step-by-step build of a realistic retail, events, and memberships site.
+- [07-implementation-program.md](./07-implementation-program.md)
+  Breaks the requirement set into executable epics, workstreams, task slices, and acceptance criteria.
 
 ## Cross-Cutting Principles
 

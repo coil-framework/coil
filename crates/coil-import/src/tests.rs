@@ -97,10 +97,7 @@ fn manifest_plans_importers_in_dependency_order() {
 fn manifest_validate_at_rejects_missing_referenced_paths_and_cutover_contracts() {
     let root = unique_dir("manifest-validate-at");
     write_text(root.join("app.toml"), "[app]\nname = \"shoppr\"\n");
-    write_text(
-        root.join("platform.toml"),
-        "[app]\nname = \"shoppr\"\n",
-    );
+    write_text(root.join("platform.toml"), "[app]\nname = \"shoppr\"\n");
     write_text(root.join("pages.json"), "[]");
     write_text(root.join("capability-map.md"), "capability map");
     write_text(root.join("auth-mapping.md"), "auth mapping");

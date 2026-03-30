@@ -68,28 +68,33 @@ pub fn load_descriptor(root: impl AsRef<Path>) -> Result<ProjectDescriptor> {
     let path = descriptor_path(root);
     let input =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let descriptor: ProjectDescriptor = toml::from_str(&input)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let descriptor: ProjectDescriptor =
+        toml::from_str(&input).with_context(|| format!("failed to parse {}", path.display()))?;
     descriptor.validate()?;
     Ok(descriptor)
 }
 
-pub fn create_project(root: impl AsRef<Path>, descriptor: &ProjectDescriptor) -> Result<ApplyReport> {
+pub fn create_project(
+    root: impl AsRef<Path>,
+    descriptor: &ProjectDescriptor,
+) -> Result<ApplyReport> {
     let root = root.as_ref();
     if root.exists() {
-        let mut entries = fs::read_dir(root)
-            .with_context(|| format!("failed to inspect {}", root.display()))?;
+        let mut entries =
+            fs::read_dir(root).with_context(|| format!("failed to inspect {}", root.display()))?;
         if entries.next().transpose()?.is_some() {
             bail!("destination `{}` is not empty", root.display());
         }
     } else {
-        fs::create_dir_all(root)
-            .with_context(|| format!("failed to create {}", root.display()))?;
+        fs::create_dir_all(root).with_context(|| format!("failed to create {}", root.display()))?;
     }
     apply_descriptor(root, descriptor)
 }
 
-pub fn apply_descriptor(root: impl AsRef<Path>, descriptor: &ProjectDescriptor) -> Result<ApplyReport> {
+pub fn apply_descriptor(
+    root: impl AsRef<Path>,
+    descriptor: &ProjectDescriptor,
+) -> Result<ApplyReport> {
     let root = root.as_ref();
     descriptor.validate()?;
     save_descriptor(root, descriptor)?;
@@ -1132,9 +1137,12 @@ secondary_cta = "{secondary}"
             _ => format!("Cargo coil generated {market} storefront"),
         },
         summary = match locale {
-            "fr-FR" => "Commencez avec une application cliente Coil, multilingue et prête à évoluer.",
-            "pl-PL" => "Zacznij od klientowskiej aplikacji Coil z wieloma językami i miejscem na dalszy rozwój.",
-            _ => "Start from a customer-root Coil app with translations, linked Rust, and room to grow.",
+            "fr-FR" =>
+                "Commencez avec une application cliente Coil, multilingue et prête à évoluer.",
+            "pl-PL" =>
+                "Zacznij od klientowskiej aplikacji Coil z wieloma językami i miejscem na dalszy rozwój.",
+            _ =>
+                "Start from a customer-root Coil app with translations, linked Rust, and room to grow.",
         },
         primary = match locale {
             "fr-FR" => "Ouvrir l’administration",
@@ -1194,11 +1202,8 @@ mod tests {
     #[test]
     fn descriptor_apply_writes_valid_customer_root_files() {
         let workspace = tempdir().unwrap();
-        let mut descriptor = ProjectDescriptor::new(
-            "acme".to_string(),
-            "Acme".to_string(),
-            "en-GB".to_string(),
-        );
+        let mut descriptor =
+            ProjectDescriptor::new("acme".to_string(), "Acme".to_string(), "en-GB".to_string());
         descriptor.add_locale("fr-FR".to_string(), "acme").unwrap();
 
         let report = apply_descriptor(workspace.path(), &descriptor).unwrap();
@@ -1234,11 +1239,8 @@ mod tests {
     #[test]
     fn platform_config_includes_canonical_host_in_site_hosts() {
         let workspace = tempdir().unwrap();
-        let mut descriptor = ProjectDescriptor::new(
-            "shop".to_string(),
-            "Shop".to_string(),
-            "en-GB".to_string(),
-        );
+        let mut descriptor =
+            ProjectDescriptor::new("shop".to_string(), "Shop".to_string(), "en-GB".to_string());
         descriptor
             .add_site(SiteDescriptor {
                 id: "shop-fr".to_string(),
@@ -1261,11 +1263,8 @@ mod tests {
     #[test]
     fn workspace_cargo_toml_uses_explicit_framework_version() {
         let workspace = tempdir().unwrap();
-        let mut descriptor = ProjectDescriptor::new(
-            "acme".to_string(),
-            "Acme".to_string(),
-            "en-GB".to_string(),
-        );
+        let mut descriptor =
+            ProjectDescriptor::new("acme".to_string(), "Acme".to_string(), "en-GB".to_string());
         descriptor.tooling.framework_version = "0.9.1".to_string();
 
         apply_descriptor(workspace.path(), &descriptor).unwrap();
@@ -1277,11 +1276,8 @@ mod tests {
 
     #[test]
     fn dev_dockerfile_uses_cargo_watch_instead_of_release_build() {
-        let descriptor = ProjectDescriptor::new(
-            "acme".to_string(),
-            "Acme".to_string(),
-            "en-GB".to_string(),
-        );
+        let descriptor =
+            ProjectDescriptor::new("acme".to_string(), "Acme".to_string(), "en-GB".to_string());
 
         let dockerfile = super::dockerfile(&descriptor);
 
@@ -1293,11 +1289,8 @@ mod tests {
 
     #[test]
     fn dev_compose_persists_cargo_caches_and_mounts_workspace() {
-        let descriptor = ProjectDescriptor::new(
-            "acme".to_string(),
-            "Acme".to_string(),
-            "en-GB".to_string(),
-        );
+        let descriptor =
+            ProjectDescriptor::new("acme".to_string(), "Acme".to_string(), "en-GB".to_string());
 
         let compose = super::docker_compose(&descriptor);
 

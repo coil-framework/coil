@@ -54,7 +54,9 @@ fn check_file(root: &Path, expected: &RenderedProjectFile, issues: &mut Vec<Doct
             if contents != expected.contents {
                 issues.push(DoctorIssue {
                     path,
-                    message: "file differs from the current descriptor output; re-run `cargo coil apply`".to_string(),
+                    message:
+                        "file differs from the current descriptor output; re-run `cargo coil apply`"
+                            .to_string(),
                 });
             }
         }

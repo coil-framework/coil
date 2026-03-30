@@ -152,12 +152,18 @@ fn route_surfaces() -> Vec<RouteSurface> {
         RouteSurface::new("ops.reports", RouteSurfaceKind::AdminPage, "/admin/reports")
             .gated_by(Capability::AdminAuditRead),
         RouteSurface::new(
-            "ops.recovery",
-            RouteSurfaceKind::AdminPage,
+            "ops.report.export",
+            RouteSurfaceKind::AdminAction,
+            "/admin/reports/export",
+        )
+        .gated_by(Capability::AdminAuditRead),
+        RouteSurface::new(
+            "ops.recovery.execute",
+            RouteSurfaceKind::AdminAction,
             "/admin/recovery",
         )
         .gated_by(Capability::SystemModuleManage),
-        RouteSurface::new("ops.bulk", RouteSurfaceKind::AdminAction, "/admin/bulk")
+        RouteSurface::new("ops.bulk.execute", RouteSurfaceKind::AdminAction, "/admin/bulk")
             .gated_by(Capability::SystemModuleManage),
     ]
 }
@@ -376,7 +382,30 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
         )
         .gated_by(Capability::AdminAuditRead),
         HttpSurfaceContribution::json(
+            "ops.report.export",
+            HttpSurfaceMethod::Post,
+            HttpSurfaceArea::Admin,
+            "/admin/reports/export",
+            202,
+            std::collections::BTreeMap::from([("status".to_string(), "queued".to_string())]),
+        )
+        .gated_by(Capability::AdminAuditRead),
+        HttpSurfaceContribution::page(
             "ops.recovery",
+            HttpSurfaceArea::Admin,
+            "/admin/recovery",
+            "ops/recovery",
+        )
+        .gated_by(Capability::SystemModuleManage),
+        HttpSurfaceContribution::page(
+            "ops.bulk",
+            HttpSurfaceArea::Admin,
+            "/admin/bulk",
+            "ops/bulk",
+        )
+        .gated_by(Capability::SystemModuleManage),
+        HttpSurfaceContribution::json(
+            "ops.recovery.execute",
             HttpSurfaceMethod::Post,
             HttpSurfaceArea::Admin,
             "/admin/recovery",
@@ -385,7 +414,7 @@ fn http_surfaces() -> Vec<HttpSurfaceContribution> {
         )
         .gated_by(Capability::SystemModuleManage),
         HttpSurfaceContribution::json(
-            "ops.bulk",
+            "ops.bulk.execute",
             HttpSurfaceMethod::Post,
             HttpSurfaceArea::Admin,
             "/admin/bulk",

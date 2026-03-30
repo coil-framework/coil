@@ -34,6 +34,8 @@ pub struct PageRevision {
     pub body_html: String,
     pub seo: SeoMetadata,
     pub media_references: BTreeSet<AssetReference>,
+    pub settings: PageSettings,
+    pub blocks: Vec<PageBlockInstance>,
 }
 
 impl PageRevision {
@@ -53,12 +55,49 @@ impl PageRevision {
             body_html: require_non_empty("body_html", body_html.into())?,
             seo,
             media_references: BTreeSet::new(),
+            settings: PageSettings::default(),
+            blocks: Vec::new(),
         })
     }
 
     pub fn with_media_reference(mut self, asset: AssetReference) -> Self {
         self.media_references.insert(asset);
         self
+    }
+
+    pub fn with_settings(mut self, settings: PageSettings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    pub fn with_inline_block(
+        mut self,
+        block: StructuredBlockInstance,
+    ) -> Result<Self, CmsModelError> {
+        self.push_block_instance(PageBlockInstance::Inline(block))?;
+        Ok(self)
+    }
+
+    pub fn with_shared_block_reference(
+        mut self,
+        reference: SharedBlockReference,
+    ) -> Result<Self, CmsModelError> {
+        self.push_block_instance(PageBlockInstance::Shared(reference))?;
+        Ok(self)
+    }
+
+    fn push_block_instance(&mut self, block: PageBlockInstance) -> Result<(), CmsModelError> {
+        let instance_id = block.instance_id().to_string();
+        if self
+            .blocks
+            .iter()
+            .any(|existing| existing.instance_id() == block.instance_id())
+        {
+            return Err(CmsModelError::DuplicatePageBlockInstance { instance_id });
+        }
+
+        self.blocks.push(block);
+        Ok(())
     }
 }
 

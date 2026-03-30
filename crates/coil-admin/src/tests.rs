@@ -159,8 +159,8 @@ fn admin_module_manifest_and_accessibility_contract_are_stable() {
             CoreServiceDependency::Http,
         ]
     );
-    assert_eq!(manifest.route_surfaces.len(), 2);
-    assert_eq!(manifest.http_surfaces.len(), 2);
+    assert_eq!(manifest.route_surfaces.len(), 6);
+    assert_eq!(manifest.http_surfaces.len(), 6);
     assert_eq!(manifest.jobs.len(), 1);
     assert_eq!(manifest.event_subscriptions.len(), 1);
     assert!(

@@ -12,8 +12,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand};
 use std::thread;
-use std::time::SystemTime;
 use std::time::Duration;
+use std::time::SystemTime;
 
 #[derive(Debug, Parser)]
 #[command(name = "cargo-coil")]
@@ -79,7 +79,10 @@ struct NewCommand {
     #[arg(long)]
     coil_path: Option<PathBuf>,
 
-    #[arg(long, help = "Framework version to generate against. Use an explicit version or `latest`.")]
+    #[arg(
+        long,
+        help = "Framework version to generate against. Use an explicit version or `latest`."
+    )]
     framework_version: Option<String>,
 }
 
@@ -112,7 +115,10 @@ struct InitCommand {
     #[arg(long)]
     coil_path: Option<PathBuf>,
 
-    #[arg(long, help = "Framework version to generate against. Use an explicit version or `latest`.")]
+    #[arg(
+        long,
+        help = "Framework version to generate against. Use an explicit version or `latest`."
+    )]
     framework_version: Option<String>,
 }
 
@@ -461,11 +467,8 @@ fn descriptor_from_wizard(
     coil_path: Option<PathBuf>,
     framework_version: String,
 ) -> Result<ProjectDescriptor> {
-    let mut descriptor = ProjectDescriptor::new(
-        wizard.name,
-        wizard.display_name,
-        wizard.default_locale,
-    );
+    let mut descriptor =
+        ProjectDescriptor::new(wizard.name, wizard.display_name, wizard.default_locale);
     descriptor.modules.enabled = wizard.modules;
     descriptor.tooling.framework_version = framework_version;
     descriptor.i18n.supported_locales = dedup(wizard.supported_locales);
@@ -732,7 +735,10 @@ fn should_ignore_watch_path(relative: &Path) -> bool {
 }
 
 fn resolve_framework_version(requested: Option<String>) -> Result<String> {
-    resolve_framework_version_with(requested.as_deref(), fetch_latest_published_framework_version)
+    resolve_framework_version_with(
+        requested.as_deref(),
+        fetch_latest_published_framework_version,
+    )
 }
 
 fn resolve_framework_version_with<F>(requested: Option<&str>, fetch_latest: F) -> Result<String>
@@ -790,7 +796,9 @@ fn ensure_version_exists(
     version: &str,
 ) -> Result<()> {
     client
-        .get(format!("https://crates.io/api/v1/crates/{package}/{version}"))
+        .get(format!(
+            "https://crates.io/api/v1/crates/{package}/{version}"
+        ))
         .send()
         .with_context(|| format!("failed to verify `{package}` v{version} on crates.io"))?
         .error_for_status()
@@ -815,30 +823,37 @@ mod tests {
 
     #[test]
     fn explicit_framework_version_wins() {
-        let version = resolve_framework_version_with(Some("0.2.7"), || Ok("9.9.9".to_string()))
-            .unwrap();
+        let version =
+            resolve_framework_version_with(Some("0.2.7"), || Ok("9.9.9".to_string())).unwrap();
         assert_eq!(version, "0.2.7");
     }
 
     #[test]
     fn latest_uses_live_lookup() {
-        let version = resolve_framework_version_with(Some("latest"), || Ok("0.3.1".to_string()))
-            .unwrap();
+        let version =
+            resolve_framework_version_with(Some("latest"), || Ok("0.3.1".to_string())).unwrap();
         assert_eq!(version, "0.3.1");
     }
 
     #[test]
     fn default_falls_back_to_built_in_version() {
-        let version = resolve_framework_version_with(None, || bail!("network unavailable")).unwrap();
+        let version =
+            resolve_framework_version_with(None, || bail!("network unavailable")).unwrap();
         assert_eq!(version, DEFAULT_FRAMEWORK_VERSION);
     }
 
     #[test]
     fn watch_ignores_runtime_state_directories() {
         assert!(should_ignore_watch_path(Path::new(".coil")));
-        assert!(should_ignore_watch_path(Path::new(".coil/cache/state.json")));
-        assert!(should_ignore_watch_path(Path::new(".coil/metadata/app.sqlite3")));
+        assert!(should_ignore_watch_path(Path::new(
+            ".coil/cache/state.json"
+        )));
+        assert!(should_ignore_watch_path(Path::new(
+            ".coil/metadata/app.sqlite3"
+        )));
         assert!(should_ignore_watch_path(Path::new("target/debug/app")));
-        assert!(!should_ignore_watch_path(Path::new("templates/pages/home.html")));
+        assert!(!should_ignore_watch_path(Path::new(
+            "templates/pages/home.html"
+        )));
     }
 }

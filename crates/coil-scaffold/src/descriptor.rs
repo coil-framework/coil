@@ -103,7 +103,9 @@ impl Default for ToolingSection {
 pub enum DependencySource {
     #[default]
     CratesIo,
-    Path { repo_root: String },
+    Path {
+        repo_root: String,
+    },
 }
 
 impl ProjectDescriptor {

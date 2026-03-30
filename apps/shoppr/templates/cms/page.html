@@ -18,11 +18,35 @@
     <main class="site-main">
       <article class="page-shell">
         <p class="catalog-section__eyebrow">CMS Page</p>
-        <h1 coil:text="${cms_page.title}">Shoppr</h1>
-        <p coil:text="${cms_page.summary}">
+        <h1 coil:text="${cms_page.content.title}">Shoppr</h1>
+        <p coil:text="${cms_page.content.summary}">
           Server-rendered CMS page.
         </p>
-        <div coil:utext="${cms_page.body_html}">
+        <div class="cms-page-blocks" coil:if="${cms_page.has_structured_blocks}">
+          <coil:block coil:each="block : ${cms_page.blocks}">
+            <coil:block coil:switch="${block.type_id}">
+              <div coil:case="'hero'" coil:replace="~{cms/blocks/hero :: block}"></div>
+              <div coil:case="'rich_text'" coil:replace="~{cms/blocks/rich_text :: block}"></div>
+              <div coil:case="'legacy_html_body'" coil:replace="~{cms/blocks/rich_text :: block}"></div>
+              <div coil:case="'callout'" coil:replace="~{cms/blocks/callout :: block}"></div>
+              <div coil:case="'editorial_callout'" coil:replace="~{cms/blocks/callout :: block}"></div>
+              <section coil:default class="page-shell">
+                <p class="catalog-section__eyebrow" coil:text="${block.type_id}">Block</p>
+                <h2 coil:if="${block.has_label}" coil:text="${block.label}">Block label</h2>
+                <div coil:if="${block.has_html}" coil:utext="${block.html}">
+                  <p>Block body.</p>
+                </div>
+                <dl coil:unless="${block.has_html}">
+                  <div coil:each="field : ${block.field_entries}">
+                    <dt coil:text="${field.key}">field</dt>
+                    <dd coil:text="${field.value}">value</dd>
+                  </div>
+                </dl>
+              </section>
+            </coil:block>
+          </coil:block>
+        </div>
+        <div coil:unless="${cms_page.has_structured_blocks}" coil:utext="${cms_page.body_html}">
           <p>Page body.</p>
         </div>
         <div class="checkout-actions">

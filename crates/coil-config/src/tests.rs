@@ -501,8 +501,7 @@ fn customer_bootstrap_manifest_loads_from_file() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let temp_dir =
-        std::env::temp_dir().join(format!("coil-config-customer-bootstrap-{timestamp}"));
+    let temp_dir = std::env::temp_dir().join(format!("coil-config-customer-bootstrap-{timestamp}"));
     std::fs::create_dir_all(&temp_dir).unwrap();
     let manifest_path = temp_dir.join("app.toml");
     std::fs::write(
@@ -544,9 +543,8 @@ fn customer_bootstrap_manifest_accepts_explicit_sites_with_app_manifest_field_na
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let temp_dir = std::env::temp_dir().join(format!(
-        "coil-config-customer-bootstrap-sites-{timestamp}"
-    ));
+    let temp_dir =
+        std::env::temp_dir().join(format!("coil-config-customer-bootstrap-sites-{timestamp}"));
     std::fs::create_dir_all(&temp_dir).unwrap();
     let manifest_path = temp_dir.join("app.toml");
     std::fs::write(
@@ -637,7 +635,10 @@ enabled = ["cms-pages", "admin-shell"]
 
     assert_eq!(manifest.translation_catalogs().len(), 2);
     assert_eq!(manifest.translation_catalogs()[0].locale(), "en-GB");
-    assert_eq!(manifest.translation_catalogs()[0].path(), "translations/en-GB.toml");
+    assert_eq!(
+        manifest.translation_catalogs()[0].path(),
+        "translations/en-GB.toml"
+    );
 
     std::fs::remove_file(&manifest_path).unwrap();
     std::fs::remove_dir(&temp_dir).unwrap();

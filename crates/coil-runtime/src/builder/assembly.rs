@@ -40,7 +40,8 @@ where
         });
     }
 
-    let bootstrap = bootstrap_core_services_with_translation_catalogs(&config, translation_catalogs)?;
+    let bootstrap =
+        bootstrap_core_services_with_translation_catalogs(&config, translation_catalogs)?;
     let mut registry = bootstrap.registry;
     let mut template = bootstrap.template;
     let mut observability = bootstrap.observability;

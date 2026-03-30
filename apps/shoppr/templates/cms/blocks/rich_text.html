@@ -1,0 +1,11 @@
+<section class="page-shell" xmlns:coil="https://coil.rs" coil:fragment="block">
+  <div coil:if="${block.has_html}" coil:utext="${block.html}">
+    <p>Rich text block.</p>
+  </div>
+  <div coil:unless="${block.has_html}">
+    <h2 coil:if="${block.has_label}" coil:text="${block.label}">Body</h2>
+    <p coil:text="${block.fields.body ?: block.fields.text ?: ''}">
+      Rich text block.
+    </p>
+  </div>
+</section>

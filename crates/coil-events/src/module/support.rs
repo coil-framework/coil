@@ -4,8 +4,7 @@ pub(super) fn events_waitlist_repository() -> DataRepositoryContribution {
     DataRepositoryContribution::new(
         RepositorySpec::new(
             "events.waitlist",
-            TableName::new("coil.events_waitlist_entries")
-                .expect("constant events table is valid"),
+            TableName::new("coil.events_waitlist_entries").expect("constant events table is valid"),
             vec![
                 QueryField::new("waitlist_entry_id").expect("constant events field is valid"),
                 QueryField::new("event_id").expect("constant events field is valid"),

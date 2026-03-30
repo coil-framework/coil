@@ -9,6 +9,7 @@ use coil_commerce::{
     CheckoutId, CheckoutLine, CheckoutSession, CurrencyCode, EntitlementKey, Money, Order, OrderId,
     PricingPolicy, ProductId, ProductKind, Sku,
 };
+use coil_core::IntegrationKind;
 use coil_customer_sdk::{
     AuditEntry, AuditFacade, AuthCheckRequest, AuthCheckResult, AuthExplainRequest,
     AuthExplanation, AuthFacade, BackendError, BackendErrorKind, CommerceFacade,
@@ -19,6 +20,7 @@ use coil_customer_sdk::{
     RepositoryWriteReceipt, RequestContext as CustomerPluginRequestContext,
     TraceContext as CustomerPluginTraceContext,
 };
+use coil_observability::{DependencyStatus, MetricReading};
 use coil_memberships::{
     BillingInterval, MemberAccountId, MembershipCatalog, MembershipInstant, MembershipModelError,
     MembershipTier, MembershipTierId, SubscriptionStatus, TierVisibility,
@@ -258,6 +260,12 @@ impl RepositoryFacade for RuntimeRenderRepositoryFacade<'_> {
                     fields.insert("summary".to_string(), page.draft.summary.clone());
                     fields.insert("body_html".to_string(), page.draft.body_html.clone());
                     fields.insert("status".to_string(), page.status_label().to_string());
+                    fields.insert("content_kind".to_string(), "legacy_html".to_string());
+                    fields.insert("block_count".to_string(), "1".to_string());
+                    fields.insert("has_blocks".to_string(), "true".to_string());
+                    fields.insert("show_in_navigation".to_string(), "true".to_string());
+                    fields.insert("allow_indexing".to_string(), "true".to_string());
+                    fields.insert("include_in_sitemap".to_string(), "true".to_string());
                     if let Some(live_path) = page.live_path() {
                         fields.insert("live_path".to_string(), live_path);
                     }
@@ -577,7 +585,13 @@ impl RuntimePlan {
             Some(&execution.principal),
         )?;
 
-        apply_customer_render_model_contributions(self, execution, template_name, fragment_id, model)
+        apply_customer_render_model_contributions(
+            self,
+            execution,
+            template_name,
+            fragment_id,
+            model,
+        )
     }
 }
 
@@ -674,12 +688,8 @@ fn apply_customer_render_model_contribution(
 
 fn merge_policy(policy: coil_customer_sdk::MergePolicy) -> RenderModelMergePolicy {
     match policy {
-        coil_customer_sdk::MergePolicy::FailOnConflict => {
-            RenderModelMergePolicy::FailOnConflict
-        }
-        coil_customer_sdk::MergePolicy::ReplaceExisting => {
-            RenderModelMergePolicy::ReplaceExisting
-        }
+        coil_customer_sdk::MergePolicy::FailOnConflict => RenderModelMergePolicy::FailOnConflict,
+        coil_customer_sdk::MergePolicy::ReplaceExisting => RenderModelMergePolicy::ReplaceExisting,
         coil_customer_sdk::MergePolicy::AppendLists => RenderModelMergePolicy::AppendLists,
     }
 }
@@ -797,6 +807,9 @@ fn site_model(
         .site_id
         .clone()
         .unwrap_or_else(|| "default".to_string());
+    let settings = cms_admin_workspace(plan)
+        .map(|workspace| workspace.global_settings)
+        .unwrap_or_else(|_| crate::cms_admin::default_workspace().global_settings);
 
     RenderModel::new()
         .with_value("id", RenderValue::text(site_id))?
@@ -804,7 +817,8 @@ fn site_model(
         .with_value("request_host", RenderValue::text(execution.host.clone()))?
         .with_value("canonical_host", RenderValue::text(canonical_host))?
         .with_bool("has_brand_name", true)?
-        .with_value("brand_name", RenderValue::text(brand_name))
+        .with_value("brand_name", RenderValue::text(brand_name))?
+        .with_object("settings", cms_global_settings_model(&settings)?)
 }
 
 fn links_model(
@@ -881,6 +895,17 @@ fn links_model(
             )),
         )?
         .with_value(
+            "events",
+            RenderValue::text(route_link(
+                plan,
+                site_id,
+                "events.list",
+                &BTreeMap::new(),
+                Some(locale),
+                &format!("/{locale}/events"),
+            )),
+        )?
+        .with_value(
             "cart",
             RenderValue::text(route_link(
                 plan,
@@ -907,13 +932,51 @@ fn links_model(
         .with_value("account", RenderValue::text("/account"))?
         .with_value("orders", RenderValue::text("/account/orders"))?
         .with_value("memberships", RenderValue::text("/account/memberships"))?
+        .with_value("passes", RenderValue::text("/account/passes"))?
         .with_value("admin_dashboard", RenderValue::text("/admin"))?
+        .with_value("admin_customers", RenderValue::text("/admin/customers"))?
+        .with_value("admin_diagnostics", RenderValue::text("/admin/diagnostics"))?
+        .with_value("admin_jobs", RenderValue::text("/admin/jobs"))?
+        .with_value(
+            "admin_integrations",
+            RenderValue::text("/admin/integrations"),
+        )?
         .with_value("admin_audit", RenderValue::text("/admin/audit"))?
         .with_value("admin_orders", RenderValue::text("/admin/orders"))?
-        .with_value("admin_catalog", RenderValue::text("/admin/catalog/products"))?
+        .with_value("admin_payments", RenderValue::text("/admin/payments"))?
+        .with_value("admin_search", RenderValue::text("/admin/search"))?
+        .with_value("admin_reports", RenderValue::text("/admin/reports"))?
+        .with_value("admin_bulk", RenderValue::text("/admin/bulk"))?
+        .with_value("admin_recovery", RenderValue::text("/admin/recovery"))?
+        .with_value("admin_events", RenderValue::text("/admin/events"))?
+        .with_value(
+            "admin_event_bookings",
+            RenderValue::text("/admin/events/bookings"),
+        )?
+        .with_value(
+            "admin_event_check_in",
+            RenderValue::text("/admin/events/check-in"),
+        )?
+        .with_value(
+            "admin_catalog",
+            RenderValue::text("/admin/catalog/products"),
+        )?
         .with_value("admin_pages", RenderValue::text("/admin/pages"))?
+        .with_value(
+            "admin_membership_tiers",
+            RenderValue::text("/admin/memberships/tiers"),
+        )?
+        .with_value(
+            "admin_membership_subscriptions",
+            RenderValue::text("/admin/memberships/subscriptions"),
+        )?
+        .with_value(
+            "admin_membership_passes",
+            RenderValue::text("/admin/memberships/passes"),
+        )?
         .with_value("admin_navigation", RenderValue::text("/admin/navigation"))?
-        .with_value("admin_redirects", RenderValue::text("/admin/redirects"))
+        .with_value("admin_redirects", RenderValue::text("/admin/redirects"))?
+        .with_value("admin_options", RenderValue::text("/admin/options"))
 }
 
 fn route_link(
@@ -991,10 +1054,8 @@ fn site_switches_model(
             } else {
                 site.default_locale.as_str()
             };
-            let target_host = host_with_request_port(
-                site.canonical_host.as_str(),
-                execution.host.as_str(),
-            );
+            let target_host =
+                host_with_request_port(site.canonical_host.as_str(), execution.host.as_str());
             let href = if route_localized || current_site_id == Some(site.id.as_str()) {
                 plan.http
                     .path_for_site(
@@ -1018,11 +1079,7 @@ fn site_switches_model(
             } else {
                 format!(
                     "{scheme}://{target_host}{}",
-                    locale_root_fallback_path(
-                        &plan.config,
-                        Some(site.id.as_str()),
-                        target_locale,
-                    )
+                    locale_root_fallback_path(&plan.config, Some(site.id.as_str()), target_locale,)
                 )
             };
 
@@ -1094,38 +1151,47 @@ fn host_with_request_port(canonical_host: &str, request_host: &str) -> String {
     }
 }
 
-fn page_model_for_route(
-    execution: &RequestExecution,
-    template_name: &str,
-    fragment_id: Option<&str>,
-) -> RenderModel {
-    let brand_name = execution.brand_name.as_deref().unwrap_or("Shoppr");
-    let title = match execution.route.route_name.as_str() {
+fn route_page_title_and_summary(
+    route_name: &str,
+    params: &BTreeMap<String, String>,
+    brand_name: &str,
+) -> (String, &'static str) {
+    let title = match route_name {
         "home" => brand_name.to_string(),
         "commerce.catalog" => format!("Shop {brand_name}"),
         "commerce.collections" => "Shop Collections".to_string(),
-        "commerce.collection-detail" => execution
-            .route
-            .params
+        "commerce.collection-detail" => params
             .get("collection_slug")
             .map(|slug| title_case_handle(slug))
-            .unwrap_or_else(|| "Collection".to_string()),
-        "commerce.product-detail" => execution
-            .route
-            .params
+            .unwrap_or_else(|| title_case_handle("featured")),
+        "commerce.product-detail" => params
             .get("product_slug")
             .map(|slug| title_case_handle(slug))
-            .unwrap_or_else(|| "Product".to_string()),
+            .unwrap_or_else(|| title_case_handle("harbor-cap")),
         "commerce.cart" => "Cart".to_string(),
         "commerce.checkout" => "Checkout".to_string(),
         "commerce.checkout-confirmation" => "Order Confirmed".to_string(),
         "commerce.account.orders" => "Order History".to_string(),
+        "memberships.account.passes" => "Passes and Credits".to_string(),
         "admin.dashboard" => format!("{brand_name} Admin"),
+        "admin.customers" => "Customer Operations".to_string(),
+        "admin.diagnostics" => "Diagnostics".to_string(),
+        "admin.jobs" => "Jobs".to_string(),
+        "admin.integrations" => "Integrations".to_string(),
+        "commerce.payment-operations" => "Payment Operations".to_string(),
+        "ops.search" => "Search Operations".to_string(),
+        "ops.reports" => "Reports".to_string(),
+        "ops.bulk" => "Bulk Operations".to_string(),
+        "ops.recovery" => "Recovery".to_string(),
+        "events.admin.index" => "Event Operations".to_string(),
+        "events.admin.bookings" => "Event Bookings".to_string(),
+        "events.admin.check-in" => "Event Check-In".to_string(),
+        "memberships.tiers" => "Membership Tiers".to_string(),
+        "memberships.subscriptions" => "Membership Subscriptions".to_string(),
+        "memberships.passes" => "Passes and Credits".to_string(),
         "admin.audit" => "Audit Log".to_string(),
         "commerce.orders" => "Orders".to_string(),
-        "commerce.order-detail" => execution
-            .route
-            .params
+        "commerce.order-detail" => params
             .get("order_id")
             .map(|order_id| format!("Order {order_id}"))
             .unwrap_or_else(|| "Order Detail".to_string()),
@@ -1133,13 +1199,14 @@ fn page_model_for_route(
         "cms.pages.index" => "Pages".to_string(),
         "cms.navigation.index" => "Navigation".to_string(),
         "cms.redirects.index" => "Redirects".to_string(),
+        "cms.options.index" => "Global Settings".to_string(),
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             "Your Account".to_string()
         }
-        _ => execution.route.route_name.clone(),
+        _ => route_name.to_string(),
     };
 
-    let summary = match execution.route.route_name.as_str() {
+    let summary = match route_name {
         "commerce.catalog" => {
             "Browse the current assortment across apparel, memberships, and event-linked offers."
         }
@@ -1162,8 +1229,56 @@ fn page_model_for_route(
         "commerce.account.orders" => {
             "Review completed purchases, payment details, and membership-linked order history."
         }
+        "memberships.account.passes" => {
+            "Review event-linked passes, available credits, and the bookings they are intended to unlock."
+        }
         "admin.dashboard" => {
             "Operator dashboard for launch-day catalog, orders, and content checks."
+        }
+        "admin.customers" => {
+            "Operator-facing customer records built from live orders, memberships, and event-linked purchases."
+        }
+        "admin.diagnostics" => {
+            "Readiness, metrics, trace samples, and privileged diagnostics entry points for operators."
+        }
+        "admin.jobs" => {
+            "Registered background jobs, triggers, queues, and retry envelopes available in the operator shell."
+        }
+        "admin.integrations" => {
+            "Module integration surfaces, approved outbound endpoints, and extension-facing platform seams."
+        }
+        "commerce.payment-operations" => {
+            "Provider handoff, webhook confirmation, and downstream follow-up for live checkout activity."
+        }
+        "ops.search" => {
+            "Search index freshness, rebuild pressure, and projection drift across the operator-visible catalog."
+        }
+        "ops.reports" => {
+            "Operational report exports, delivery state, and queued follow-up work for system operators."
+        }
+        "ops.bulk" => {
+            "Capability-gated bulk workflows for search reindex and queued export coordination."
+        }
+        "ops.recovery" => {
+            "Operator-run recovery workflows for full restore and derived-state rebuild scenarios."
+        }
+        "events.admin.index" => {
+            "Operator overview of live events, slot pressure, and booking or waitlist actions."
+        }
+        "events.admin.bookings" => {
+            "Operator booking queue for held reservations, confirmed attendees, and waitlist follow-up."
+        }
+        "events.admin.check-in" => {
+            "Operator check-in lane for attendance readiness, reconciliation, and on-site follow-up."
+        }
+        "memberships.tiers" => {
+            "Operator view of the checked-in membership offers, entitlements, and storefront availability."
+        }
+        "memberships.subscriptions" => {
+            "Operator-facing subscription queue built from live membership orders and current customer state."
+        }
+        "memberships.passes" => {
+            "Operator-facing pass and credit queue built from event-linked purchases, pending payment state, and customer follow-up signals."
         }
         "admin.audit" => {
             "Recent privileged actions, the acting operator, and the affected resources."
@@ -1184,11 +1299,33 @@ fn page_model_for_route(
         "cms.redirects.index" => {
             "Manage live redirect rules for legacy and unmatched storefront routes."
         }
+        "cms.options.index" => {
+            "Edit shared storefront content and contact settings used across public templates."
+        }
         "memberships.account" | "memberships.account.dashboard" | "account.dashboard" => {
             "Membership state, recent orders, and next actions for the signed-in customer."
         }
         _ => "Server-rendered storefront and account surface.",
     };
+
+    (title, summary)
+}
+
+fn page_model_for_route_name(
+    route_name: &str,
+    params: &BTreeMap<String, String>,
+    brand_name: &str,
+    template_name: &str,
+    fragment_id: Option<&str>,
+) -> RenderModel {
+    let (title, summary) = route_page_title_and_summary(route_name, params, brand_name);
+    let presentation = page_presentation_model(template_name, fragment_id)
+        .expect("page presentation model keys are valid");
+    let settings =
+        default_page_settings_model().expect("default page settings model keys are valid");
+    let content = route_page_content_model(title.as_str(), summary)
+        .expect("route page content model keys are valid");
+    let blocks = empty_page_blocks().expect("empty page blocks model is valid");
 
     RenderModel::new()
         .with_value("title", RenderValue::text(title))
@@ -1197,7 +1334,109 @@ fn page_model_for_route(
         .and_then(|model| {
             model.with_value("fragment_mode", RenderValue::bool(fragment_id.is_some()))
         })
+        .and_then(|model| model.with_object("presentation", presentation))
+        .and_then(|model| model.with_object("settings", settings))
+        .and_then(|model| model.with_object("content", content))
+        .and_then(|model| model.with_list("blocks", blocks))
+        .and_then(|model| model.with_bool("has_blocks", false))
+        .and_then(|model| model.with_value("block_count", RenderValue::text("0")))
         .expect("page model keys are valid")
+}
+
+fn page_model_for_route(
+    execution: &RequestExecution,
+    template_name: &str,
+    fragment_id: Option<&str>,
+) -> RenderModel {
+    page_model_for_route_name(
+        execution.route.route_name.as_str(),
+        &execution.route.params,
+        execution.brand_name.as_deref().unwrap_or("Shoppr"),
+        template_name,
+        fragment_id,
+    )
+}
+
+fn page_presentation_model(
+    template_name: &str,
+    fragment_id: Option<&str>,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("template", RenderValue::text(template_name))?
+        .with_bool("fragment_mode", fragment_id.is_some())?
+        .with_bool("has_fragment_id", fragment_id.is_some())?
+        .with_value(
+            "fragment_id",
+            RenderValue::text(fragment_id.unwrap_or_default().to_string()),
+        )
+}
+
+fn default_page_settings_model() -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_bool("has_navigation_label", false)?
+        .with_value("navigation_label", RenderValue::text(String::new()))?
+        .with_bool("has_layout_variant", false)?
+        .with_value("layout_variant", RenderValue::text(String::new()))?
+        .with_bool("show_in_navigation", true)?
+        .with_bool("allow_indexing", true)?
+        .with_bool("include_in_sitemap", true)
+}
+
+fn route_page_content_model(title: &str, summary: &str) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("title", RenderValue::text(title))?
+        .with_value("summary", RenderValue::text(summary))?
+        .with_bool("has_body_html", false)?
+        .with_bool("has_blocks", false)?
+        .with_value("block_count", RenderValue::text("0"))
+}
+
+fn page_content_model_from_legacy_html(
+    title: &str,
+    summary: &str,
+    body_html: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    let blocks = legacy_page_blocks(body_html)?;
+    let block_count = blocks.len() as i64;
+    RenderModel::new()
+        .with_value("title", RenderValue::text(title))?
+        .with_value("summary", RenderValue::text(summary))?
+        .with_value("body_source", RenderValue::text(body_html.to_string()))?
+        .with_value(
+            "body_html",
+            RenderValue::trusted_html(TrustedHtml::new(body_html.to_string())?),
+        )?
+        .with_bool("has_body_html", true)?
+        .with_bool("has_blocks", block_count > 0)?
+        .with_value("block_count", RenderValue::text(block_count.to_string()))?
+        .with_list("blocks", blocks)
+}
+
+fn empty_page_blocks() -> Result<Vec<RenderModel>, TemplateModelError> {
+    Ok(Vec::new())
+}
+
+fn legacy_page_blocks(body_html: &str) -> Result<Vec<RenderModel>, TemplateModelError> {
+    Ok(vec![legacy_html_page_block_model("page-body", body_html)?])
+}
+
+fn legacy_html_page_block_model(
+    instance_id: &str,
+    body_html: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("id", RenderValue::text(instance_id.to_string()))?
+        .with_value("type", RenderValue::text("legacy_html_body"))?
+        .with_value("type_id", RenderValue::text("legacy_html_body"))?
+        .with_value("kind", RenderValue::text("inline"))?
+        .with_value("render_mode", RenderValue::text("legacy_html"))?
+        .with_bool("is_shared", false)?
+        .with_bool("has_html", true)?
+        .with_value("body_source", RenderValue::text(body_html.to_string()))?
+        .with_value(
+            "html",
+            RenderValue::trusted_html(TrustedHtml::new(body_html.to_string())?),
+        )
 }
 
 fn apply_route_specific_bindings(
@@ -1215,15 +1454,20 @@ fn apply_route_specific_bindings(
     let effective_catalog = effective_storefront_catalog(plan)?;
     let catalog = &effective_catalog;
     let fixture = storefront_fixture(locale, site_id, catalog, plan)?;
+    let audience = storefront_audience_bindings(plan, locale, session, principal)?;
 
     match route_name {
         "home" | "commerce.catalog" | "commerce.collections" => {
             let has_catalog_sections = !fixture.catalog_sections.is_empty();
+            let has_discovery_hubs = !fixture.discovery_hubs.is_empty();
             let has_product_cards = !fixture.product_cards.is_empty();
             model = model
+                .with_object("audience", audience.audience.clone())?
                 .with_bool("has_catalog_sections", has_catalog_sections)?
+                .with_bool("has_discovery_hubs", has_discovery_hubs)?
                 .with_bool("has_product_cards", has_product_cards)?
                 .with_list("catalog_sections", fixture.catalog_sections.clone())?
+                .with_list("discovery_hubs", fixture.discovery_hubs.clone())?
                 .with_list("product_cards", fixture.product_cards.clone())?;
         }
         "commerce.collection-detail" => {
@@ -1231,6 +1475,7 @@ fn apply_route_specific_bindings(
                 .get("collection_slug")
                 .map(String::as_str)
                 .unwrap_or("featured");
+            model = model.with_object("audience", audience.audience.clone())?;
             if let Some(_collection) = catalog.visible_collection_for_site(site_id, slug) {
                 let product_cards = fixture.product_cards_for_collection(slug);
                 model = model
@@ -1254,19 +1499,48 @@ fn apply_route_specific_bindings(
                 .get("product_slug")
                 .map(String::as_str)
                 .unwrap_or("harbor-cap");
+            let is_membership_product = catalog
+                .visible_product_for_site(site_id, slug)
+                .is_some_and(|product| product.product_kind == "membership");
+            let show_active_membership_product_notice =
+                is_membership_product && audience.has_membership;
+            let show_pending_membership_product_notice =
+                is_membership_product && audience.has_pending_membership_order;
+            let show_membership_purchase_actions =
+                !is_membership_product || audience.needs_membership_purchase;
             if catalog.visible_product_for_site(site_id, slug).is_some() {
                 let product_cards = fixture.related_product_cards_for_product(slug);
                 model = model
+                    .with_object("audience", audience.audience.clone())?
                     .with_bool("has_product", true)?
                     .with_object("product", fixture.product_for(slug))?
+                    .with_bool(
+                        "show_active_membership_product_notice",
+                        show_active_membership_product_notice,
+                    )?
+                    .with_bool(
+                        "show_pending_membership_product_notice",
+                        show_pending_membership_product_notice,
+                    )?
+                    .with_bool(
+                        "show_membership_purchase_actions",
+                        show_membership_purchase_actions,
+                    )?
                     .with_bool("has_product_cards", !product_cards.is_empty())?
                     .with_list("product_cards", product_cards)?;
             } else {
                 model = model
+                    .with_object("audience", audience.audience.clone())?
                     .with_bool("has_product", false)?
+                    .with_bool("show_active_membership_product_notice", false)?
+                    .with_bool("show_pending_membership_product_notice", false)?
+                    .with_bool("show_membership_purchase_actions", false)?
                     .with_bool("has_product_cards", false)?
                     .with_list("product_cards", Vec::<RenderModel>::new())?
-                    .with_value("missing_product_handle", RenderValue::text(slug.to_string()))?;
+                    .with_value(
+                        "missing_product_handle",
+                        RenderValue::text(slug.to_string()),
+                    )?;
             }
         }
         "commerce.cart" => {
@@ -1357,9 +1631,39 @@ fn apply_route_specific_bindings(
                     .with_object("membership_summary", account.membership_summary)?;
             }
         }
+        "events.list" => {
+            let events = event_fixtures(locale, site_id, plan)
+                .into_iter()
+                .map(|event| event_model(&event))
+                .collect::<Result<Vec<_>, _>>()?;
+            model = model
+                .with_object("audience", audience.audience.clone())?
+                .with_bool("has_events", !events.is_empty())?
+                .with_list("events", events)?;
+        }
+        "events.detail" => {
+            let slug = params
+                .get("event_slug")
+                .map(String::as_str)
+                .unwrap_or("spring-tasting");
+            let event = event_fixtures(locale, site_id, plan)
+                .into_iter()
+                .find(|event| event.slug == slug);
+            model = model.with_object("audience", audience.audience.clone())?;
+            if let Some(event) = event {
+                model = model
+                    .with_bool("has_event", true)?
+                    .with_object("event", event_model(&event)?)?;
+            } else {
+                model = model
+                    .with_bool("has_event", false)?
+                    .with_value("missing_event_slug", RenderValue::text(slug.to_string()))?;
+            }
+        }
         "commerce.account.orders"
         | "memberships.account"
         | "memberships.account.dashboard"
+        | "memberships.account.passes"
         | "account.dashboard" => {
             let include_pending_membership = route_name == "memberships.account";
             let account = account_surface_bindings(
@@ -1374,9 +1678,13 @@ fn apply_route_specific_bindings(
                 .with_object("account", account.account)?
                 .with_object("customer", account.customer)?
                 .with_list("recent_orders", account.recent_orders)?
+                .with_list("event_bookings", account.event_bookings)?
+                .with_list("pass_programs", account.pass_programs)?
+                .with_object("pass_wallet", account.pass_wallet)?
                 .with_object("membership_summary", account.membership_summary)?;
         }
         "admin.dashboard" => {
+            let (customer_records, customer_stats) = customer_operations_from_storefront(plan)?;
             let live_recent_orders = recent_orders_from_storefront(
                 live_storefront_state(plan, session, principal)?.as_ref(),
             )?;
@@ -1390,16 +1698,192 @@ fn apply_route_specific_bindings(
             } else {
                 content_pages(locale)?.len().to_string()
             };
+            let event_count = event_fixtures(locale, site_id, plan).len().to_string();
             model = model
                 .with_object("operator", operator_identity(principal, session)?)?
                 .with_bool("has_admin_panels", true)?
-                .with_list("admin_panels", admin_panels(locale, &fixture, order_count)?)?
+                .with_list(
+                    "admin_panels",
+                    admin_panels(locale, &fixture, order_count, customer_records.len())?,
+                )?
                 .with_value(
                     "catalog_count",
                     RenderValue::text(fixture.product_cards.len().to_string()),
                 )?
                 .with_value("order_count", RenderValue::text(order_count.to_string()))?
+                .with_value(
+                    "customer_count",
+                    RenderValue::text(customer_records.len().to_string()),
+                )?
+                .with_value("event_count", RenderValue::text(event_count))?
                 .with_value("content_count", RenderValue::text(content_count))?;
+            model = model.with_object("customer_stats", customer_stats)?;
+        }
+        "admin.customers" => {
+            let (customer_records, customer_stats) = customer_operations_from_storefront(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_customer_records", !customer_records.is_empty())?
+                .with_list("customer_records", customer_records)?
+                .with_object("customer_stats", customer_stats)?
+                .with_value(
+                    "customers_empty_text",
+                    RenderValue::text(
+                        "Complete at least one checkout so operator-visible customer records can be assembled.",
+                    ),
+                )?;
+        }
+        "admin.diagnostics" => {
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_object("diagnostic_status", admin_diagnostic_status(plan)?)?
+                .with_list("diagnostic_metrics", admin_diagnostic_metrics(plan)?)?
+                .with_list("diagnostic_traces", admin_diagnostic_traces(plan)?)?;
+        }
+        "admin.jobs" => {
+            let rows = admin_job_rows(plan)?;
+            let subscription_rows = admin_job_subscription_rows(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_job_rows", !rows.is_empty())?
+                .with_list("job_rows", rows)?
+                .with_bool("has_job_subscription_rows", !subscription_rows.is_empty())?
+                .with_list("job_subscription_rows", subscription_rows)?
+                .with_object("job_stats", admin_job_stats(plan)?)?;
+        }
+        "admin.integrations" => {
+            let integration_rows = admin_integration_rows(plan)?;
+            let outbound_rows = admin_outbound_endpoint_rows(plan)?;
+            let extension_rows = admin_extension_participant_rows(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_integration_rows", !integration_rows.is_empty())?
+                .with_list("integration_rows", integration_rows)?
+                .with_bool("has_outbound_endpoint_rows", !outbound_rows.is_empty())?
+                .with_list("outbound_endpoint_rows", outbound_rows)?
+                .with_bool("has_extension_participant_rows", !extension_rows.is_empty())?
+                .with_list("extension_participant_rows", extension_rows)?
+                .with_object("integration_stats", admin_integration_stats(plan)?)?;
+        }
+        "commerce.payment-operations" => {
+            let (payment_rows, payment_stats) = payment_operations_from_storefront(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_payment_operations", !payment_rows.is_empty())?
+                .with_list("payment_operations", payment_rows)?
+                .with_object("payment_operation_stats", payment_stats)?
+                .with_value(
+                    "payment_operations_empty_text",
+                    RenderValue::text(
+                        "Complete at least one checkout so provider handoff and webhook reconciliation become visible to operators.",
+                    ),
+                )?;
+        }
+        "ops.search" => {
+            let rows = ops_search_rows(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_search_rows", !rows.is_empty())?
+                .with_list("search_rows", rows)?
+                .with_object("search_stats", ops_search_stats(plan)?)?;
+        }
+        "ops.reports" => {
+            let rows = ops_report_rows(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_report_rows", !rows.is_empty())?
+                .with_list("report_rows", rows)?
+                .with_object("report_stats", ops_report_stats(plan)?)?;
+        }
+        "ops.bulk" => {
+            let rows = ops_bulk_rows(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_bulk_rows", !rows.is_empty())?
+                .with_list("bulk_rows", rows)?
+                .with_object("bulk_stats", ops_bulk_stats(plan)?)?;
+        }
+        "ops.recovery" => {
+            let rows = ops_recovery_rows(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_recovery_rows", !rows.is_empty())?
+                .with_list("recovery_rows", rows)?
+                .with_object("recovery_stats", ops_recovery_stats(plan)?)?;
+        }
+        "events.admin.index" => {
+            let events = event_admin_rows(locale, site_id, plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_event_admin_rows", !events.is_empty())?
+                .with_list("event_admin_rows", events)?
+                .with_object(
+                    "event_admin_stats",
+                    event_admin_stats(locale, site_id, plan)?,
+                )?;
+        }
+        "events.admin.bookings" => {
+            let bookings = event_booking_rows(locale, site_id, plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_event_booking_rows", !bookings.is_empty())?
+                .with_list("event_booking_rows", bookings)?
+                .with_object(
+                    "event_booking_stats",
+                    event_booking_stats(locale, site_id, plan)?,
+                )?;
+        }
+        "events.admin.check-in" => {
+            let check_in_rows = event_check_in_rows(locale, site_id, plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_event_check_in_rows", !check_in_rows.is_empty())?
+                .with_list("event_check_in_rows", check_in_rows)?
+                .with_object(
+                    "event_check_in_stats",
+                    event_check_in_stats(locale, site_id, plan)?,
+                )?;
+        }
+        "memberships.tiers" => {
+            let tiers = membership_tiers_from_catalog(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_membership_tiers", !tiers.is_empty())?
+                .with_list("membership_tiers", tiers)?
+                .with_value(
+                    "membership_tiers_empty_text",
+                    RenderValue::text(
+                        "No membership-backed products are visible in the checked-in catalog yet.",
+                    ),
+                )?;
+        }
+        "memberships.subscriptions" => {
+            let (subscriptions, stats) = membership_subscriptions_from_storefront(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_membership_subscriptions", !subscriptions.is_empty())?
+                .with_list("membership_subscriptions", subscriptions)?
+                .with_object("membership_subscription_stats", stats)?
+                .with_value(
+                    "membership_subscriptions_empty_text",
+                    RenderValue::text(
+                        "Complete a membership checkout so operator-visible subscription records can be assembled.",
+                    ),
+                )?;
+        }
+        "memberships.passes" => {
+            let (passes, stats) = membership_pass_rows_from_storefront(plan)?;
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_bool("has_membership_pass_rows", !passes.is_empty())?
+                .with_list("membership_pass_rows", passes)?
+                .with_object("membership_pass_stats", stats)?
+                .with_value(
+                    "membership_pass_rows_empty_text",
+                    RenderValue::text(
+                        "Complete an event-pass checkout so operator-visible pass and credit records can be assembled.",
+                    ),
+                )?;
         }
         "admin.audit" => {
             let audit_history = admin_audit_history(plan)?;
@@ -1497,7 +1981,20 @@ fn apply_route_specific_bindings(
                 .with_bool("has_persisted_content_page", selected_page.is_some())?
                 .with_object(
                     "selected_content_page",
-                    cms_admin_selected_page_model_with_form_state(selected_page, form_state)?,
+                    cms_admin_selected_page_model_with_form_state(
+                        selected_page,
+                        form_state,
+                        &workspace.shared_blocks,
+                    )?,
+                )?
+                .with_bool("has_shared_blocks", !workspace.shared_blocks.is_empty())?
+                .with_list(
+                    "shared_blocks",
+                    cms_admin_shared_blocks_model(&workspace.shared_blocks)?,
+                )?
+                .with_object(
+                    "shared_block_editor",
+                    cms_admin_shared_block_editor_model(form_state)?,
                 )?
                 .with_value(
                     "new_content_page_href",
@@ -1549,7 +2046,11 @@ fn apply_route_specific_bindings(
                 .cloned();
             model = model.with_object(
                 "selected_content_page",
-                cms_admin_selected_page_model_with_form_state(selected_page, form_state)?,
+                cms_admin_selected_page_model_with_form_state(
+                    selected_page,
+                    form_state,
+                    &workspace.shared_blocks,
+                )?,
             )?;
         }
         "cms.navigation.index" => {
@@ -1587,13 +2088,44 @@ fn apply_route_specific_bindings(
                 )?;
             model = merge_cms_redirect_form_feedback(model, form_state)?;
         }
+        "cms.options.index" => {
+            let workspace = plan
+                .map(cms_admin_workspace)
+                .transpose()?
+                .unwrap_or_else(default_cms_admin_workspace);
+            model = model
+                .with_object("operator", operator_identity(principal, session)?)?
+                .with_object(
+                    "global_settings",
+                    cms_global_settings_model(&workspace.global_settings)?,
+                )?;
+            model = merge_cms_options_form_feedback(model, form_state)?;
+        }
         "cms.page" => {
             let workspace = plan
                 .map(cms_admin_workspace)
                 .transpose()?
                 .unwrap_or_else(default_cms_admin_workspace);
             let slug = params.get("slug").map(String::as_str).unwrap_or_default();
-            model = model.with_object("cms_page", cms_live_page_model(&workspace, slug)?)?;
+            let requires_membership = workspace
+                .live_page_by_slug(slug)
+                .and_then(|page| page.live.as_ref())
+                .is_some_and(|revision| revision.settings.page_type == "membership_guide");
+            model = model
+                .with_object("audience", audience.audience.clone())?
+                .with_bool(
+                    "show_membership_gated_content",
+                    !requires_membership || audience.has_membership,
+                )?
+                .with_bool(
+                    "show_membership_pending_gate",
+                    requires_membership && audience.has_pending_membership_order,
+                )?
+                .with_bool(
+                    "show_membership_teaser_gate",
+                    requires_membership && audience.needs_membership_purchase,
+                )?
+                .with_object("cms_page", cms_live_page_model(&workspace, slug)?)?;
         }
         _ => {}
     }
@@ -1726,7 +2258,10 @@ fn confirmation_from_storefront(
         .with_bool("has_payment_reference", order.payment.reference.is_some())?
         .with_bool("has_membership_items", includes_membership)?
         .with_bool("has_line_items", !order.lines.is_empty())?
-        .with_list("line_items", confirmation_line_items_from_storefront(order)?)
+        .with_list(
+            "line_items",
+            confirmation_line_items_from_storefront(order)?,
+        )
 }
 
 fn empty_confirmation_model(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
@@ -1770,7 +2305,10 @@ fn account_order_from_storefront(
             RenderValue::text(display_status_label(&order.status)),
         )
         .and_then(|model| {
-            model.with_value("line_count", RenderValue::text(order.line_count.to_string()))
+            model.with_value(
+                "line_count",
+                RenderValue::text(order.line_count.to_string()),
+            )
         })
         .and_then(|model| {
             model.with_value(
@@ -1797,14 +2335,18 @@ fn admin_orders_from_storefront(
     _fixture: &StorefrontFixture,
 ) -> Result<(Vec<RenderModel>, RenderModel), TemplateModelError> {
     let Some(plan) = plan else {
-        return Ok((Vec::new(), admin_order_stats(0, 0, 0)?));
+        return Ok((Vec::new(), admin_order_stats(0, 0, 0, 0)?));
     };
     let store = StorefrontStateStore::open_for_plan(plan).map_err(template_store_error)?;
     let orders = store.admin_orders(50).map_err(template_store_error)?;
     if orders.is_empty() {
-        Ok((Vec::new(), admin_order_stats(0, 0, 0)?))
+        Ok((Vec::new(), admin_order_stats(0, 0, 0, 0)?))
     } else {
         let pending = orders
+            .iter()
+            .filter(|order| order.status == "pending_payment")
+            .count();
+        let payment_follow_up = orders
             .iter()
             .filter(|order| order.status == "pending_payment")
             .count();
@@ -1814,10 +2356,1751 @@ fn admin_orders_from_storefront(
             .count();
         let rows = orders
             .iter()
-            .map(admin_order_row_from_storefront)
+            .map(|order| admin_order_row_from_storefront(plan, order))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((rows, admin_order_stats(orders.len(), pending, refunded)?))
+        Ok((
+            rows,
+            admin_order_stats(orders.len(), pending, refunded, payment_follow_up)?,
+        ))
     }
+}
+
+fn payment_operations_from_storefront(
+    plan: Option<&RuntimePlan>,
+) -> Result<(Vec<RenderModel>, RenderModel), TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok((Vec::new(), payment_operation_stats(0, 0, 0, 0)?));
+    };
+    let store = StorefrontStateStore::open_for_plan(plan).map_err(template_store_error)?;
+    let orders = store.admin_orders(50).map_err(template_store_error)?;
+    if orders.is_empty() {
+        return Ok((Vec::new(), payment_operation_stats(0, 0, 0, 0)?));
+    }
+
+    let awaiting_confirmation = orders
+        .iter()
+        .filter(|order| order.status == "pending_payment")
+        .count();
+    let captured = orders
+        .iter()
+        .filter(|order| matches!(order.status.as_str(), "paid" | "fulfilled"))
+        .count();
+    let refund_follow_up = orders
+        .iter()
+        .filter(|order| matches!(order.status.as_str(), "refunded" | "partially_refunded"))
+        .count();
+    let rows = orders
+        .iter()
+        .map(|order| payment_operation_row_from_order(plan, order))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok((
+        rows,
+        payment_operation_stats(
+            orders.len(),
+            awaiting_confirmation,
+            captured,
+            refund_follow_up,
+        )?,
+    ))
+}
+
+fn payment_operation_stats(
+    total: usize,
+    awaiting_confirmation: usize,
+    captured: usize,
+    refund_follow_up: usize,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value(
+            "awaiting_confirmation",
+            RenderValue::text(awaiting_confirmation.to_string()),
+        )?
+        .with_value("captured", RenderValue::text(captured.to_string()))?
+        .with_value(
+            "refund_follow_up",
+            RenderValue::text(refund_follow_up.to_string()),
+        )
+}
+
+fn payment_operation_row_from_order(
+    plan: &RuntimePlan,
+    order: &StorefrontOrderSnapshot,
+) -> Result<RenderModel, TemplateModelError> {
+    let provider_label = payment_provider_label(Some(plan));
+    let has_payment_reference = order.payment.reference.is_some();
+    let provider_status_label = payment_status_label(&order.payment.status).to_string();
+    let webhook_status_label = if !has_payment_reference {
+        "No provider reference recorded".to_string()
+    } else if order.status == "pending_payment" {
+        format!("Awaiting signed {provider_label} webhook")
+    } else if matches!(
+        order.status.as_str(),
+        "paid" | "fulfilled" | "partially_refunded" | "refunded"
+    ) {
+        "Provider callback reconciled".to_string()
+    } else {
+        "Provider state needs review".to_string()
+    };
+    let next_job_label = if order.status == "pending_payment" {
+        "Hold customer messaging until the payment-provider webhook confirms capture.".to_string()
+    } else if matches!(order.status.as_str(), "paid" | "fulfilled") {
+        "Queue order confirmation and operational follow-up from the captured payment.".to_string()
+    } else if matches!(order.status.as_str(), "refunded" | "partially_refunded") {
+        "Run refund follow-up and audit export after reconciliation.".to_string()
+    } else {
+        "Review local state before scheduling another downstream action.".to_string()
+    };
+    let integration_note = if order.status == "pending_payment" {
+        configured_payment_provider(Some(plan))
+            .map(|provider| provider.pending_next_step())
+            .unwrap_or_else(|| {
+                "Payment confirmation is pending. The order will move forward after the provider callback arrives.".to_string()
+            })
+    } else if matches!(order.status.as_str(), "paid" | "fulfilled") {
+        "The provider handoff has completed. Operators can move into fulfillment or customer follow-up.".to_string()
+    } else if matches!(order.status.as_str(), "refunded" | "partially_refunded") {
+        "This payment already has refund history. Keep provider reconciliation and customer comms aligned.".to_string()
+    } else {
+        "Use the order detail view to reconcile payment, refund, and customer state.".to_string()
+    };
+
+    RenderModel::new()
+        .with_value("reference", RenderValue::text(order.order_id.clone()))?
+        .with_value(
+            "checkout_email",
+            RenderValue::text(order.payment.checkout_email.clone().unwrap_or_default()),
+        )?
+        .with_bool("has_checkout_email", order.payment.checkout_email.is_some())?
+        .with_value(
+            "payment_reference",
+            RenderValue::text(order.payment.reference.clone().unwrap_or_default()),
+        )?
+        .with_bool("has_payment_reference", has_payment_reference)?
+        .with_value("provider_label", RenderValue::text(provider_label))?
+        .with_value(
+            "provider_status_label",
+            RenderValue::text(provider_status_label),
+        )?
+        .with_value(
+            "webhook_status_label",
+            RenderValue::text(webhook_status_label),
+        )?
+        .with_value("integration_note", RenderValue::text(integration_note))?
+        .with_value("next_job_label", RenderValue::text(next_job_label))?
+        .with_value("total", RenderValue::text(order.total.clone()))?
+        .with_bool("has_refund_history", !order.refunds.is_empty())?
+        .with_value(
+            "refund_history_label",
+            RenderValue::text(if order.refunds.is_empty() {
+                String::new()
+            } else {
+                format!("{} refund event(s) recorded", order.refunds.len())
+            }),
+        )?
+        .with_value("session_id", RenderValue::text(order.session_id.clone()))?
+        .with_value(
+            "detail_href",
+            RenderValue::text(format!("/admin/orders/{}", order.order_id)),
+        )
+}
+
+fn ops_search_rows(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let product_count = if let Some(plan) = plan {
+        StorefrontStateStore::open_for_plan(plan)
+            .map_err(template_store_error)?
+            .catalog()
+            .map_err(template_store_error)?
+            .products
+            .len()
+    } else {
+        0
+    };
+    Ok(vec![
+        RenderModel::new()
+            .with_value("index_name", RenderValue::text("catalog.products"))?
+            .with_value("freshness_label", RenderValue::text("Fresh"))?
+            .with_value(
+                "drift_summary",
+                RenderValue::text(format!(
+                    "{product_count} catalog products currently participate in the checked-in search projection."
+                )),
+            )?
+            .with_value(
+                "trigger_summary",
+                RenderValue::text("Rebuilt when catalog or CMS publication events invalidate browse content."),
+            )?
+            .with_value("action_label", RenderValue::text("Rebuild only if browse drift is confirmed."))?,
+        RenderModel::new()
+            .with_value("index_name", RenderValue::text("content.pages"))?
+            .with_value("freshness_label", RenderValue::text("Watching publication events"))?
+            .with_value(
+                "drift_summary",
+                RenderValue::text("CMS publication events enqueue search refresh work through the ops module."),
+            )?
+            .with_value(
+                "trigger_summary",
+                RenderValue::text("Publication and redirect changes should keep search projections aligned."),
+            )?
+            .with_value("action_label", RenderValue::text("Use this lane before forcing a bulk reindex."))?,
+    ])
+}
+
+fn ops_search_stats(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    let total = ops_search_rows(plan)?.len();
+    let healthy = 1usize;
+    let watching = total.saturating_sub(healthy);
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("healthy", RenderValue::text(healthy.to_string()))?
+        .with_value("watching", RenderValue::text(watching.to_string()))
+}
+
+fn ops_report_rows(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    let mut definitions = plan.module_report_definitions.clone();
+    definitions.sort_by(|left, right| left.definition.title.cmp(&right.definition.title));
+
+    definitions
+        .into_iter()
+        .map(|registered| {
+            let definition = registered.definition;
+            let scope_summary = definition.description.clone().unwrap_or_else(|| {
+                format!(
+                    "Export generated by the {} module for operator handoff and audit follow-up.",
+                    registered.module
+                )
+            });
+            let output_summary = format!(
+                "{} report delivered via {} under `{}`.",
+                display_report_format(definition.format),
+                display_report_delivery_mode(definition.delivery_mode),
+                definition.export_prefix
+            );
+            let action_label = match definition.id.as_str() {
+                "report.ops.search-health" => {
+                    "Queue export before launch checks, browse drift review, or cutover sign-off."
+                }
+                "report.ops.backup-readiness" => {
+                    "Queue export before backup drills, recovery review, or operational handoff."
+                }
+                _ => "Queue export when operators need a signed artifact.",
+            };
+
+            RenderModel::new()
+                .with_value("report_id", RenderValue::text(definition.id.to_string()))?
+                .with_value("report_name", RenderValue::text(definition.title))?
+                .with_value(
+                    "delivery_mode",
+                    RenderValue::text(display_report_delivery_mode(definition.delivery_mode)),
+                )?
+                .with_value(
+                    "format_label",
+                    RenderValue::text(display_report_format(definition.format)),
+                )?
+                .with_value("job_state_label", RenderValue::text("Ready to export"))?
+                .with_value("scope_summary", RenderValue::text(scope_summary))?
+                .with_value("output_summary", RenderValue::text(output_summary))?
+                .with_value("action_label", RenderValue::text(action_label))
+        })
+        .collect()
+}
+
+fn ops_report_stats(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    let Some(plan) = plan else {
+        return RenderModel::new()
+            .with_value("total", RenderValue::text("0"))?
+            .with_value("ready", RenderValue::text("0"))?
+            .with_value("signed_delivery", RenderValue::text("0"))?
+            .with_value("queued", RenderValue::text("0"));
+    };
+    let total = plan.module_report_definitions.len();
+    let ready = total;
+    let queued = total;
+    let signed_delivery = plan
+        .module_report_definitions
+        .iter()
+        .filter(|registered| {
+            matches!(
+                registered.definition.delivery_mode,
+                coil_core::ReportDeliveryMode::SignedUrl
+            )
+        })
+        .count();
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("ready", RenderValue::text(ready.to_string()))?
+        .with_value("signed_delivery", RenderValue::text(signed_delivery.to_string()))?
+        .with_value("queued", RenderValue::text(queued.to_string()))
+}
+
+fn ops_bulk_rows(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    let mut definitions = plan.module_bulk_operations.clone();
+    definitions.sort_by(|left, right| left.definition.title.cmp(&right.definition.title));
+
+    definitions
+        .into_iter()
+        .map(|registered| {
+            let definition = registered.definition;
+            let recommended_target_count = match definition.id.as_str() {
+                "bulk.search.reindex" => "3",
+                "bulk.reports.export" => "2",
+                _ => "10",
+            };
+            RenderModel::new()
+                .with_value("operation_id", RenderValue::text(definition.id.to_string()))?
+                .with_value("operation_name", RenderValue::text(definition.title))?
+                .with_value(
+                    "scope_label",
+                    RenderValue::text(display_bulk_scope(definition.scope)),
+                )?
+                .with_value(
+                    "kind_label",
+                    RenderValue::text(display_bulk_kind(definition.kind)),
+                )?
+                .with_value(
+                    "target_limit_label",
+                    RenderValue::text(
+                        definition
+                            .max_items
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "unbounded".to_string()),
+                    ),
+                )?
+                .with_value(
+                    "recommended_target_count",
+                    RenderValue::text(recommended_target_count),
+                )?
+                .with_value(
+                    "scope_summary",
+                    RenderValue::text(
+                        definition.description.unwrap_or_else(|| {
+                            format!(
+                                "Bulk workflow from the {} module for operator-run follow-up.",
+                                registered.module
+                            )
+                        }),
+                    ),
+                )?
+                .with_value(
+                    "action_label",
+                    RenderValue::text(match definition.id.as_str() {
+                        "bulk.search.reindex" => {
+                            "Queue this only after diagnostics and search-health review confirm browse drift."
+                        }
+                        "bulk.reports.export" => {
+                            "Use this when multiple operator-facing exports are needed for audit or cutover sign-off."
+                        }
+                        _ => "Queue this workflow only when the operator runbook calls for it.",
+                    }),
+                )
+        })
+        .collect()
+}
+
+fn ops_bulk_stats(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    let Some(plan) = plan else {
+        return RenderModel::new()
+            .with_value("total", RenderValue::text("0"))?
+            .with_value("search", RenderValue::text("0"))?
+            .with_value("system", RenderValue::text("0"));
+    };
+
+    let total = plan.module_bulk_operations.len();
+    let search = plan
+        .module_bulk_operations
+        .iter()
+        .filter(|registered| {
+            matches!(
+                registered.definition.scope,
+                coil_core::BulkOperationScope::Search
+            )
+        })
+        .count();
+    let system = plan
+        .module_bulk_operations
+        .iter()
+        .filter(|registered| {
+            matches!(
+                registered.definition.scope,
+                coil_core::BulkOperationScope::System
+            )
+        })
+        .count();
+
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("search", RenderValue::text(search.to_string()))?
+        .with_value("system", RenderValue::text(system.to_string()))
+}
+
+fn ops_recovery_rows(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    plan.ops_catalog
+        .recovery
+        .definitions()
+        .iter()
+        .cloned()
+        .map(|definition| {
+            let stage_summary = definition
+                .default_stages
+                .iter()
+                .map(|stage| display_recovery_stage(*stage))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+
+            RenderModel::new()
+                .with_value("workflow_id", RenderValue::text(definition.id.to_string()))?
+                .with_value("workflow_name", RenderValue::text(definition.title))?
+                .with_value(
+                    "requires_local_only_sensitive_ack",
+                    RenderValue::text(
+                        definition.requires_local_only_sensitive_ack.to_string(),
+                    ),
+                )?
+                .with_value(
+                    "stage_count",
+                    RenderValue::text(definition.default_stages.len().to_string()),
+                )?
+                .with_value("stage_summary", RenderValue::text(stage_summary))?
+                .with_value(
+                    "workflow_summary",
+                    RenderValue::text(definition.description.unwrap_or_else(|| {
+                        "Recovery workflow for restoring source-of-truth state and rebuilding disposable layers."
+                            .to_string()
+                    })),
+                )?
+                .with_value(
+                    "action_label",
+                    RenderValue::text(match definition.id.as_str() {
+                        "recovery.customer-app.full-restore" => {
+                            "Use after source-of-truth restore is ready and the operator has confirmed host-local sensitive data handling."
+                        }
+                        "recovery.customer-app.derived-state" => {
+                            "Use when data is intact but caches, search projections, or assets need coordinated rebuild."
+                        }
+                        _ => "Use the documented operator recovery runbook before queuing this workflow.",
+                    }),
+                )
+        })
+        .collect()
+}
+
+fn ops_recovery_stats(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    let Some(plan) = plan else {
+        return RenderModel::new()
+            .with_value("total", RenderValue::text("0"))?
+            .with_value("host_local", RenderValue::text("0"))?
+            .with_value("derived_only", RenderValue::text("0"));
+    };
+
+    let total = plan.ops_catalog.recovery.definitions().len();
+    let host_local = plan
+        .ops_catalog
+        .recovery
+        .definitions()
+        .iter()
+        .filter(|definition| definition.requires_local_only_sensitive_ack)
+        .count();
+    let derived_only = plan
+        .ops_catalog
+        .recovery
+        .definitions()
+        .iter()
+        .filter(|definition| !definition.requires_local_only_sensitive_ack)
+        .count();
+
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("host_local", RenderValue::text(host_local.to_string()))?
+        .with_value("derived_only", RenderValue::text(derived_only.to_string()))
+}
+
+fn admin_job_rows(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    let mut jobs = plan.registered_runtime_jobs.clone();
+    jobs.sort_by(|left, right| left.contract.name.cmp(&right.contract.name));
+
+    jobs.into_iter()
+        .map(|registered| {
+            let retry_summary = match registered.retry_policy.dead_letter_queue.as_ref() {
+                Some(queue) => format!(
+                    "{} attempts, {}s backoff start, dead-letter to {}.",
+                    registered.retry_policy.max_attempts,
+                    registered.retry_policy.initial_delay.as_secs(),
+                    queue.as_str(),
+                ),
+                None => format!(
+                    "{} attempts, {}s backoff start, no dedicated dead-letter queue.",
+                    registered.retry_policy.max_attempts,
+                    registered.retry_policy.initial_delay.as_secs(),
+                ),
+            };
+
+            RenderModel::new()
+                .with_value("job_name", RenderValue::text(registered.contract.name))?
+                .with_value("module_name", RenderValue::text(registered.module))?
+                .with_value(
+                    "trigger_label",
+                    RenderValue::text(display_job_trigger_kind(registered.contract.trigger)),
+                )?
+                .with_value("queue_name", RenderValue::text(registered.queue.as_str()))?
+                .with_value(
+                    "idempotent_label",
+                    RenderValue::text(if registered.contract.idempotent {
+                        "Idempotent"
+                    } else {
+                        "Non-idempotent"
+                    }),
+                )?
+                .with_value(
+                    "description",
+                    RenderValue::text(registered.contract.description),
+                )?
+                .with_value("retry_summary", RenderValue::text(retry_summary))
+        })
+        .collect()
+}
+
+fn admin_job_stats(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    let Some(plan) = plan else {
+        return RenderModel::new()
+            .with_value("total", RenderValue::text("0"))?
+            .with_value("operator", RenderValue::text("0"))?
+            .with_value("scheduled", RenderValue::text("0"))?
+            .with_value("queue_depth", RenderValue::text("unavailable"));
+    };
+
+    let total = plan.registered_runtime_jobs.len();
+    let operator = plan
+        .registered_runtime_jobs
+        .iter()
+        .filter(|registered| registered.contract.trigger == JobTriggerKind::Operator)
+        .count();
+    let scheduled = plan
+        .registered_runtime_jobs
+        .iter()
+        .filter(|registered| registered.contract.trigger == JobTriggerKind::Scheduled)
+        .count();
+    let event_reactions = plan.registered_runtime_event_subscriptions.len();
+    let queue_depth = match plan
+        .observability
+        .telemetry
+        .metric_reading("coil.queue.depth")
+    {
+        Some(MetricReading::Gauge(value)) => value.to_string(),
+        Some(MetricReading::Counter(value)) => value.to_string(),
+        Some(MetricReading::Histogram(value)) => value.last.to_string(),
+        None => "unavailable".to_string(),
+    };
+
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("operator", RenderValue::text(operator.to_string()))?
+        .with_value("scheduled", RenderValue::text(scheduled.to_string()))?
+        .with_value(
+            "event_reactions",
+            RenderValue::text(event_reactions.to_string()),
+        )?
+        .with_value("queue_depth", RenderValue::text(queue_depth))
+}
+
+fn admin_job_subscription_rows(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    let mut subscriptions = plan.registered_runtime_event_subscriptions.clone();
+    subscriptions.sort_by(|left, right| {
+        left.event_type
+            .as_str()
+            .cmp(right.event_type.as_str())
+            .then_with(|| left.module.cmp(&right.module))
+    });
+
+    subscriptions
+        .into_iter()
+        .map(|subscription| {
+            let queue_summary = format!(
+                "Reaction queue {} -> target queue {}.",
+                subscription.reaction_queue.as_str(),
+                subscription.target_queue.as_str(),
+            );
+            RenderModel::new()
+                .with_value("module_name", RenderValue::text(subscription.module))?
+                .with_value("event_type", RenderValue::text(subscription.event_type.as_str()))?
+                .with_value("job_name", RenderValue::text(subscription.job_name))?
+                .with_value(
+                    "trigger_label",
+                    RenderValue::text(display_job_trigger_kind(subscription.target_trigger)),
+                )?
+                .with_value("queue_summary", RenderValue::text(queue_summary))?
+                .with_value("description", RenderValue::text(subscription.description))
+        })
+        .collect()
+}
+
+fn admin_integration_rows(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    let mut rows = Vec::new();
+    for module in &plan.modules {
+        for integration in &module.integration_points {
+            rows.push((
+                module.name.clone(),
+                integration.kind,
+                integration.surface.clone(),
+                integration.description.clone(),
+                integration_operator_note(integration.kind).to_string(),
+            ));
+        }
+    }
+    rows.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.2.cmp(&right.2)));
+
+    rows.into_iter()
+        .map(|(module_name, kind, surface, description, operator_note)| {
+            RenderModel::new()
+                .with_value("module_name", RenderValue::text(module_name))?
+                .with_value(
+                    "kind_label",
+                    RenderValue::text(display_integration_kind(kind)),
+                )?
+                .with_value("surface", RenderValue::text(surface))?
+                .with_value("description", RenderValue::text(description))?
+                .with_value("operator_note", RenderValue::text(operator_note))
+        })
+        .collect()
+}
+
+fn admin_outbound_endpoint_rows(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    plan.approved_outbound_http_endpoints
+        .iter()
+        .map(|(name, endpoint)| {
+            RenderModel::new()
+                .with_value("endpoint_name", RenderValue::text(name.clone()))?
+                .with_value("endpoint_url", RenderValue::text(endpoint.as_str().to_string()))?
+                .with_value(
+                    "operator_note",
+                    RenderValue::text(
+                        "Approved outbound endpoint declared in the runtime plan and available to modules or customer code.",
+                    ),
+                )
+        })
+        .collect()
+}
+
+fn admin_integration_stats(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    let Some(plan) = plan else {
+        return RenderModel::new()
+            .with_value("total", RenderValue::text("0"))?
+            .with_value("modules", RenderValue::text("0"))?
+            .with_value("outbound_endpoints", RenderValue::text("0"))?
+            .with_value("extensions", RenderValue::text("0"));
+    };
+
+    let total = plan
+        .modules
+        .iter()
+        .map(|module| module.integration_points.len())
+        .sum::<usize>();
+    let modules = plan
+        .modules
+        .iter()
+        .filter(|module| !module.integration_points.is_empty())
+        .count();
+    let outbound_endpoints = plan.approved_outbound_http_endpoints.len();
+    let extensions = plan.installed_extensions.len() + plan.linked_customer_plugins.len();
+
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("modules", RenderValue::text(modules.to_string()))?
+        .with_value(
+            "outbound_endpoints",
+            RenderValue::text(outbound_endpoints.to_string()),
+        )?
+        .with_value("extensions", RenderValue::text(extensions.to_string()))
+}
+
+fn admin_extension_participant_rows(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+
+    let mut rows = Vec::new();
+
+    for extension in &plan.installed_extensions {
+        rows.push(
+            RenderModel::new()
+                .with_value("participant_kind", RenderValue::text("WASM extension"))?
+                .with_value(
+                    "participant_name",
+                    RenderValue::text(extension.display_name.clone()),
+                )?
+                .with_value(
+                    "participant_id",
+                    RenderValue::text(extension.extension_id.clone()),
+                )?
+                .with_value(
+                    "surface_summary",
+                    RenderValue::text(format!(
+                        "{} handlers installed for customer app {}.",
+                        extension.handler_count, extension.customer_app_id
+                    )),
+                )?
+                .with_value(
+                    "operator_note",
+                    RenderValue::text(
+                        "Extension handlers run through declared slots and the shared host capability model.",
+                    ),
+                )?,
+        );
+    }
+
+    for plugin in &plan.linked_customer_plugins {
+        let hook_summary = if plugin.registered_hooks.is_empty() {
+            "No runtime hooks registered.".to_string()
+        } else {
+            plugin
+                .registered_hooks
+                .iter()
+                .map(registered_hook_label)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        rows.push(
+            RenderModel::new()
+                .with_value("participant_kind", RenderValue::text("Linked plugin"))?
+                .with_value(
+                    "participant_name",
+                    RenderValue::text(plugin.display_name.clone()),
+                )?
+                .with_value(
+                    "participant_id",
+                    RenderValue::text(plugin.plugin_id.clone()),
+                )?
+                .with_value(
+                    "surface_summary",
+                    RenderValue::text(format!(
+                        "Version {} with hooks: {}.",
+                        plugin.version, hook_summary
+                    )),
+                )?
+                .with_value(
+                    "operator_note",
+                    RenderValue::text(
+                        "Customer plugins participate through explicit hook registration rather than ambient runtime mutation.",
+                    ),
+                )?,
+        );
+    }
+
+    Ok(rows)
+}
+
+fn admin_diagnostic_status(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
+    let Some(plan) = plan else {
+        return RenderModel::new()
+            .with_value("liveness", RenderValue::text("Unknown"))?
+            .with_value("readiness", RenderValue::text("Unknown"))?
+            .with_value("metrics_enabled", RenderValue::text("false"))?
+            .with_value("trace_enabled", RenderValue::text("false"))?
+            .with_value("health_href", RenderValue::text("/health"))?
+            .with_value("readiness_href", RenderValue::text("/ready"))?
+            .with_value("metrics_href", RenderValue::text("/metrics"))?
+            .with_value("diagnostics_href", RenderValue::text("/diagnostics"));
+    };
+
+    RenderModel::new()
+        .with_value(
+            "liveness",
+            RenderValue::text(dependency_status_label(plan.observability.liveness.overall_status())),
+        )?
+        .with_value(
+            "readiness",
+            RenderValue::text(dependency_status_label(plan.observability.readiness.overall_status())),
+        )?
+        .with_value(
+            "metrics_enabled",
+            RenderValue::text(plan.observability.telemetry.metrics_enabled.to_string()),
+        )?
+        .with_value(
+            "trace_enabled",
+            RenderValue::text(plan.observability.telemetry.trace.enabled.to_string()),
+        )?
+        .with_value("health_href", RenderValue::text("/health"))?
+        .with_value("readiness_href", RenderValue::text("/ready"))?
+        .with_value("metrics_href", RenderValue::text("/metrics"))?
+        .with_value("diagnostics_href", RenderValue::text("/diagnostics"))
+}
+
+fn admin_diagnostic_metrics(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+    let telemetry = &plan.observability.telemetry;
+    vec![
+        ("coil.http.requests.total", "HTTP requests"),
+        ("coil.http.requests.in_flight", "In-flight requests"),
+        ("coil.http.request.latency_ms", "Request latency"),
+        ("coil.queue.depth", "Queue depth"),
+        ("coil.runtime.jobs.ready", "Ready jobs"),
+    ]
+    .into_iter()
+    .map(|(metric, label)| {
+        let value = match telemetry.metric_reading(metric) {
+            Some(MetricReading::Counter(value)) => value.to_string(),
+            Some(MetricReading::Gauge(value)) => value.to_string(),
+            Some(MetricReading::Histogram(value)) => {
+                format!("samples={}, last={}, max={}", value.samples, value.last, value.max)
+            }
+            None => "unavailable".to_string(),
+        };
+        RenderModel::new()
+            .with_value("metric_name", RenderValue::text(metric))?
+            .with_value("metric_label", RenderValue::text(label))?
+            .with_value("metric_value", RenderValue::text(value))
+    })
+    .collect()
+}
+
+fn admin_diagnostic_traces(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+    plan.observability
+        .telemetry
+        .recent_traces(5)
+        .into_iter()
+        .map(|trace| {
+            let duration_ms = trace
+                .fields
+                .get("duration_ms")
+                .cloned()
+                .unwrap_or_else(|| "unavailable".to_string());
+            RenderModel::new()
+                .with_value("trace_id", RenderValue::text(trace.trace_id))?
+                .with_value("span", RenderValue::text(trace.span))?
+                .with_value("outcome", RenderValue::text(trace.outcome))?
+                .with_value(
+                    "recorded_at_unix_seconds",
+                    RenderValue::text(trace.recorded_at_unix_seconds.to_string()),
+                )?
+                .with_value("duration_ms", RenderValue::text(duration_ms))
+        })
+        .collect()
+}
+
+fn dependency_status_label(status: DependencyStatus) -> &'static str {
+    match status {
+        DependencyStatus::Healthy => "Healthy",
+        DependencyStatus::Degraded => "Degraded",
+        DependencyStatus::Unhealthy => "Unhealthy",
+        DependencyStatus::Unknown => "Unknown",
+    }
+}
+
+fn customer_operations_from_storefront(
+    plan: Option<&RuntimePlan>,
+) -> Result<(Vec<RenderModel>, RenderModel), TemplateModelError> {
+    let records = admin_customer_records_from_storefront(plan)?;
+    if records.is_empty() {
+        return Ok((Vec::new(), admin_customer_stats(0, 0, 0, 0)?));
+    }
+
+    let mut active_memberships = 0usize;
+    let mut pending_memberships = 0usize;
+    let mut payment_follow_up = 0usize;
+    let total = records.len();
+    let mut rows = Vec::with_capacity(total);
+
+    for row in records {
+        if row.has_active_membership {
+            active_memberships += 1;
+        }
+        if row.has_pending_membership {
+            pending_memberships += 1;
+        }
+        if row.needs_payment_follow_up {
+            payment_follow_up += 1;
+        }
+        rows.push(row.into_model()?);
+    }
+
+    Ok((
+        rows,
+        admin_customer_stats(
+            total,
+            active_memberships,
+            pending_memberships,
+            payment_follow_up,
+        )?,
+    ))
+}
+
+fn admin_customer_records_from_storefront(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<AdminCustomerRecordView>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+    let store = StorefrontStateStore::open_for_plan(plan).map_err(template_store_error)?;
+    let orders = store.admin_orders(100).map_err(template_store_error)?;
+    if orders.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut groups: BTreeMap<String, Vec<&StorefrontOrderSnapshot>> = BTreeMap::new();
+    for order in &orders {
+        groups
+            .entry(admin_customer_group_key(order))
+            .or_default()
+            .push(order);
+    }
+
+    let mut rows = groups
+        .into_values()
+        .map(|orders| admin_customer_record_from_orders(orders))
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.sort_by(|left, right| right.sort_key.cmp(&left.sort_key));
+    Ok(rows)
+}
+
+fn admin_customer_group_key(order: &StorefrontOrderSnapshot) -> String {
+    order
+        .principal_id
+        .clone()
+        .or_else(|| order.payment.checkout_email.clone())
+        .unwrap_or_else(|| order.session_id.clone())
+}
+
+struct AdminCustomerRecordView {
+    sort_key: u64,
+    display_name: String,
+    customer_email: String,
+    has_customer_email: bool,
+    principal_id: String,
+    has_principal_id: bool,
+    session_id: String,
+    membership_state_label: String,
+    membership_summary: String,
+    has_active_membership: bool,
+    has_pending_membership: bool,
+    pass_state_label: String,
+    pass_summary: String,
+    pass_titles: String,
+    pass_count: usize,
+    has_active_pass: bool,
+    has_pending_pass: bool,
+    support_state_label: String,
+    needs_payment_follow_up: bool,
+    has_refund_history: bool,
+    refund_history_label: String,
+    event_access_label: String,
+    latest_order_reference: String,
+    latest_order_status: String,
+    latest_order_total: String,
+    latest_order_href: String,
+    order_count: usize,
+}
+
+impl AdminCustomerRecordView {
+    fn into_model(self) -> Result<RenderModel, TemplateModelError> {
+        RenderModel::new()
+            .with_value("display_name", RenderValue::text(self.display_name))?
+            .with_value("customer_email", RenderValue::text(self.customer_email))?
+            .with_bool("has_customer_email", self.has_customer_email)?
+            .with_value("principal_id", RenderValue::text(self.principal_id))?
+            .with_bool("has_principal_id", self.has_principal_id)?
+            .with_value("session_id", RenderValue::text(self.session_id))?
+            .with_value(
+                "membership_state_label",
+                RenderValue::text(self.membership_state_label),
+            )?
+            .with_value(
+                "membership_summary",
+                RenderValue::text(self.membership_summary),
+            )?
+            .with_bool("has_active_membership", self.has_active_membership)?
+            .with_bool("has_pending_membership", self.has_pending_membership)?
+            .with_value("pass_state_label", RenderValue::text(self.pass_state_label))?
+            .with_value("pass_summary", RenderValue::text(self.pass_summary))?
+            .with_value("pass_titles", RenderValue::text(self.pass_titles))?
+            .with_value("pass_count", RenderValue::text(self.pass_count.to_string()))?
+            .with_bool("has_active_pass", self.has_active_pass)?
+            .with_bool("has_pending_pass", self.has_pending_pass)?
+            .with_value(
+                "support_state_label",
+                RenderValue::text(self.support_state_label),
+            )?
+            .with_bool("needs_payment_follow_up", self.needs_payment_follow_up)?
+            .with_bool("has_refund_history", self.has_refund_history)?
+            .with_value(
+                "refund_history_label",
+                RenderValue::text(self.refund_history_label),
+            )?
+            .with_value(
+                "event_access_label",
+                RenderValue::text(self.event_access_label),
+            )?
+            .with_value(
+                "latest_order_reference",
+                RenderValue::text(self.latest_order_reference),
+            )?
+            .with_value(
+                "latest_order_status",
+                RenderValue::text(self.latest_order_status),
+            )?
+            .with_value(
+                "latest_order_total",
+                RenderValue::text(self.latest_order_total),
+            )?
+            .with_value(
+                "latest_order_href",
+                RenderValue::text(self.latest_order_href),
+            )?
+            .with_value(
+                "order_count",
+                RenderValue::text(self.order_count.to_string()),
+            )
+    }
+}
+
+fn admin_customer_record_from_orders(
+    mut orders: Vec<&StorefrontOrderSnapshot>,
+) -> Result<AdminCustomerRecordView, TemplateModelError> {
+    orders.sort_by(|left, right| {
+        right
+            .created_at_unix_seconds
+            .cmp(&left.created_at_unix_seconds)
+    });
+    let latest = orders
+        .first()
+        .copied()
+        .ok_or_else(|| TemplateModelError::MissingValue {
+            key: "admin_customers.latest_order".to_string(),
+        })?;
+
+    let customer_email = orders
+        .iter()
+        .find_map(|order| order.payment.checkout_email.clone())
+        .unwrap_or_default();
+    let principal_id = orders
+        .iter()
+        .find_map(|order| order.principal_id.clone())
+        .unwrap_or_default();
+    let session_id = latest.session_id.clone();
+    let display_name = if !principal_id.is_empty() {
+        display_name_from_principal_id(&principal_id)
+    } else if !customer_email.is_empty() {
+        display_name_from_principal_id(&customer_email)
+    } else {
+        format!("Guest {}", latest.order_id)
+    };
+
+    let has_active_membership = orders.iter().any(|order| {
+        matches!(order.status.as_str(), "paid" | "fulfilled")
+            && order
+                .lines
+                .iter()
+                .any(admin_customer_order_has_membership_line)
+    });
+    let has_pending_membership = !has_active_membership
+        && orders.iter().any(|order| {
+            order.status == "pending_payment"
+                && order
+                    .lines
+                    .iter()
+                    .any(admin_customer_order_has_membership_line)
+        });
+    let active_pass_count = customer_pass_quantity_for_statuses(&orders, &["paid", "fulfilled"]);
+    let pending_pass_count = if active_pass_count == 0 {
+        customer_pass_quantity_for_statuses(&orders, &["pending_payment"])
+    } else {
+        0
+    };
+    let pass_titles = customer_pass_titles(&orders);
+    let has_active_pass = active_pass_count > 0;
+    let has_pending_pass = !has_active_pass && pending_pass_count > 0;
+    let has_event_purchase = orders.iter().any(|order| {
+        order
+            .lines
+            .iter()
+            .any(admin_customer_order_has_event_linked_line)
+    });
+    let has_refund_history = orders.iter().any(|order| !order.refunds.is_empty());
+    let needs_payment_follow_up = orders.iter().any(|order| order.status == "pending_payment");
+    let has_refunded_order = orders
+        .iter()
+        .any(|order| matches!(order.status.as_str(), "refunded" | "partially_refunded"));
+
+    let membership_state_label = if has_active_membership {
+        "Active membership"
+    } else if has_pending_membership {
+        "Pending activation"
+    } else {
+        "No membership"
+    };
+    let membership_summary = if has_active_membership {
+        "The latest qualifying membership purchase is paid or fulfilled for this customer record."
+    } else if has_pending_membership {
+        "A qualifying membership purchase exists but payment capture has not settled yet."
+    } else {
+        "No qualifying membership purchase has been captured for this customer record yet."
+    };
+    let pass_state_label = if has_active_pass {
+        "Passes available"
+    } else if has_pending_pass {
+        "Pending pass activation"
+    } else {
+        "No passes"
+    };
+    let pass_summary = if has_active_pass {
+        format!(
+            "{} available across {}.",
+            unit_count_label(active_pass_count, "pass", "passes"),
+            pass_titles.as_str()
+        )
+    } else if has_pending_pass {
+        format!(
+            "{} will become available after payment capture settles.",
+            unit_count_label(pending_pass_count, "pass", "passes")
+        )
+    } else {
+        "No pass-backed entitlement has been captured for this customer record yet.".to_string()
+    };
+    let support_state_label = if needs_payment_follow_up {
+        "Needs payment follow-up"
+    } else if has_refunded_order {
+        "Has refund history"
+    } else if latest.status == "fulfilled" {
+        "Fulfilled"
+    } else {
+        "Active customer record"
+    };
+    let refund_history_label = if has_refund_history {
+        "Refund history present"
+    } else {
+        ""
+    };
+    let event_access_label = if has_event_purchase {
+        "Has event-linked purchase"
+    } else {
+        "No event-linked purchase"
+    };
+
+    Ok(AdminCustomerRecordView {
+        sort_key: latest.created_at_unix_seconds,
+        display_name,
+        customer_email: customer_email.clone(),
+        has_customer_email: !customer_email.is_empty(),
+        principal_id: principal_id.clone(),
+        has_principal_id: !principal_id.is_empty(),
+        session_id,
+        membership_state_label: membership_state_label.to_string(),
+        membership_summary: membership_summary.to_string(),
+        has_active_membership,
+        has_pending_membership,
+        pass_state_label: pass_state_label.to_string(),
+        pass_summary,
+        pass_titles,
+        pass_count: active_pass_count.max(pending_pass_count),
+        has_active_pass,
+        has_pending_pass,
+        support_state_label: support_state_label.to_string(),
+        needs_payment_follow_up,
+        has_refund_history,
+        refund_history_label: refund_history_label.to_string(),
+        event_access_label: event_access_label.to_string(),
+        latest_order_reference: latest.order_id.clone(),
+        latest_order_status: display_status_label(&latest.status).to_string(),
+        latest_order_total: latest.total.clone(),
+        latest_order_href: format!("/admin/orders/{}", latest.order_id),
+        order_count: orders.len(),
+    })
+}
+
+fn admin_customer_order_has_membership_line(line: &StorefrontOrderLine) -> bool {
+    line.product_kind == "membership"
+        || line
+            .entitlement_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("membership."))
+}
+
+fn admin_customer_order_has_pass_line(line: &StorefrontOrderLine) -> bool {
+    matches!(line.product_kind.as_str(), "event_pass" | "credit" | "gift_credit")
+        || line
+            .entitlement_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("pass.") || key.starts_with("credit."))
+        || line.sku.contains("pass")
+        || line.sku.contains("credit")
+        || line.title.to_ascii_lowercase().contains("pass")
+        || line.title.to_ascii_lowercase().contains("credit")
+}
+
+fn admin_customer_order_has_event_linked_line(line: &StorefrontOrderLine) -> bool {
+    matches!(
+        line.product_kind.as_str(),
+        "event" | "event_pass" | "experience" | "membership_event"
+    ) || admin_customer_order_has_pass_line(line)
+        || line
+        .entitlement_key
+        .as_deref()
+        .is_some_and(|key| key.starts_with("event.") || key.contains("event"))
+        || line.title.to_ascii_lowercase().contains("event")
+}
+
+fn customer_pass_quantity_for_statuses(
+    orders: &[&StorefrontOrderSnapshot],
+    eligible_statuses: &[&str],
+) -> usize {
+    orders
+        .iter()
+        .filter(|order| {
+            eligible_statuses
+                .iter()
+                .any(|status| order.status.as_str() == *status)
+        })
+        .flat_map(|order| order.lines.iter())
+        .filter(|line| admin_customer_order_has_pass_line(line))
+        .map(|line| line.quantity as usize)
+        .sum()
+}
+
+fn customer_pass_titles(orders: &[&StorefrontOrderSnapshot]) -> String {
+    let titles = orders
+        .iter()
+        .flat_map(|order| order.lines.iter())
+        .filter(|line| admin_customer_order_has_pass_line(line))
+        .map(|line| line.title.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    if titles.is_empty() {
+        "no active pass products".to_string()
+    } else {
+        titles.into_iter().collect::<Vec<_>>().join(", ")
+    }
+}
+
+fn unit_count_label(count: usize, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {plural}")
+    }
+}
+
+fn membership_tiers_from_catalog(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(plan) = plan else {
+        return Ok(Vec::new());
+    };
+    let catalog = StorefrontStateStore::open_for_plan(plan)
+        .map_err(template_store_error)?
+        .catalog()
+        .map_err(template_store_error)?;
+    let mut rows = catalog
+        .products
+        .iter()
+        .filter(|product| product.product_kind == "membership")
+        .map(|product| {
+            let site_count = product.site_ids.len();
+            Ok((
+                site_count,
+                RenderModel::new()
+                    .with_value("title", RenderValue::text(product.title.clone()))?
+                    .with_value("sku", RenderValue::text(product.sku.clone()))?
+                    .with_value("handle", RenderValue::text(product.handle.clone()))?
+                    .with_value(
+                        "price",
+                        RenderValue::text(money_display_minor(
+                            product.price_minor,
+                            &product.currency,
+                        )),
+                    )?
+                    .with_value(
+                        "variant_title",
+                        RenderValue::text(product.variant_title.clone()),
+                    )?
+                    .with_value(
+                        "entitlement_key",
+                        RenderValue::text(product.entitlement_key.clone().unwrap_or_default()),
+                    )?
+                    .with_bool("has_entitlement_key", product.entitlement_key.is_some())?
+                    .with_value("summary", RenderValue::text(product.summary.clone()))?
+                    .with_value("site_count", RenderValue::text(site_count.to_string()))?
+                    .with_value(
+                        "site_summary",
+                        RenderValue::text(if site_count == 1 {
+                            "Visible in 1 site".to_string()
+                        } else {
+                            format!("Visible in {site_count} sites")
+                        }),
+                    )?
+                    .with_value("sites", RenderValue::text(product.site_ids.join(", ")))?,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.sort_by(|left, right| right.0.cmp(&left.0));
+    Ok(rows.into_iter().map(|(_, model)| model).collect())
+}
+
+fn membership_subscriptions_from_storefront(
+    plan: Option<&RuntimePlan>,
+) -> Result<(Vec<RenderModel>, RenderModel), TemplateModelError> {
+    let records = admin_customer_records_from_storefront(plan)?;
+    if records.is_empty() {
+        return Ok((Vec::new(), membership_subscription_stats(0, 0, 0, 0)?));
+    }
+
+    let mut active = 0usize;
+    let mut pending = 0usize;
+    let mut follow_up = 0usize;
+    let mut event_linked = 0usize;
+
+    let subscriptions = records
+        .into_iter()
+        .filter(|record| record.has_active_membership || record.has_pending_membership)
+        .map(|record| {
+            if record.has_active_membership {
+                active += 1;
+            }
+            if record.has_pending_membership {
+                pending += 1;
+            }
+            if record.needs_payment_follow_up {
+                follow_up += 1;
+            }
+            if record.event_access_label == "Has event-linked purchase" {
+                event_linked += 1;
+            }
+
+            RenderModel::new()
+                .with_value("display_name", RenderValue::text(record.display_name))?
+                .with_value("customer_email", RenderValue::text(record.customer_email))?
+                .with_bool("has_customer_email", record.has_customer_email)?
+                .with_value("principal_id", RenderValue::text(record.principal_id))?
+                .with_bool("has_principal_id", record.has_principal_id)?
+                .with_value(
+                    "membership_state_label",
+                    RenderValue::text(record.membership_state_label),
+                )?
+                .with_value(
+                    "membership_summary",
+                    RenderValue::text(record.membership_summary),
+                )?
+                .with_bool("has_active_membership", record.has_active_membership)?
+                .with_bool("has_pending_membership", record.has_pending_membership)?
+                .with_bool("needs_payment_follow_up", record.needs_payment_follow_up)?
+                .with_value(
+                    "support_state_label",
+                    RenderValue::text(record.support_state_label),
+                )?
+                .with_value(
+                    "event_access_label",
+                    RenderValue::text(record.event_access_label),
+                )?
+                .with_value(
+                    "latest_order_reference",
+                    RenderValue::text(record.latest_order_reference),
+                )?
+                .with_value(
+                    "latest_order_status",
+                    RenderValue::text(record.latest_order_status),
+                )?
+                .with_value(
+                    "latest_order_total",
+                    RenderValue::text(record.latest_order_total),
+                )?
+                .with_value(
+                    "latest_order_href",
+                    RenderValue::text(record.latest_order_href),
+                )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let total = subscriptions.len();
+    Ok((
+        subscriptions,
+        membership_subscription_stats(total, active, pending, follow_up + event_linked)?,
+    ))
+}
+
+fn membership_pass_rows_from_storefront(
+    plan: Option<&RuntimePlan>,
+) -> Result<(Vec<RenderModel>, RenderModel), TemplateModelError> {
+    let records = admin_customer_records_from_storefront(plan)?;
+    if records.is_empty() {
+        return Ok((Vec::new(), membership_pass_stats(0, 0, 0, 0)?));
+    }
+
+    let mut available = 0usize;
+    let mut pending = 0usize;
+    let mut follow_up = 0usize;
+
+    let passes = records
+        .into_iter()
+        .filter(|record| record.has_active_pass || record.has_pending_pass)
+        .map(|record| {
+            if record.has_active_pass {
+                available += 1;
+            }
+            if record.has_pending_pass {
+                pending += 1;
+            }
+            if record.needs_payment_follow_up {
+                follow_up += 1;
+            }
+
+            RenderModel::new()
+                .with_value("display_name", RenderValue::text(record.display_name))?
+                .with_value("customer_email", RenderValue::text(record.customer_email))?
+                .with_bool("has_customer_email", record.has_customer_email)?
+                .with_value("principal_id", RenderValue::text(record.principal_id))?
+                .with_bool("has_principal_id", record.has_principal_id)?
+                .with_value("pass_state_label", RenderValue::text(record.pass_state_label))?
+                .with_value("pass_summary", RenderValue::text(record.pass_summary))?
+                .with_value("pass_titles", RenderValue::text(record.pass_titles))?
+                .with_value("pass_count", RenderValue::text(record.pass_count.to_string()))?
+                .with_bool("has_active_pass", record.has_active_pass)?
+                .with_bool("has_pending_pass", record.has_pending_pass)?
+                .with_value(
+                    "support_state_label",
+                    RenderValue::text(record.support_state_label),
+                )?
+                .with_value(
+                    "latest_order_reference",
+                    RenderValue::text(record.latest_order_reference),
+                )?
+                .with_value(
+                    "latest_order_status",
+                    RenderValue::text(record.latest_order_status),
+                )?
+                .with_value(
+                    "latest_order_total",
+                    RenderValue::text(record.latest_order_total),
+                )?
+                .with_value(
+                    "latest_order_href",
+                    RenderValue::text(record.latest_order_href),
+                )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let total = passes.len();
+    Ok((passes, membership_pass_stats(total, available, pending, follow_up)?))
+}
+
+fn membership_subscription_stats(
+    total: usize,
+    active: usize,
+    pending: usize,
+    follow_up: usize,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("active", RenderValue::text(active.to_string()))?
+        .with_value("pending", RenderValue::text(pending.to_string()))?
+        .with_value("follow_up", RenderValue::text(follow_up.to_string()))
+}
+
+fn membership_pass_stats(
+    total: usize,
+    available: usize,
+    pending: usize,
+    follow_up: usize,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("available", RenderValue::text(available.to_string()))?
+        .with_value("pending", RenderValue::text(pending.to_string()))?
+        .with_value("follow_up", RenderValue::text(follow_up.to_string()))
+}
+
+fn event_admin_rows(
+    locale: &str,
+    site_id: Option<&str>,
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    event_fixtures(locale, site_id, plan)
+        .into_iter()
+        .map(|event| {
+            let slot_count = event.timeslots.len();
+            let waitlist_count = event
+                .timeslots
+                .iter()
+                .filter(|slot| slot.booking_status_label.contains("Waitlist"))
+                .count();
+            let operational_state_label = if waitlist_count > 0 {
+                "Waitlist pressure"
+            } else if slot_count > 1 {
+                "Multi-slot event"
+            } else {
+                "Single-session event"
+            };
+            let next_action_label = if waitlist_count > 0 {
+                "Review waitlist and promotion rules"
+            } else if event.audience_label.contains("members") {
+                "Confirm member priority windows"
+            } else {
+                "Review booking windows"
+            };
+
+            RenderModel::new()
+                .with_value("title", RenderValue::text(event.title))?
+                .with_value("eyebrow", RenderValue::text(event.eyebrow))?
+                .with_value("venue_name", RenderValue::text(event.venue_name))?
+                .with_value("venue_city", RenderValue::text(event.venue_city))?
+                .with_value("venue_mode", RenderValue::text(event.venue_mode))?
+                .with_value("day_label", RenderValue::text(event.day_label))?
+                .with_value(
+                    "time_range_label",
+                    RenderValue::text(event.time_range_label),
+                )?
+                .with_value("audience_label", RenderValue::text(event.audience_label))?
+                .with_value(
+                    "availability_label",
+                    RenderValue::text(event.availability_label),
+                )?
+                .with_value(
+                    "operational_state_label",
+                    RenderValue::text(operational_state_label),
+                )?
+                .with_value("next_action_label", RenderValue::text(next_action_label))?
+                .with_value("slot_count", RenderValue::text(slot_count.to_string()))?
+                .with_value(
+                    "slot_summary",
+                    RenderValue::text(if slot_count == 1 {
+                        "1 active slot".to_string()
+                    } else {
+                        format!("{slot_count} active slots")
+                    }),
+                )?
+                .with_value("preview_href", RenderValue::text(event.detail_href))?
+                .with_value("bookings_href", RenderValue::text("/admin/events/bookings"))?
+                .with_value("check_in_href", RenderValue::text("/admin/events/check-in"))
+        })
+        .collect()
+}
+
+fn event_admin_stats(
+    locale: &str,
+    site_id: Option<&str>,
+    plan: Option<&RuntimePlan>,
+) -> Result<RenderModel, TemplateModelError> {
+    let events = event_fixtures(locale, site_id, plan);
+    let total = events.len();
+    let slot_total = events
+        .iter()
+        .map(|event| event.timeslots.len())
+        .sum::<usize>();
+    let waitlist_events = events
+        .iter()
+        .filter(|event| {
+            event
+                .timeslots
+                .iter()
+                .any(|slot| slot.booking_status_label.contains("Waitlist"))
+        })
+        .count();
+    let appointment_events = events
+        .iter()
+        .filter(|event| event.venue_mode == "Appointment")
+        .count();
+
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("slot_total", RenderValue::text(slot_total.to_string()))?
+        .with_value(
+            "waitlist_events",
+            RenderValue::text(waitlist_events.to_string()),
+        )?
+        .with_value(
+            "appointment_events",
+            RenderValue::text(appointment_events.to_string()),
+        )
+}
+
+fn event_booking_rows(
+    locale: &str,
+    site_id: Option<&str>,
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let booking_fixtures = vec![
+        (
+            "EVT-2001",
+            "Morgan Rowe",
+            "morgan@example.com",
+            "Spring Tasting Evening",
+            "Early tasting",
+            "Reservation held",
+            "Gold member priority",
+            "Needs confirmation before hold expiry",
+        ),
+        (
+            "EVT-2002",
+            "Avery King",
+            "avery@example.com",
+            "Summer Gala Preview",
+            "Evening salon",
+            "Waitlisted",
+            "Invited members",
+            "Check promotion order before sending updates",
+        ),
+        (
+            "EVT-2003",
+            "Jordan Lee",
+            "jordan@example.com",
+            "Fit Clinic Appointments",
+            "Morning appointment",
+            "Confirmed booking",
+            "Pass-backed access",
+            "Ready for check-in lane",
+        ),
+    ];
+
+    let preview_hrefs = event_fixtures(locale, site_id, plan)
+        .into_iter()
+        .map(|event| (event.title, event.detail_href))
+        .collect::<BTreeMap<_, _>>();
+
+    booking_fixtures
+        .into_iter()
+        .map(
+            |(
+                reference,
+                customer_name,
+                customer_email,
+                event_title,
+                slot_label,
+                state,
+                audience,
+                note,
+            )| {
+                RenderModel::new()
+                    .with_value("reference", RenderValue::text(reference))?
+                    .with_value("customer_name", RenderValue::text(customer_name))?
+                    .with_value("customer_email", RenderValue::text(customer_email))?
+                    .with_value("event_title", RenderValue::text(event_title))?
+                    .with_value("slot_label", RenderValue::text(slot_label))?
+                    .with_value("booking_state_label", RenderValue::text(state))?
+                    .with_value("audience_label", RenderValue::text(audience))?
+                    .with_value("support_note", RenderValue::text(note))?
+                    .with_value(
+                        "event_preview_href",
+                        RenderValue::text(
+                            preview_hrefs
+                                .get(event_title)
+                                .cloned()
+                                .unwrap_or_else(|| "/events".to_string()),
+                        ),
+                    )?
+                    .with_value("check_in_href", RenderValue::text("/admin/events/check-in"))
+            },
+        )
+        .collect()
+}
+
+fn event_booking_stats(
+    locale: &str,
+    site_id: Option<&str>,
+    plan: Option<&RuntimePlan>,
+) -> Result<RenderModel, TemplateModelError> {
+    let rows = event_booking_rows(locale, site_id, plan)?;
+    let total = rows.len();
+    let waitlisted = 1usize;
+    let confirmed = 1usize;
+    let held = total.saturating_sub(waitlisted + confirmed);
+
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("held", RenderValue::text(held.to_string()))?
+        .with_value("confirmed", RenderValue::text(confirmed.to_string()))?
+        .with_value("waitlisted", RenderValue::text(waitlisted.to_string()))
+}
+
+fn event_check_in_rows(
+    _locale: &str,
+    _site_id: Option<&str>,
+    _plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    Ok(vec![
+        RenderModel::new()
+            .with_value("booking_reference", RenderValue::text("EVT-2003"))?
+            .with_value("attendee_name", RenderValue::text("Jordan Lee"))?
+            .with_value("event_title", RenderValue::text("Fit Clinic Appointments"))?
+            .with_value("slot_label", RenderValue::text("Morning appointment"))?
+            .with_value(
+                "attendance_state_label",
+                RenderValue::text("Ready to check in"),
+            )?
+            .with_value(
+                "operator_note",
+                RenderValue::text(
+                    "Pass-backed attendee. Confirm stylist assignment before scanning in.",
+                ),
+            )?,
+        RenderModel::new()
+            .with_value("booking_reference", RenderValue::text("EVT-2004"))?
+            .with_value("attendee_name", RenderValue::text("Taylor Quinn"))?
+            .with_value("event_title", RenderValue::text("Spring Tasting Evening"))?
+            .with_value("slot_label", RenderValue::text("Main salon tasting"))?
+            .with_value(
+                "attendance_state_label",
+                RenderValue::text("Already checked in"),
+            )?
+            .with_value(
+                "operator_note",
+                RenderValue::text(
+                    "Attendance captured from the operator lane. Use this row for reconciliation.",
+                ),
+            )?,
+    ])
+}
+
+fn event_check_in_stats(
+    locale: &str,
+    site_id: Option<&str>,
+    plan: Option<&RuntimePlan>,
+) -> Result<RenderModel, TemplateModelError> {
+    let total = event_check_in_rows(locale, site_id, plan)?.len();
+    let ready = 1usize;
+    let completed = 1usize;
+
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value("ready", RenderValue::text(ready.to_string()))?
+        .with_value("completed", RenderValue::text(completed.to_string()))
 }
 
 fn order_detail_from_storefront(
@@ -1839,6 +4122,25 @@ fn order_detail_from_storefront(
         order.payment.last4.as_deref(),
         order.payment.reference.as_deref(),
     );
+    let payment_provider_label = payment_provider_label(Some(plan));
+    let payment_provider_summary = payment_provider_summary(Some(plan));
+    let needs_payment_follow_up = order.status == "pending_payment";
+    let payment_next_step = if needs_payment_follow_up {
+        configured_payment_provider(Some(plan))
+            .map(|provider| provider.pending_next_step())
+            .unwrap_or_else(|| {
+                "Payment confirmation is pending. The order will move forward after the provider callback arrives.".to_string()
+            })
+    } else if order.status == "paid" {
+        "Payment is captured. The next operator step is fulfillment or customer support follow-up."
+            .to_string()
+    } else if order.status == "fulfilled" {
+        "Payment is captured and the order is fulfilled. Use this view for refund or audit follow-up."
+            .to_string()
+    } else {
+        "Review provider status and local order state before taking another payment-side action."
+            .to_string()
+    };
     let can_refund = matches!(
         order.status.as_str(),
         "paid" | "fulfilled" | "partially_refunded"
@@ -1926,6 +4228,16 @@ fn order_detail_from_storefront(
             "payment_status",
             RenderValue::text(payment_status_label(&order.payment.status)),
         )?
+        .with_value(
+            "payment_provider_label",
+            RenderValue::text(payment_provider_label),
+        )?
+        .with_value(
+            "payment_provider_summary",
+            RenderValue::text(payment_provider_summary),
+        )?
+        .with_bool("needs_payment_follow_up", needs_payment_follow_up)?
+        .with_value("payment_next_step", RenderValue::text(payment_next_step))?
         .with_value("payment_summary", RenderValue::text(payment_summary))?
         .with_value("payment_reference", RenderValue::text(payment_reference))?
         .with_bool("has_payment_reference", order.payment.reference.is_some())?
@@ -2236,9 +4548,9 @@ fn parse_customer_auth_entity(value: &str) -> Result<coil_auth::Entity, BackendE
 
 fn customer_hook_auth_subject(principal_id: Option<&str>) -> coil_auth::DefaultSubject {
     match principal_id {
-        Some(principal_id) => coil_auth::DefaultSubject::entity(coil_auth::Entity::user(
-            principal_id.to_string(),
-        )),
+        Some(principal_id) => {
+            coil_auth::DefaultSubject::entity(coil_auth::Entity::user(principal_id.to_string()))
+        }
         None => coil_auth::DefaultSubject::entity(coil_auth::Entity::any_user()),
     }
 }
@@ -2339,8 +4651,20 @@ fn customer_order_review_model(
 }
 
 fn admin_order_row_from_storefront(
+    plan: &RuntimePlan,
     order: &StorefrontOrderSnapshot,
 ) -> Result<RenderModel, TemplateModelError> {
+    let needs_payment_follow_up = order.status == "pending_payment";
+    let support_state_label = if needs_payment_follow_up {
+        format!(
+            "Awaiting {} confirmation",
+            payment_provider_operator_name(Some(plan))
+        )
+    } else if !order.refunds.is_empty() {
+        "Refund history present".to_string()
+    } else {
+        "No payment follow-up required".to_string()
+    };
     RenderModel::new()
         .with_value("reference", RenderValue::text(order.order_id.clone()))?
         .with_value(
@@ -2358,6 +4682,16 @@ fn admin_order_row_from_storefront(
         )?
         .with_bool("has_customer_email", order.payment.checkout_email.is_some())?
         .with_value(
+            "payment_reference",
+            RenderValue::text(order.payment.reference.clone().unwrap_or_default()),
+        )?
+        .with_bool("has_payment_reference", order.payment.reference.is_some())?
+        .with_bool("needs_payment_follow_up", needs_payment_follow_up)?
+        .with_value(
+            "support_state_label",
+            RenderValue::text(support_state_label),
+        )?
+        .with_value(
             "detail_href",
             RenderValue::text(format!("/admin/orders/{}", order.order_id)),
         )
@@ -2367,11 +4701,38 @@ fn admin_order_stats(
     total: usize,
     pending: usize,
     refunded: usize,
+    payment_follow_up: usize,
 ) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
         .with_value("total", RenderValue::text(total.to_string()))?
         .with_value("pending", RenderValue::text(pending.to_string()))?
-        .with_value("refunded", RenderValue::text(refunded.to_string()))
+        .with_value("refunded", RenderValue::text(refunded.to_string()))?
+        .with_value(
+            "payment_follow_up",
+            RenderValue::text(payment_follow_up.to_string()),
+        )
+}
+
+fn admin_customer_stats(
+    total: usize,
+    active_memberships: usize,
+    pending_memberships: usize,
+    payment_follow_up: usize,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("total", RenderValue::text(total.to_string()))?
+        .with_value(
+            "active_memberships",
+            RenderValue::text(active_memberships.to_string()),
+        )?
+        .with_value(
+            "pending_memberships",
+            RenderValue::text(pending_memberships.to_string()),
+        )?
+        .with_value(
+            "payment_follow_up",
+            RenderValue::text(payment_follow_up.to_string()),
+        )
 }
 
 fn operator_identity(
@@ -2561,9 +4922,16 @@ fn parse_operator_audit_record(kind: &str) -> ParsedOperatorAuditRecord {
 fn admin_audit_capability_fallback(action: &str) -> &'static str {
     match action {
         "cms.pages.save-draft" => "cms.page.edit",
+        "cms.pages.save-settings" => "cms.page.edit",
+        "cms.pages.save-blocks" => "cms.page.edit",
+        "cms.pages.duplicate-block" => "cms.page.edit",
+        "cms.pages.schedule" => "cms.page.publish",
         "cms.pages.publish" | "cms.pages.unpublish" => "cms.page.publish",
+        "cms.pages.rollback" => "cms.page.publish",
         "cms.navigation.save" => "cms.navigation.edit",
         "cms.redirects.save" => "cms.page.edit",
+        "cms.shared-blocks.save" => "cms.page.edit",
+        "cms.options.save" => "cms.page.edit",
         "commerce.catalog-admin-update.product"
         | "commerce.catalog-admin-update.collection"
         | "commerce.catalog-admin-update" => "catalog.product.edit",
@@ -2576,10 +4944,17 @@ fn admin_audit_capability_fallback(action: &str) -> &'static str {
 fn admin_audit_action_label(action: &str) -> &'static str {
     match action {
         "cms.pages.save-draft" => "Save draft",
+        "cms.pages.save-settings" => "Save page settings",
+        "cms.pages.save-blocks" => "Save page blocks",
+        "cms.pages.duplicate-block" => "Duplicate page block",
+        "cms.pages.schedule" => "Schedule page publication",
         "cms.pages.publish" => "Publish page",
         "cms.pages.unpublish" => "Unpublish page",
+        "cms.pages.rollback" => "Rollback page",
         "cms.navigation.save" => "Save navigation",
         "cms.redirects.save" => "Save redirects",
+        "cms.shared-blocks.save" => "Save shared block",
+        "cms.options.save" => "Save global settings",
         "commerce.catalog-admin-update.product" => "Update product",
         "commerce.catalog-admin-update.collection" => "Update collection",
         "commerce.order-refund" => "Issue refund",
@@ -2600,6 +4975,7 @@ fn admin_panels(
     locale: &str,
     fixture: &StorefrontFixture,
     order_count: usize,
+    customer_count: usize,
 ) -> Result<Vec<RenderModel>, TemplateModelError> {
     let content_pages = content_pages(locale)?;
     Ok(vec![
@@ -2618,6 +4994,14 @@ fn admin_panels(
             "Review recent purchases",
             "/admin/orders",
             &format!("{order_count} completed orders are available for operator review."),
+        )?,
+        admin_panel(
+            "Customers",
+            "Review customer operations",
+            "/admin/customers",
+            &format!(
+                "{customer_count} operator-visible customer records are currently assembled from live orders.",
+            ),
         )?,
         admin_panel(
             "Content",
@@ -2681,6 +5065,12 @@ fn content_pages(locale: &str) -> Result<Vec<RenderModel>, TemplateModelError> {
             "/account/memberships",
             "account",
             "Membership state and entitlement guidance for signed-in customers.",
+        )?,
+        content_page(
+            "Passes and credits",
+            "/account/passes",
+            "account",
+            "Pass-backed access, balances, and event-linked redemption guidance for signed-in customers.",
         )?,
     ])
 }
@@ -2746,15 +5136,42 @@ fn cms_admin_pages_model(
         .pages
         .iter()
         .map(|page| {
+            let blocks = cms_admin_revision_blocks_models(&page.draft, &workspace.shared_blocks)?;
+            let scheduled_publish_at = page
+                .scheduled_publish_at
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            let previous_live_title = page
+                .previous_live
+                .as_ref()
+                .map(|revision| revision.title.clone())
+                .unwrap_or_default();
             RenderModel::new()
                 .with_value("id", RenderValue::text(page.id.clone()))?
                 .with_value("title", RenderValue::text(page.draft.title.clone()))?
                 .with_value("slug", RenderValue::text(page.draft.slug.clone()))?
                 .with_value(
+                    "workflow_status",
+                    RenderValue::text(page.status().to_string().to_lowercase()),
+                )?
+                .with_value(
                     "status_label",
                     RenderValue::text(page.status_label().to_string()),
                 )?
                 .with_value("summary", RenderValue::text(page.draft.summary.clone()))?
+                .with_bool("has_blocks", !blocks.is_empty())?
+                .with_value("block_count", RenderValue::text(blocks.len().to_string()))?
+                .with_bool("has_scheduled_publish", page.scheduled_publish_at.is_some())?
+                .with_value(
+                    "scheduled_publish_at",
+                    RenderValue::text(scheduled_publish_at),
+                )?
+                .with_bool("can_rollback", page.has_rollback_target())?
+                .with_bool("has_previous_live", page.previous_live.is_some())?
+                .with_value(
+                    "previous_live_title",
+                    RenderValue::text(previous_live_title),
+                )?
                 .with_value(
                     "edit_href",
                     RenderValue::text(format!("/admin/pages?page={}", page.id)),
@@ -2768,8 +5185,571 @@ fn cms_admin_pages_model(
         .collect()
 }
 
-fn cms_admin_selected_page_model(page: CmsAdminPage) -> Result<RenderModel, TemplateModelError> {
-    let preview_html = TrustedHtml::new(page.draft.body_html.clone())?;
+fn default_cms_admin_page_settings() -> crate::cms_admin::CmsAdminPageSettings {
+    crate::cms_admin::CmsAdminPageSettings {
+        page_type: "page".to_string(),
+        template: None,
+        seo_title: None,
+        seo_description: None,
+        options: crate::cms_admin::CmsAdminPageOptions {
+            show_in_navigation: false,
+            allow_indexing: true,
+            localized: false,
+        },
+    }
+}
+
+fn cms_admin_page_settings_model(
+    settings: &crate::cms_admin::CmsAdminPageSettings,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("page_type", RenderValue::text(settings.page_type.clone()))?
+        .with_bool("has_template", settings.template.is_some())?
+        .with_value(
+            "template",
+            RenderValue::text(settings.template.clone().unwrap_or_default()),
+        )?
+        .with_bool("has_seo_title", settings.seo_title.is_some())?
+        .with_value(
+            "seo_title",
+            RenderValue::text(settings.seo_title.clone().unwrap_or_default()),
+        )?
+        .with_bool("has_seo_description", settings.seo_description.is_some())?
+        .with_value(
+            "seo_description",
+            RenderValue::text(settings.seo_description.clone().unwrap_or_default()),
+        )?
+        .with_bool("show_in_navigation", settings.options.show_in_navigation)?
+        .with_bool("allow_indexing", settings.options.allow_indexing)?
+        .with_bool("localized", settings.options.localized)?
+        .with_bool("has_navigation_label", false)?
+        .with_value("navigation_label", RenderValue::text(String::new()))?
+        .with_bool("has_layout_variant", false)?
+        .with_value("layout_variant", RenderValue::text(String::new()))?
+        .with_bool("include_in_sitemap", settings.options.allow_indexing)
+}
+
+fn cms_admin_shared_block_lookup<'a>(
+    shared_blocks: &'a [crate::cms_admin::CmsAdminSharedBlock],
+    shared_block_id: &str,
+) -> Option<&'a crate::cms_admin::CmsAdminSharedBlock> {
+    shared_blocks
+        .iter()
+        .find(|block| block.id == shared_block_id)
+}
+
+fn cms_optional_form_state_field(
+    form_state: Option<&StorefrontFormState>,
+    field: &str,
+) -> Option<String> {
+    form_state
+        .and_then(|state| state.fields.get(field))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn cms_checkbox_form_state_field(form_state: Option<&StorefrontFormState>, field: &str) -> bool {
+    form_state
+        .and_then(|state| state.fields.get(field))
+        .map(|value| matches!(value.as_str(), "true" | "yes" | "on" | "1"))
+        .unwrap_or(false)
+}
+
+fn cms_admin_page_settings_from_form_state(
+    form_state: Option<&StorefrontFormState>,
+    fallback: &crate::cms_admin::CmsAdminPageSettings,
+) -> crate::cms_admin::CmsAdminPageSettings {
+    let has_settings_fields = form_state
+        .map(|state| {
+            state.fields.keys().any(|field| {
+                field.starts_with("page_settings_") || field.starts_with("page_option_")
+            })
+        })
+        .unwrap_or(false);
+    if !has_settings_fields {
+        return fallback.clone();
+    }
+    crate::cms_admin::CmsAdminPageSettings {
+        page_type: cms_optional_form_state_field(form_state, "page_settings_page_type")
+            .unwrap_or_else(|| fallback.page_type.clone()),
+        template: cms_optional_form_state_field(form_state, "page_settings_template"),
+        seo_title: cms_optional_form_state_field(form_state, "page_settings_seo_title"),
+        seo_description: cms_optional_form_state_field(form_state, "page_settings_seo_description"),
+        options: crate::cms_admin::CmsAdminPageOptions {
+            show_in_navigation: cms_checkbox_form_state_field(
+                form_state,
+                "page_option_show_in_navigation",
+            ),
+            allow_indexing: form_state
+                .and_then(|state| state.fields.get("page_option_allow_indexing"))
+                .map(|_| cms_checkbox_form_state_field(form_state, "page_option_allow_indexing"))
+                .unwrap_or(fallback.options.allow_indexing),
+            localized: cms_checkbox_form_state_field(form_state, "page_option_localized"),
+        },
+    }
+}
+
+fn cms_admin_page_blocks_from_form_state(
+    form_state: Option<&StorefrontFormState>,
+) -> Option<Vec<crate::cms_admin::CmsAdminPageBlock>> {
+    let fields = &form_state?.fields;
+    if !fields.keys().any(|field| field.starts_with("block_kind_")) {
+        return None;
+    }
+    let mut blocks = Vec::new();
+    for index in 0.. {
+        let kind = fields
+            .get(&format!("block_kind_{index}"))?
+            .trim()
+            .to_string();
+        if kind.is_empty() {
+            break;
+        }
+        let id = fields
+            .get(&format!("block_id_{index}"))
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default();
+        let label = fields
+            .get(&format!("block_label_{index}"))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let enabled = fields
+            .get(&format!("block_enabled_{index}"))
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(true);
+        if matches!(kind.as_str(), "shared" | "shared_reference") {
+            let shared_block_id = fields
+                .get(&format!("block_shared_block_id_{index}"))
+                .map(|value| value.trim().to_string())
+                .unwrap_or_default();
+            blocks.push(crate::cms_admin::CmsAdminPageBlock::SharedReference(
+                crate::cms_admin::CmsAdminSharedBlockReference {
+                    id,
+                    shared_block_id,
+                    label,
+                    enabled,
+                },
+            ));
+            continue;
+        }
+        let block_type = fields
+            .get(&format!("block_type_{index}"))
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default();
+        let prefix = format!("block_field_{index}_");
+        let mut block_fields = std::collections::BTreeMap::new();
+        for (field, value) in fields {
+            if let Some(key) = field.strip_prefix(prefix.as_str()) {
+                block_fields.insert(key.to_string(), value.clone());
+            }
+        }
+        blocks.push(crate::cms_admin::CmsAdminPageBlock::Instance(
+            crate::cms_admin::CmsAdminBlockInstance {
+                id,
+                block_type,
+                label,
+                enabled,
+                fields: block_fields,
+            },
+        ));
+    }
+    Some(blocks)
+}
+
+fn cms_admin_fields_model(
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<RenderModel, TemplateModelError> {
+    let mut model = RenderModel::new();
+    for (key, value) in fields {
+        model = model.with_value(key.as_str(), RenderValue::text(value.clone()))?;
+    }
+    Ok(model)
+}
+
+fn cms_admin_field_entries_model(
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    fields
+        .iter()
+        .map(|(key, value)| {
+            RenderModel::new()
+                .with_value("key", RenderValue::text(key.clone()))?
+                .with_value("value", RenderValue::text(value.clone()))
+        })
+        .collect()
+}
+
+fn cms_admin_named_field_entries_model(
+    fields: &std::collections::BTreeMap<String, String>,
+    prefix: &str,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    fields
+        .iter()
+        .map(|(key, value)| {
+            RenderModel::new()
+                .with_value("key", RenderValue::text(key.clone()))?
+                .with_value("value", RenderValue::text(value.clone()))?
+                .with_value("field_name", RenderValue::text(format!("{prefix}{key}")))
+        })
+        .collect()
+}
+
+fn empty_trusted_html_placeholder() -> &'static str {
+    "<span hidden></span>"
+}
+
+fn cms_admin_page_block_model(
+    block: &crate::cms_admin::CmsAdminPageBlock,
+    shared_blocks: &[crate::cms_admin::CmsAdminSharedBlock],
+    index: usize,
+) -> Result<RenderModel, TemplateModelError> {
+    match block {
+        crate::cms_admin::CmsAdminPageBlock::Instance(instance) => RenderModel::new()
+            .with_value("id", RenderValue::text(instance.id.clone()))?
+            .with_value("type", RenderValue::text(instance.block_type.clone()))?
+            .with_value("type_id", RenderValue::text(instance.block_type.clone()))?
+            .with_value("kind", RenderValue::text("inline"))?
+            .with_value(
+                "kind_field",
+                RenderValue::text(format!("block_kind_{index}")),
+            )?
+            .with_value("id_field", RenderValue::text(format!("block_id_{index}")))?
+            .with_value(
+                "type_field",
+                RenderValue::text(format!("block_type_{index}")),
+            )?
+            .with_value(
+                "label_field",
+                RenderValue::text(format!("block_label_{index}")),
+            )?
+            .with_bool("has_shared_block_id", false)?
+            .with_value("shared_block_id", RenderValue::text(String::new()))?
+            .with_value(
+                "shared_block_id_field",
+                RenderValue::text(format!("block_shared_block_id_{index}")),
+            )?
+            .with_value("render_mode", RenderValue::text("structured_fields"))?
+            .with_bool("is_shared", false)?
+            .with_bool("enabled", instance.enabled)?
+            .with_bool("is_enabled", instance.enabled)?
+            .with_bool("is_disabled", !instance.enabled)?
+            .with_value(
+                "enabled_field",
+                RenderValue::text(format!("block_enabled_{index}")),
+            )?
+            .with_bool("has_label", instance.label.is_some())?
+            .with_value(
+                "label",
+                RenderValue::text(instance.label.clone().unwrap_or_default()),
+            )?
+            .with_object("fields", cms_admin_fields_model(&instance.fields)?)?
+            .with_list(
+                "field_entries",
+                cms_admin_named_field_entries_model(
+                    &instance.fields,
+                    format!("block_field_{index}_").as_str(),
+                )?,
+            )?
+            .with_bool("has_html", instance.fields.contains_key("html"))
+            .and_then(|model| {
+                if let Some(html) = instance.fields.get("html") {
+                    model.with_value(
+                        "html",
+                        RenderValue::trusted_html(TrustedHtml::new(html.clone())?),
+                    )
+                } else {
+                    model.with_value(
+                        "html",
+                        RenderValue::trusted_html(TrustedHtml::new(
+                            empty_trusted_html_placeholder(),
+                        )?),
+                    )
+                }
+            }),
+        crate::cms_admin::CmsAdminPageBlock::SharedReference(reference) => {
+            let shared = cms_admin_shared_block_lookup(shared_blocks, &reference.shared_block_id);
+            let shared_type = shared
+                .map(|block| block.block_type.clone())
+                .unwrap_or_else(|| "shared_reference".to_string());
+            let shared_label = shared
+                .map(|block| block.label.clone())
+                .unwrap_or_else(|| reference.shared_block_id.clone());
+            let shared_fields = shared.map(|block| block.fields.clone()).unwrap_or_default();
+            RenderModel::new()
+                .with_value("id", RenderValue::text(reference.id.clone()))?
+                .with_value("type", RenderValue::text(shared_type.clone()))?
+                .with_value("type_id", RenderValue::text(shared_type))?
+                .with_value("kind", RenderValue::text("shared_reference"))?
+                .with_value(
+                    "kind_field",
+                    RenderValue::text(format!("block_kind_{index}")),
+                )?
+                .with_value("id_field", RenderValue::text(format!("block_id_{index}")))?
+                .with_value(
+                    "type_field",
+                    RenderValue::text(format!("block_type_{index}")),
+                )?
+                .with_value(
+                    "label_field",
+                    RenderValue::text(format!("block_label_{index}")),
+                )?
+                .with_value("render_mode", RenderValue::text("shared_reference"))?
+                .with_bool("is_shared", true)?
+                .with_bool("enabled", reference.enabled)?
+                .with_bool("is_enabled", reference.enabled)?
+                .with_bool("is_disabled", !reference.enabled)?
+                .with_value(
+                    "enabled_field",
+                    RenderValue::text(format!("block_enabled_{index}")),
+                )?
+                .with_bool("has_label", true)?
+                .with_value(
+                    "label",
+                    RenderValue::text(
+                        reference
+                            .label
+                            .clone()
+                            .unwrap_or_else(|| shared_label.clone()),
+                    ),
+                )?
+                .with_value(
+                    "shared_block_id",
+                    RenderValue::text(reference.shared_block_id.clone()),
+                )?
+                .with_bool("has_shared_block_id", true)?
+                .with_value(
+                    "shared_block_id_field",
+                    RenderValue::text(format!("block_shared_block_id_{index}")),
+                )?
+                .with_bool("has_shared_block", shared.is_some())?
+                .with_object("fields", cms_admin_fields_model(&shared_fields)?)?
+                .with_list(
+                    "field_entries",
+                    cms_admin_field_entries_model(&shared_fields)?,
+                )?
+                .with_bool("has_html", shared_fields.contains_key("html"))
+                .and_then(|model| {
+                    if let Some(html) = shared_fields.get("html") {
+                        model.with_value(
+                            "html",
+                            RenderValue::trusted_html(TrustedHtml::new(html.clone())?),
+                        )
+                    } else {
+                        model.with_value(
+                            "html",
+                            RenderValue::trusted_html(TrustedHtml::new(
+                                empty_trusted_html_placeholder(),
+                            )?),
+                        )
+                    }
+                })
+        }
+    }
+}
+
+fn cms_live_page_block_model(
+    block: &crate::cms_admin::CmsAdminPageBlock,
+    shared_blocks: &[crate::cms_admin::CmsAdminSharedBlock],
+) -> Result<RenderModel, TemplateModelError> {
+    match block {
+        crate::cms_admin::CmsAdminPageBlock::Instance(instance) => RenderModel::new()
+            .with_value("id", RenderValue::text(instance.id.clone()))?
+            .with_value("type", RenderValue::text(instance.block_type.clone()))?
+            .with_value("type_id", RenderValue::text(instance.block_type.clone()))?
+            .with_value("kind", RenderValue::text("inline"))?
+            .with_value("source_kind", RenderValue::text("inline"))?
+            .with_bool("is_shared", false)?
+            .with_bool("enabled", instance.enabled)?
+            .with_bool("is_enabled", instance.enabled)?
+            .with_bool("is_disabled", !instance.enabled)?
+            .with_bool("has_shared_block_id", false)?
+            .with_bool("has_shared_block", false)?
+            .with_value("shared_block_id", RenderValue::text(String::new()))?
+            .with_value("shared_block_label", RenderValue::text(String::new()))?
+            .with_bool("has_label", instance.label.is_some())?
+            .with_value(
+                "label",
+                RenderValue::text(instance.label.clone().unwrap_or_default()),
+            )?
+            .with_object("fields", cms_admin_fields_model(&instance.fields)?)?
+            .with_list(
+                "field_entries",
+                cms_admin_field_entries_model(&instance.fields)?,
+            )?
+            .with_bool("has_html", instance.fields.contains_key("html"))
+            .and_then(|model| {
+                if let Some(html) = instance.fields.get("html") {
+                    model.with_value(
+                        "html",
+                        RenderValue::trusted_html(TrustedHtml::new(html.clone())?),
+                    )
+                } else {
+                    model.with_value(
+                        "html",
+                        RenderValue::trusted_html(TrustedHtml::new(
+                            empty_trusted_html_placeholder(),
+                        )?),
+                    )
+                }
+            }),
+        crate::cms_admin::CmsAdminPageBlock::SharedReference(reference) => {
+            let shared = cms_admin_shared_block_lookup(shared_blocks, &reference.shared_block_id);
+            let shared_type = shared
+                .map(|block| block.block_type.clone())
+                .unwrap_or_else(|| "shared_reference".to_string());
+            let shared_label = shared
+                .map(|block| block.label.clone())
+                .unwrap_or_else(|| reference.shared_block_id.clone());
+            let shared_fields = shared.map(|block| block.fields.clone()).unwrap_or_default();
+            RenderModel::new()
+                .with_value("id", RenderValue::text(reference.id.clone()))?
+                .with_value("type", RenderValue::text(shared_type.clone()))?
+                .with_value("type_id", RenderValue::text(shared_type))?
+                .with_value("kind", RenderValue::text("shared_reference"))?
+                .with_value("source_kind", RenderValue::text("shared"))?
+                .with_bool("is_shared", true)?
+                .with_bool("enabled", reference.enabled)?
+                .with_bool("is_enabled", reference.enabled)?
+                .with_bool("is_disabled", !reference.enabled)?
+                .with_bool("has_label", true)?
+                .with_value(
+                    "label",
+                    RenderValue::text(
+                        reference
+                            .label
+                            .clone()
+                            .unwrap_or_else(|| shared_label.clone()),
+                    ),
+                )?
+                .with_value(
+                    "shared_block_id",
+                    RenderValue::text(reference.shared_block_id.clone()),
+                )?
+                .with_value("shared_block_label", RenderValue::text(shared_label))?
+                .with_bool("has_shared_block_id", true)?
+                .with_bool("has_shared_block", shared.is_some())?
+                .with_object("fields", cms_admin_fields_model(&shared_fields)?)?
+                .with_list(
+                    "field_entries",
+                    cms_admin_field_entries_model(&shared_fields)?,
+                )?
+                .with_bool("has_html", shared_fields.contains_key("html"))
+                .and_then(|model| {
+                    if let Some(html) = shared_fields.get("html") {
+                        model.with_value(
+                            "html",
+                            RenderValue::trusted_html(TrustedHtml::new(html.clone())?),
+                        )
+                    } else {
+                        model.with_value(
+                            "html",
+                            RenderValue::trusted_html(TrustedHtml::new(
+                                empty_trusted_html_placeholder(),
+                            )?),
+                        )
+                    }
+                })
+        }
+    }
+}
+
+fn cms_admin_revision_blocks_models(
+    revision: &crate::cms_admin::CmsAdminPageRevision,
+    shared_blocks: &[crate::cms_admin::CmsAdminSharedBlock],
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    if revision.blocks.is_empty() {
+        return legacy_page_blocks(revision.body_html.as_str());
+    }
+    revision
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| cms_admin_page_block_model(block, shared_blocks, index))
+        .collect()
+}
+
+fn cms_live_revision_blocks_models(
+    revision: &crate::cms_admin::CmsAdminPageRevision,
+    shared_blocks: &[crate::cms_admin::CmsAdminSharedBlock],
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    if revision.blocks.is_empty() {
+        return legacy_page_blocks(revision.body_html.as_str());
+    }
+    revision
+        .blocks
+        .iter()
+        .filter(|block| match block {
+            crate::cms_admin::CmsAdminPageBlock::Instance(instance) => instance.enabled,
+            crate::cms_admin::CmsAdminPageBlock::SharedReference(reference) => reference.enabled,
+        })
+        .map(|block| cms_live_page_block_model(block, shared_blocks))
+        .collect()
+}
+
+fn cms_admin_shared_blocks_model(
+    shared_blocks: &[crate::cms_admin::CmsAdminSharedBlock],
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    shared_blocks
+        .iter()
+        .map(|block| {
+            RenderModel::new()
+                .with_value("id", RenderValue::text(block.id.clone()))?
+                .with_value("label", RenderValue::text(block.label.clone()))?
+                .with_value("type_id", RenderValue::text(block.block_type.clone()))?
+                .with_object("fields", cms_admin_fields_model(&block.fields)?)?
+                .with_list(
+                    "field_entries",
+                    cms_admin_named_field_entries_model(&block.fields, "shared_block_field_")?,
+                )?
+                .with_value(
+                    "updated_at_unix_seconds",
+                    RenderValue::text(block.updated_at.to_string()),
+                )
+        })
+        .collect()
+}
+
+fn cms_admin_shared_block_editor_model(
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let id = cms_optional_form_state_field(form_state, "shared_block_id").unwrap_or_default();
+    let label = cms_optional_form_state_field(form_state, "shared_block_label").unwrap_or_default();
+    let block_type =
+        cms_optional_form_state_field(form_state, "shared_block_type").unwrap_or_default();
+    let mut fields = std::collections::BTreeMap::new();
+    if let Some(state) = form_state {
+        for (field, value) in &state.fields {
+            if let Some(key) = field.strip_prefix("shared_block_field_") {
+                fields.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    RenderModel::new()
+        .with_value("id", RenderValue::text(id))?
+        .with_value("label", RenderValue::text(label))?
+        .with_value("type_id", RenderValue::text(block_type))?
+        .with_object("fields", cms_admin_fields_model(&fields)?)?
+        .with_list(
+            "field_entries",
+            cms_admin_named_field_entries_model(&fields, "shared_block_field_")?,
+        )
+}
+
+fn cms_admin_selected_page_model(
+    page: CmsAdminPage,
+    shared_blocks: &[crate::cms_admin::CmsAdminSharedBlock],
+) -> Result<RenderModel, TemplateModelError> {
+    let content = page_content_model_from_legacy_html(
+        page.draft.title.as_str(),
+        page.draft.summary.as_str(),
+        page.draft.body_html.as_str(),
+    )?;
+    let blocks = cms_admin_revision_blocks_models(&page.draft, shared_blocks)?;
     RenderModel::new()
         .with_value("id", RenderValue::text(page.id.clone()))?
         .with_value("title", RenderValue::text(page.draft.title.clone()))?
@@ -2779,10 +5759,24 @@ fn cms_admin_selected_page_model(page: CmsAdminPage) -> Result<RenderModel, Temp
             "body_source",
             RenderValue::text(page.draft.body_html.clone()),
         )?
-        .with_value("body_html", RenderValue::trusted_html(preview_html))?
+        .with_value(
+            "body_html",
+            RenderValue::trusted_html(TrustedHtml::new(page.draft.body_html.clone())?),
+        )?
         .with_value(
             "status_label",
             RenderValue::text(page.status_label().to_string()),
+        )?
+        .with_object(
+            "settings",
+            cms_admin_page_settings_model(&page.draft.settings)?,
+        )?
+        .with_object("content", content)?
+        .with_list("blocks", blocks)?
+        .with_bool("has_blocks", !page.draft.blocks.is_empty())?
+        .with_value(
+            "block_count",
+            RenderValue::text(page.draft.blocks.len().to_string()),
         )?
         .with_bool("has_live_path", page.live_path().is_some())?
         .with_value(
@@ -2796,6 +5790,7 @@ fn cms_admin_selected_page_model(page: CmsAdminPage) -> Result<RenderModel, Temp
 fn cms_admin_selected_page_model_with_form_state(
     page: Option<CmsAdminPage>,
     form_state: Option<&StorefrontFormState>,
+    shared_blocks: &[crate::cms_admin::CmsAdminSharedBlock],
 ) -> Result<RenderModel, TemplateModelError> {
     let page_id = form_state
         .and_then(|state| state.fields.get("page_id"))
@@ -2836,6 +5831,36 @@ fn cms_admin_selected_page_model_with_form_state(
         .map(|page| page.preview_path())
         .or_else(|| (!page_id.is_empty()).then(|| format!("/admin/pages/preview?page={page_id}")))
         .unwrap_or_default();
+    let scheduled_publish_at = page
+        .as_ref()
+        .and_then(|page| page.scheduled_publish_at)
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    let previous_live_title = page
+        .as_ref()
+        .and_then(|page| page.previous_live.as_ref())
+        .map(|revision| revision.title.clone())
+        .unwrap_or_default();
+    let settings = page
+        .as_ref()
+        .map(|page| page.draft.settings.clone())
+        .map(|settings| cms_admin_page_settings_from_form_state(form_state, &settings))
+        .unwrap_or_else(|| {
+            cms_admin_page_settings_from_form_state(form_state, &default_cms_admin_page_settings())
+        });
+    let blocks = if let Some(form_blocks) = cms_admin_page_blocks_from_form_state(form_state) {
+        form_blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| cms_admin_page_block_model(block, shared_blocks, index))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        match page.as_ref() {
+            Some(page) => cms_admin_revision_blocks_models(&page.draft, shared_blocks)?,
+            None => legacy_page_blocks(&body_html)?,
+        }
+    };
+    let content = page_content_model_from_legacy_html(&title, &summary, &body_html)?;
     RenderModel::new()
         .with_value("id", RenderValue::text(page_id))?
         .with_value("title", RenderValue::text(title))?
@@ -2846,14 +5871,52 @@ fn cms_admin_selected_page_model_with_form_state(
             "body_html",
             RenderValue::trusted_html(TrustedHtml::new(body_html)?),
         )?
+        .with_value(
+            "workflow_status",
+            RenderValue::text(
+                page.as_ref()
+                    .map(|page| page.status().to_string().to_lowercase())
+                    .unwrap_or_else(|| "draft_only".to_string()),
+            ),
+        )?
         .with_value("status_label", RenderValue::text(status_label))?
+        .with_object("settings", cms_admin_page_settings_model(&settings)?)?
+        .with_object("content", content)?
+        .with_list("blocks", blocks.clone())?
+        .with_bool("has_blocks", !blocks.is_empty())?
+        .with_value("block_count", RenderValue::text(blocks.len().to_string()))?
         .with_bool("has_live_path", has_live_path)?
         .with_value("live_path", RenderValue::text(live_path))?
+        .with_bool(
+            "has_scheduled_publish",
+            page.as_ref()
+                .and_then(|page| page.scheduled_publish_at)
+                .is_some(),
+        )?
+        .with_value(
+            "scheduled_publish_at",
+            RenderValue::text(scheduled_publish_at),
+        )?
+        .with_bool(
+            "can_rollback",
+            page.as_ref().is_some_and(|page| page.has_rollback_target()),
+        )?
+        .with_bool(
+            "has_previous_live",
+            page.as_ref()
+                .is_some_and(|page| page.previous_live.is_some()),
+        )?
+        .with_value(
+            "previous_live_title",
+            RenderValue::text(previous_live_title),
+        )?
         .with_bool("has_preview_path", !preview_path.is_empty())?
         .with_value("preview_path", RenderValue::text(preview_path))
 }
 
 fn empty_cms_admin_selected_page_model() -> Result<RenderModel, TemplateModelError> {
+    let placeholder_html = "<p>Create a draft page to preview it.</p>";
+    let blocks = legacy_page_blocks(placeholder_html)?;
     RenderModel::new()
         .with_value("id", RenderValue::text(String::new()))?
         .with_value("title", RenderValue::text(String::new()))?
@@ -2862,10 +5925,23 @@ fn empty_cms_admin_selected_page_model() -> Result<RenderModel, TemplateModelErr
         .with_value("body_source", RenderValue::text(String::new()))?
         .with_value(
             "body_html",
-            RenderValue::trusted_html(TrustedHtml::new(
-                "<p>Create a draft page to preview it.</p>",
-            )?),
+            RenderValue::trusted_html(TrustedHtml::new(placeholder_html)?),
         )?
+        .with_object(
+            "settings",
+            cms_admin_page_settings_model(&default_cms_admin_page_settings())?,
+        )?
+        .with_object(
+            "content",
+            page_content_model_from_legacy_html(
+                String::new().as_str(),
+                String::new().as_str(),
+                placeholder_html,
+            )?,
+        )?
+        .with_list("blocks", blocks.clone())?
+        .with_bool("has_blocks", !blocks.is_empty())?
+        .with_value("block_count", RenderValue::text(blocks.len().to_string()))?
         .with_value("status_label", RenderValue::text("Draft only"))?
         .with_bool("has_live_path", false)?
         .with_value("live_path", RenderValue::text(String::new()))?
@@ -2892,6 +5968,64 @@ fn cms_navigation_items_model(
         .collect()
 }
 
+fn cms_global_settings_model(
+    settings: &crate::cms_admin::CmsAdminGlobalSettings,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value(
+            "footer_heading",
+            RenderValue::text(settings.footer_heading.clone()),
+        )?
+        .with_value(
+            "footer_body",
+            RenderValue::text(settings.footer_body.clone()),
+        )?
+        .with_value(
+            "contact_email",
+            RenderValue::text(settings.contact_email.clone()),
+        )?
+        .with_bool(
+            "has_contact_email",
+            !settings.contact_email.trim().is_empty(),
+        )?
+        .with_value(
+            "contact_phone",
+            RenderValue::text(settings.contact_phone.clone()),
+        )?
+        .with_bool(
+            "has_contact_phone",
+            !settings.contact_phone.trim().is_empty(),
+        )?
+        .with_value(
+            "announcement_title",
+            RenderValue::text(settings.announcement_title.clone()),
+        )?
+        .with_bool(
+            "has_announcement_title",
+            !settings.announcement_title.trim().is_empty(),
+        )?
+        .with_value(
+            "announcement_body",
+            RenderValue::text(settings.announcement_body.clone()),
+        )?
+        .with_bool(
+            "has_announcement_body",
+            !settings.announcement_body.trim().is_empty(),
+        )?
+        .with_value("footer_heading_field", RenderValue::text("footer_heading"))?
+        .with_value("footer_body_field", RenderValue::text("footer_body"))?
+        .with_value("contact_email_field", RenderValue::text("contact_email"))?
+        .with_value("contact_phone_field", RenderValue::text("contact_phone"))?
+        .with_value(
+            "announcement_title_field",
+            RenderValue::text("announcement_title"),
+        )?
+        .with_value(
+            "announcement_body_field",
+            RenderValue::text("announcement_body"),
+        )
+}
+
 fn cms_redirects_model(
     redirects: &[CmsAdminRedirect],
 ) -> Result<Vec<RenderModel>, TemplateModelError> {
@@ -2907,13 +6041,42 @@ fn cms_redirects_model(
                     "from_field",
                     RenderValue::text(format!("redirect_from_{index}")),
                 )?
-                .with_value("to_field", RenderValue::text(format!("redirect_to_{index}")))?
+                .with_value(
+                    "to_field",
+                    RenderValue::text(format!("redirect_to_{index}")),
+                )?
                 .with_value(
                     "permanent_field",
                     RenderValue::text(format!("redirect_permanent_{index}")),
                 )
         })
         .collect()
+}
+
+fn revision_has_distinct_structured_blocks(revision: &CmsAdminPageRevision) -> bool {
+    if revision.blocks.is_empty() {
+        return false;
+    }
+    if revision.blocks.len() == 1 {
+        match &revision.blocks[0] {
+            crate::cms_admin::CmsAdminPageBlock::Instance(instance)
+                if instance.block_type == "rich_text" =>
+            {
+                return instance
+                    .fields
+                    .get("html")
+                    .map(|html| html != &revision.body_html)
+                    .unwrap_or(true);
+            }
+            crate::cms_admin::CmsAdminPageBlock::Instance(instance)
+                if instance.block_type == "legacy_html_body" =>
+            {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    true
 }
 
 fn cms_live_page_model(
@@ -2925,19 +6088,37 @@ fn cms_live_page_model(
             .live
             .as_ref()
             .expect("live page should have a live revision");
+        let has_structured_blocks = revision_has_distinct_structured_blocks(live);
+        let content = page_content_model_from_legacy_html(
+            live.title.as_str(),
+            live.summary.as_str(),
+            live.body_html.as_str(),
+        )?;
+        let blocks = cms_live_revision_blocks_models(live, &workspace.shared_blocks)?;
         return RenderModel::new()
             .with_bool("is_published", true)?
+            .with_bool(
+                "requires_membership",
+                live.settings.page_type == "membership_guide",
+            )?
             .with_value("title", RenderValue::text(live.title.clone()))?
             .with_value("summary", RenderValue::text(live.summary.clone()))?
             .with_value(
                 "body_html",
                 RenderValue::trusted_html(TrustedHtml::new(live.body_html.clone())?),
             )?
+            .with_object("settings", cms_admin_page_settings_model(&live.settings)?)?
+            .with_object("content", content)?
+            .with_list("blocks", blocks.clone())?
+            .with_bool("has_structured_blocks", has_structured_blocks)?
+            .with_bool("has_blocks", !blocks.is_empty())?
+            .with_value("block_count", RenderValue::text(blocks.len().to_string()))?
             .with_value("slug", RenderValue::text(live.slug.clone()));
     }
 
     RenderModel::new()
         .with_bool("is_published", false)?
+        .with_bool("requires_membership", false)?
         .with_value("title", RenderValue::text("Page unavailable"))?
         .with_value(
             "summary",
@@ -2951,6 +6132,21 @@ fn cms_live_page_model(
                 "<p>The requested CMS page is not live yet.</p>",
             )?),
         )?
+        .with_object(
+            "settings",
+            cms_admin_page_settings_model(&default_cms_admin_page_settings())?,
+        )?
+        .with_object(
+            "content",
+            route_page_content_model(
+                "Page unavailable",
+                "This CMS page is not published yet. Use the Shoppr admin workflow to publish it before linking customers to this path.",
+            )?,
+        )?
+        .with_list("blocks", empty_page_blocks()?)?
+        .with_bool("has_structured_blocks", false)?
+        .with_bool("has_blocks", false)?
+        .with_value("block_count", RenderValue::text("0"))?
         .with_value("slug", RenderValue::text(slug.to_string()))
 }
 
@@ -3006,6 +6202,25 @@ fn merge_cms_redirect_form_feedback(
                 form_state
                     .map(|state| state.summary.clone())
                     .unwrap_or_else(|| "Update the redirect rules and save again.".to_string()),
+            ),
+        )?
+        .with_list("errors", errors)
+}
+
+fn merge_cms_options_form_feedback(
+    model: RenderModel,
+    form_state: Option<&StorefrontFormState>,
+) -> Result<RenderModel, TemplateModelError> {
+    let errors = form_errors_model(form_state)?;
+    let has_errors = form_state.is_some() || !errors.is_empty();
+    model
+        .with_bool("has_errors", has_errors)?
+        .with_value(
+            "error_summary",
+            RenderValue::text(
+                form_state
+                    .map(|state| state.summary.clone())
+                    .unwrap_or_else(|| "Update the global settings and save again.".to_string()),
             ),
         )?
         .with_list("errors", errors)
@@ -3198,7 +6413,10 @@ fn checkout_form_from_storefront(
             "payment_status_label",
             RenderValue::text(payment_status_label(&payment.status)),
         )?
-        .with_value("provider_code", RenderValue::text(provider_code.to_string()))?
+        .with_value(
+            "provider_code",
+            RenderValue::text(provider_code.to_string()),
+        )?
         .with_value(
             "provider_label",
             RenderValue::text(provider_label.to_string()),
@@ -3228,6 +6446,14 @@ fn payment_provider_summary(plan: Option<&RuntimePlan>) -> String {
         .unwrap_or_else(|| {
             "This checkout is using the platform fallback payment path until a provider-backed handoff is installed.".to_string()
         })
+}
+
+fn payment_provider_operator_name(plan: Option<&RuntimePlan>) -> String {
+    payment_provider_label(plan)
+        .trim_end_matches(" webhook confirmation")
+        .trim_end_matches(" hosted checkout")
+        .trim_end_matches(" payment provider")
+        .to_string()
 }
 
 fn payment_submit_label(plan: Option<&RuntimePlan>) -> String {
@@ -3359,7 +6585,18 @@ struct AccountSurfaceBindings {
     account: RenderModel,
     customer: RenderModel,
     recent_orders: Vec<RenderModel>,
+    event_bookings: Vec<RenderModel>,
+    pass_programs: Vec<RenderModel>,
+    pass_wallet: RenderModel,
     membership_summary: RenderModel,
+}
+
+#[derive(Clone)]
+struct AudienceSurfaceBindings {
+    audience: RenderModel,
+    has_membership: bool,
+    has_pending_membership_order: bool,
+    needs_membership_purchase: bool,
 }
 
 fn flash_messages_model(messages: &[FlashMessage]) -> Result<Vec<RenderModel>, TemplateModelError> {
@@ -3400,6 +6637,10 @@ fn fixture_account_surface_bindings(
 ) -> Result<AccountSurfaceBindings, TemplateModelError> {
     let latest_preview_order = sample_completed_order();
     let has_recent_orders = !fixture.recent_orders.is_empty();
+    let event_bookings = preview_event_bookings(locale, true, false)?;
+    let has_event_bookings = !event_bookings.is_empty();
+    let pass_programs = fixture_pass_programs(locale)?;
+    let has_pass_programs = !pass_programs.is_empty();
     let orders_cta_url = if has_recent_orders {
         "/account/orders".to_string()
     } else {
@@ -3420,6 +6661,8 @@ fn fixture_account_surface_bindings(
             .with_bool("has_latest_order", true)?
             .with_bool("has_pending_membership_order", false)?
             .with_bool("needs_membership_purchase", false)?
+            .with_bool("has_event_bookings", has_event_bookings)?
+            .with_bool("has_pass_programs", has_pass_programs)?
             .with_value("state_source", RenderValue::text("fixture-preview"))?
             .with_value(
                 "state_summary",
@@ -3439,11 +6682,39 @@ fn fixture_account_surface_bindings(
                     "No membership is attached yet. Join to unlock early-access drops and concierge support.",
                 ),
             )?
+            .with_value(
+                "event_bookings_empty_text",
+                RenderValue::text(
+                    "Event reservations and confirmed bookings will appear here once the customer starts booking timed experiences.",
+                ),
+            )?
+            .with_value(
+                "pass_programs_empty_text",
+                RenderValue::text(
+                    "Pass-backed access and remaining credits will appear here once the customer completes an event-pass checkout.",
+                ),
+            )?
             .with_value("orders_cta_url", RenderValue::text(orders_cta_url))?
             .with_value("orders_cta_label", RenderValue::text(orders_cta_label))?
             .with_value(
                 "membership_cta_url",
                 RenderValue::text(localized_collection_path(locale, "memberships")),
+            )?
+            .with_value(
+                "event_bookings_cta_url",
+                RenderValue::text(format!("/{}/events", locale.trim_matches('/'))),
+            )?
+            .with_value(
+                "event_bookings_cta_label",
+                RenderValue::text("Browse event calendar"),
+            )?
+            .with_value(
+                "passes_cta_url",
+                RenderValue::text(localized_collection_path(locale, "events")),
+            )?
+            .with_value(
+                "passes_cta_label",
+                RenderValue::text("Browse event passes"),
             )?
             .with_value(
                 "latest_order_reference",
@@ -3455,7 +6726,104 @@ fn fixture_account_surface_bindings(
             )?,
         customer: fixture.customer.clone(),
         recent_orders: fixture.recent_orders.clone(),
+        event_bookings,
+        pass_programs,
+        pass_wallet: pass_wallet_model(1, 0)?,
         membership_summary: fixture.membership_summary.clone(),
+    })
+}
+
+fn storefront_audience_bindings(
+    plan: Option<&RuntimePlan>,
+    locale: &str,
+    session: Option<&SessionContext>,
+    principal: Option<&PrincipalContext>,
+) -> Result<AudienceSurfaceBindings, TemplateModelError> {
+    let snapshot = live_storefront_state(plan, session, principal)?;
+    let active_membership = snapshot
+        .as_ref()
+        .map(|snapshot| projected_membership_state(snapshot, false))
+        .transpose()?
+        .flatten();
+    let pending_membership = if active_membership.is_some() {
+        None
+    } else {
+        snapshot
+            .as_ref()
+            .map(|snapshot| projected_membership_state(snapshot, true))
+            .transpose()?
+            .flatten()
+    };
+    let membership_tier_name = active_membership
+        .as_ref()
+        .or(pending_membership.as_ref())
+        .map(|membership| membership.tier_name.clone())
+        .unwrap_or_default();
+    let has_membership = active_membership.is_some();
+    let has_pending_membership_order = !has_membership && pending_membership.is_some();
+    let needs_membership_purchase = !has_membership && !has_pending_membership_order;
+
+    let (
+        membership_state,
+        membership_state_label,
+        membership_title,
+        membership_summary,
+        membership_cta_label,
+        membership_cta_url,
+    ) = if let Some(active) = active_membership.as_ref() {
+        (
+            "active",
+            active.status_label(),
+            "Membership already active".to_string(),
+            active.renewal_text.clone(),
+            "Open memberships",
+            "/account/memberships".to_string(),
+        )
+    } else if let Some(pending) = pending_membership.as_ref() {
+        (
+            "pending",
+            pending.status_label(),
+            "Membership activation pending".to_string(),
+            pending.renewal_text.clone(),
+            "Review order history",
+            "/account/orders".to_string(),
+        )
+    } else {
+        (
+            "none",
+            "Not active",
+            "Membership preview".to_string(),
+            "This surface previews member-specific guidance. Join from the storefront to unlock the full path in your account.".to_string(),
+            "Explore memberships",
+            localized_collection_path(locale, "memberships"),
+        )
+    };
+
+    Ok(AudienceSurfaceBindings {
+        audience: RenderModel::new()
+            .with_bool("has_membership", has_membership)?
+            .with_bool("has_pending_membership_order", has_pending_membership_order)?
+            .with_bool("needs_membership_purchase", needs_membership_purchase)?
+            .with_bool("has_membership_tier_name", !membership_tier_name.is_empty())?
+            .with_value(
+                "membership_tier_name",
+                RenderValue::text(membership_tier_name),
+            )?
+            .with_value("membership_state", RenderValue::text(membership_state))?
+            .with_value(
+                "membership_state_label",
+                RenderValue::text(membership_state_label),
+            )?
+            .with_value("membership_title", RenderValue::text(membership_title))?
+            .with_value("membership_summary", RenderValue::text(membership_summary))?
+            .with_value(
+                "membership_cta_label",
+                RenderValue::text(membership_cta_label),
+            )?
+            .with_value("membership_cta_url", RenderValue::text(membership_cta_url))?,
+        has_membership,
+        has_pending_membership_order,
+        needs_membership_purchase,
     })
 }
 
@@ -3498,6 +6866,12 @@ fn live_account_surface_bindings(
     let has_latest_order = latest_order.is_some();
     let has_pending_membership_order = !has_membership && has_latest_order;
     let needs_membership_purchase = !has_membership && !has_latest_order;
+    let event_bookings =
+        preview_event_bookings(locale, has_membership, has_pending_membership_order)?;
+    let has_event_bookings = !event_bookings.is_empty();
+    let pass_programs = pass_programs_from_storefront(snapshot.as_ref(), locale)?;
+    let pass_wallet = pass_wallet_from_storefront(snapshot.as_ref())?;
+    let has_pass_programs = !pass_programs.is_empty();
     let latest_order_reference = latest_order
         .as_ref()
         .map(|order| order.order_id.clone())
@@ -3535,6 +6909,8 @@ fn live_account_surface_bindings(
             .with_bool("has_latest_order", has_latest_order)?
             .with_bool("has_pending_membership_order", has_pending_membership_order)?
             .with_bool("needs_membership_purchase", needs_membership_purchase)?
+            .with_bool("has_event_bookings", has_event_bookings)?
+            .with_bool("has_pass_programs", has_pass_programs)?
             .with_value("state_source", RenderValue::text("storefront-session"))?
             .with_value("state_summary", RenderValue::text(state_summary))?
             .with_value(
@@ -3557,11 +6933,47 @@ fn live_account_surface_bindings(
                     },
                 ),
             )?
+            .with_value(
+                "event_bookings_empty_text",
+                RenderValue::text(
+                    if principal_id.is_some() {
+                        "No event reservations or confirmed bookings are attached to this signed-in account yet. Timed-event bookings will appear here after the live booking flow is completed."
+                    } else {
+                        "This browser session has no event reservations or bookings yet. Timed-event holds and confirmations will appear here after booking flows are completed from this same browser."
+                    },
+                ),
+            )?
+            .with_value(
+                "pass_programs_empty_text",
+                RenderValue::text(
+                    if principal_id.is_some() {
+                        "No pass-backed access is attached to this signed-in account yet. Complete an event-pass purchase to make the wallet and booking entitlements appear here."
+                    } else {
+                        "This browser session has no captured passes or credits yet. Event-pass purchases completed from this browser will appear here after payment capture."
+                    },
+                ),
+            )?
             .with_value("orders_cta_url", RenderValue::text(orders_cta_url))?
             .with_value("orders_cta_label", RenderValue::text(orders_cta_label))?
             .with_value(
                 "membership_cta_url",
                 RenderValue::text(localized_collection_path(locale, "memberships")),
+            )?
+            .with_value(
+                "event_bookings_cta_url",
+                RenderValue::text(format!("/{}/events", locale.trim_matches('/'))),
+            )?
+            .with_value(
+                "event_bookings_cta_label",
+                RenderValue::text("Browse event calendar"),
+            )?
+            .with_value(
+                "passes_cta_url",
+                RenderValue::text(localized_collection_path(locale, "events")),
+            )?
+            .with_value(
+                "passes_cta_label",
+                RenderValue::text("Browse event passes"),
             )?
             .with_value(
                 "latest_order_reference",
@@ -3572,6 +6984,9 @@ fn live_account_surface_bindings(
             .with_value("display_name", RenderValue::text(display_name))?
             .with_value("email", RenderValue::text(email))?,
         recent_orders,
+        event_bookings,
+        pass_programs,
+        pass_wallet,
         membership_summary: membership_summary.unwrap_or(empty_membership_summary()?),
     })
 }
@@ -3588,6 +7003,144 @@ fn recent_orders_from_storefront(
         .iter()
         .map(account_order_from_storefront)
         .collect::<Result<Vec<_>, _>>()
+}
+
+fn fixture_pass_programs(locale: &str) -> Result<Vec<RenderModel>, TemplateModelError> {
+    vec![pass_program_model(
+        "Spring Tasting Pass",
+        "tasting-pass",
+        "Available",
+        "1 available",
+        "Use this pass when booking seasonal tasting slots from the event calendar.",
+        localized_product_path(locale, "tasting-pass").as_str(),
+        "/account/orders",
+    )]
+    .into_iter()
+    .collect()
+}
+
+fn pass_programs_from_storefront(
+    snapshot: Option<&StorefrontStateSnapshot>,
+    locale: &str,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    let Some(snapshot) = snapshot else {
+        return Ok(Vec::new());
+    };
+
+    let mut rows = Vec::new();
+    for order in &snapshot.recent_orders {
+        let state_label = match order.status.as_str() {
+            "paid" | "fulfilled" => "Available",
+            "pending_payment" => "Pending activation",
+            "refunded" | "partially_refunded" => "Refunded",
+            _ => "In review",
+        };
+        for line in &order.lines {
+            if !admin_customer_order_has_pass_line(line) {
+                continue;
+            }
+            let balance_label = if order.status == "pending_payment" {
+                format!("{} pending", unit_count_label(line.quantity as usize, "pass", "passes"))
+            } else {
+                format!(
+                    "{} available",
+                    unit_count_label(line.quantity as usize, "pass", "passes")
+                )
+            };
+            rows.push(pass_program_model(
+                &line.title,
+                &line.sku,
+                state_label,
+                &balance_label,
+                &pass_usage_summary(line),
+                &localized_product_path(locale, &line.sku),
+                "/account/orders",
+            )?);
+        }
+    }
+
+    Ok(rows)
+}
+
+fn pass_wallet_from_storefront(
+    snapshot: Option<&StorefrontStateSnapshot>,
+) -> Result<RenderModel, TemplateModelError> {
+    let Some(snapshot) = snapshot else {
+        return pass_wallet_model(0, 0);
+    };
+
+    let mut available = 0usize;
+    let mut pending = 0usize;
+    for order in &snapshot.recent_orders {
+        for line in &order.lines {
+            if !admin_customer_order_has_pass_line(line) {
+                continue;
+            }
+            if matches!(order.status.as_str(), "paid" | "fulfilled") {
+                available += line.quantity as usize;
+            } else if order.status == "pending_payment" {
+                pending += line.quantity as usize;
+            }
+        }
+    }
+
+    pass_wallet_model(available, pending)
+}
+
+fn pass_wallet_model(
+    available: usize,
+    pending: usize,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("available", RenderValue::text(available.to_string()))?
+        .with_value("pending", RenderValue::text(pending.to_string()))?
+        .with_bool("has_pending", pending > 0)?
+        .with_value(
+            "summary",
+            RenderValue::text(if pending > 0 {
+                format!(
+                    "{} available, {} pending activation.",
+                    unit_count_label(available, "pass", "passes"),
+                    unit_count_label(pending, "pass", "passes")
+                )
+            } else {
+                format!(
+                    "{} currently available for event-linked bookings.",
+                    unit_count_label(available, "pass", "passes")
+                )
+            }),
+        )
+}
+
+fn pass_program_model(
+    title: &str,
+    sku: &str,
+    state_label: &str,
+    balance_label: &str,
+    usage_summary: &str,
+    product_href: &str,
+    order_href: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("title", RenderValue::text(title.to_string()))?
+        .with_value("sku", RenderValue::text(sku.to_string()))?
+        .with_value("state_label", RenderValue::text(state_label.to_string()))?
+        .with_value("balance_label", RenderValue::text(balance_label.to_string()))?
+        .with_value("usage_summary", RenderValue::text(usage_summary.to_string()))?
+        .with_value("product_href", RenderValue::text(product_href.to_string()))?
+        .with_value("order_href", RenderValue::text(order_href.to_string()))
+}
+
+fn pass_usage_summary(line: &StorefrontOrderLine) -> String {
+    if line.title.to_ascii_lowercase().contains("tasting") {
+        "Use this pass when reserving tasting sessions or member-priority event slots.".to_string()
+    } else if line.title.to_ascii_lowercase().contains("night") {
+        "Use this pass for after-hours event inventory once the matching market window opens."
+            .to_string()
+    } else {
+        "Use this pass when booking qualifying event inventory from the public calendar."
+            .to_string()
+    }
 }
 
 fn membership_summary_from_storefront(
@@ -3849,6 +7402,118 @@ fn display_status_label(status: &str) -> String {
         .join(" ")
 }
 
+fn display_report_delivery_mode(mode: coil_core::ReportDeliveryMode) -> &'static str {
+    match mode {
+        coil_core::ReportDeliveryMode::PublicObjectStore => "Public object store",
+        coil_core::ReportDeliveryMode::SignedUrl => "Signed URL",
+        coil_core::ReportDeliveryMode::InternalOnly => "Internal only",
+    }
+}
+
+fn display_job_trigger_kind(trigger: JobTriggerKind) -> &'static str {
+    match trigger {
+        JobTriggerKind::Scheduled => "Scheduled",
+        JobTriggerKind::DomainEvent => "Domain event",
+        JobTriggerKind::Operator => "Operator",
+        JobTriggerKind::Webhook => "Webhook",
+        JobTriggerKind::InlineFollowup => "Inline follow-up",
+    }
+}
+
+fn integration_operator_note(kind: IntegrationKind) -> &'static str {
+    match kind {
+        IntegrationKind::AdminNavigation => {
+            "Extends the shared admin shell and operator routing."
+        }
+        IntegrationKind::AdminWorkflow => {
+            "Participates in queueable or audited operator workflows."
+        }
+        IntegrationKind::FrontendRendering => {
+            "Feeds the SSR and progressive-enhancement frontend contract."
+        }
+        IntegrationKind::SearchIndex => {
+            "Contributes browse/search indexing behavior and rebuild pressure."
+        }
+        IntegrationKind::SeoMetadata | IntegrationKind::JsonLd => {
+            "Shapes structured metadata emitted by storefront routes."
+        }
+        IntegrationKind::LocalizedContent => {
+            "Participates in locale-aware editorial or storefront rendering."
+        }
+        IntegrationKind::CacheInvalidation => {
+            "Influences cache purge and freshness behavior."
+        }
+        IntegrationKind::StoragePolicy => {
+            "Depends on the shared storage and artifact delivery policy."
+        }
+        IntegrationKind::CommerceBridge => {
+            "Bridges storefront purchasing, fulfillment, or downstream commerce state."
+        }
+        IntegrationKind::AuthPublication => {
+            "Coordinates auth-aware publication and access boundaries."
+        }
+    }
+}
+
+fn display_integration_kind(kind: IntegrationKind) -> &'static str {
+    match kind {
+        IntegrationKind::AdminNavigation => "Admin navigation",
+        IntegrationKind::AdminWorkflow => "Admin workflow",
+        IntegrationKind::FrontendRendering => "Frontend rendering",
+        IntegrationKind::SearchIndex => "Search index",
+        IntegrationKind::SeoMetadata => "SEO metadata",
+        IntegrationKind::JsonLd => "JSON-LD",
+        IntegrationKind::LocalizedContent => "Localized content",
+        IntegrationKind::CacheInvalidation => "Cache invalidation",
+        IntegrationKind::StoragePolicy => "Storage policy",
+        IntegrationKind::CommerceBridge => "Commerce bridge",
+        IntegrationKind::AuthPublication => "Auth publication",
+    }
+}
+
+fn display_report_format(format: coil_core::ReportFormat) -> &'static str {
+    match format {
+        coil_core::ReportFormat::Csv => "CSV",
+        coil_core::ReportFormat::Json => "JSON",
+        coil_core::ReportFormat::Pdf => "PDF",
+    }
+}
+
+fn display_bulk_kind(kind: coil_core::BulkOperationKind) -> &'static str {
+    match kind {
+        coil_core::BulkOperationKind::Publish => "Publish",
+        coil_core::BulkOperationKind::Unpublish => "Unpublish",
+        coil_core::BulkOperationKind::Reindex => "Reindex",
+        coil_core::BulkOperationKind::Export => "Export",
+        coil_core::BulkOperationKind::Cancel => "Cancel",
+        coil_core::BulkOperationKind::CheckIn => "Check-in",
+        coil_core::BulkOperationKind::Custom => "Custom",
+    }
+}
+
+fn display_bulk_scope(scope: coil_core::BulkOperationScope) -> &'static str {
+    match scope {
+        coil_core::BulkOperationScope::Cms => "CMS",
+        coil_core::BulkOperationScope::Commerce => "Commerce",
+        coil_core::BulkOperationScope::Memberships => "Memberships",
+        coil_core::BulkOperationScope::Events => "Events",
+        coil_core::BulkOperationScope::Media => "Media",
+        coil_core::BulkOperationScope::Search => "Search",
+        coil_core::BulkOperationScope::System => "System",
+    }
+}
+
+fn display_recovery_stage(stage: coil_ops::RecoveryStage) -> &'static str {
+    match stage {
+        coil_ops::RecoveryStage::RestoreDatabase => "Restore database",
+        coil_ops::RecoveryStage::ReattachManagedObjectStore => "Reattach object store",
+        coil_ops::RecoveryStage::RestoreLocalOnlySensitive => "Restore host-local sensitive data",
+        coil_ops::RecoveryStage::RebuildDerivedState => "Rebuild derived state",
+        coil_ops::RecoveryStage::RedeployStaticAssets => "Redeploy static assets",
+        coil_ops::RecoveryStage::ValidateReadiness => "Validate readiness",
+    }
+}
+
 fn looks_like_email(candidate: &str) -> bool {
     matches!(candidate.split_once('@'), Some((local, domain)) if !local.is_empty() && !domain.is_empty())
 }
@@ -3885,6 +7550,7 @@ fn capitalize_token(segment: &str) -> String {
 #[derive(Clone)]
 struct StorefrontFixture {
     catalog_sections: Vec<RenderModel>,
+    discovery_hubs: Vec<RenderModel>,
     product_cards: Vec<RenderModel>,
     product_cards_by_collection: BTreeMap<String, Vec<RenderModel>>,
     product_collection_handles: BTreeMap<String, String>,
@@ -3969,6 +7635,7 @@ fn storefront_fixture(
             title: product.title.clone(),
             summary: product.summary.clone(),
             price: money_display_minor(product.price_minor, &product.currency),
+            product_kind: product.product_kind.clone(),
             collection_handle: product.collection_handle.clone(),
             collection_name: catalog
                 .collection(&product.collection_handle)
@@ -4011,6 +7678,10 @@ fn storefront_fixture(
         .iter()
         .map(|collection| collection_section_model(locale, collection))
         .collect::<Result<Vec<_>, _>>()?;
+    let discovery_hubs = collections_data
+        .iter()
+        .map(|collection| discovery_hub_model(locale, collection, &products_data))
+        .collect::<Result<Vec<_>, _>>()?;
     let collections = collections_data
         .iter()
         .map(|collection| collection_detail_model(locale, collection, &products_data))
@@ -4039,7 +7710,10 @@ fn storefront_fixture(
         .with_value("payment_method", RenderValue::text("card"))?
         .with_value("payment_method_label", RenderValue::text("Card"))?
         .with_value("payment_status", RenderValue::text("ready_for_payment"))?
-        .with_value("payment_status_label", RenderValue::text("Ready for payment"))?
+        .with_value(
+            "payment_status_label",
+            RenderValue::text("Ready for payment"),
+        )?
         .with_value(
             "provider_code",
             RenderValue::text(payment_provider_code(None)),
@@ -4073,6 +7747,7 @@ fn storefront_fixture(
 
     Ok(StorefrontFixture {
         catalog_sections,
+        discovery_hubs,
         product_cards: product_cards.clone(),
         product_cards_by_collection,
         product_collection_handles,
@@ -4143,6 +7818,7 @@ fn catalog_admin_products_model(
                 title: product.title.clone(),
                 summary: product.summary.clone(),
                 price: money_display_minor(product.price_minor, &product.currency),
+                product_kind: product.product_kind.clone(),
                 collection_handle: product.collection_handle.clone(),
                 collection_name,
             };
@@ -4425,8 +8101,37 @@ struct ProductFixture {
     title: String,
     summary: String,
     price: String,
+    product_kind: String,
     collection_handle: String,
     collection_name: String,
+}
+
+struct EventSlotFixture {
+    label: String,
+    starts_at_label: String,
+    ends_at_label: String,
+    availability_label: String,
+    audience_label: String,
+    capacity_note: String,
+    booking_status_label: String,
+    booking_cta_label: String,
+}
+
+struct EventFixture {
+    slug: String,
+    title: String,
+    summary: String,
+    eyebrow: String,
+    venue_name: String,
+    venue_city: String,
+    venue_mode: String,
+    day_label: String,
+    time_range_label: String,
+    availability_label: String,
+    audience_label: String,
+    priority_note: String,
+    detail_href: String,
+    timeslots: Vec<EventSlotFixture>,
 }
 
 fn collection_section_model(
@@ -4476,8 +8181,351 @@ fn collection_detail_model(
         .with_list("products", filtered_products)
 }
 
+fn discovery_hub_model(
+    locale: &str,
+    collection: &CollectionFixture,
+    products: &[ProductFixture],
+) -> Result<RenderModel, TemplateModelError> {
+    let product_count = products
+        .iter()
+        .filter(|product| {
+            product.collection_handle == collection.handle || collection.handle == "featured"
+        })
+        .count();
+    let (journey_title, journey_summary) = match collection.handle.as_str() {
+        "memberships" => (
+            "Membership-led discovery",
+            "Start with recurring access products, then move into gated content and account state.",
+        ),
+        "events" => (
+            "Event-led discovery",
+            "Use event-linked products and passes to move from browse into time-bound experiences.",
+        ),
+        _ => (
+            "Merchandising discovery",
+            "Use curated edits to narrow the customer from the full catalog into a tighter browse path.",
+        ),
+    };
+
+    RenderModel::new()
+        .with_value("handle", RenderValue::text(collection.handle.as_str()))?
+        .with_value("title", RenderValue::text(collection.title.as_str()))?
+        .with_value("label", RenderValue::text(collection.label.as_str()))?
+        .with_value("summary", RenderValue::text(collection.summary.as_str()))?
+        .with_value("journey_title", RenderValue::text(journey_title))?
+        .with_value("journey_summary", RenderValue::text(journey_summary))?
+        .with_value(
+            "href",
+            RenderValue::text(localized_collection_path(
+                locale,
+                collection.handle.as_str(),
+            )),
+        )?
+        .with_value(
+            "product_count",
+            RenderValue::text(product_count.to_string()),
+        )
+}
+
 fn product_model(product: &ProductFixture) -> Result<RenderModel, TemplateModelError> {
     product_model_for_locale("en-GB", product, None)
+}
+
+fn event_slot_model(slot: &EventSlotFixture) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("label", RenderValue::text(slot.label.as_str()))?
+        .with_value(
+            "starts_at_label",
+            RenderValue::text(slot.starts_at_label.as_str()),
+        )?
+        .with_value(
+            "ends_at_label",
+            RenderValue::text(slot.ends_at_label.as_str()),
+        )?
+        .with_value(
+            "availability_label",
+            RenderValue::text(slot.availability_label.as_str()),
+        )?
+        .with_value(
+            "audience_label",
+            RenderValue::text(slot.audience_label.as_str()),
+        )?
+        .with_value(
+            "capacity_note",
+            RenderValue::text(slot.capacity_note.as_str()),
+        )?
+        .with_value(
+            "booking_status_label",
+            RenderValue::text(slot.booking_status_label.as_str()),
+        )?
+        .with_value(
+            "booking_cta_label",
+            RenderValue::text(slot.booking_cta_label.as_str()),
+        )
+}
+
+fn event_model(event: &EventFixture) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("slug", RenderValue::text(event.slug.as_str()))?
+        .with_value("title", RenderValue::text(event.title.as_str()))?
+        .with_value("summary", RenderValue::text(event.summary.as_str()))?
+        .with_value("eyebrow", RenderValue::text(event.eyebrow.as_str()))?
+        .with_value("venue_name", RenderValue::text(event.venue_name.as_str()))?
+        .with_value("venue_city", RenderValue::text(event.venue_city.as_str()))?
+        .with_value("venue_mode", RenderValue::text(event.venue_mode.as_str()))?
+        .with_value("day_label", RenderValue::text(event.day_label.as_str()))?
+        .with_value(
+            "time_range_label",
+            RenderValue::text(event.time_range_label.as_str()),
+        )?
+        .with_value(
+            "availability_label",
+            RenderValue::text(event.availability_label.as_str()),
+        )?
+        .with_value(
+            "audience_label",
+            RenderValue::text(event.audience_label.as_str()),
+        )?
+        .with_value(
+            "priority_note",
+            RenderValue::text(event.priority_note.as_str()),
+        )?
+        .with_value("href", RenderValue::text(event.detail_href.as_str()))?
+        .with_bool("has_timeslots", !event.timeslots.is_empty())?
+        .with_value(
+            "timeslot_count",
+            RenderValue::text(event.timeslots.len().to_string()),
+        )?
+        .with_list(
+            "timeslots",
+            event
+                .timeslots
+                .iter()
+                .map(event_slot_model)
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+}
+
+fn event_booking_model(
+    id: &str,
+    event_slug: &str,
+    event_title: &str,
+    slot_label: &str,
+    status: &str,
+    status_label: &str,
+    day_label: &str,
+    summary: &str,
+    locale: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new()
+        .with_value("id", RenderValue::text(id.to_string()))?
+        .with_value("event_slug", RenderValue::text(event_slug.to_string()))?
+        .with_value("event_title", RenderValue::text(event_title.to_string()))?
+        .with_value("slot_label", RenderValue::text(slot_label.to_string()))?
+        .with_value("status", RenderValue::text(status.to_string()))?
+        .with_value("status_label", RenderValue::text(status_label.to_string()))?
+        .with_value("day_label", RenderValue::text(day_label.to_string()))?
+        .with_value("summary", RenderValue::text(summary.to_string()))?
+        .with_value(
+            "href",
+            RenderValue::text(format!(
+                "/{}/events/{}",
+                locale.trim_matches('/'),
+                event_slug.trim_matches('/')
+            )),
+        )
+}
+
+fn preview_event_bookings(
+    locale: &str,
+    has_membership: bool,
+    has_pending_membership_order: bool,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
+    if has_membership {
+        return Ok(vec![
+            event_booking_model(
+                "booking-spring-tasting",
+                "spring-tasting",
+                "Spring Tasting Evening",
+                "Early tasting",
+                "confirmed",
+                "Confirmed",
+                "Thursday 11 April",
+                "Seat confirmed. Arrive ten minutes early for the guided tasting.",
+                locale,
+            )?,
+            event_booking_model(
+                "booking-summer-gala",
+                "summer-gala",
+                "Summer Gala Preview",
+                "Main salon waitlist",
+                "waitlisted",
+                "Waitlisted",
+                "Saturday 6 July",
+                "The primary salon is full, so this account is currently queued for the next available release.",
+                locale,
+            )?,
+        ]);
+    }
+
+    if has_pending_membership_order {
+        return Ok(vec![event_booking_model(
+            "booking-fit-clinic",
+            "fit-clinic",
+            "Fit Clinic Appointments",
+            "Personal fitting session",
+            "reservation_held",
+            "Reservation held",
+            "Tuesday 7 May",
+            "This provisional slot becomes a confirmed booking after the qualifying membership order settles.",
+            locale,
+        )?]);
+    }
+
+    Ok(Vec::new())
+}
+
+fn event_fixtures(
+    locale: &str,
+    site_id: Option<&str>,
+    plan: Option<&RuntimePlan>,
+) -> Vec<EventFixture> {
+    let detail_href = |slug: &str| {
+        let fallback = format!("/{locale}/events/{slug}");
+        plan.map_or_else(
+            || fallback.clone(),
+            |plan| {
+                route_link(
+                    plan,
+                    site_id,
+                    "events.detail",
+                    &BTreeMap::from([("event_slug".to_string(), slug.to_string())]),
+                    Some(locale),
+                    &fallback,
+                )
+            },
+        )
+    };
+
+    vec![
+        EventFixture {
+            slug: "spring-tasting".to_string(),
+            title: "Spring Tasting Evening".to_string(),
+            summary:
+                "A guided tasting and edit preview built around event-linked products and member-first booking."
+                    .to_string(),
+            eyebrow: "Member event".to_string(),
+            venue_name: "Shoppr Townhouse".to_string(),
+            venue_city: "London".to_string(),
+            venue_mode: "In store".to_string(),
+            day_label: "Thursday 11 April".to_string(),
+            time_range_label: "18:30 to 20:30".to_string(),
+            availability_label: "Priority booking window open".to_string(),
+            audience_label: "Gold members book first".to_string(),
+            priority_note:
+                "Gold members can secure early slots before the wider event-linked edit opens."
+                    .to_string(),
+            detail_href: detail_href("spring-tasting"),
+            timeslots: vec![
+                EventSlotFixture {
+                    label: "Early tasting".to_string(),
+                    starts_at_label: "18:30".to_string(),
+                    ends_at_label: "19:15".to_string(),
+                    availability_label: "4 seats remaining".to_string(),
+                    audience_label: "Gold members".to_string(),
+                    capacity_note: "Small-group seating keeps this tasting intimate.".to_string(),
+                    booking_status_label: "Priority reservation available".to_string(),
+                    booking_cta_label: "Reserve seat".to_string(),
+                },
+                EventSlotFixture {
+                    label: "Main salon tasting".to_string(),
+                    starts_at_label: "19:30".to_string(),
+                    ends_at_label: "20:30".to_string(),
+                    availability_label: "8 seats remaining".to_string(),
+                    audience_label: "All active members".to_string(),
+                    capacity_note:
+                        "The later session opens after the priority allocation clears."
+                            .to_string(),
+                    booking_status_label: "General reservation available".to_string(),
+                    booking_cta_label: "Reserve seat".to_string(),
+                },
+            ],
+        },
+        EventFixture {
+            slug: "summer-gala".to_string(),
+            title: "Summer Gala Preview".to_string(),
+            summary:
+                "A late-evening campaign preview that combines styling, hospitality, and member access."
+                    .to_string(),
+            eyebrow: "Editorial event".to_string(),
+            venue_name: "Riverside Studio".to_string(),
+            venue_city: "Paris".to_string(),
+            venue_mode: "In store".to_string(),
+            day_label: "Friday 7 June".to_string(),
+            time_range_label: "19:00 to 22:00".to_string(),
+            availability_label: "Waitlist available".to_string(),
+            audience_label: "Members and invited guests".to_string(),
+            priority_note:
+                "This event demonstrates that editorial positioning and booking operations belong in the same product story."
+                    .to_string(),
+            detail_href: detail_href("summer-gala"),
+            timeslots: vec![EventSlotFixture {
+                label: "Evening salon".to_string(),
+                starts_at_label: "19:00".to_string(),
+                ends_at_label: "22:00".to_string(),
+                availability_label: "Join waitlist".to_string(),
+                audience_label: "Invited members".to_string(),
+                capacity_note:
+                    "The main salon is full, so new interest routes through the waitlist path."
+                        .to_string(),
+                booking_status_label: "Waitlist only".to_string(),
+                booking_cta_label: "Join waitlist".to_string(),
+            }],
+        },
+        EventFixture {
+            slug: "fit-clinic".to_string(),
+            title: "Fit Clinic Appointments".to_string(),
+            summary:
+                "Short appointment-led sessions that show how timeslots and venue data can stay explicit."
+                    .to_string(),
+            eyebrow: "Service event".to_string(),
+            venue_name: "Private Fitting Suite".to_string(),
+            venue_city: "London".to_string(),
+            venue_mode: "Appointment".to_string(),
+            day_label: "Saturday 13 April".to_string(),
+            time_range_label: "10:00 to 16:00".to_string(),
+            availability_label: "Booking windows open".to_string(),
+            audience_label: "Members and event-pass holders".to_string(),
+            priority_note:
+                "Appointment-led events use the same route model but make the timeslot layer more obvious."
+                    .to_string(),
+            detail_href: detail_href("fit-clinic"),
+            timeslots: vec![
+                EventSlotFixture {
+                    label: "Morning appointment".to_string(),
+                    starts_at_label: "10:00".to_string(),
+                    ends_at_label: "10:45".to_string(),
+                    availability_label: "2 appointments left".to_string(),
+                    audience_label: "All active members".to_string(),
+                    capacity_note: "One stylist is assigned to each appointment slot.".to_string(),
+                    booking_status_label: "Appointments open".to_string(),
+                    booking_cta_label: "Hold appointment".to_string(),
+                },
+                EventSlotFixture {
+                    label: "Afternoon appointment".to_string(),
+                    starts_at_label: "14:00".to_string(),
+                    ends_at_label: "14:45".to_string(),
+                    availability_label: "4 appointments left".to_string(),
+                    audience_label: "Members and pass holders".to_string(),
+                    capacity_note:
+                        "Pass-backed slots open after membership-only windows have been offered."
+                            .to_string(),
+                    booking_status_label: "Appointments open".to_string(),
+                    booking_cta_label: "Hold appointment".to_string(),
+                },
+            ],
+        },
+    ]
 }
 
 fn product_model_for_locale(
@@ -4492,6 +8540,14 @@ fn product_model_for_locale(
         .with_value("name", RenderValue::text(product.title.as_str()))?
         .with_value("summary", RenderValue::text(product.summary.as_str()))?
         .with_value("price", RenderValue::text(product.price.as_str()))?
+        .with_value(
+            "product_kind",
+            RenderValue::text(product.product_kind.as_str()),
+        )?
+        .with_bool(
+            "is_membership_product",
+            product.product_kind == "membership",
+        )?
         .with_value(
             "url",
             RenderValue::text(localized_product_path(locale, product.handle.as_str())),
@@ -4796,9 +8852,11 @@ fn empty_membership_summary() -> Result<RenderModel, TemplateModelError> {
 mod tests {
     use super::*;
     use crate::builder::RuntimeBuilder;
+    use crate::cms_admin::{CmsAdminPage, CmsAdminPageRevision, CmsAdminWorkspace};
     use coil_auth::DefaultAuthModelPackage;
     use coil_commerce::CommerceModule;
     use coil_config::PlatformConfig;
+    use coil_observability::TraceRecord;
     use coil_customer_sdk::{
         AuditFacade, AuthFacade, BackendError, BackendErrorKind, CheckoutHooks, CommerceFacade,
         CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor, MergePolicy,
@@ -5197,7 +9255,10 @@ cdn_base_url = "https://cdn.example.com"
             let mounted = RenderModel::new()
                 .with_value("route_name", RenderValue::text(target.route_name.clone()))
                 .and_then(|model| {
-                    model.with_value("template_name", RenderValue::text(target.template_name.clone()))
+                    model.with_value(
+                        "template_name",
+                        RenderValue::text(target.template_name.clone()),
+                    )
                 })
                 .and_then(|model| {
                     model.with_value(
@@ -5286,6 +9347,68 @@ cdn_base_url = "https://cdn.example.com"
             .unwrap()
     }
 
+    #[test]
+    fn admin_diagnostic_traces_reads_duration_from_trace_fields() {
+        let app_name = format!(
+            "render-diagnostics-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let storage_root = std::env::temp_dir().join(&app_name).display().to_string();
+        let config = PlatformConfig::from_toml_str(
+            &RENDER_TEST_CONFIG
+                .replace(
+                    "name = \"customer-render-tests\"",
+                    &format!("name = \"{app_name}\""),
+                )
+                .replace(
+                    "local_root = \"/tmp/coil-runtime-tests\"",
+                    &format!("local_root = \"{storage_root}\""),
+                ),
+        )
+        .unwrap();
+        let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+            .build()
+            .unwrap();
+        assert!(plan.observability.telemetry.record_trace(
+            TraceRecord::new("trace-1", "http.request", "ok", 42).with_field("duration_ms", "17")
+        ));
+
+        let traces = admin_diagnostic_traces(Some(&plan)).unwrap();
+        let trace = traces.first().cloned().expect("trace row should exist");
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("trace").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <p class="duration" coil:text="${trace.duration_ms}">duration</p>
+    <p class="recorded" coil:text="${trace.recorded_at_unix_seconds}">recorded</p>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("trace").unwrap()),
+                    RenderModel::new().with_object("trace", trace).unwrap(),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains(r#"<p class="duration">17</p>"#), "{html}");
+        assert!(html.contains(r#"<p class="recorded">42</p>"#), "{html}");
+    }
+
     fn sample_storefront_order_snapshot() -> StorefrontOrderSnapshot {
         StorefrontOrderSnapshot {
             order_id: "ORD-10042".to_string(),
@@ -5335,7 +9458,18 @@ cdn_base_url = "https://cdn.example.com"
     fn fixture_model(route_name: &str) -> RenderModel {
         apply_route_specific_bindings(
             None,
-            RenderModel::new(),
+            RenderModel::new()
+                .with_object(
+                    "page",
+                    page_model_for_route_name(
+                        route_name,
+                        &BTreeMap::new(),
+                        "Shoppr",
+                        route_name.replace('.', "/").as_str(),
+                        None,
+                    ),
+                )
+                .unwrap(),
             route_name,
             None,
             "en-GB",
@@ -5360,7 +9494,18 @@ cdn_base_url = "https://cdn.example.com"
         };
         apply_route_specific_bindings(
             None,
-            RenderModel::new(),
+            RenderModel::new()
+                .with_object(
+                    "page",
+                    page_model_for_route_name(
+                        "memberships.account",
+                        &BTreeMap::new(),
+                        "Shoppr",
+                        "memberships/account",
+                        None,
+                    ),
+                )
+                .unwrap(),
             "memberships.account",
             None,
             "en-GB",
@@ -5380,7 +9525,18 @@ cdn_base_url = "https://cdn.example.com"
         };
         apply_route_specific_bindings(
             None,
-            RenderModel::new(),
+            RenderModel::new()
+                .with_object(
+                    "page",
+                    page_model_for_route_name(
+                        "memberships.account.dashboard",
+                        &BTreeMap::new(),
+                        "Shoppr",
+                        "memberships/account/dashboard",
+                        None,
+                    ),
+                )
+                .unwrap(),
             "memberships.account.dashboard",
             None,
             "en-GB",
@@ -5416,6 +9572,105 @@ cdn_base_url = "https://cdn.example.com"
             .html
     }
 
+    fn cms_workspace_fixture() -> CmsAdminWorkspace {
+        CmsAdminWorkspace {
+            pages: vec![CmsAdminPage {
+                id: "page-home".to_string(),
+                draft: CmsAdminPageRevision {
+                    title: "Editorial Home".to_string(),
+                    slug: "home".to_string(),
+                    summary: "A draft landing page".to_string(),
+                    body_html: "<section><h2>Welcome</h2><p>Body copy</p></section>".to_string(),
+                    settings: crate::cms_admin::CmsAdminPageSettings {
+                        page_type: "landing_page".to_string(),
+                        template: Some("pages/home".to_string()),
+                        seo_title: Some("Editorial Home".to_string()),
+                        seo_description: Some("A draft landing page".to_string()),
+                        options: crate::cms_admin::CmsAdminPageOptions {
+                            show_in_navigation: true,
+                            allow_indexing: true,
+                            localized: false,
+                        },
+                    },
+                    blocks: vec![crate::cms_admin::CmsAdminPageBlock::Instance(
+                        crate::cms_admin::CmsAdminBlockInstance {
+                            id: "block-home-draft".to_string(),
+                            block_type: "rich_text".to_string(),
+                            label: Some("Draft body".to_string()),
+                            enabled: true,
+                            fields: std::collections::BTreeMap::from([(
+                                "html".to_string(),
+                                "<section><h2>Welcome</h2><p>Body copy</p></section>".to_string(),
+                            )]),
+                        },
+                    )],
+                },
+                live: Some(CmsAdminPageRevision {
+                    title: "Editorial Home".to_string(),
+                    slug: "home".to_string(),
+                    summary: "A live landing page".to_string(),
+                    body_html: "<section><h2>Welcome live</h2><p>Body copy</p></section>"
+                        .to_string(),
+                    settings: crate::cms_admin::CmsAdminPageSettings {
+                        page_type: "landing_page".to_string(),
+                        template: Some("pages/home".to_string()),
+                        seo_title: Some("Editorial Home".to_string()),
+                        seo_description: Some("A live landing page".to_string()),
+                        options: crate::cms_admin::CmsAdminPageOptions {
+                            show_in_navigation: true,
+                            allow_indexing: true,
+                            localized: false,
+                        },
+                    },
+                    blocks: vec![
+                        crate::cms_admin::CmsAdminPageBlock::Instance(
+                            crate::cms_admin::CmsAdminBlockInstance {
+                                id: "block-home-live".to_string(),
+                                block_type: "rich_text".to_string(),
+                                label: Some("Live body".to_string()),
+                                enabled: true,
+                                fields: std::collections::BTreeMap::from([(
+                                    "html".to_string(),
+                                    "<section><h2>Welcome live</h2><p>Body copy</p></section>"
+                                        .to_string(),
+                                )]),
+                            },
+                        ),
+                        crate::cms_admin::CmsAdminPageBlock::SharedReference(
+                            crate::cms_admin::CmsAdminSharedBlockReference {
+                                id: "block-home-membership-cta".to_string(),
+                                shared_block_id: "shared-membership-cta".to_string(),
+                                label: Some("Membership CTA".to_string()),
+                                enabled: true,
+                            },
+                        ),
+                    ],
+                }),
+                previous_live: None,
+                scheduled_publish_at: None,
+                published_once: true,
+                updated_at: 1_710_000_000,
+            }],
+            navigation: Vec::new(),
+            redirects: Vec::new(),
+            shared_blocks: vec![crate::cms_admin::CmsAdminSharedBlock {
+                id: "shared-membership-cta".to_string(),
+                label: "Membership CTA".to_string(),
+                block_type: "callout".to_string(),
+                fields: std::collections::BTreeMap::from([
+                    ("heading".to_string(), "Join Shoppr+".to_string()),
+                    (
+                        "body".to_string(),
+                        "Unlock members-only drops and event booking.".to_string(),
+                    ),
+                    ("cta_href".to_string(), "/en-GB/account".to_string()),
+                ]),
+                updated_at: 1_710_000_000,
+            }],
+            global_settings: crate::cms_admin::default_workspace().global_settings,
+        }
+    }
+
     #[test]
     fn route_specific_model_populates_catalog_listing() {
         let html = render_fixture(
@@ -5432,6 +9687,54 @@ cdn_base_url = "https://cdn.example.com"
 
         assert!(html.contains("Featured"));
         assert!(html.contains("Memberships"));
+    }
+
+    #[test]
+    fn route_specific_model_exposes_discovery_hubs_for_collections_route() {
+        let html = render_fixture(
+            "commerce.collections",
+            r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <article coil:each="hub : ${discovery_hubs}">
+      <h2 coil:text="${hub.journey_title}">Journey</h2>
+      <p class="count" coil:text="${hub.product_count}">0</p>
+    </article>
+  </body>
+</html>"#,
+        );
+
+        assert!(html.contains("Merchandising discovery"), "{html}");
+        assert!(html.contains("Membership-led discovery"), "{html}");
+        assert!(html.contains("Event-led discovery"), "{html}");
+    }
+
+    #[test]
+    fn route_specific_model_exposes_structured_page_surface() {
+        let html = render_fixture(
+            "commerce.product-detail",
+            r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <h1 coil:text="${page.content.title}">title</h1>
+    <p class="summary" coil:text="${page.content.summary}">summary</p>
+    <p class="template" coil:text="${page.presentation.template}">template</p>
+    <p class="fragment" coil:text="${page.presentation.fragment_mode}">false</p>
+    <p class="nav" coil:text="${page.settings.show_in_navigation}">true</p>
+    <p class="blocks" coil:text="${page.block_count}">0</p>
+  </body>
+</html>"#,
+        );
+
+        assert!(html.contains("Harbor Cap"), "{html}");
+        assert!(
+            html.contains("Product detail, pricing, and purchase intent"),
+            "{html}"
+        );
+        assert!(html.contains("commerce/product-detail"), "{html}");
+        assert!(html.contains(">false<"), "{html}");
+        assert!(html.contains(">true<"), "{html}");
+        assert!(html.contains(">0<"), "{html}");
     }
 
     #[test]
@@ -5555,6 +9858,209 @@ cdn_base_url = "https://cdn.example.com"
             "{html}"
         );
         assert!(html.contains("Gold Membership"), "{html}");
+    }
+
+    #[test]
+    fn cms_live_page_model_exposes_structured_content_and_structured_blocks() {
+        let model = cms_live_page_model(&cms_workspace_fixture(), "home").unwrap();
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <h1 coil:text="${cms_page.content.title}">title</h1>
+    <p class="summary" coil:text="${cms_page.content.summary}">summary</p>
+    <p class="nav" coil:text="${cms_page.settings.show_in_navigation}">true</p>
+    <p class="count" coil:text="${cms_page.block_count}">1</p>
+    <article coil:each="block : ${cms_page.blocks}">
+      <p class="type" coil:text="${block.type_id}">rich_text</p>
+      <div class="html" coil:utext="${block.html}">body</div>
+      <p
+        class="heading"
+        coil:if="${block.type_id == 'callout'}"
+        coil:text="${block.fields.heading}"
+      >
+        heading
+      </p>
+    </article>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    RenderModel::new().with_object("cms_page", model).unwrap(),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains("Editorial Home"), "{html}");
+        assert!(html.contains("A live landing page"), "{html}");
+        assert!(html.contains(">true<"), "{html}");
+        assert!(html.contains(">2<"), "{html}");
+        assert!(html.contains("rich_text"), "{html}");
+        assert!(html.contains("Welcome live"), "{html}");
+        assert!(html.contains("callout"), "{html}");
+        assert!(html.contains("Join Shoppr+"), "{html}");
+    }
+
+    #[test]
+    fn cms_live_page_model_resolves_shared_block_references_without_admin_form_fields() {
+        let model = cms_live_page_model(&cms_workspace_fixture(), "home").unwrap();
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <article coil:each="block : ${cms_page.blocks}">
+      <p class="kind" coil:text="${block.kind}">kind</p>
+      <p class="source" coil:text="${block.source_kind}">source</p>
+      <p class="type" coil:text="${block.type_id}">type</p>
+      <p class="shared-id" coil:text="${block.shared_block_id}">shared</p>
+      <p class="shared-label" coil:text="${block.shared_block_label}">label</p>
+    </article>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    RenderModel::new().with_object("cms_page", model).unwrap(),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(
+            html.contains(r#"<p class="kind">shared_reference</p>"#),
+            "{html}"
+        );
+        assert!(html.contains(r#"<p class="source">shared</p>"#), "{html}");
+        assert!(html.contains(r#"<p class="type">callout</p>"#), "{html}");
+        assert!(
+            html.contains(r#"<p class="shared-id">shared-membership-cta</p>"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"<p class="shared-label">Membership CTA</p>"#),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn cms_live_page_model_filters_disabled_blocks_from_live_output() {
+        let mut workspace = cms_workspace_fixture();
+        if let Some(CmsAdminPageBlock::SharedReference(reference)) = workspace.pages[0]
+            .live
+            .as_mut()
+            .and_then(|revision| revision.blocks.get_mut(1))
+        {
+            reference.enabled = false;
+        }
+
+        let model = cms_live_page_model(&workspace, "home").unwrap();
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <p class="count" coil:text="${cms_page.block_count}">1</p>
+    <article coil:each="block : ${cms_page.blocks}">
+      <p class="type" coil:text="${block.type_id}">type</p>
+    </article>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    RenderModel::new().with_object("cms_page", model).unwrap(),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains(r#"<p class="count">1</p>"#), "{html}");
+        assert!(html.contains("rich_text"), "{html}");
+        assert!(!html.contains("callout"), "{html}");
+    }
+
+    #[test]
+    fn cms_admin_selected_page_model_exposes_structured_editor_content() {
+        let workspace = cms_workspace_fixture();
+        let page = workspace.pages.first().cloned().unwrap();
+        let model = cms_admin_selected_page_model_with_form_state(
+            Some(page),
+            None,
+            &workspace.shared_blocks,
+        )
+        .unwrap();
+        let namespace = TemplateNamespace::new("customer-app").unwrap();
+        let template = TemplateSourceParser::new()
+            .parse_layout(
+                namespace.clone(),
+                TemplateName::new("page").unwrap(),
+                r#"<!doctype html>
+<html xmlns:coil="https://coil.rs">
+  <body>
+    <h1 coil:text="${selected_page.content.title}">title</h1>
+    <p class="summary" coil:text="${selected_page.content.summary}">summary</p>
+    <p class="layout" coil:text="${selected_page.settings.has_layout_variant}">false</p>
+    <p class="count" coil:text="${selected_page.content.block_count}">1</p>
+    <section coil:each="block : ${selected_page.blocks}">
+      <p class="mode" coil:text="${block.render_mode}">structured_fields</p>
+      <div class="html" coil:utext="${block.html}">body</div>
+    </section>
+  </body>
+</html>"#,
+            )
+            .unwrap();
+        let mut registry = TemplateRegistry::new();
+        registry.register(template).unwrap();
+        let html = TemplateRuntime::new(registry)
+            .render_document(
+                &[namespace],
+                DocumentRenderRequest::new(
+                    TemplateSelector::new(TemplateName::new("page").unwrap()),
+                    RenderModel::new()
+                        .with_object("selected_page", model)
+                        .unwrap(),
+                ),
+            )
+            .unwrap()
+            .html;
+
+        assert!(html.contains("Editorial Home"), "{html}");
+        assert!(html.contains("A draft landing page"), "{html}");
+        assert!(html.contains(">false<"), "{html}");
+        assert!(html.contains(">1<"), "{html}");
+        assert!(html.contains("structured_fields"), "{html}");
+        assert!(html.contains("Welcome"), "{html}");
     }
 
     #[test]

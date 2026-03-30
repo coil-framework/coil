@@ -94,9 +94,7 @@ pub(super) fn observability_response(
     response
 }
 
-pub(super) fn health_report_json(
-    report: &coil_observability::HealthReport,
-) -> serde_json::Value {
+pub(super) fn health_report_json(report: &coil_observability::HealthReport) -> serde_json::Value {
     json!({
         "kind": report.kind.to_string(),
         "status": health_status_string(report.overall_status()),
@@ -137,10 +135,8 @@ async fn live_readiness_report(state: &RuntimeServerState) -> coil_observability
         .is_some()
     {
         let status = live_distributed_cache_status(state);
-        readiness.set_dependency_status(
-            coil_observability::DependencyKind::DistributedCache,
-            status,
-        );
+        readiness
+            .set_dependency_status(coil_observability::DependencyKind::DistributedCache, status);
     }
 
     if readiness
@@ -184,9 +180,7 @@ async fn live_readiness_report(state: &RuntimeServerState) -> coil_observability
     readiness
 }
 
-async fn live_database_status(
-    state: &RuntimeServerState,
-) -> coil_observability::DependencyStatus {
+async fn live_database_status(state: &RuntimeServerState) -> coil_observability::DependencyStatus {
     if state.plan.data.driver != coil_config::DatabaseDriver::Postgres {
         return coil_observability::DependencyStatus::Healthy;
     }
@@ -194,7 +188,12 @@ async fn live_database_status(
     let Some(connection_url) = state.backends.database.url.clone() else {
         return coil_observability::DependencyStatus::Unhealthy;
     };
-    let client = match state.plan.data.with_resolved_connection_url(connection_url).connect_lazy_postgres() {
+    let client = match state
+        .plan
+        .data
+        .with_resolved_connection_url(connection_url)
+        .connect_lazy_postgres()
+    {
         Ok(client) => client,
         Err(_) => return coil_observability::DependencyStatus::Unhealthy,
     };
@@ -268,8 +267,7 @@ fn live_cache_metrics(state: &RuntimeServerState) -> Option<CacheMetrics> {
             std::env::var_os("REDIS_URL")?;
         }
         coil_cache::DistributedCacheBackend::Valkey => {
-            if std::env::var_os("VALKEY_URL").is_none() && std::env::var_os("REDIS_URL").is_none()
-            {
+            if std::env::var_os("VALKEY_URL").is_none() && std::env::var_os("REDIS_URL").is_none() {
                 return None;
             }
         }
@@ -289,9 +287,7 @@ fn live_cache_metrics(state: &RuntimeServerState) -> Option<CacheMetrics> {
     .ok()
 }
 
-fn live_object_store_status(
-    state: &RuntimeServerState,
-) -> coil_observability::DependencyStatus {
+fn live_object_store_status(state: &RuntimeServerState) -> coil_observability::DependencyStatus {
     let Some(object_store) = state.backends.object_store.as_ref() else {
         return coil_observability::DependencyStatus::Unhealthy;
     };
@@ -319,8 +315,7 @@ fn metric_reading_for_exposition(
     match metric_name {
         "coil.queue.depth" => live_jobs_snapshot.map(|snapshot| {
             coil_observability::MetricReading::Gauge(
-                (snapshot.ready.len() + snapshot.scheduled.len() + snapshot.in_flight.len())
-                    as i64,
+                (snapshot.ready.len() + snapshot.scheduled.len() + snapshot.in_flight.len()) as i64,
             )
         }),
         "coil.cache.hit_ratio" => live_cache_metrics.and_then(|metrics| {
@@ -389,7 +384,10 @@ fn prometheus_metrics_body(
 
     if let Some(snapshot) = live_jobs_snapshot {
         body.push_str("# TYPE coil_runtime_jobs_ready gauge\n");
-        body.push_str(&format!("coil_runtime_jobs_ready {}\n", snapshot.ready.len()));
+        body.push_str(&format!(
+            "coil_runtime_jobs_ready {}\n",
+            snapshot.ready.len()
+        ));
         body.push_str("# TYPE coil_runtime_jobs_scheduled gauge\n");
         body.push_str(&format!(
             "coil_runtime_jobs_scheduled {}\n",

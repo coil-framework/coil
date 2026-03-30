@@ -11,10 +11,8 @@ use coil_core::{
     SearchFieldContribution, SearchFieldRole, SearchIndexContribution, SearchInvalidationRule,
     SearchInvalidationTrigger, SearchRebuildStrategy, SearchVisibility,
 };
+use coil_data::{MigrationId, MigrationOwner as DataMigrationOwner, MigrationPlan, MigrationStep};
 use coil_i18n::MessageKey;
-use coil_data::{
-    MigrationId, MigrationOwner as DataMigrationOwner, MigrationPlan, MigrationStep,
-};
 use coil_wasm::{
     ContractVersion, ExtensionArtifactSource, ExtensionConfigField, ExtensionConfigSchema,
     ExtensionConfigValue, ExtensionConfigValueType, ExtensionManifest, ExtensionPackage,

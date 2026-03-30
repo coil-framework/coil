@@ -369,7 +369,12 @@ fn render_element<'a>(
         )?)
     };
 
-    let mut nodes = match (slot_name, include_selector, include_expression, element.take()) {
+    let mut nodes = match (
+        slot_name,
+        include_selector,
+        include_expression,
+        element.take(),
+    ) {
         (Some(slot), _, _, Some(mut element)) => {
             element.children = vec![Node::Slot(
                 SlotNode::new(SlotName::new(slot)?).with_fallback(rendered_children),
@@ -757,7 +762,11 @@ fn tokenize_template_expression(value: &str) -> Result<Vec<ExpressionToken>, Tem
                         "unterminated asset expression in `{value}`"
                     )));
                 }
-                let asset = chars[start..index].iter().collect::<String>().trim().to_string();
+                let asset = chars[start..index]
+                    .iter()
+                    .collect::<String>()
+                    .trim()
+                    .to_string();
                 tokens.push(ExpressionToken::AssetLiteral(asset));
                 index += 1;
             }
@@ -840,7 +849,9 @@ impl TemplateExpressionParser {
 
     fn finish(&self) -> Result<(), TemplateModelError> {
         if self.peek().is_some() {
-            Err(expression_parse_error("unexpected trailing tokens in expression"))
+            Err(expression_parse_error(
+                "unexpected trailing tokens in expression",
+            ))
         } else {
             Ok(())
         }
@@ -854,7 +865,10 @@ impl TemplateExpressionParser {
         let condition = self.parse_elvis()?;
         if self.consume(&ExpressionToken::Question) {
             let then_expression = self.parse_expression()?;
-            self.expect(ExpressionToken::Colon, "expected `:` in conditional expression")?;
+            self.expect(
+                ExpressionToken::Colon,
+                "expected `:` in conditional expression",
+            )?;
             let else_expression = self.parse_expression()?;
             Ok(TemplateExpression::Conditional {
                 condition: Box::new(condition),
@@ -966,10 +980,15 @@ impl TemplateExpressionParser {
         match self.next() {
             Some(ExpressionToken::LParen) => {
                 let expression = self.parse_expression()?;
-                self.expect(ExpressionToken::RParen, "expected `)` to close grouped expression")?;
+                self.expect(
+                    ExpressionToken::RParen,
+                    "expected `)` to close grouped expression",
+                )?;
                 Ok(expression)
             }
-            Some(ExpressionToken::StringLiteral(value)) => Ok(TemplateExpression::LiteralText(value)),
+            Some(ExpressionToken::StringLiteral(value)) => {
+                Ok(TemplateExpression::LiteralText(value))
+            }
             Some(ExpressionToken::AssetLiteral(value)) => Ok(TemplateExpression::AssetPath(value)),
             Some(ExpressionToken::True) => Ok(TemplateExpression::LiteralBool(true)),
             Some(ExpressionToken::False) => Ok(TemplateExpression::LiteralBool(false)),
@@ -1002,7 +1021,7 @@ impl TemplateExpressionParser {
                         return Err(expression_parse_error(format!(
                             "asset(...) expects a path literal, got `{:?}`",
                             other
-                        )))
+                        )));
                     }
                 };
                 self.expect(ExpressionToken::RParen, "expected `)` after asset(...)")?;
@@ -1015,7 +1034,7 @@ impl TemplateExpressionParser {
                         return Err(expression_parse_error(format!(
                             "translation helper expects a quoted key like t('checkout.title'), got `{:?}`",
                             other
-                        )))
+                        )));
                     }
                 };
                 self.expect(ExpressionToken::RParen, "expected `)` after t(...)")?;
@@ -1030,11 +1049,7 @@ impl TemplateExpressionParser {
         }
     }
 
-    fn expect(
-        &mut self,
-        token: ExpressionToken,
-        message: &str,
-    ) -> Result<(), TemplateModelError> {
+    fn expect(&mut self, token: ExpressionToken, message: &str) -> Result<(), TemplateModelError> {
         if self.consume(&token) {
             Ok(())
         } else {
@@ -1269,7 +1284,9 @@ mod tests {
                 | Node::Each { children, .. }
                 | Node::Default { children } => contains_translation_node(children, key),
                 Node::Switch { cases, default, .. } => {
-                    cases.iter().any(|case| contains_translation_node(&case.children, key))
+                    cases
+                        .iter()
+                        .any(|case| contains_translation_node(&case.children, key))
                         || default
                             .as_ref()
                             .is_some_and(|children| contains_translation_node(children, key))
@@ -1323,7 +1340,9 @@ mod tests {
                 | Node::Each { children, .. }
                 | Node::Default { children } => contains_translation_node(children, key),
                 Node::Switch { cases, default, .. } => {
-                    cases.iter().any(|case| contains_translation_node(&case.children, key))
+                    cases
+                        .iter()
+                        .any(|case| contains_translation_node(&case.children, key))
                         || default
                             .as_ref()
                             .is_some_and(|children| contains_translation_node(children, key))

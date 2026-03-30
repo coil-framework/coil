@@ -146,10 +146,7 @@ pub(crate) fn i18n_runtime_from_config(
             .iter()
             .cloned()
             .map(|locale| {
-                merged_translation_catalog(
-                    locale.clone(),
-                    customer_catalogs_by_locale.get(&locale),
-                )
+                merged_translation_catalog(locale.clone(), customer_catalogs_by_locale.get(&locale))
             })
             .collect::<Vec<_>>(),
     )
@@ -169,10 +166,7 @@ fn merged_translation_catalog(
     customer_catalog: Option<&TranslationCatalog>,
 ) -> TranslationCatalog {
     let core_locale_key = coil_i18n::MessageKey::new("core.locale").expect("static key");
-    let mut messages = vec![(
-        core_locale_key.clone(),
-        locale.to_string(),
-    )];
+    let mut messages = vec![(core_locale_key.clone(), locale.to_string())];
     if let Some(customer_catalog) = customer_catalog {
         messages.extend(
             customer_catalog

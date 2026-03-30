@@ -147,7 +147,11 @@ impl HealthReport {
             .copied()
     }
 
-    pub fn set_dependency_status(&mut self, kind: DependencyKind, status: DependencyStatus) -> bool {
+    pub fn set_dependency_status(
+        &mut self,
+        kind: DependencyKind,
+        status: DependencyStatus,
+    ) -> bool {
         let Some(dependency) = self
             .dependencies
             .iter_mut()

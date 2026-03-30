@@ -70,7 +70,10 @@ impl RenderModelHooks for ExampleRenderModelHooks {
         Ok(vec![RenderModelContribution::merge(
             "page",
             RenderModel::new()
-                .with_value("customer_extension", coil_template::RenderValue::text("enabled"))
+                .with_value(
+                    "customer_extension",
+                    coil_template::RenderValue::text("enabled"),
+                )
                 .map_err(|error| {
                     BackendError::new(
                         coil_customer_sdk::BackendErrorKind::Internal,
@@ -255,10 +258,7 @@ fn runtime_builder_registers_linked_customer_plugins_through_sdk_hooks() {
     assert_eq!(plan.customer_hooks.cms.len(), 0);
     assert_eq!(plan.customer_hooks.verified_webhooks.len(), 0);
     assert_eq!(plan.linked_customer_plugins.len(), 1);
-    assert_eq!(
-        plan.linked_customer_plugins[0].plugin_id,
-        "shoppr-backend"
-    );
+    assert_eq!(plan.linked_customer_plugins[0].plugin_id, "shoppr-backend");
     assert_eq!(
         plan.linked_customer_plugins[0].display_name,
         "Shoppr Backend"
@@ -348,10 +348,7 @@ fn customer_root_runtime_builder_makes_linked_customer_bootstrap_explicit() {
     fs::remove_dir_all(&customer_root).unwrap();
 
     assert_eq!(plan.linked_customer_plugins.len(), 1);
-    assert_eq!(
-        plan.linked_customer_plugins[0].plugin_id,
-        "shoppr-backend"
-    );
+    assert_eq!(plan.linked_customer_plugins[0].plugin_id, "shoppr-backend");
     assert!(html.contains("customer-root-runtime"), "{html}");
 }
 

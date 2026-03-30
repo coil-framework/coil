@@ -432,7 +432,9 @@ fn thymeleaf_style_operators_render_with_expected_precedence() {
         .unwrap()
         .with_value("featured", RenderValue::bool(true))
         .unwrap();
-    model = model.with_value("optional_subtitle", RenderValue::text("")).unwrap();
+    model = model
+        .with_value("optional_subtitle", RenderValue::text(""))
+        .unwrap();
 
     let html = TemplateRuntime::new(registry)
         .render_fragment(
@@ -443,17 +445,7 @@ fn thymeleaf_style_operators_render_with_expected_precedence() {
         .html;
 
     for class in [
-        "gt",
-        "lt",
-        "ge",
-        "le",
-        "eq",
-        "ne",
-        "neq",
-        "not-bang",
-        "not-word",
-        "and-word",
-        "or-word",
+        "gt", "lt", "ge", "le", "eq", "ne", "neq", "not-bang", "not-word", "and-word", "or-word",
         "paren",
     ] {
         assert!(
@@ -563,9 +555,18 @@ fn block_dispatch_exposes_variant_booleans_and_fragment_paths() {
         .unwrap()
         .html;
 
-    assert!(html.contains(r#"<section class="marker">Hero title</section>"#), "{html}");
-    assert!(html.contains(r#"<section class="hero"><h2>Hero title</h2></section>"#), "{html}");
-    assert!(html.contains(r#"<section class="events"><h2>Featured events</h2></section>"#), "{html}");
+    assert!(
+        html.contains(r#"<section class="marker">Hero title</section>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<section class="hero"><h2>Hero title</h2></section>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<section class="events"><h2>Featured events</h2></section>"#),
+        "{html}"
+    );
 }
 
 #[test]
@@ -581,9 +582,12 @@ fn runtime_block_dispatch_binds_nested_block_object_fields() {
         )
         .unwrap();
     let current_template = TemplateName::new("pages/home").unwrap();
-    let dispatch_entry =
-        crate::runtime::augment_block_dispatch(&entry, &current_template, &[String::from("hero_section")])
-            .unwrap();
+    let dispatch_entry = crate::runtime::augment_block_dispatch(
+        &entry,
+        &current_template,
+        &[String::from("hero_section")],
+    )
+    .unwrap();
     let loop_model = RenderModel::new()
         .merged_with(&dispatch_entry)
         .with_object("block", dispatch_entry)

@@ -65,9 +65,11 @@
     </main>
     <footer class="site-footer">
       <div>
-        <p class="site-footer__eyebrow" coil:t="shell.footer.developer">Developer footer</p>
+        <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Developer footer</p>
         <strong>Shoppr</strong>
-        <p coil:t="shell.footer.summary">Retail starter showing multi-site, multi-locale, customer-linked Rust, and third-party WASM.</p>
+        <p coil:text="${site.settings.footer_body}">
+          Retail starter showing multi-site, multi-locale, customer-linked Rust, and third-party WASM.
+        </p>
       </div>
       <div>
         <p class="site-footer__eyebrow" coil:t="shell.footer.inspect">Inspect</p>

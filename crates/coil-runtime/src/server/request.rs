@@ -20,7 +20,7 @@ use coil_customer_sdk::{
     RepositoryWriteReceipt, RequestContext as SdkRequestContext, TraceContext as SdkTraceContext,
     VerifiedWebhook, WebhookHandlingResult,
 };
-use coil_jobs::JobInstant;
+use coil_jobs::{IdempotencyKey, JobInstant};
 use coil_storage::StoragePlanRequest;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
@@ -35,10 +35,7 @@ use url::form_urlencoded;
 
 const STOREFRONT_ORDER_HISTORY_JSON_PATH: &str = "/account/orders.json";
 const STOREFRONT_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
-    (
-        "/cart/items",
-        "x-coil-storefront-csrf-commerce-add-to-cart",
-    ),
+    ("/cart/items", "x-coil-storefront-csrf-commerce-add-to-cart"),
     ("/cart", "x-coil-storefront-csrf-commerce-cart-update"),
     (
         "/checkout/start",
@@ -62,17 +59,31 @@ const STOREFRONT_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
     ),
 ];
 const CMS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
+    ("/admin/pages/draft", "x-coil-cms-csrf-cms-pages-save-draft"),
     (
-        "/admin/pages/draft",
-        "x-coil-cms-csrf-cms-pages-save-draft",
+        "/admin/pages/settings",
+        "x-coil-cms-csrf-cms-pages-save-settings",
     ),
     (
-        "/admin/pages/publish",
-        "x-coil-cms-csrf-cms-pages-publish",
+        "/admin/pages/blocks",
+        "x-coil-cms-csrf-cms-pages-save-blocks",
+    ),
+    (
+        "/admin/pages/blocks/duplicate",
+        "x-coil-cms-csrf-cms-pages-duplicate-block",
+    ),
+    ("/admin/pages/publish", "x-coil-cms-csrf-cms-pages-publish"),
+    (
+        "/admin/pages/schedule",
+        "x-coil-cms-csrf-cms-pages-schedule",
     ),
     (
         "/admin/pages/unpublish",
         "x-coil-cms-csrf-cms-pages-unpublish",
+    ),
+    (
+        "/admin/pages/rollback",
+        "x-coil-cms-csrf-cms-pages-rollback",
     ),
     (
         "/admin/navigation/save",
@@ -82,6 +93,19 @@ const CMS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
         "/admin/redirects/save",
         "x-coil-cms-csrf-cms-redirects-save",
     ),
+    (
+        "/admin/shared-blocks/save",
+        "x-coil-cms-csrf-cms-shared-blocks-save",
+    ),
+    ("/admin/options/save", "x-coil-cms-csrf-cms-options-save"),
+];
+const OPS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
+    (
+        "/admin/reports/export",
+        "x-coil-ops-csrf-ops-report-export",
+    ),
+    ("/admin/bulk", "x-coil-ops-csrf-ops-bulk"),
+    ("/admin/recovery", "x-coil-ops-csrf-ops-recovery"),
 ];
 const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
     "commerce.cart",
@@ -98,11 +122,20 @@ const STOREFRONT_NATIVE_CAPABILITY_ROUTES: &[&str] = &[
 ];
 const CMS_ADMIN_NATIVE_MUTATION_ROUTES: &[&str] = &[
     "cms.pages.save-draft",
+    "cms.pages.save-settings",
+    "cms.pages.save-blocks",
+    "cms.pages.duplicate-block",
     "cms.pages.publish",
+    "cms.pages.schedule",
     "cms.pages.unpublish",
+    "cms.pages.rollback",
     "cms.navigation.save",
     "cms.redirects.save",
+    "cms.shared-blocks.save",
+    "cms.options.save",
 ];
+const OPS_ADMIN_NATIVE_MUTATION_ROUTES: &[&str] =
+    &["ops.report.export", "ops.bulk.execute", "ops.recovery.execute"];
 const STOREFRONT_CSRF_ACTIONS: &[&str] = &[
     "commerce.add-to-cart",
     "commerce.cart-update",
@@ -118,19 +151,34 @@ const CMS_ADMIN_CSRF_ACTIONS: &[(&str, &str)] = &[
         "cms.pages.save-draft",
         "x-coil-cms-csrf-cms-pages-save-draft",
     ),
+    (
+        "cms.pages.save-settings",
+        "x-coil-cms-csrf-cms-pages-save-settings",
+    ),
+    (
+        "cms.pages.save-blocks",
+        "x-coil-cms-csrf-cms-pages-save-blocks",
+    ),
+    (
+        "cms.pages.duplicate-block",
+        "x-coil-cms-csrf-cms-pages-duplicate-block",
+    ),
     ("cms.pages.publish", "x-coil-cms-csrf-cms-pages-publish"),
+    ("cms.pages.schedule", "x-coil-cms-csrf-cms-pages-schedule"),
+    ("cms.pages.unpublish", "x-coil-cms-csrf-cms-pages-unpublish"),
+    ("cms.pages.rollback", "x-coil-cms-csrf-cms-pages-rollback"),
+    ("cms.navigation.save", "x-coil-cms-csrf-cms-navigation-save"),
+    ("cms.redirects.save", "x-coil-cms-csrf-cms-redirects-save"),
     (
-        "cms.pages.unpublish",
-        "x-coil-cms-csrf-cms-pages-unpublish",
+        "cms.shared-blocks.save",
+        "x-coil-cms-csrf-cms-shared-blocks-save",
     ),
-    (
-        "cms.navigation.save",
-        "x-coil-cms-csrf-cms-navigation-save",
-    ),
-    (
-        "cms.redirects.save",
-        "x-coil-cms-csrf-cms-redirects-save",
-    ),
+    ("cms.options.save", "x-coil-cms-csrf-cms-options-save"),
+];
+const OPS_ADMIN_CSRF_ACTIONS: &[(&str, &str)] = &[
+    ("ops.report.export", "x-coil-ops-csrf-ops-report-export"),
+    ("ops.bulk.execute", "x-coil-ops-csrf-ops-bulk"),
+    ("ops.recovery.execute", "x-coil-ops-csrf-ops-recovery"),
 ];
 const STRIPE_WEBHOOK_MAX_AGE_SECS: u64 = 300;
 
@@ -570,6 +618,17 @@ async fn execute_live_request_inner(
         ));
     }
     if let Some(location) =
+        apply_native_ops_admin_mutations(state, &execution, now, &mut storefront_mutation_cookies)?
+    {
+        execution
+            .response_cookies
+            .extend(storefront_mutation_cookies);
+        return Ok(storefront_redirect_response(
+            &location,
+            &execution.response_cookies,
+        ));
+    }
+    if let Some(location) =
         apply_native_storefront_mutations(state, &execution, now, &mut storefront_mutation_cookies)
             .await?
     {
@@ -584,6 +643,7 @@ async fn execute_live_request_inner(
     execution
         .response_cookies
         .extend(storefront_mutation_cookies);
+    apply_due_cms_publication_schedule(state, now)?;
     let route_name = execution.route.route_name.clone();
     let method = execution.method;
     let session_id = execution.session.session_id.clone();
@@ -1267,6 +1327,40 @@ fn cms_page_form_state_from_execution(
             state = state.with_field_value(field, value);
         }
     }
+    for (name, values) in &execution.form_fields {
+        if (name.starts_with("page_settings_")
+            || name.starts_with("page_option_")
+            || name.starts_with("page_schedule_")
+            || name.starts_with("block_"))
+            && !values.is_empty()
+        {
+            state = state.with_field_value(name.clone(), values[0].clone());
+        }
+    }
+    state
+}
+
+fn cms_shared_block_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.pages.index", summary.into());
+    for field in [
+        "page_id",
+        "shared_block_id",
+        "shared_block_label",
+        "shared_block_type",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    for (name, values) in &execution.form_fields {
+        if name.starts_with("shared_block_field_") && !values.is_empty() {
+            state = state.with_field_value(name.clone(), values[0].clone());
+        }
+    }
     state
 }
 
@@ -1381,6 +1475,355 @@ fn cms_redirect_form_state_from_execution(
         state = state.with_field_value("new_redirect_permanent", "yes");
     }
     state
+}
+
+fn cms_options_form_state_from_execution(
+    execution: &RequestExecution,
+    summary: impl Into<String>,
+) -> StorefrontFormState {
+    let mut state = StorefrontFormState::new("cms.options.index", summary.into());
+    for field in [
+        "footer_heading",
+        "footer_body",
+        "contact_email",
+        "contact_phone",
+        "announcement_title",
+        "announcement_body",
+    ] {
+        let value = storefront_form_field_value(execution, field);
+        if !value.is_empty() {
+            state = state.with_field_value(field, value);
+        }
+    }
+    state
+}
+
+fn cms_checkbox_form_field(
+    execution: &RequestExecution,
+    field: &str,
+    default: bool,
+) -> Result<bool, RuntimeServerError> {
+    match execution_form_field(execution, field) {
+        Some(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(RuntimeServerError::Configuration {
+                reason: format!("invalid boolean value for `{field}`"),
+            }),
+        },
+        None => Ok(default),
+    }
+}
+
+fn cms_optional_form_field(execution: &RequestExecution, field: &str) -> Option<String> {
+    execution_form_field(execution, field)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn cms_page_settings_fields_present(execution: &RequestExecution) -> bool {
+    execution
+        .form_fields
+        .keys()
+        .any(|name| name.starts_with("page_settings_") || name.starts_with("page_option_"))
+}
+
+fn cms_page_blocks_fields_present(execution: &RequestExecution) -> bool {
+    execution
+        .form_fields
+        .keys()
+        .any(|name| name.starts_with("block_"))
+}
+
+fn cms_page_settings_from_execution(
+    execution: &RequestExecution,
+    existing: Option<&CmsAdminPageSettings>,
+) -> Result<CmsAdminPageSettings, RuntimeServerError> {
+    let existing = existing.cloned().unwrap_or(CmsAdminPageSettings {
+        page_type: "page".to_string(),
+        template: None,
+        seo_title: None,
+        seo_description: None,
+        options: CmsAdminPageOptions {
+            show_in_navigation: false,
+            allow_indexing: true,
+            localized: false,
+        },
+    });
+    Ok(CmsAdminPageSettings {
+        page_type: cms_optional_form_field(execution, "page_settings_page_type")
+            .unwrap_or(existing.page_type),
+        template: cms_optional_form_field(execution, "page_settings_template")
+            .or(existing.template),
+        seo_title: cms_optional_form_field(execution, "page_settings_seo_title")
+            .or(existing.seo_title),
+        seo_description: cms_optional_form_field(execution, "page_settings_seo_description")
+            .or(existing.seo_description),
+        options: CmsAdminPageOptions {
+            show_in_navigation: cms_checkbox_form_field(
+                execution,
+                "page_option_show_in_navigation",
+                existing.options.show_in_navigation,
+            )?,
+            allow_indexing: cms_checkbox_form_field(
+                execution,
+                "page_option_allow_indexing",
+                existing.options.allow_indexing,
+            )?,
+            localized: cms_checkbox_form_field(
+                execution,
+                "page_option_localized",
+                existing.options.localized,
+            )?,
+        },
+    })
+}
+
+fn cms_page_blocks_from_fields(
+    fields: &RequestFieldMap,
+) -> Result<Vec<CmsAdminPageBlock>, RuntimeServerError> {
+    let mut blocks = Vec::new();
+    let mut index = 0;
+    loop {
+        let kind = fields
+            .get(&format!("block_kind_{index}"))
+            .and_then(|values| values.first())
+            .map(|value| value.trim().to_ascii_lowercase());
+        let id = fields
+            .get(&format!("block_id_{index}"))
+            .and_then(|values| values.first())
+            .map(|value| value.trim().to_string());
+        let block_type = fields
+            .get(&format!("block_type_{index}"))
+            .and_then(|values| values.first())
+            .map(|value| value.trim().to_string());
+        let label = fields
+            .get(&format!("block_label_{index}"))
+            .and_then(|values| values.first())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let shared_block_id = fields
+            .get(&format!("block_shared_block_id_{index}"))
+            .and_then(|values| values.first())
+            .map(|value| value.trim().to_string());
+        let field_prefix = format!("block_field_{index}_");
+        let enabled = match fields
+            .get(&format!("block_enabled_{index}"))
+            .and_then(|values| values.first())
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("1" | "true" | "yes" | "on") => true,
+            Some("0" | "false" | "no" | "off") => false,
+            Some(_) => {
+                return Err(RuntimeServerError::Configuration {
+                    reason: format!("invalid boolean value for `block_enabled_{index}`"),
+                });
+            }
+            None => true,
+        };
+        let block_fields = fields
+            .iter()
+            .filter_map(|(name, values)| {
+                let field_name = name.strip_prefix(&field_prefix)?;
+                let value = values.first()?.trim();
+                if value.is_empty() {
+                    return None;
+                }
+                Some((field_name.to_string(), value.to_string()))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        if kind.is_none()
+            && id.is_none()
+            && block_type.is_none()
+            && label.is_none()
+            && shared_block_id.is_none()
+            && block_fields.is_empty()
+        {
+            break;
+        }
+
+        let block = match kind.as_deref() {
+            Some("shared") | Some("shared_reference") => {
+                CmsAdminPageBlock::SharedReference(CmsAdminSharedBlockReference {
+                    id: id.unwrap_or_default(),
+                    shared_block_id: shared_block_id.unwrap_or_default(),
+                    label,
+                    enabled,
+                })
+            }
+            _ => CmsAdminPageBlock::Instance(CmsAdminBlockInstance {
+                id: id.unwrap_or_default(),
+                block_type: block_type.unwrap_or_default(),
+                label,
+                enabled,
+                fields: block_fields,
+            }),
+        };
+        blocks.push(block);
+        index += 1;
+    }
+    Ok(blocks)
+}
+
+fn cms_shared_block_from_execution(
+    execution: &RequestExecution,
+    updated_at: u64,
+) -> CmsAdminSharedBlock {
+    let fields = execution
+        .form_fields
+        .iter()
+        .filter_map(|(name, values)| {
+            let field = name.strip_prefix("shared_block_field_")?;
+            let value = values.first()?.trim();
+            if value.is_empty() {
+                return None;
+            }
+            Some((field.to_string(), value.to_string()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    CmsAdminSharedBlock {
+        id: storefront_form_field_value(execution, "shared_block_id"),
+        label: storefront_form_field_value(execution, "shared_block_label"),
+        block_type: storefront_form_field_value(execution, "shared_block_type"),
+        fields,
+        updated_at,
+    }
+}
+
+fn cms_global_settings_from_execution(execution: &RequestExecution) -> CmsAdminGlobalSettings {
+    CmsAdminGlobalSettings {
+        footer_heading: storefront_form_field_value(execution, "footer_heading"),
+        footer_body: storefront_form_field_value(execution, "footer_body"),
+        contact_email: storefront_form_field_value(execution, "contact_email"),
+        contact_phone: storefront_form_field_value(execution, "contact_phone"),
+        announcement_title: storefront_form_field_value(execution, "announcement_title"),
+        announcement_body: storefront_form_field_value(execution, "announcement_body"),
+    }
+}
+
+fn cms_page_schedule_publish_at_from_execution(
+    execution: &RequestExecution,
+) -> Result<u64, RuntimeServerError> {
+    let raw = storefront_form_field_value(execution, "page_schedule_publish_at");
+    if raw.trim().is_empty() {
+        return Err(RuntimeServerError::Configuration {
+            reason: "missing scheduled publish time".to_string(),
+        });
+    }
+    raw.parse::<u64>()
+        .map_err(|error| RuntimeServerError::Configuration {
+            reason: format!("invalid scheduled publish time `{raw}`: {error}"),
+        })
+}
+
+fn apply_due_cms_publication_schedule(
+    state: &RuntimeServerState,
+    now: BrowserInstant,
+) -> Result<(), RuntimeServerError> {
+    let mut workspace = CmsAdminWorkspace::load(&state.plan).map_err(|reason| {
+        RuntimeServerError::Configuration {
+            reason: format!("failed to load CMS admin workspace: {reason}"),
+        }
+    })?;
+    let promoted = workspace.apply_due_schedules(now.as_unix_seconds());
+    if promoted.is_empty() {
+        return Ok(());
+    }
+    workspace
+        .save(&state.plan)
+        .map_err(|reason| RuntimeServerError::Configuration {
+            reason: format!("failed to persist scheduled CMS publication: {reason}"),
+        })?;
+    Ok(())
+}
+
+fn cms_admin_page_location(page_id: &str) -> String {
+    format!("/admin/pages?page={page_id}")
+}
+
+fn apply_structured_cms_page_state(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    workspace: &mut CmsAdminWorkspace,
+    page_id: &str,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if cms_page_settings_fields_present(execution) {
+        let existing = workspace
+            .selected_page(Some(page_id))
+            .map(|page| page.draft.settings.clone())
+            .ok_or_else(|| RuntimeServerError::Configuration {
+                reason: format!("CMS page `{page_id}` was not found"),
+            })?;
+        let settings = match cms_page_settings_from_execution(execution, Some(&existing)) {
+            Ok(settings) => settings,
+            Err(error) => {
+                let reason = match error {
+                    RuntimeServerError::Configuration { reason } => reason,
+                    other => return Err(other),
+                };
+                let mut form_state = cms_page_form_state_from_execution(execution, reason.clone());
+                for field in [
+                    "page_settings_page_type",
+                    "page_settings_template",
+                    "page_settings_seo_title",
+                    "page_settings_seo_description",
+                    "page_option_show_in_navigation",
+                    "page_option_allow_indexing",
+                    "page_option_localized",
+                ] {
+                    form_state = form_state.with_field_error(field, reason.clone());
+                }
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(cms_admin_page_location(page_id)));
+            }
+        };
+        if let Err(reason) = workspace.save_page_settings(page_id, settings, now.as_unix_seconds())
+        {
+            let mut form_state = cms_page_form_state_from_execution(execution, reason.clone());
+            for field in [
+                "page_settings_page_type",
+                "page_settings_template",
+                "page_settings_seo_title",
+                "page_settings_seo_description",
+                "page_option_show_in_navigation",
+                "page_option_allow_indexing",
+                "page_option_localized",
+            ] {
+                form_state = form_state.with_field_error(field, reason.clone());
+            }
+            push_storefront_form_state(state, response_cookies, &form_state)?;
+            return Ok(Some(cms_admin_page_location(page_id)));
+        }
+    }
+
+    if cms_page_blocks_fields_present(execution) {
+        let blocks = match cms_page_blocks_from_fields(&execution.form_fields) {
+            Ok(blocks) => blocks,
+            Err(error) => {
+                let reason = match error {
+                    RuntimeServerError::Configuration { reason } => reason,
+                    other => return Err(other),
+                };
+                let form_state = cms_page_form_state_from_execution(execution, reason.clone())
+                    .with_field_error("block_kind_0", reason);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(cms_admin_page_location(page_id)));
+            }
+        };
+        if let Err(reason) = workspace.replace_page_blocks(page_id, blocks, now.as_unix_seconds()) {
+            let form_state = cms_page_form_state_from_execution(execution, reason.clone())
+                .with_field_error("block_kind_0", reason);
+            push_storefront_form_state(state, response_cookies, &form_state)?;
+            return Ok(Some(cms_admin_page_location(page_id)));
+        }
+    }
+
+    Ok(None)
 }
 
 fn storefront_cart_form_state_from_execution(
@@ -2206,10 +2649,7 @@ struct RuntimeCustomerJobsFacade<'a> {
 }
 
 impl JobsFacade for RuntimeCustomerJobsFacade<'_> {
-    fn enqueue(
-        &self,
-        request: coil_customer_sdk::JobRequest,
-    ) -> Result<JobReceipt, BackendError> {
+    fn enqueue(&self, request: coil_customer_sdk::JobRequest) -> Result<JobReceipt, BackendError> {
         let mut host = self
             .plan
             .jobs_host(format!("customer-hooks-{}", self.trace_id))
@@ -3528,8 +3968,8 @@ fn stripe_payment_reference_from_event(
     let payment_reference = metadata
         .and_then(|metadata| {
             ["payment_reference", "checkout_intent"]
-            .iter()
-            .find_map(|key| metadata.get(*key).and_then(serde_json::Value::as_str))
+                .iter()
+                .find_map(|key| metadata.get(*key).and_then(serde_json::Value::as_str))
         })
         .or_else(|| {
             object
@@ -3819,6 +4259,16 @@ fn apply_native_cms_admin_mutations(
                     return Ok(Some("/admin/pages".to_string()));
                 }
             };
+            if let Some(location) = apply_structured_cms_page_state(
+                state,
+                execution,
+                &mut workspace,
+                &page_id,
+                now,
+                response_cookies,
+            )? {
+                return Ok(Some(location));
+            }
             workspace
                 .save(&state.plan)
                 .map_err(|reason| RuntimeServerError::Configuration {
@@ -3842,6 +4292,188 @@ fn apply_native_cms_admin_mutations(
                 response_cookies,
                 FlashLevel::Success,
                 "Draft saved. Preview and publish when ready.",
+            )?;
+            return Ok(Some(cms_admin_page_location(&page_id)));
+        }
+        "cms.pages.save-settings" => {
+            let page_id = execution_form_field(execution, "page_id")
+                .map(str::to_string)
+                .ok_or_else(|| RuntimeServerError::Configuration {
+                    reason: "missing page_id for settings save".to_string(),
+                })?;
+            let existing = workspace
+                .selected_page(Some(&page_id))
+                .map(|page| page.draft.settings.clone())
+                .ok_or_else(|| RuntimeServerError::Configuration {
+                    reason: format!("CMS page `{page_id}` was not found"),
+                })?;
+            let settings = match cms_page_settings_from_execution(execution, Some(&existing)) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    let reason = match error {
+                        RuntimeServerError::Configuration { reason } => reason,
+                        other => return Err(other),
+                    };
+                    let mut form_state =
+                        cms_page_form_state_from_execution(execution, reason.clone());
+                    if cms_page_settings_fields_present(execution) {
+                        for field in [
+                            "page_settings_page_type",
+                            "page_settings_template",
+                            "page_settings_seo_title",
+                            "page_settings_seo_description",
+                            "page_option_show_in_navigation",
+                            "page_option_allow_indexing",
+                            "page_option_localized",
+                        ] {
+                            form_state = form_state.with_field_error(field, reason.clone());
+                        }
+                    }
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(format!("/admin/pages?page={page_id}")));
+                }
+            };
+            if let Err(reason) =
+                workspace.save_page_settings(&page_id, settings, now.as_unix_seconds())
+            {
+                let mut form_state = cms_page_form_state_from_execution(execution, reason.clone());
+                if cms_page_settings_fields_present(execution) {
+                    for field in [
+                        "page_settings_page_type",
+                        "page_settings_template",
+                        "page_settings_seo_title",
+                        "page_settings_seo_description",
+                        "page_option_show_in_navigation",
+                        "page_option_allow_indexing",
+                        "page_option_localized",
+                    ] {
+                        form_state = form_state.with_field_error(field, reason.clone());
+                    }
+                }
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS page settings: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.save-settings",
+                "page",
+                page_id.as_str(),
+                "succeeded",
+                "Saved structured page settings for the draft revision.",
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Page settings saved for this draft.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.pages.save-blocks" => {
+            let page_id = execution_form_field(execution, "page_id")
+                .map(str::to_string)
+                .ok_or_else(|| RuntimeServerError::Configuration {
+                    reason: "missing page_id for block save".to_string(),
+                })?;
+            let blocks = match cms_page_blocks_from_fields(&execution.form_fields) {
+                Ok(blocks) => blocks,
+                Err(error) => {
+                    let reason = match error {
+                        RuntimeServerError::Configuration { reason } => reason,
+                        other => return Err(other),
+                    };
+                    let mut form_state =
+                        cms_page_form_state_from_execution(execution, reason.clone());
+                    if cms_page_blocks_fields_present(execution) {
+                        form_state = form_state.with_field_error("block_kind_0", reason);
+                    }
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(format!("/admin/pages?page={page_id}")));
+                }
+            };
+            if let Err(reason) =
+                workspace.replace_page_blocks(&page_id, blocks, now.as_unix_seconds())
+            {
+                let mut form_state = cms_page_form_state_from_execution(execution, reason.clone());
+                if cms_page_blocks_fields_present(execution) {
+                    form_state = form_state.with_field_error("block_kind_0", reason);
+                }
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS page blocks: {reason}"),
+                })?;
+            let block_count = workspace
+                .selected_page(Some(&page_id))
+                .map(|page| page.draft.blocks.len())
+                .unwrap_or_default();
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.save-blocks",
+                "page",
+                page_id.as_str(),
+                "succeeded",
+                &format!("Replaced {block_count} structured page-builder blocks."),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Structured page blocks saved for this draft.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.pages.duplicate-block" => {
+            let page_id = execution_form_field(execution, "page_id").ok_or_else(|| {
+                RuntimeServerError::Configuration {
+                    reason: "missing page_id for block duplication".to_string(),
+                }
+            })?;
+            let block_id = execution_form_field(execution, "block_id").ok_or_else(|| {
+                RuntimeServerError::Configuration {
+                    reason: "missing block_id for block duplication".to_string(),
+                }
+            })?;
+            let duplicated_id =
+                match workspace.duplicate_page_block(page_id, block_id, now.as_unix_seconds()) {
+                    Ok(duplicated_id) => duplicated_id,
+                    Err(reason) => {
+                        let form_state =
+                            cms_page_form_state_from_execution(execution, reason.clone())
+                                .with_field_error("block_id", reason);
+                        push_storefront_form_state(state, response_cookies, &form_state)?;
+                        return Ok(Some(format!("/admin/pages?page={page_id}")));
+                    }
+                };
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist duplicated CMS block: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.duplicate-block",
+                "page",
+                page_id,
+                "succeeded",
+                &format!("Duplicated page block `{block_id}` as `{duplicated_id}`."),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Page block duplicated in the current draft.",
             )?;
             return Ok(Some(format!("/admin/pages?page={page_id}")));
         }
@@ -3873,6 +4505,16 @@ fn apply_native_cms_admin_mutations(
                         reason: "missing page_id for publish".to_string(),
                     })?
             };
+            if let Some(location) = apply_structured_cms_page_state(
+                state,
+                execution,
+                &mut workspace,
+                &page_id,
+                now,
+                response_cookies,
+            )? {
+                return Ok(Some(location));
+            }
             if let Some(location) = validate_cms_publish_with_customer_hooks(
                 state,
                 execution,
@@ -3910,6 +4552,66 @@ fn apply_native_cms_admin_mutations(
                 FlashLevel::Success,
                 "Page published to the live /pages/{slug} surface.",
             )?;
+            return Ok(Some(cms_admin_page_location(&page_id)));
+        }
+        "cms.pages.schedule" => {
+            let page_id = execution_form_field(execution, "page_id").ok_or_else(|| {
+                RuntimeServerError::Configuration {
+                    reason: "missing page_id for schedule".to_string(),
+                }
+            })?;
+            let publish_at = match cms_page_schedule_publish_at_from_execution(execution) {
+                Ok(value) => value,
+                Err(RuntimeServerError::Configuration { reason }) => {
+                    let form_state = cms_page_form_state_from_execution(execution, reason.clone())
+                        .with_field_error("page_schedule_publish_at", reason);
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(format!("/admin/pages?page={page_id}")));
+                }
+                Err(other) => return Err(other),
+            };
+            if let Err(reason) = workspace.schedule_page_publish(
+                page_id,
+                publish_at,
+                now.as_unix_seconds(),
+                now.as_unix_seconds(),
+            ) {
+                let form_state = cms_page_form_state_from_execution(execution, reason.clone())
+                    .with_field_error("page_schedule_publish_at", reason);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS schedule: {reason}"),
+                })?;
+            let mut jobs = state.plan.jobs_host("runtime-http")?;
+            let request = JobDispatchRequest::new(
+                "cms.publish-scheduled",
+                format!("cms-page-scheduled-publish-{page_id}"),
+            )?
+            .scheduled_for(JobInstant::from_unix_seconds(publish_at))
+            .with_idempotency_key(format!("cms.publish-scheduled:{page_id}:{publish_at}"))?;
+            let _ = jobs.enqueue_job(
+                request,
+                JobInstant::from_unix_seconds(now.as_unix_seconds()),
+            )?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.schedule",
+                "page",
+                page_id,
+                "succeeded",
+                &format!("Scheduled page publication for unix time `{publish_at}`."),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Info,
+                "Page scheduled for future publication.",
+            )?;
             return Ok(Some(format!("/admin/pages?page={page_id}")));
         }
         "cms.pages.unpublish" => {
@@ -3940,6 +4642,40 @@ fn apply_native_cms_admin_mutations(
                 response_cookies,
                 FlashLevel::Info,
                 "Page removed from the live route but kept as a draft.",
+            )?;
+            return Ok(Some(format!("/admin/pages?page={page_id}")));
+        }
+        "cms.pages.rollback" => {
+            let page_id = execution_form_field(execution, "page_id").ok_or_else(|| {
+                RuntimeServerError::Configuration {
+                    reason: "missing page_id for rollback".to_string(),
+                }
+            })?;
+            if let Err(reason) = workspace.rollback_page(page_id, now.as_unix_seconds()) {
+                let form_state = cms_page_form_state_from_execution(execution, reason.clone())
+                    .with_field_error("page_id", reason);
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some(format!("/admin/pages?page={page_id}")));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS rollback: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.pages.rollback",
+                "page",
+                page_id,
+                "succeeded",
+                "Rolled the page back to the previous live revision.",
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Info,
+                "Page rolled back to the previous live revision.",
             )?;
             return Ok(Some(format!("/admin/pages?page={page_id}")));
         }
@@ -4025,10 +4761,534 @@ fn apply_native_cms_admin_mutations(
             )?;
             return Ok(Some("/admin/redirects".to_string()));
         }
+        "cms.shared-blocks.save" => {
+            let redirect_location = execution_form_field(execution, "page_id")
+                .map(|page_id| format!("/admin/pages?page={page_id}"))
+                .unwrap_or_else(|| "/admin/pages".to_string());
+            let shared_block = cms_shared_block_from_execution(execution, now.as_unix_seconds());
+            let block_id = match workspace.save_shared_block(shared_block) {
+                Ok(block_id) => block_id,
+                Err(reason) => {
+                    let mut form_state =
+                        cms_shared_block_form_state_from_execution(execution, reason.clone());
+                    for field in ["shared_block_id", "shared_block_label", "shared_block_type"] {
+                        form_state = form_state.with_field_error(field, reason.clone());
+                    }
+                    push_storefront_form_state(state, response_cookies, &form_state)?;
+                    return Ok(Some(redirect_location));
+                }
+            };
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS shared block: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.shared-blocks.save",
+                "shared-block",
+                block_id.as_str(),
+                "succeeded",
+                "Saved a reusable shared page-builder block.",
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Shared block saved for reuse across structured pages.",
+            )?;
+            return Ok(Some(redirect_location));
+        }
+        "cms.options.save" => {
+            let settings = cms_global_settings_from_execution(execution);
+            if let Err(reason) = workspace.save_global_settings(settings) {
+                let mut form_state =
+                    cms_options_form_state_from_execution(execution, reason.clone());
+                for field in [
+                    "footer_heading",
+                    "footer_body",
+                    "contact_email",
+                    "contact_phone",
+                    "announcement_title",
+                    "announcement_body",
+                ] {
+                    form_state = form_state.with_field_error(field, reason.clone());
+                }
+                push_storefront_form_state(state, response_cookies, &form_state)?;
+                return Ok(Some("/admin/options".to_string()));
+            }
+            workspace
+                .save(&state.plan)
+                .map_err(|reason| RuntimeServerError::Configuration {
+                    reason: format!("failed to persist CMS global settings: {reason}"),
+                })?;
+            record_operator_audit(
+                state,
+                execution,
+                "cms.options.save",
+                "cms-options",
+                "global-settings",
+                "succeeded",
+                "Saved global CMS settings for shared storefront content.",
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                "Global content settings saved for the storefront shell.",
+            )?;
+            return Ok(Some("/admin/options".to_string()));
+        }
         _ => {}
     }
 
     Ok(None)
+}
+
+fn apply_native_ops_admin_mutations(
+    state: &RuntimeServerState,
+    execution: &RequestExecution,
+    now: BrowserInstant,
+    response_cookies: &mut Vec<String>,
+) -> Result<Option<String>, RuntimeServerError> {
+    if !OPS_ADMIN_NATIVE_MUTATION_ROUTES.contains(&execution.route.route_name.as_str()) {
+        return Ok(None);
+    }
+
+    match execution.route.route_name.as_str() {
+        "ops.report.export" => {
+            let report_id = storefront_form_field_value(execution, "report_id");
+            let redirect_location = "/admin/reports".to_string();
+            if report_id.trim().is_empty() {
+                push_storefront_flash(
+                    state,
+                    response_cookies,
+                    FlashLevel::Error,
+                    "Choose a report before queuing an export.",
+                )?;
+                return Ok(Some(redirect_location));
+            }
+
+            let Some(registered) = state
+                .plan
+                .module_report_definitions
+                .iter()
+                .find(|registered| registered.definition.id.as_str() == report_id.trim())
+                .cloned()
+            else {
+                record_operator_audit(
+                    state,
+                    execution,
+                    "ops.report.export",
+                    "report",
+                    report_id.trim(),
+                    "rejected",
+                    "Unknown report definition requested from the reports surface.",
+                )?;
+                push_storefront_flash(
+                    state,
+                    response_cookies,
+                    FlashLevel::Error,
+                    format!("Unknown report `{}`.", report_id.trim()),
+                )?;
+                return Ok(Some(redirect_location));
+            };
+
+            let requested_by = execution
+                .principal
+                .principal_id
+                .clone()
+                .unwrap_or_else(|| "operator".to_string());
+            let export_id = coil_ops::ReportExportId::new(format!(
+                "report-export-{}-{}",
+                report_id.trim().replace('.', "-"),
+                now.as_unix_seconds()
+            ))
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid report export id: {error}"),
+            })?;
+            let report_id_model = coil_ops::ReportId::new(registered.definition.id.clone())
+                .map_err(|error| RuntimeServerError::Configuration {
+                    reason: format!("invalid report id in registered definition: {error}"),
+                })?;
+            let idempotency_key =
+                IdempotencyKey::new(format!(
+                    "ops.report.export:{}:{}",
+                    report_id_model.as_str(),
+                    now.as_unix_seconds()
+                ))
+                    .map_err(|error| RuntimeServerError::Configuration {
+                        reason: format!("invalid report export idempotency key: {error}"),
+                    })?;
+            let request = coil_ops::ReportExportRequest::new(
+                export_id,
+                report_id_model,
+                requested_by,
+                JobInstant::from_unix_seconds(now.as_unix_seconds()),
+            )
+            .map(|request| {
+                request
+                    .with_capability(registered.definition.required_capability)
+                    .with_idempotency_key(idempotency_key)
+            })
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid report export request: {error}"),
+            })?;
+            let mut ops = state
+                .plan
+                .ops_host("runtime-http")
+                .map_err(|error| RuntimeServerError::Configuration {
+                    reason: format!("could not create ops host for report export: {error}"),
+                })?;
+            match ops.queue_report_export(request) {
+                Ok(queued) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "ops.report.export",
+                        "report",
+                        queued.plan.definition.id.as_str(),
+                        "succeeded",
+                        &format!(
+                            "Queued export job `{}` for `{}` to `{}`.",
+                            queued.queued_job_id,
+                            queued.plan.definition.title,
+                            queued.plan.output_object_key
+                        ),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Success,
+                        format!(
+                            "Queued report export for {}.",
+                            queued.plan.definition.title
+                        ),
+                    )?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "ops.report.export",
+                        "report",
+                        report_id.trim(),
+                        "rejected",
+                        &error.to_string(),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Error,
+                        format!(
+                            "Could not queue report export for {}.",
+                            registered.definition.title
+                        ),
+                    )?;
+                    return Ok(Some(redirect_location));
+                }
+            }
+        }
+        "ops.bulk.execute" => {
+            let operation_id = storefront_form_field_value(execution, "operation_id");
+            let redirect_location = "/admin/bulk".to_string();
+            if operation_id.trim().is_empty() {
+                push_storefront_flash(
+                    state,
+                    response_cookies,
+                    FlashLevel::Error,
+                    "Choose a bulk workflow before queuing execution.",
+                )?;
+                return Ok(Some(redirect_location));
+            }
+
+            let Some(registered) = state
+                .plan
+                .module_bulk_operations
+                .iter()
+                .find(|registered| registered.definition.id.as_str() == operation_id.trim())
+                .cloned()
+            else {
+                record_operator_audit(
+                    state,
+                    execution,
+                    "ops.bulk.execute",
+                    "bulk_operation",
+                    operation_id.trim(),
+                    "rejected",
+                    "Unknown bulk workflow requested from the admin bulk surface.",
+                )?;
+                push_storefront_flash(
+                    state,
+                    response_cookies,
+                    FlashLevel::Error,
+                    format!("Unknown bulk workflow `{}`.", operation_id.trim()),
+                )?;
+                return Ok(Some(redirect_location));
+            };
+
+            let target_count = storefront_form_field_value(execution, "target_count")
+                .trim()
+                .parse::<usize>()
+                .unwrap_or_default();
+            let requested_by = execution
+                .principal
+                .principal_id
+                .clone()
+                .unwrap_or_else(|| "operator".to_string());
+            let execution_id = coil_ops::BulkExecutionId::new(format!(
+                "bulk-{}-{}",
+                operation_id.trim().replace('.', "-"),
+                now.as_unix_seconds()
+            ))
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid bulk execution id: {error}"),
+            })?;
+            let definition_id =
+                coil_ops::BulkOperationId::new(registered.definition.id.clone()).map_err(
+                    |error| RuntimeServerError::Configuration {
+                        reason: format!("invalid bulk operation id in registered definition: {error}"),
+                    },
+                )?;
+            let idempotency_key = IdempotencyKey::new(format!(
+                "ops.bulk.execute:{}:{}",
+                definition_id.as_str(),
+                now.as_unix_seconds()
+            ))
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid bulk execution idempotency key: {error}"),
+            })?;
+            let dry_run = storefront_form_field_value(execution, "dry_run") == "yes";
+            let request = coil_ops::BulkOperationRequest::new(
+                execution_id,
+                definition_id,
+                requested_by,
+                JobInstant::from_unix_seconds(now.as_unix_seconds()),
+                target_count,
+            )
+            .map(|request| {
+                request
+                    .with_capability(registered.definition.required_capability)
+                    .with_idempotency_key(idempotency_key)
+                    .dry_run(dry_run)
+            })
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid bulk operation request: {error}"),
+            })?;
+            let mut ops = state
+                .plan
+                .ops_host("runtime-http")
+                .map_err(|error| RuntimeServerError::Configuration {
+                    reason: format!("could not create ops host for bulk workflow: {error}"),
+                })?;
+            match ops.queue_bulk_operation(request) {
+                Ok(queued) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "ops.bulk.execute",
+                        "bulk_operation",
+                        queued.plan.definition.id.as_str(),
+                        "succeeded",
+                        &format!(
+                            "Queued bulk job `{}` for `{}` over {} targets.",
+                            queued.queued_job_id,
+                            queued.plan.definition.title,
+                            queued.plan.target_count
+                        ),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Success,
+                        format!(
+                            "Queued bulk workflow for {}.",
+                            queued.plan.definition.title
+                        ),
+                    )?;
+                    return Ok(Some(redirect_location));
+                }
+                Err(error) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "ops.bulk.execute",
+                        "bulk_operation",
+                        operation_id.trim(),
+                        "rejected",
+                        &error.to_string(),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Error,
+                        format!(
+                            "Could not queue bulk workflow for {}.",
+                            registered.definition.title
+                        ),
+                    )?;
+                    return Ok(Some(redirect_location));
+                }
+            }
+        }
+        "ops.recovery.execute" => {
+            let workflow_id = storefront_form_field_value(execution, "workflow_id");
+            let redirect_location = "/admin/recovery".to_string();
+            if workflow_id.trim().is_empty() {
+                push_storefront_flash(
+                    state,
+                    response_cookies,
+                    FlashLevel::Error,
+                    "Choose a recovery workflow before queuing execution.",
+                )?;
+                return Ok(Some(redirect_location));
+            }
+
+            let Some(definition) = state
+                .plan
+                .ops_catalog
+                .recovery
+                .definitions()
+                .iter()
+                .find(|definition| definition.id.as_str() == workflow_id.trim())
+                .cloned()
+            else {
+                record_operator_audit(
+                    state,
+                    execution,
+                    "ops.recovery.execute",
+                    "recovery_workflow",
+                    workflow_id.trim(),
+                    "rejected",
+                    "Unknown recovery workflow requested from the admin recovery surface.",
+                )?;
+                push_storefront_flash(
+                    state,
+                    response_cookies,
+                    FlashLevel::Error,
+                    format!("Unknown recovery workflow `{}`.", workflow_id.trim()),
+                )?;
+                return Ok(Some(redirect_location));
+            };
+
+            let requested_by = execution
+                .principal
+                .principal_id
+                .clone()
+                .unwrap_or_else(|| "operator".to_string());
+            let execution_id = coil_ops::RecoveryExecutionId::new(format!(
+                "recovery-{}-{}",
+                workflow_id.trim().replace('.', "-"),
+                now.as_unix_seconds()
+            ))
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid recovery execution id: {error}"),
+            })?;
+            let definition_id =
+                coil_ops::RecoveryWorkflowId::new(definition.id.as_str().to_string()).map_err(
+                    |error| RuntimeServerError::Configuration {
+                        reason: format!("invalid recovery workflow id in catalog: {error}"),
+                    },
+                )?;
+            let idempotency_key = IdempotencyKey::new(format!(
+                "ops.recovery.execute:{}:{}",
+                definition_id.as_str(),
+                now.as_unix_seconds()
+            ))
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid recovery idempotency key: {error}"),
+            })?;
+            let local_only_sensitive_present =
+                storefront_form_field_value(execution, "local_only_sensitive_present") == "yes";
+            let local_only_sensitive_acknowledged =
+                storefront_form_field_value(execution, "local_only_sensitive_acknowledged")
+                    == "yes";
+
+            let mut request = coil_ops::RecoveryPlanRequest::new(
+                execution_id,
+                definition_id,
+                state.plan.config.app.name.clone(),
+                requested_by,
+                JobInstant::from_unix_seconds(now.as_unix_seconds()),
+            )
+            .map(|request| {
+                request
+                    .with_capability(definition.required_capability)
+                    .with_idempotency_key(idempotency_key)
+            })
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid recovery workflow request: {error}"),
+            })?;
+            if local_only_sensitive_present {
+                request =
+                    request.with_local_only_sensitive_data(local_only_sensitive_acknowledged);
+            }
+
+            let planner =
+                coil_ops::OpsPlanner::new(state.plan.jobs.clone(), state.plan.ops_catalog.clone())
+                    .map_err(|error| RuntimeServerError::Configuration {
+                        reason: format!("could not create ops planner for recovery workflow: {error}"),
+                    })?;
+            let plan = match planner.plan_recovery_workflow(request) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    record_operator_audit(
+                        state,
+                        execution,
+                        "ops.recovery.execute",
+                        "recovery_workflow",
+                        workflow_id.trim(),
+                        "rejected",
+                        &error.to_string(),
+                    )?;
+                    push_storefront_flash(
+                        state,
+                        response_cookies,
+                        FlashLevel::Error,
+                        format!(
+                            "Could not queue recovery workflow for {}.",
+                            definition.title
+                        ),
+                    )?;
+                    return Ok(Some(redirect_location));
+                }
+            };
+
+            let mut jobs =
+                state.plan.jobs_host("runtime-http").map_err(|error| RuntimeServerError::Configuration {
+                    reason: format!("could not create jobs host for recovery workflow: {error}"),
+                })?;
+            let queued_job_id =
+                jobs.enqueue_spec(plan.job.clone(), JobInstant::from_unix_seconds(now.as_unix_seconds()))?;
+            record_operator_audit(
+                state,
+                execution,
+                "ops.recovery.execute",
+                "recovery_workflow",
+                plan.definition.id.as_str(),
+                "succeeded",
+                &format!(
+                    "Queued recovery job `{}` for `{}` covering {} stages.",
+                    queued_job_id,
+                    plan.definition.title,
+                    plan.stages.len()
+                ),
+            )?;
+            push_storefront_flash(
+                state,
+                response_cookies,
+                FlashLevel::Success,
+                format!(
+                    "Queued recovery workflow for {}.",
+                    plan.definition.title
+                ),
+            )?;
+            return Ok(Some(redirect_location));
+        }
+        _ => Ok(None),
+    }
 }
 
 fn normalized_payment_webhook_event<'a>(source: &str, event: &'a str) -> Cow<'a, str> {
@@ -5321,9 +6581,7 @@ fn parse_customer_auth_entity(value: &str) -> Result<coil_auth::Entity, BackendE
     }
 }
 
-fn customer_hook_auth_subject(
-    principal: &PrincipalContext,
-) -> Option<coil_auth::DefaultSubject> {
+fn customer_hook_auth_subject(principal: &PrincipalContext) -> Option<coil_auth::DefaultSubject> {
     match (principal.principal_id.as_deref(), principal.principal_kind) {
         (Some(principal_id), RequestPrincipalKind::ServiceAccount) => {
             Some(coil_auth::DefaultSubject::entity(
@@ -5403,7 +6661,9 @@ fn storefront_response_augmentation(
 ) -> Result<Option<StorefrontResponseAugmentation>, RuntimeServerError> {
     let should_render_storefront = should_render_storefront_state(execution);
     let should_render_cms_admin_forms = should_render_cms_admin_forms(execution);
-    if !should_render_storefront && !should_render_cms_admin_forms {
+    let should_render_ops_admin_forms = should_render_ops_admin_forms(execution);
+    if !should_render_storefront && !should_render_cms_admin_forms && !should_render_ops_admin_forms
+    {
         return Ok(None);
     }
     let Some(session_id) = execution.session.session_id.as_deref() else {
@@ -5430,6 +6690,11 @@ fn storefront_response_augmentation(
             .headers
             .extend(issue_cms_admin_csrf_tokens(state, session_id)?);
     }
+    if should_render_ops_admin_forms {
+        augmentation
+            .headers
+            .extend(issue_ops_admin_csrf_tokens(state, session_id)?);
+    }
     Ok(Some(augmentation))
 }
 
@@ -5443,7 +6708,18 @@ fn should_render_cms_admin_forms(execution: &RequestExecution) -> bool {
     matches!(execution.response, HandlerResponse::Page(_))
         && matches!(
             execution.route.route_name.as_str(),
-            "cms.pages.index" | "cms.navigation.index" | "cms.redirects.index"
+            "cms.pages.index"
+                | "cms.navigation.index"
+                | "cms.redirects.index"
+                | "cms.options.index"
+        )
+}
+
+fn should_render_ops_admin_forms(execution: &RequestExecution) -> bool {
+    matches!(execution.response, HandlerResponse::Page(_))
+        && matches!(
+            execution.route.route_name.as_str(),
+            "ops.reports" | "ops.search" | "ops.bulk" | "ops.recovery"
         )
 }
 
@@ -5475,6 +6751,24 @@ fn issue_cms_admin_csrf_tokens(
         .expect("runtime browser mutex poisoned");
     let mut tokens = BTreeMap::new();
     for (action, header) in CMS_ADMIN_CSRF_ACTIONS {
+        let token = browser
+            .issue_csrf_token(&state.csrf_secret, session_id, action)
+            .map_err(RequestExecutionError::from_browser_error)?;
+        tokens.insert((*header).to_string(), token);
+    }
+    Ok(tokens)
+}
+
+fn issue_ops_admin_csrf_tokens(
+    state: &RuntimeServerState,
+    session_id: &str,
+) -> Result<BTreeMap<String, String>, RuntimeServerError> {
+    let browser = state
+        .browser
+        .lock()
+        .expect("runtime browser mutex poisoned");
+    let mut tokens = BTreeMap::new();
+    for (action, header) in OPS_ADMIN_CSRF_ACTIONS {
         let token = browser
             .issue_csrf_token(&state.csrf_secret, session_id, action)
             .map_err(RequestExecutionError::from_browser_error)?;
@@ -5540,6 +6834,7 @@ async fn apply_storefront_response_augmentation(
         return Ok(response);
     };
     let form_tokens = storefront_form_tokens_from_headers(&augmentation.headers);
+    let markup = augmentation.html_fragment.unwrap_or_default();
     for (name, value) in augmentation.headers {
         if let (Ok(name), Ok(value)) = (
             HeaderName::from_bytes(name.as_bytes()),
@@ -5548,9 +6843,9 @@ async fn apply_storefront_response_augmentation(
             response.headers_mut().insert(name, value);
         }
     }
-    let Some(markup) = augmentation.html_fragment else {
+    if form_tokens.is_empty() && markup.is_empty() {
         return Ok(response);
-    };
+    }
     let is_html = response
         .headers()
         .get("content-type")
@@ -5593,6 +6888,7 @@ fn storefront_form_tokens_from_headers(
     STOREFRONT_FORM_CSRF_HEADERS
         .iter()
         .chain(CMS_ADMIN_FORM_CSRF_HEADERS.iter())
+        .chain(OPS_ADMIN_FORM_CSRF_HEADERS.iter())
         .filter_map(|(path, header)| headers.get(*header).map(|token| (*path, token.clone())))
         .collect()
 }

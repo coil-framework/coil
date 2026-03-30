@@ -235,16 +235,10 @@ fn load_auth_model_package_inner(
 
     match manifest.mode {
         PackageMode::Replace => {
-            let schema = load_model_schema(
-                &package_root.join("model.auth"),
-                &manifest.name,
-                None,
-                true,
-            )?;
-            let capability_bindings = load_capability_bindings(
-                &package_root.join("capabilities.toml"),
-                &manifest.name,
-            )?;
+            let schema =
+                load_model_schema(&package_root.join("model.auth"), &manifest.name, None, true)?;
+            let capability_bindings =
+                load_capability_bindings(&package_root.join("capabilities.toml"), &manifest.name)?;
 
             Ok(LoadedAuthModelPackage {
                 manifest,

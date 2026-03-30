@@ -1,4 +1,8 @@
 use super::*;
+use crate::cms_admin::{
+    CmsAdminBlockInstance, CmsAdminPageBlock, CmsAdminPageInput, CmsAdminPageOptions,
+    CmsAdminPageSettings, CmsAdminSharedBlock, CmsAdminSharedBlockReference, CmsAdminWorkspace,
+};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use coil_admin::AdminModule;
@@ -266,6 +270,119 @@ fn request_execution_resolves_site_context_and_site_locales() {
 }
 
 #[test]
+fn cms_admin_workspace_save_and_load_roundtrips_structured_editorial_state() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let app_name = format!("showcase-cms-admin-roundtrip-{unique}");
+    let config = config_with_app_name(&app_name);
+    let plan = RuntimeBuilder::new(config, DefaultAuthModelPackage::default())
+        .with_module(CmsModule::new())
+        .build()
+        .unwrap();
+
+    let mut workspace = CmsAdminWorkspace::load(&plan).unwrap();
+    let page_id = workspace
+        .save_page_draft(
+            CmsAdminPageInput {
+                page_id: Some("page-editorial-brief".to_string()),
+                title: "Editorial Brief".to_string(),
+                slug: "editorial-brief".to_string(),
+                summary: "A structured editorial test page.".to_string(),
+                body_html: "<p>Base body</p>".to_string(),
+            },
+            100,
+        )
+        .unwrap();
+    workspace
+        .save_shared_block(CmsAdminSharedBlock {
+            id: "shared-editorial-footer".to_string(),
+            label: "Editorial footer".to_string(),
+            block_type: "callout".to_string(),
+            fields: std::collections::BTreeMap::from([
+                ("heading".to_string(), "Plan the week".to_string()),
+                (
+                    "body".to_string(),
+                    "Cutover rehearsal on Thursday.".to_string(),
+                ),
+            ]),
+            updated_at: 101,
+        })
+        .unwrap();
+    workspace
+        .save_page_settings(
+            &page_id,
+            CmsAdminPageSettings {
+                page_type: "briefing".to_string(),
+                template: Some("pages/briefing".to_string()),
+                seo_title: Some("Editorial Brief".to_string()),
+                seo_description: Some("Internal planning page".to_string()),
+                options: CmsAdminPageOptions {
+                    show_in_navigation: false,
+                    allow_indexing: false,
+                    localized: true,
+                },
+            },
+            102,
+        )
+        .unwrap();
+    workspace
+        .replace_page_blocks(
+            &page_id,
+            vec![
+                CmsAdminPageBlock::Instance(CmsAdminBlockInstance {
+                    id: "block-briefing-hero".to_string(),
+                    block_type: "hero".to_string(),
+                    label: Some("Hero".to_string()),
+                    enabled: true,
+                    fields: std::collections::BTreeMap::from([(
+                        "heading".to_string(),
+                        "Editorial Brief".to_string(),
+                    )]),
+                }),
+                CmsAdminPageBlock::SharedReference(CmsAdminSharedBlockReference {
+                    id: "block-briefing-footer".to_string(),
+                    shared_block_id: "shared-editorial-footer".to_string(),
+                    label: Some("Footer".to_string()),
+                    enabled: true,
+                }),
+            ],
+            103,
+        )
+        .unwrap();
+    workspace.publish_page(&page_id, 104).unwrap();
+    workspace.save(&plan).unwrap();
+
+    let reloaded = CmsAdminWorkspace::load(&plan).unwrap();
+    let page = reloaded
+        .pages
+        .iter()
+        .find(|page| page.id == page_id)
+        .unwrap();
+    assert_eq!(page.draft.settings.page_type, "briefing");
+    assert_eq!(
+        page.draft.settings.template.as_deref(),
+        Some("pages/briefing")
+    );
+    assert_eq!(page.draft.blocks.len(), 2);
+    assert!(matches!(
+        &page.draft.blocks[1],
+        CmsAdminPageBlock::SharedReference(reference)
+            if reference.shared_block_id == "shared-editorial-footer"
+    ));
+    assert_eq!(page.live.as_ref().unwrap().blocks, page.draft.blocks);
+    assert!(
+        reloaded
+            .shared_blocks
+            .iter()
+            .any(|block| block.id == "shared-editorial-footer")
+    );
+
+    let _ = fs::remove_dir_all(plan.shared_state_root());
+}
+
+#[test]
 fn localized_home_routes_resolve_default_and_non_default_locale_paths() {
     let config = config_with_sites();
     let template_root = unique_temp_template_root("localized-home");
@@ -524,8 +641,14 @@ fn render_model_exposes_locale_switches_with_locale_root_fallback_for_default_on
         .unwrap()
         .html;
 
-    assert!(html.contains(r#"class="locale-switch" href="/cart" data-active="true">English"#), "{html}");
-    assert!(html.contains(r#"class="locale-switch" href="/fr-FR" data-active="false">Français"#), "{html}");
+    assert!(
+        html.contains(r#"class="locale-switch" href="/cart" data-active="true">English"#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"class="locale-switch" href="/fr-FR" data-active="false">Français"#),
+        "{html}"
+    );
 }
 
 #[test]

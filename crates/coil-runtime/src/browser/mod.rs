@@ -412,7 +412,11 @@ mod tests {
             .unwrap()
             .with_session_cookie(issued.cookie_value);
         let error = host
-            .resolve_request(&request, cookie_secret, BrowserInstant::from_unix_seconds(4_000))
+            .resolve_request(
+                &request,
+                cookie_secret,
+                BrowserInstant::from_unix_seconds(4_000),
+            )
             .unwrap_err();
 
         assert_eq!(

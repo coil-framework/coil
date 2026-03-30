@@ -79,8 +79,8 @@ fn commerce_module_manifest_declares_expected_capabilities_and_registers_service
             .contains(&Capability::AssetRead)
     );
     assert_eq!(manifest.migrations.len(), 3);
-    assert_eq!(manifest.route_surfaces.len(), 20);
-    assert_eq!(manifest.http_surfaces.len(), 20);
+    assert_eq!(manifest.route_surfaces.len(), 21);
+    assert_eq!(manifest.http_surfaces.len(), 21);
     assert_eq!(manifest.jobs.len(), 2);
     assert_eq!(manifest.event_subscriptions.len(), 2);
     assert_eq!(manifest.search_contributions.len(), 2);
@@ -679,6 +679,15 @@ fn commerce_module_manifest_exposes_basic_storefront_listing_detail_cart_and_com
     assert_eq!(order_fulfill.kind, RouteSurfaceKind::AdminAction);
     assert_eq!(order_fulfill.path, "/admin/orders/fulfill");
     assert_eq!(order_fulfill.capability, Some(Capability::OrderRefundIssue));
+
+    let payment_operations = manifest
+        .route_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.payment-operations")
+        .expect("payment operations surface should exist");
+    assert_eq!(payment_operations.kind, RouteSurfaceKind::AdminPage);
+    assert_eq!(payment_operations.path, "/admin/payments");
+    assert_eq!(payment_operations.capability, Some(Capability::OrderRead));
 }
 
 #[test]
@@ -874,6 +883,23 @@ fn commerce_module_http_surfaces_match_storefront_route_contracts() {
         HttpResponseContract::Redirect {
             location: "/admin/orders".to_string(),
             status: 303,
+        }
+    );
+
+    let payment_operations = manifest
+        .http_surfaces
+        .iter()
+        .find(|surface| surface.name == "commerce.payment-operations")
+        .expect("payment operations http surface should exist");
+    assert_eq!(payment_operations.area, HttpSurfaceArea::Admin);
+    assert_eq!(payment_operations.method, HttpSurfaceMethod::Get);
+    assert_eq!(payment_operations.path, "/admin/payments");
+    assert_eq!(payment_operations.capability, Some(Capability::OrderRead));
+    assert_eq!(
+        payment_operations.response,
+        HttpResponseContract::Page {
+            template: "commerce/payments".to_string(),
+            status: 200,
         }
     );
 

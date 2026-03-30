@@ -554,7 +554,9 @@ fn emulated_shared_jobs_runtime(
         namespace
     );
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry.lock().expect("emulated jobs registry mutex poisoned");
+    let mut guard = registry
+        .lock()
+        .expect("emulated jobs registry mutex poisoned");
     guard
         .entry(key)
         .or_insert_with(|| coil_jobs::JobsBackendAdapter::emulated_shared_runtime(runtime))
@@ -575,7 +577,9 @@ fn emulated_shared_cache_runtime(
 
     let key = format!("{backend:?}:{namespace}");
     let registry = REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut guard = registry.lock().expect("emulated cache registry mutex poisoned");
+    let mut guard = registry
+        .lock()
+        .expect("emulated cache registry mutex poisoned");
     guard
         .entry(key)
         .or_insert_with(|| coil_cache::DistributedCacheClient::emulated_shared_runtime(backend))

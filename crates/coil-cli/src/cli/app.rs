@@ -1409,10 +1409,8 @@ fn run_module_inspect(invocation: &ModuleInspectInvocation) -> Result<CommandRep
         .module_dependencies
         .iter()
         .filter(|dependency| {
-            matches!(
-                dependency.kind,
-                coil_core::ModuleDependencyKind::Required
-            ) && !installed_modules.contains(&dependency.module)
+            matches!(dependency.kind, coil_core::ModuleDependencyKind::Required)
+                && !installed_modules.contains(&dependency.module)
         })
         .map(|dependency| dependency.module.clone())
         .collect::<Vec<_>>();
@@ -2171,9 +2169,7 @@ fn supported_official_module_manifest(
         "admin" => Box::new(coil_admin::AdminModule::new()),
         "cms" => Box::new(coil_cms::CmsModule::new()),
         "commerce" => Box::new(coil_commerce::CommerceModule::new()),
-        "commerce-payments-stripe" => {
-            Box::new(coil_commerce::CommercePaymentsStripeModule::new())
-        }
+        "commerce-payments-stripe" => Box::new(coil_commerce::CommercePaymentsStripeModule::new()),
         "events" => Box::new(coil_events::EventsModule::new()),
         "media" => Box::new(coil_media::MediaModule::new()),
         "memberships" => Box::new(coil_memberships::MembershipsModule::new()),
@@ -2648,11 +2644,7 @@ fn run_jobs_status(invocation: &JobsStatusInvocation) -> Result<CommandReport, C
 
     let database_url = std::env::var("DATABASE_URL").ok();
     let jobs_host = if database_url.is_some() {
-        Some(build_cli_jobs_host(
-            &built,
-            "coil-jobs-status",
-            "status",
-        )?)
+        Some(build_cli_jobs_host(&built, "coil-jobs-status", "status")?)
     } else {
         None
     };
@@ -3369,9 +3361,7 @@ fn push_jobs_topology_diagnostic(
     )
 }
 
-fn jobs_run_dead_letter_reason(
-    _error: &coil_runtime::LiveWasmExecutionError,
-) -> DeadLetterReason {
+fn jobs_run_dead_letter_reason(_error: &coil_runtime::LiveWasmExecutionError) -> DeadLetterReason {
     DeadLetterReason::HandlerPanic
 }
 
@@ -12996,10 +12986,7 @@ enabled = ["cms"]
 
     fn ensure_test_tls_material_key() {
         unsafe {
-            std::env::set_var(
-                "COIL_TLS_MATERIAL_KEY",
-                "coil-test-tls-material-key-seed",
-            );
+            std::env::set_var("COIL_TLS_MATERIAL_KEY", "coil-test-tls-material-key-seed");
         }
     }
 
@@ -13728,42 +13715,40 @@ source_path = "fixtures/media.json"
         assert!(rendered.contains("coil module list [--config <path>]"));
         assert!(rendered.contains("coil module inspect <module> [--config <path>]"));
         assert!(
-            rendered
-                .contains("coil module install <module> [--config <path>] [--dry-run] [--yes]")
+            rendered.contains("coil module install <module> [--config <path>] [--dry-run] [--yes]")
         );
         assert!(
-            rendered
-                .contains("coil module enable <module> [--config <path>] [--dry-run] [--yes]")
+            rendered.contains("coil module enable <module> [--config <path>] [--dry-run] [--yes]")
         );
         assert!(
-            rendered
-                .contains("coil module disable <module> [--config <path>] [--dry-run] [--yes]")
+            rendered.contains("coil module disable <module> [--config <path>] [--dry-run] [--yes]")
         );
         assert!(rendered.contains("coil migrate plan [--config <path>]"));
         assert!(rendered.contains("coil migrate apply [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("coil release doctor [--config <path>]"));
         assert!(rendered.contains("coil release plan [--config <path>]"));
         assert!(
-            rendered
-                .contains("coil cache warm [--config <path>] --scope public --route <path>")
+            rendered.contains("coil cache warm [--config <path>] --scope public --route <path>")
         );
         assert!(rendered.contains("coil jobs status [--config <path>] [--queue <name>]"));
         assert!(rendered.contains(
             "coil jobs run [--config <path>] [--queue <name>] [--worker-id <id>] [--limit <n>] [--dry-run]"
         ));
         assert!(
-            rendered
-                .contains("coil jobs ready [--config <path>] [--queue <name>] [--limit <n>]")
+            rendered.contains("coil jobs ready [--config <path>] [--queue <name>] [--limit <n>]")
         );
-        assert!(rendered.contains(
-            "coil jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>]"
-        ));
+        assert!(
+            rendered.contains(
+                "coil jobs dead-letters [--config <path>] [--queue <name>] [--limit <n>]"
+            )
+        );
         assert!(rendered.contains(
             "coil jobs in-flight [--config <path>] [--queue <name>] [--worker-id <id>] [--limit <n>]"
         ));
-        assert!(rendered.contains(
-            "coil jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes]"
-        ));
+        assert!(
+            rendered
+                .contains("coil jobs retry <dead-letter-id> [--config <path>] [--dry-run] [--yes]")
+        );
         assert!(rendered.contains("coil jobs promote [--config <path>] [--dry-run] [--yes]"));
         assert!(rendered.contains("coil storage inspect [--config <path>]"));
         assert!(rendered.contains("coil storage verify [--config <path>] [--policy]"));
@@ -14317,10 +14302,7 @@ expect = true
         let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
         let manifest_root = cutover_manifest.parent().unwrap();
         unsafe {
-            std::env::set_var(
-                "DATABASE_URL",
-                "postgres://coil:test@127.0.0.1:5432/coil",
-            );
+            std::env::set_var("DATABASE_URL", "postgres://coil:test@127.0.0.1:5432/coil");
             std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
         }
         let tokio_runtime = tokio::runtime::Builder::new_current_thread()
@@ -14361,10 +14343,7 @@ expect = true
         let manifest = ImportManifest::from_file(&cutover_manifest).unwrap();
         let manifest_root = cutover_manifest.parent().unwrap();
         unsafe {
-            std::env::set_var(
-                "DATABASE_URL",
-                "postgres://coil:test@127.0.0.1:5432/coil",
-            );
+            std::env::set_var("DATABASE_URL", "postgres://coil:test@127.0.0.1:5432/coil");
             std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
         }
         let tokio_runtime = tokio::runtime::Builder::new_current_thread()
@@ -15336,10 +15315,7 @@ expect = true
         );
         run_dns_cutover_switch(&cutover_manifest, probe_server.base_url(), &dns);
         unsafe {
-            std::env::set_var(
-                "DATABASE_URL",
-                "postgres://coil:test@127.0.0.1:5432/coil",
-            );
+            std::env::set_var("DATABASE_URL", "postgres://coil:test@127.0.0.1:5432/coil");
             std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
             std::env::set_var("COIL_COOKIE_SECRET", "01234567012345670123456701234567");
             std::env::set_var("COIL_CSRF_SECRET", "76543210765432107654321076543210");
@@ -15725,13 +15701,8 @@ expect = true
                     .unwrap(),
             )
             .with_check(
-                CutoverCheck::new(
-                    "storage.verify",
-                    "storage validation is green",
-                    true,
-                    false,
-                )
-                .unwrap(),
+                CutoverCheck::new("storage.verify", "storage validation is green", true, false)
+                    .unwrap(),
             );
 
         assert!(!cutover_preflight_ready(&plan));
@@ -16155,10 +16126,7 @@ expect = true
         let original_database_url = std::env::var("DATABASE_URL").ok();
 
         unsafe {
-            std::env::set_var(
-                "DATABASE_URL",
-                "postgres://coil:devpass@127.0.0.1:1/coil",
-            );
+            std::env::set_var("DATABASE_URL", "postgres://coil:devpass@127.0.0.1:1/coil");
         }
 
         let outcome = std::panic::catch_unwind(|| {
@@ -16579,10 +16547,7 @@ expect = true
         let config_path = customer_app_fixture_with_modules(&["cms", "media"]);
         let now_unix_seconds = unix_timestamp_now().unwrap();
         unsafe {
-            std::env::set_var(
-                "DATABASE_URL",
-                "postgres://coil:test@127.0.0.1:5432/coil",
-            );
+            std::env::set_var("DATABASE_URL", "postgres://coil:test@127.0.0.1:5432/coil");
         }
 
         let rendered = {
@@ -16671,10 +16636,7 @@ expect = true
         let config_path = customer_app_fixture_with_modules(&["cms", "media"]);
         let now_unix_seconds = unix_timestamp_now().unwrap();
         unsafe {
-            std::env::set_var(
-                "DATABASE_URL",
-                "postgres://coil:test@127.0.0.1:5432/coil",
-            );
+            std::env::set_var("DATABASE_URL", "postgres://coil:test@127.0.0.1:5432/coil");
         }
 
         let (rendered, job_id) = {
@@ -16684,11 +16646,7 @@ expect = true
                 .unwrap();
             let _runtime_guard = tokio_runtime.enter();
             let built = build_customer_app_runtime_context(&config_path, true).unwrap();
-            let Ok(mut host) = built
-                .runtime_plan
-                .runtime
-                .jobs_host("coil-jobs-run-seed")
-            else {
+            let Ok(mut host) = built.runtime_plan.runtime.jobs_host("coil-jobs-run-seed") else {
                 return;
             };
             let definition = host
@@ -17513,8 +17471,7 @@ expect = true
         let auth_package = configured_auth_model_package("coil-default-auth");
 
         let (updates, persisted) =
-            user_import_updates(&staged, None, "shoppr", &auth_package, &auth_mapping)
-                .unwrap();
+            user_import_updates(&staged, None, "shoppr", &auth_package, &auth_mapping).unwrap();
 
         assert_eq!(updates.len(), 2);
         assert_eq!(persisted["site_id"], serde_json::Value::Null);
@@ -17632,8 +17589,8 @@ expect = true
             test_import_auth_mapping("- `editor` -> `cms.page.publish`, `asset.publish`\n");
         let auth_package = configured_auth_model_package("coil-default-auth");
 
-        let error = user_import_updates(&staged, None, "shoppr", &auth_package, &auth_mapping)
-            .unwrap_err();
+        let error =
+            user_import_updates(&staged, None, "shoppr", &auth_package, &auth_mapping).unwrap_err();
 
         assert!(error.to_string().contains("non-empty `site`"));
     }

@@ -1,0 +1,19 @@
+<aside class="page-shell" xmlns:coil="https://coil.rs" coil:fragment="block">
+  <p class="catalog-section__eyebrow" coil:text="${block.label ?: 'Callout'}">Callout</p>
+  <h2 coil:text="${block.fields.heading ?: block.fields.title ?: block.label ?: 'Editorial callout'}">
+    Editorial callout
+  </h2>
+  <p coil:text="${block.fields.body ?: block.fields.summary ?: ''}">
+    Callout copy.
+  </p>
+  <p coil:if="${(block.fields.cta_href ?: '') != ''}">
+    <a
+      class="button button--secondary"
+      href="#"
+      coil:attr="href=${block.fields.cta_href}"
+      coil:text="${block.fields.cta_label ?: 'Learn more'}"
+    >
+      Learn more
+    </a>
+  </p>
+</aside>

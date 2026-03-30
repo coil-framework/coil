@@ -11,9 +11,7 @@ pub enum SessionStoreBackendKind {
     Valkey,
 }
 
-fn session_store_backend_kind(
-    store: coil_core::SessionStoreTopology,
-) -> SessionStoreBackendKind {
+fn session_store_backend_kind(store: coil_core::SessionStoreTopology) -> SessionStoreBackendKind {
     match store {
         coil_core::SessionStoreTopology::Memory => SessionStoreBackendKind::Local,
         coil_core::SessionStoreTopology::Database => SessionStoreBackendKind::Database,

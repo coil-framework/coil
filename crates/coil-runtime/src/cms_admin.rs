@@ -764,11 +764,11 @@ pub(crate) fn default_workspace() -> CmsAdminWorkspace {
             },
             CmsAdminNavigationItem {
                 label: "Shop".to_string(),
-                href: "/en-GB/shop".to_string(),
+                href: "/shop".to_string(),
             },
             CmsAdminNavigationItem {
                 label: "Collections".to_string(),
-                href: "/en-GB/shop/collections".to_string(),
+                href: "/shop/collections".to_string(),
             },
             CmsAdminNavigationItem {
                 label: "Cart".to_string(),
@@ -1184,7 +1184,7 @@ mod tests {
                 block_type: "callout".to_string(),
                 fields: BTreeMap::from([
                     ("heading".to_string(), "Join today".to_string()),
-                    ("cta_href".to_string(), "/en-GB/shop".to_string()),
+                    ("cta_href".to_string(), "/shop".to_string()),
                 ]),
                 updated_at: 99,
             })

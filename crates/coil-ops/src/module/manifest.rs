@@ -163,8 +163,12 @@ fn route_surfaces() -> Vec<RouteSurface> {
             "/admin/recovery",
         )
         .gated_by(Capability::SystemModuleManage),
-        RouteSurface::new("ops.bulk.execute", RouteSurfaceKind::AdminAction, "/admin/bulk")
-            .gated_by(Capability::SystemModuleManage),
+        RouteSurface::new(
+            "ops.bulk.execute",
+            RouteSurfaceKind::AdminAction,
+            "/admin/bulk",
+        )
+        .gated_by(Capability::SystemModuleManage),
     ]
 }
 

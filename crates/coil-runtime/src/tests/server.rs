@@ -9880,6 +9880,11 @@ async fn server_host_executes_checked_in_harbor_shop_french_customer_journey() {
         collection_body.contains("/fr-FR/shop/products/gold-membership"),
         "{collection_body}"
     );
+    assert!(collection_body.contains("/fr-FR/shop"), "{collection_body}");
+    assert!(
+        !collection_body.contains("class=\"primary-nav__link\" href=\"/en-GB/shop\""),
+        "{collection_body}"
+    );
     assert!(
         collection_body.contains("Gold Membership"),
         "{collection_body}"
@@ -10767,6 +10772,11 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
                 assert!(body.contains("Manage live catalog copy"), "{route}: {body}");
                 assert!(body.contains("Order support baseline"), "{route}: {body}");
                 assert!(body.contains("Cutover content checks"), "{route}: {body}");
+                assert!(
+                    body.contains("/admin/memberships/passes"),
+                    "{route}: {body}"
+                );
+                assert!(!body.contains("href=\"/admin/passes\""), "{route}: {body}");
             }
             "/admin/audit" => {
                 assert!(
@@ -10800,9 +10810,18 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
             }
             "/admin/integrations" => {
                 assert!(body.contains("Integration summary"), "{route}: {body}");
-                assert!(body.contains("Module integration points"), "{route}: {body}");
-                assert!(body.contains("Approved outbound endpoints"), "{route}: {body}");
-                assert!(body.contains("Installed extensions and plugins"), "{route}: {body}");
+                assert!(
+                    body.contains("Module integration points"),
+                    "{route}: {body}"
+                );
+                assert!(
+                    body.contains("Approved outbound endpoints"),
+                    "{route}: {body}"
+                );
+                assert!(
+                    body.contains("Installed extensions and plugins"),
+                    "{route}: {body}"
+                );
             }
             "/admin/orders" => {
                 assert!(body.contains("Support first"), "{route}: {body}");
@@ -10815,7 +10834,10 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
             "/admin/payments" => {
                 assert!(body.contains("Awaiting confirmation"), "{route}: {body}");
                 assert!(body.contains("Captured payments"), "{route}: {body}");
-                assert!(body.contains("Pending payment is still live"), "{route}: {body}");
+                assert!(
+                    body.contains("Pending payment is still live"),
+                    "{route}: {body}"
+                );
             }
             "/admin/search" => {
                 assert!(body.contains("Search health"), "{route}: {body}");
@@ -10831,13 +10853,19 @@ async fn server_host_renders_checked_in_harbor_shop_admin_surfaces() {
             }
             "/admin/bulk" => {
                 assert!(body.contains("Workflow summary"), "{route}: {body}");
-                assert!(body.contains("Queued workflow entrypoints"), "{route}: {body}");
+                assert!(
+                    body.contains("Queued workflow entrypoints"),
+                    "{route}: {body}"
+                );
                 assert!(body.contains("Reindex search"), "{route}: {body}");
             }
             "/admin/recovery" => {
                 assert!(body.contains("Recovery summary"), "{route}: {body}");
                 assert!(body.contains("Recovery workflows"), "{route}: {body}");
-                assert!(body.contains("Full customer-app restore"), "{route}: {body}");
+                assert!(
+                    body.contains("Full customer-app restore"),
+                    "{route}: {body}"
+                );
             }
             "/admin/catalog/products" => {
                 assert!(body.contains("Save product"), "{route}: {body}");
@@ -10921,7 +10949,10 @@ async fn server_host_queues_checked_in_harbor_shop_report_export_from_admin_repo
         .await
         .unwrap();
     assert_eq!(export_response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(response_header(&export_response, "location"), "/admin/reports");
+    assert_eq!(
+        response_header(&export_response, "location"),
+        "/admin/reports"
+    );
 
     let flash_cookie = cookie_pair_from_response(&export_response, "coil_flash")
         .expect("report export should set a flash cookie");
@@ -15195,7 +15226,9 @@ async fn server_host_renders_checked_in_harbor_shop_payment_operations_surface()
     assert!(body.contains("webhook"), "{body}");
     assert!(body.contains("Provider callback reconciled"), "{body}");
     assert!(
-        body.contains("Queue order confirmation and operational follow-up from the captured payment."),
+        body.contains(
+            "Queue order confirmation and operational follow-up from the captured payment."
+        ),
         "{body}"
     );
 }
@@ -15350,7 +15383,13 @@ async fn server_host_renders_checked_in_harbor_shop_account_passes_surface() {
     let session_cookie = format!("coil_session={}", issued.cookie_value);
     let store = StorefrontStateStore::open_for_plan(&plan).unwrap();
     store
-        .add_to_cart(&issued.record.session_id, Some(principal_id), "tasting-pass", 1, 100)
+        .add_to_cart(
+            &issued.record.session_id,
+            Some(principal_id),
+            "tasting-pass",
+            1,
+            100,
+        )
         .unwrap();
     store
         .checkout_start(&issued.record.session_id, Some(principal_id), 101)

@@ -1,33 +1,34 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="page_title='Passes and credits'"
+  coil:with="page_title='Passes and Credits'"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page_title}">Passes and credits</title>
+    <title coil:text="${page_title}">Passes and Credits</title>
     <link rel="stylesheet" href="/theme/assets/admin.css" coil:href="asset('theme/assets/admin.css')" />
     <script src="/theme/assets/admin.js" coil:src="asset('theme/assets/admin.js')" defer="defer"></script>
   </head>
   <body class="harbor harbor--admin">
     <header class="site-header">
-      <a href="/" class="brand">Shoppr</a>
+      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
       <nav coil:replace="~{admin/nav}"></nav>
     </header>
     <main class="site-main admin-page">
       <section class="admin-page__intro">
-        <p class="admin-page__eyebrow">Pass and credit operations</p>
-        <h1 coil:text="${page.title}">Passes and credits</h1>
+        <p class="admin-page__eyebrow">Membership operations</p>
+        <h1 coil:text="${page.title}">Passes and Credits</h1>
         <p coil:text="${page.summary}">
-          Operator queue for prepaid access, finite balances, and redemption exceptions.
+          Operator-facing pass and credit queue built from event-linked purchases, pending payment
+          state, and customer follow-up signals.
         </p>
         <p>
-          Use this screen when support needs to answer whether a customer still has usable credits,
-          which pass program granted access, and whether a recent event redemption consumed the
-          expected balance.
+          This page gives operators a clean pass-specific queue instead of forcing them to infer
+          event access from orders one record at a time. It is where support should answer whether
+          a pass is available, still pending activation, or blocked on a payment follow-up.
         </p>
       </section>
 
@@ -35,75 +36,43 @@
         <p class="admin-panel__eyebrow">Queue summary</p>
         <div class="admin-card-grid">
           <article class="admin-card">
-            <h2>Pass programs</h2>
+            <h2>Total visible records</h2>
             <p>
-              <strong coil:text="${pass_program_count}">0</strong>
-              visible pass-backed customer records are currently in scope.
+              <strong coil:text="${membership_pass_stats.total}">0</strong>
+              customer records currently carry pass-backed access or pending pass activation.
             </p>
           </article>
           <article class="admin-card">
-            <h2>Credit ledgers</h2>
+            <h2>Available now</h2>
             <p>
-              <strong coil:text="${credit_ledger_count}">0</strong>
-              ledgers currently expose remaining balance or recent usage.
+              <strong coil:text="${membership_pass_stats.available}">0</strong>
+              customer records already have captured pass inventory available for booking.
             </p>
           </article>
           <article class="admin-card">
-            <h2>Redeemed events</h2>
+            <h2>Pending activation</h2>
             <p>
-              <strong coil:text="${redeemed_event_count}">0</strong>
-              event redemptions are available for operator review.
+              <strong coil:text="${membership_pass_stats.pending}">0</strong>
+              customer records still need payment settlement before the pass becomes usable.
             </p>
           </article>
           <article class="admin-card">
-            <h2>Operator queues</h2>
+            <h2>Needs follow-up</h2>
             <p>
-              <strong coil:text="${operator_queue_count}">0</strong>
-              queues currently need pass or credit follow-up.
+              <strong coil:text="${membership_pass_stats.follow_up}">0</strong>
+              rows still need payment or order support before customer access is clear.
             </p>
           </article>
         </div>
       </section>
 
-      <section class="admin-panel" coil:if="${has_operator_queues}" data-admin-filter="">
-        <p class="admin-panel__eyebrow">Follow-up queues</p>
+      <section class="admin-panel" coil:if="${has_membership_pass_rows}" data-admin-filter="">
+        <p class="admin-panel__eyebrow">Live pass queue</p>
         <label class="admin-filter">
-          <span>Filter queues</span>
+          <span>Filter by customer, pass title, state, email, or order</span>
           <input
             type="search"
-            placeholder="Filter by queue, status, balance, event..."
-            data-admin-filter-input=""
-          />
-        </label>
-        <div class="admin-card-grid">
-          <article class="admin-card" coil:each="queue : ${operator_queues}" data-admin-filter-item="">
-            <h2 coil:text="${queue.queue_name}">Expiring credits</h2>
-            <p coil:text="${queue.summary}">
-              Customers in this queue need outreach before balances expire or a redemption fails.
-            </p>
-            <p>
-              <strong coil:text="${queue.count_label}">3 records</strong>
-              <span coil:text="${queue.status_label}">Needs review</span>
-            </p>
-            <a
-              class="button button--secondary"
-              href="/admin/passes"
-              coil:attr="href=${queue.href}"
-              coil:text="${queue.action_label}"
-            >
-              Review queue
-            </a>
-          </article>
-        </div>
-      </section>
-
-      <section class="admin-panel" coil:if="${has_pass_programs}" data-admin-filter="">
-        <p class="admin-panel__eyebrow">Pass program records</p>
-        <label class="admin-filter">
-          <span>Filter customer records</span>
-          <input
-            type="search"
-            placeholder="Filter by customer, program, order, status..."
+            placeholder="Filter by customer, pass title, state, email, order..."
             data-admin-filter-input=""
           />
         </label>
@@ -111,92 +80,106 @@
           <thead>
             <tr>
               <th scope="col">Customer</th>
-              <th scope="col">Program</th>
-              <th scope="col">Balance</th>
-              <th scope="col">Latest redemption</th>
+              <th scope="col">Pass state</th>
+              <th scope="col">Titles</th>
               <th scope="col">Support state</th>
+              <th scope="col">Latest order</th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr coil:each="program : ${pass_programs}" data-admin-filter-item="">
+            <tr coil:each="record : ${membership_pass_rows}" data-admin-filter-item="">
               <td>
-                <strong coil:text="${program.customer_name}">Customer</strong>
-                <div coil:if="${program.has_customer_email}" coil:text="${program.customer_email}">
-                  customer@example.com
+                <strong coil:text="${record.display_name}">Customer</strong>
+                <div class="admin-copy-row" coil:if="${record.has_customer_email}">
+                  <span coil:text="${record.customer_email}">customer@example.com</span>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.customer_email}"
+                  >
+                    Copy email
+                  </button>
+                </div>
+                <div class="admin-copy-row" coil:if="${record.has_principal_id}">
+                  <code coil:text="${record.principal_id}">customer-live</code>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.principal_id}"
+                  >
+                    Copy principal
+                  </button>
                 </div>
               </td>
               <td>
-                <strong coil:text="${program.program_name}">Studio sessions</strong>
-                <p coil:text="${program.summary}">
-                  Pass-backed access summary.
+                <strong coil:text="${record.pass_state_label}">Passes available</strong>
+                <p coil:text="${record.pass_summary}">
+                  1 pass available across Spring Tasting Pass.
                 </p>
               </td>
               <td>
-                <span coil:text="${program.available_balance_label}">3 credits</span>
-                <div coil:text="${program.status_label}">Active</div>
+                <p coil:text="${record.pass_titles}">Spring Tasting Pass</p>
+                <p>
+                  Quantity
+                  <strong coil:text="${record.pass_count}">1</strong>
+                </p>
               </td>
-              <td coil:text="${program.latest_redemption_label}">
-                Redeemed against Spring tasting evening
+              <td coil:text="${record.support_state_label}">Needs payment follow-up</td>
+              <td>
+                <div class="admin-copy-row">
+                  <strong coil:text="${record.latest_order_reference}">ORD-10042</strong>
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    coil:attr="data-copy-text=${record.latest_order_reference}"
+                  >
+                    Copy order
+                  </button>
+                </div>
+                <div coil:text="${record.latest_order_status}">Paid</div>
+                <div coil:text="${record.latest_order_total}">£45.00</div>
               </td>
-              <td coil:text="${program.support_state_label}">Needs review</td>
               <td>
                 <a
                   class="button button--secondary"
                   href="/admin/orders/ORD-10042"
-                  coil:if="${program.has_order_reference}"
-                  coil:attr="href=${program.order_href}"
+                  coil:attr="href=${record.latest_order_href}"
                 >
                   View order
-                </a>
-                <a
-                  class="button button--secondary"
-                  href="/admin/customers"
-                  coil:attr="href=${program.customer_href}"
-                >
-                  View customer
                 </a>
               </td>
             </tr>
           </tbody>
         </table>
-      </section>
-
-      <section class="admin-panel" coil:if="${has_credit_ledgers}">
-        <p class="admin-panel__eyebrow">Credit ledgers</p>
-        <div class="admin-card-grid">
-          <article class="admin-card" coil:each="ledger : ${credit_ledgers}">
-            <h2 coil:text="${ledger.label}">Guided tasting credits</h2>
-            <p>
-              Available
-              <strong coil:text="${ledger.available_balance_label}">3 credits</strong>
-            </p>
-            <p coil:if="${ledger.has_used_balance}">
-              Used
-              <span coil:text="${ledger.used_balance_label}">1 credit</span>
-            </p>
-            <p coil:if="${ledger.has_last_activity}">
-              Last activity
-              <span coil:text="${ledger.last_activity_label}">Redeemed on 14 May</span>
-            </p>
-            <p coil:if="${ledger.has_expiry}">
-              Expires
-              <span coil:text="${ledger.expiry_label}">30 June</span>
-            </p>
-            <p coil:text="${ledger.summary}">
-              Ledger summary for support and reconciliation.
-            </p>
-          </article>
+        <div class="admin-page__actions">
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+          <a class="button button--secondary" href="/admin/events/bookings" coil:attr="href=${links.admin_event_bookings}">
+            Open event bookings
+          </a>
+          <a class="button button--secondary" href="/admin/memberships/subscriptions" coil:attr="href=${links.admin_membership_subscriptions}">
+            Review subscriptions
+          </a>
         </div>
       </section>
 
-      <section class="admin-panel" coil:unless="${has_pass_programs}">
-        <p class="admin-panel__eyebrow">Pass program records</p>
-        <h2>No pass or credit records yet</h2>
-        <p>
-          Once customers start buying pass-backed access or redeeming credits against events, this
-          queue becomes the operator view for balances, redemptions, and manual follow-up.
+      <section class="admin-panel" coil:unless="${has_membership_pass_rows}">
+        <p class="admin-panel__eyebrow">Live pass queue</p>
+        <h2>No pass-backed customer records yet</h2>
+        <p coil:text="${membership_pass_rows_empty_text}">
+          Complete an event-pass checkout so operator-visible pass and credit records can be
+          assembled.
         </p>
+        <div class="admin-page__actions">
+          <a class="button" href="/admin/catalog/products" coil:attr="href=${links.admin_catalog}">
+            Open catalog admin
+          </a>
+          <a class="button button--secondary" href="/admin/orders" coil:attr="href=${links.admin_orders}">
+            Open orders
+          </a>
+        </div>
       </section>
     </main>
     <footer class="site-footer">

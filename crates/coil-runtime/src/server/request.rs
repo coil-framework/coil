@@ -100,10 +100,7 @@ const CMS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
     ("/admin/options/save", "x-coil-cms-csrf-cms-options-save"),
 ];
 const OPS_ADMIN_FORM_CSRF_HEADERS: &[(&str, &str)] = &[
-    (
-        "/admin/reports/export",
-        "x-coil-ops-csrf-ops-report-export",
-    ),
+    ("/admin/reports/export", "x-coil-ops-csrf-ops-report-export"),
     ("/admin/bulk", "x-coil-ops-csrf-ops-bulk"),
     ("/admin/recovery", "x-coil-ops-csrf-ops-recovery"),
 ];
@@ -134,8 +131,11 @@ const CMS_ADMIN_NATIVE_MUTATION_ROUTES: &[&str] = &[
     "cms.shared-blocks.save",
     "cms.options.save",
 ];
-const OPS_ADMIN_NATIVE_MUTATION_ROUTES: &[&str] =
-    &["ops.report.export", "ops.bulk.execute", "ops.recovery.execute"];
+const OPS_ADMIN_NATIVE_MUTATION_ROUTES: &[&str] = &[
+    "ops.report.export",
+    "ops.bulk.execute",
+    "ops.recovery.execute",
+];
 const STOREFRONT_CSRF_ACTIONS: &[&str] = &[
     "commerce.add-to-cart",
     "commerce.cart-update",
@@ -4912,15 +4912,14 @@ fn apply_native_ops_admin_mutations(
                 .map_err(|error| RuntimeServerError::Configuration {
                     reason: format!("invalid report id in registered definition: {error}"),
                 })?;
-            let idempotency_key =
-                IdempotencyKey::new(format!(
-                    "ops.report.export:{}:{}",
-                    report_id_model.as_str(),
-                    now.as_unix_seconds()
-                ))
-                    .map_err(|error| RuntimeServerError::Configuration {
-                        reason: format!("invalid report export idempotency key: {error}"),
-                    })?;
+            let idempotency_key = IdempotencyKey::new(format!(
+                "ops.report.export:{}:{}",
+                report_id_model.as_str(),
+                now.as_unix_seconds()
+            ))
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid report export idempotency key: {error}"),
+            })?;
             let request = coil_ops::ReportExportRequest::new(
                 export_id,
                 report_id_model,
@@ -4935,12 +4934,11 @@ fn apply_native_ops_admin_mutations(
             .map_err(|error| RuntimeServerError::Configuration {
                 reason: format!("invalid report export request: {error}"),
             })?;
-            let mut ops = state
-                .plan
-                .ops_host("runtime-http")
-                .map_err(|error| RuntimeServerError::Configuration {
+            let mut ops = state.plan.ops_host("runtime-http").map_err(|error| {
+                RuntimeServerError::Configuration {
                     reason: format!("could not create ops host for report export: {error}"),
-                })?;
+                }
+            })?;
             match ops.queue_report_export(request) {
                 Ok(queued) => {
                     record_operator_audit(
@@ -4961,10 +4959,7 @@ fn apply_native_ops_admin_mutations(
                         state,
                         response_cookies,
                         FlashLevel::Success,
-                        format!(
-                            "Queued report export for {}.",
-                            queued.plan.definition.title
-                        ),
+                        format!("Queued report export for {}.", queued.plan.definition.title),
                     )?;
                     return Ok(Some(redirect_location));
                 }
@@ -5046,12 +5041,10 @@ fn apply_native_ops_admin_mutations(
             .map_err(|error| RuntimeServerError::Configuration {
                 reason: format!("invalid bulk execution id: {error}"),
             })?;
-            let definition_id =
-                coil_ops::BulkOperationId::new(registered.definition.id.clone()).map_err(
-                    |error| RuntimeServerError::Configuration {
-                        reason: format!("invalid bulk operation id in registered definition: {error}"),
-                    },
-                )?;
+            let definition_id = coil_ops::BulkOperationId::new(registered.definition.id.clone())
+                .map_err(|error| RuntimeServerError::Configuration {
+                    reason: format!("invalid bulk operation id in registered definition: {error}"),
+                })?;
             let idempotency_key = IdempotencyKey::new(format!(
                 "ops.bulk.execute:{}:{}",
                 definition_id.as_str(),
@@ -5077,12 +5070,11 @@ fn apply_native_ops_admin_mutations(
             .map_err(|error| RuntimeServerError::Configuration {
                 reason: format!("invalid bulk operation request: {error}"),
             })?;
-            let mut ops = state
-                .plan
-                .ops_host("runtime-http")
-                .map_err(|error| RuntimeServerError::Configuration {
+            let mut ops = state.plan.ops_host("runtime-http").map_err(|error| {
+                RuntimeServerError::Configuration {
                     reason: format!("could not create ops host for bulk workflow: {error}"),
-                })?;
+                }
+            })?;
             match ops.queue_bulk_operation(request) {
                 Ok(queued) => {
                     record_operator_audit(
@@ -5103,10 +5095,7 @@ fn apply_native_ops_admin_mutations(
                         state,
                         response_cookies,
                         FlashLevel::Success,
-                        format!(
-                            "Queued bulk workflow for {}.",
-                            queued.plan.definition.title
-                        ),
+                        format!("Queued bulk workflow for {}.", queued.plan.definition.title),
                     )?;
                     return Ok(Some(redirect_location));
                 }
@@ -5186,12 +5175,12 @@ fn apply_native_ops_admin_mutations(
             .map_err(|error| RuntimeServerError::Configuration {
                 reason: format!("invalid recovery execution id: {error}"),
             })?;
-            let definition_id =
-                coil_ops::RecoveryWorkflowId::new(definition.id.as_str().to_string()).map_err(
-                    |error| RuntimeServerError::Configuration {
-                        reason: format!("invalid recovery workflow id in catalog: {error}"),
-                    },
-                )?;
+            let definition_id = coil_ops::RecoveryWorkflowId::new(
+                definition.id.as_str().to_string(),
+            )
+            .map_err(|error| RuntimeServerError::Configuration {
+                reason: format!("invalid recovery workflow id in catalog: {error}"),
+            })?;
             let idempotency_key = IdempotencyKey::new(format!(
                 "ops.recovery.execute:{}:{}",
                 definition_id.as_str(),
@@ -5222,14 +5211,15 @@ fn apply_native_ops_admin_mutations(
                 reason: format!("invalid recovery workflow request: {error}"),
             })?;
             if local_only_sensitive_present {
-                request =
-                    request.with_local_only_sensitive_data(local_only_sensitive_acknowledged);
+                request = request.with_local_only_sensitive_data(local_only_sensitive_acknowledged);
             }
 
             let planner =
                 coil_ops::OpsPlanner::new(state.plan.jobs.clone(), state.plan.ops_catalog.clone())
                     .map_err(|error| RuntimeServerError::Configuration {
-                        reason: format!("could not create ops planner for recovery workflow: {error}"),
+                        reason: format!(
+                            "could not create ops planner for recovery workflow: {error}"
+                        ),
                     })?;
             let plan = match planner.plan_recovery_workflow(request) {
                 Ok(plan) => plan,
@@ -5256,12 +5246,15 @@ fn apply_native_ops_admin_mutations(
                 }
             };
 
-            let mut jobs =
-                state.plan.jobs_host("runtime-http").map_err(|error| RuntimeServerError::Configuration {
+            let mut jobs = state.plan.jobs_host("runtime-http").map_err(|error| {
+                RuntimeServerError::Configuration {
                     reason: format!("could not create jobs host for recovery workflow: {error}"),
-                })?;
-            let queued_job_id =
-                jobs.enqueue_spec(plan.job.clone(), JobInstant::from_unix_seconds(now.as_unix_seconds()))?;
+                }
+            })?;
+            let queued_job_id = jobs.enqueue_spec(
+                plan.job.clone(),
+                JobInstant::from_unix_seconds(now.as_unix_seconds()),
+            )?;
             record_operator_audit(
                 state,
                 execution,
@@ -5280,10 +5273,7 @@ fn apply_native_ops_admin_mutations(
                 state,
                 response_cookies,
                 FlashLevel::Success,
-                format!(
-                    "Queued recovery workflow for {}.",
-                    plan.definition.title
-                ),
+                format!("Queued recovery workflow for {}.", plan.definition.title),
             )?;
             return Ok(Some(redirect_location));
         }

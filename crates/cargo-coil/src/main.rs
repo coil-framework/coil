@@ -626,10 +626,7 @@ fn dev_environment(root: &Path, descriptor: &ProjectDescriptor) -> Vec<(String, 
     env
 }
 
-fn env_var_or_default(
-    key: &str,
-    default: impl FnOnce() -> String,
-) -> String {
+fn env_var_or_default(key: &str, default: impl FnOnce() -> String) -> String {
     match std::env::var(key) {
         Ok(value) if !value.trim().is_empty() => value,
         _ => default(),
@@ -705,7 +702,11 @@ fn compose_app_environment(compose: &ComposeFile) -> Option<BTreeMap<String, Str
     Some(env)
 }
 
-fn compose_host_port(compose: &ComposeFile, service_name: &str, container_port: u16) -> Option<u16> {
+fn compose_host_port(
+    compose: &ComposeFile,
+    service_name: &str,
+    container_port: u16,
+) -> Option<u16> {
     let service = compose.services.get(service_name)?;
     service
         .ports
@@ -741,7 +742,9 @@ fn resolve_compose_scalar(value: &str) -> Option<String> {
         if let Some((_, default)) = inner.split_once(":-") {
             return Some(default.to_string());
         }
-        return std::env::var(inner).ok().filter(|value| !value.trim().is_empty());
+        return std::env::var(inner)
+            .ok()
+            .filter(|value| !value.trim().is_empty());
     }
     Some(trimmed.to_string())
 }
@@ -950,7 +953,9 @@ fn should_ignore_watch_path(relative: &Path) -> bool {
     }
 
     if relative.starts_with(Path::new("extensions"))
-        && relative.extension().is_some_and(|extension| extension == "wasm")
+        && relative
+            .extension()
+            .is_some_and(|extension| extension == "wasm")
     {
         return true;
     }
@@ -1076,9 +1081,7 @@ mod tests {
             ".coil/metadata/app.sqlite3"
         )));
         assert!(should_ignore_watch_path(Path::new("target/debug/app")));
-        assert!(should_ignore_watch_path(Path::new(
-            "theme/assets/site.js"
-        )));
+        assert!(should_ignore_watch_path(Path::new("theme/assets/site.js")));
         assert!(should_ignore_watch_path(Path::new(
             "extensions/example/example.wasm"
         )));

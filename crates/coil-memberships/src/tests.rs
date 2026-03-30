@@ -317,20 +317,16 @@ fn module_manifest_and_service_registration_match_capability_contracts() {
                 )
                 && surface.capability.is_none())
     );
-    assert!(
-        manifest
-            .http_surfaces
-            .iter()
-            .any(|surface| surface.name == "memberships.account.passes"
-                && surface.area == HttpSurfaceArea::Account
-                && surface.path == "/account/passes"
-                && matches!(
-                    &surface.response,
-                    HttpResponseContract::Page { template, status }
-                        if template == "account/passes" && *status == 200
-                )
-                && surface.capability.is_none())
-    );
+    assert!(manifest.http_surfaces.iter().any(|surface| surface.name
+        == "memberships.account.passes"
+        && surface.area == HttpSurfaceArea::Account
+        && surface.path == "/account/passes"
+        && matches!(
+            &surface.response,
+            HttpResponseContract::Page { template, status }
+                if template == "account/passes" && *status == 200
+        )
+        && surface.capability.is_none()));
     assert_eq!(
         module
             .install_migration_plan()

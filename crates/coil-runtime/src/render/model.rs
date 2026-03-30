@@ -20,11 +20,11 @@ use coil_customer_sdk::{
     RepositoryWriteReceipt, RequestContext as CustomerPluginRequestContext,
     TraceContext as CustomerPluginTraceContext,
 };
-use coil_observability::{DependencyStatus, MetricReading};
 use coil_memberships::{
     BillingInterval, MemberAccountId, MembershipCatalog, MembershipInstant, MembershipModelError,
     MembershipTier, MembershipTierId, SubscriptionStatus, TierVisibility,
 };
+use coil_observability::{DependencyStatus, MetricReading};
 use coil_template::{
     RenderModel, RenderModelMergePolicy, RenderValue, TemplateModelError, TemplateNamespace,
     TrustedHtml,
@@ -533,7 +533,10 @@ impl RuntimePlan {
             .with_object("site", site_model(self, execution)?)?
             .with_object("route_params", route_params_model(&execution.route.params))?
             .with_object("links", links_model(self, execution)?)?
-            .with_object("navigation", navigation_model(Some(self))?)?
+            .with_object(
+                "navigation",
+                navigation_model(Some(self), &execution.locale)?,
+            )?
             .with_bool(
                 "has_flash_messages",
                 !storefront_feedback.visible_flash_messages.is_empty(),
@@ -754,8 +757,11 @@ fn route_params_model(params: &BTreeMap<String, String>) -> RenderModel {
     model
 }
 
-fn navigation_model(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateModelError> {
-    RenderModel::new().with_list("primary", primary_navigation_items(plan)?)
+fn navigation_model(
+    plan: Option<&RuntimePlan>,
+    locale: &str,
+) -> Result<RenderModel, TemplateModelError> {
+    RenderModel::new().with_list("primary", primary_navigation_items(plan, locale)?)
 }
 
 fn nav_item(label: &str, href: &str) -> RenderModel {
@@ -765,21 +771,57 @@ fn nav_item(label: &str, href: &str) -> RenderModel {
         .expect("navigation item keys are valid")
 }
 
+fn normalize_navigation_href(href: &str, locale: &str) -> String {
+    let locale = locale.trim_matches('/');
+    let trimmed = href.trim();
+    let normalized = if let Some((first, rest)) = trimmed.trim_start_matches('/').split_once('/') {
+        if first.contains('-') && matches!(rest, "shop" | "shop/collections" | "events") {
+            format!("/{rest}")
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        trimmed.to_string()
+    };
+
+    match normalized.as_str() {
+        "/shop" => format!("/{locale}/shop"),
+        "/shop/collections" => format!("/{locale}/shop/collections"),
+        "/events" => format!("/{locale}/events"),
+        _ => normalized,
+    }
+}
+
 fn primary_navigation_items(
     plan: Option<&RuntimePlan>,
+    locale: &str,
 ) -> Result<Vec<RenderModel>, TemplateModelError> {
     let items = if let Some(plan) = plan {
         cms_admin_workspace(plan)?
             .navigation
             .into_iter()
-            .map(|item| nav_item(item.label.as_str(), item.href.as_str()))
+            .map(|item| {
+                nav_item(
+                    item.label.as_str(),
+                    normalize_navigation_href(item.href.as_str(), locale).as_str(),
+                )
+            })
             .collect::<Vec<_>>()
     } else {
         vec![
             nav_item("Home", "/"),
-            nav_item("Shop", "/shop"),
-            nav_item("Collections", "/shop/collections"),
-            nav_item("Events", "/events"),
+            nav_item(
+                "Shop",
+                format!("/{}/shop", locale.trim_matches('/')).as_str(),
+            ),
+            nav_item(
+                "Collections",
+                format!("/{}/shop/collections", locale.trim_matches('/')).as_str(),
+            ),
+            nav_item(
+                "Events",
+                format!("/{}/events", locale.trim_matches('/')).as_str(),
+            ),
             nav_item("Cart", "/cart"),
             nav_item("Account", "/account"),
         ]
@@ -2634,7 +2676,10 @@ fn ops_report_stats(plan: Option<&RuntimePlan>) -> Result<RenderModel, TemplateM
     RenderModel::new()
         .with_value("total", RenderValue::text(total.to_string()))?
         .with_value("ready", RenderValue::text(ready.to_string()))?
-        .with_value("signed_delivery", RenderValue::text(signed_delivery.to_string()))?
+        .with_value(
+            "signed_delivery",
+            RenderValue::text(signed_delivery.to_string()),
+        )?
         .with_value("queued", RenderValue::text(queued.to_string()))
 }
 
@@ -2944,7 +2989,10 @@ fn admin_job_subscription_rows(
             );
             RenderModel::new()
                 .with_value("module_name", RenderValue::text(subscription.module))?
-                .with_value("event_type", RenderValue::text(subscription.event_type.as_str()))?
+                .with_value(
+                    "event_type",
+                    RenderValue::text(subscription.event_type.as_str()),
+                )?
                 .with_value("job_name", RenderValue::text(subscription.job_name))?
                 .with_value(
                     "trigger_label",
@@ -3141,11 +3189,15 @@ fn admin_diagnostic_status(plan: Option<&RuntimePlan>) -> Result<RenderModel, Te
     RenderModel::new()
         .with_value(
             "liveness",
-            RenderValue::text(dependency_status_label(plan.observability.liveness.overall_status())),
+            RenderValue::text(dependency_status_label(
+                plan.observability.liveness.overall_status(),
+            )),
         )?
         .with_value(
             "readiness",
-            RenderValue::text(dependency_status_label(plan.observability.readiness.overall_status())),
+            RenderValue::text(dependency_status_label(
+                plan.observability.readiness.overall_status(),
+            )),
         )?
         .with_value(
             "metrics_enabled",
@@ -3161,7 +3213,9 @@ fn admin_diagnostic_status(plan: Option<&RuntimePlan>) -> Result<RenderModel, Te
         .with_value("diagnostics_href", RenderValue::text("/diagnostics"))
 }
 
-fn admin_diagnostic_metrics(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+fn admin_diagnostic_metrics(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
     let Some(plan) = plan else {
         return Ok(Vec::new());
     };
@@ -3179,7 +3233,10 @@ fn admin_diagnostic_metrics(plan: Option<&RuntimePlan>) -> Result<Vec<RenderMode
             Some(MetricReading::Counter(value)) => value.to_string(),
             Some(MetricReading::Gauge(value)) => value.to_string(),
             Some(MetricReading::Histogram(value)) => {
-                format!("samples={}, last={}, max={}", value.samples, value.last, value.max)
+                format!(
+                    "samples={}, last={}, max={}",
+                    value.samples, value.last, value.max
+                )
             }
             None => "unavailable".to_string(),
         };
@@ -3191,7 +3248,9 @@ fn admin_diagnostic_metrics(plan: Option<&RuntimePlan>) -> Result<Vec<RenderMode
     .collect()
 }
 
-fn admin_diagnostic_traces(plan: Option<&RuntimePlan>) -> Result<Vec<RenderModel>, TemplateModelError> {
+fn admin_diagnostic_traces(
+    plan: Option<&RuntimePlan>,
+) -> Result<Vec<RenderModel>, TemplateModelError> {
     let Some(plan) = plan else {
         return Ok(Vec::new());
     };
@@ -3556,11 +3615,13 @@ fn admin_customer_order_has_membership_line(line: &StorefrontOrderLine) -> bool 
 }
 
 fn admin_customer_order_has_pass_line(line: &StorefrontOrderLine) -> bool {
-    matches!(line.product_kind.as_str(), "event_pass" | "credit" | "gift_credit")
-        || line
-            .entitlement_key
-            .as_deref()
-            .is_some_and(|key| key.starts_with("pass.") || key.starts_with("credit."))
+    matches!(
+        line.product_kind.as_str(),
+        "event_pass" | "credit" | "gift_credit"
+    ) || line
+        .entitlement_key
+        .as_deref()
+        .is_some_and(|key| key.starts_with("pass.") || key.starts_with("credit."))
         || line.sku.contains("pass")
         || line.sku.contains("credit")
         || line.title.to_ascii_lowercase().contains("pass")
@@ -3573,9 +3634,9 @@ fn admin_customer_order_has_event_linked_line(line: &StorefrontOrderLine) -> boo
         "event" | "event_pass" | "experience" | "membership_event"
     ) || admin_customer_order_has_pass_line(line)
         || line
-        .entitlement_key
-        .as_deref()
-        .is_some_and(|key| key.starts_with("event.") || key.contains("event"))
+            .entitlement_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("event.") || key.contains("event"))
         || line.title.to_ascii_lowercase().contains("event")
 }
 
@@ -3788,10 +3849,16 @@ fn membership_pass_rows_from_storefront(
                 .with_bool("has_customer_email", record.has_customer_email)?
                 .with_value("principal_id", RenderValue::text(record.principal_id))?
                 .with_bool("has_principal_id", record.has_principal_id)?
-                .with_value("pass_state_label", RenderValue::text(record.pass_state_label))?
+                .with_value(
+                    "pass_state_label",
+                    RenderValue::text(record.pass_state_label),
+                )?
                 .with_value("pass_summary", RenderValue::text(record.pass_summary))?
                 .with_value("pass_titles", RenderValue::text(record.pass_titles))?
-                .with_value("pass_count", RenderValue::text(record.pass_count.to_string()))?
+                .with_value(
+                    "pass_count",
+                    RenderValue::text(record.pass_count.to_string()),
+                )?
                 .with_bool("has_active_pass", record.has_active_pass)?
                 .with_bool("has_pending_pass", record.has_pending_pass)?
                 .with_value(
@@ -3818,7 +3885,10 @@ fn membership_pass_rows_from_storefront(
         .collect::<Result<Vec<_>, _>>()?;
 
     let total = passes.len();
-    Ok((passes, membership_pass_stats(total, available, pending, follow_up)?))
+    Ok((
+        passes,
+        membership_pass_stats(total, available, pending, follow_up)?,
+    ))
 }
 
 fn membership_subscription_stats(
@@ -4022,7 +4092,7 @@ fn event_booking_rows(
                             preview_hrefs
                                 .get(event_title)
                                 .cloned()
-                                .unwrap_or_else(|| "/events".to_string()),
+                                .unwrap_or_else(|| format!("/{}/events", locale.trim_matches('/'))),
                         ),
                     )?
                     .with_value("check_in_href", RenderValue::text("/admin/events/check-in"))
@@ -7040,7 +7110,10 @@ fn pass_programs_from_storefront(
                 continue;
             }
             let balance_label = if order.status == "pending_payment" {
-                format!("{} pending", unit_count_label(line.quantity as usize, "pass", "passes"))
+                format!(
+                    "{} pending",
+                    unit_count_label(line.quantity as usize, "pass", "passes")
+                )
             } else {
                 format!(
                     "{} available",
@@ -7087,10 +7160,7 @@ fn pass_wallet_from_storefront(
     pass_wallet_model(available, pending)
 }
 
-fn pass_wallet_model(
-    available: usize,
-    pending: usize,
-) -> Result<RenderModel, TemplateModelError> {
+fn pass_wallet_model(available: usize, pending: usize) -> Result<RenderModel, TemplateModelError> {
     RenderModel::new()
         .with_value("available", RenderValue::text(available.to_string()))?
         .with_value("pending", RenderValue::text(pending.to_string()))?
@@ -7125,8 +7195,14 @@ fn pass_program_model(
         .with_value("title", RenderValue::text(title.to_string()))?
         .with_value("sku", RenderValue::text(sku.to_string()))?
         .with_value("state_label", RenderValue::text(state_label.to_string()))?
-        .with_value("balance_label", RenderValue::text(balance_label.to_string()))?
-        .with_value("usage_summary", RenderValue::text(usage_summary.to_string()))?
+        .with_value(
+            "balance_label",
+            RenderValue::text(balance_label.to_string()),
+        )?
+        .with_value(
+            "usage_summary",
+            RenderValue::text(usage_summary.to_string()),
+        )?
         .with_value("product_href", RenderValue::text(product_href.to_string()))?
         .with_value("order_href", RenderValue::text(order_href.to_string()))
 }
@@ -7422,9 +7498,7 @@ fn display_job_trigger_kind(trigger: JobTriggerKind) -> &'static str {
 
 fn integration_operator_note(kind: IntegrationKind) -> &'static str {
     match kind {
-        IntegrationKind::AdminNavigation => {
-            "Extends the shared admin shell and operator routing."
-        }
+        IntegrationKind::AdminNavigation => "Extends the shared admin shell and operator routing.",
         IntegrationKind::AdminWorkflow => {
             "Participates in queueable or audited operator workflows."
         }
@@ -7440,9 +7514,7 @@ fn integration_operator_note(kind: IntegrationKind) -> &'static str {
         IntegrationKind::LocalizedContent => {
             "Participates in locale-aware editorial or storefront rendering."
         }
-        IntegrationKind::CacheInvalidation => {
-            "Influences cache purge and freshness behavior."
-        }
+        IntegrationKind::CacheInvalidation => "Influences cache purge and freshness behavior.",
         IntegrationKind::StoragePolicy => {
             "Depends on the shared storage and artifact delivery policy."
         }
@@ -8856,13 +8928,13 @@ mod tests {
     use coil_auth::DefaultAuthModelPackage;
     use coil_commerce::CommerceModule;
     use coil_config::PlatformConfig;
-    use coil_observability::TraceRecord;
     use coil_customer_sdk::{
         AuditFacade, AuthFacade, BackendError, BackendErrorKind, CheckoutHooks, CommerceFacade,
         CustomerBackendPlugin, CustomerHookRegistry, CustomerPluginDescriptor, MergePolicy,
         OrderDraft, OrderReviewDecision, RenderModelContribution, RenderModelHooks, RenderTarget,
         RepositoryFacade, RequestContext,
     };
+    use coil_observability::TraceRecord;
     use coil_template::{
         DocumentRenderRequest, TemplateName, TemplateNamespace, TemplateRegistry, TemplateRuntime,
         TemplateSelector, TemplateSourceParser,

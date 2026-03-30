@@ -11,6 +11,6 @@ documentation = "https://coil.rs/docs"
 description = "Server-side template parsing and rendering for the Coil framework."
 readme = "README.md"
 [dependencies]
-html5ever = "0.26"
+html5ever = "0.39"
 markup5ever = "0.11"
 markup5ever_rcdom = "0.2"

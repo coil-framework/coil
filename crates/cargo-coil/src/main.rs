@@ -6,7 +6,7 @@ use coil_scaffold::{
     doctor, load_descriptor, modify_modules, run_wizard, sanitize_slug,
 };
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -292,7 +292,7 @@ fn dev_project(command: DevCommand) -> Result<()> {
         run_docker_compose_up(&root)?;
     }
 
-    let env = dev_environment(&descriptor);
+    let env = dev_environment(&root, &descriptor);
     let cargo_program = cargo_program();
     let mut app_args = vec![
         OsString::from("run"),
@@ -576,36 +576,54 @@ fn run_docker_compose_up(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn dev_environment(descriptor: &ProjectDescriptor) -> Vec<(String, String)> {
+fn dev_environment(root: &Path, descriptor: &ProjectDescriptor) -> Vec<(String, String)> {
     let slug = descriptor.project_slug();
-    vec![
-        (
-            "DATABASE_URL".to_string(),
-            env_var_or_default("DATABASE_URL", || {
-                format!("postgres://coil:coil@127.0.0.1:15432/{slug}")
-            }),
-        ),
-        (
-            "REDIS_URL".to_string(),
-            env_var_or_default("REDIS_URL", || "redis://127.0.0.1:16379/0".to_string()),
-        ),
-        (
-            "COIL_COOKIE_SECRET".to_string(),
-            env_var_or_default("COIL_COOKIE_SECRET", || {
-                "local-development-cookie-secret".to_string()
-            }),
-        ),
-        (
-            "COIL_CSRF_SECRET".to_string(),
-            env_var_or_default("COIL_CSRF_SECRET", || {
-                "local-development-csrf-secret".to_string()
-            }),
-        ),
-        (
-            "OBJECT_STORE_URL".to_string(),
-            env_var_or_default("OBJECT_STORE_URL", || default_object_store_url(&slug)),
-        ),
-    ]
+    let compose = read_compose(root);
+    let compose_env = compose
+        .as_ref()
+        .and_then(compose_app_environment)
+        .unwrap_or_default();
+    let postgres_host_port = compose
+        .as_ref()
+        .and_then(|file| compose_host_port(file, "postgres", 5432))
+        .unwrap_or(15432);
+    let redis_host_port = compose
+        .as_ref()
+        .and_then(|file| compose_host_port(file, "redis", 6379))
+        .unwrap_or(16379);
+    let minio_host_port = compose
+        .as_ref()
+        .and_then(|file| compose_host_port(file, "minio", 9000))
+        .unwrap_or(9000);
+
+    let mut names = BTreeSet::from([
+        "DATABASE_URL".to_string(),
+        "REDIS_URL".to_string(),
+        "OBJECT_STORE_URL".to_string(),
+        "COIL_COOKIE_SECRET".to_string(),
+        "COIL_CSRF_SECRET".to_string(),
+    ]);
+    names.extend(compose_env.keys().cloned());
+
+    let mut env = Vec::new();
+    for name in names {
+        let value = env_var_or_default(&name, || {
+            if let Some(value) = compose_env.get(&name) {
+                return localize_compose_env_value(
+                    &name,
+                    value,
+                    &slug,
+                    postgres_host_port,
+                    redis_host_port,
+                    minio_host_port,
+                )
+                .unwrap_or_else(|| fallback_dev_env_value(&name, &slug));
+            }
+            fallback_dev_env_value(&name, &slug)
+        });
+        env.push((name, value));
+    }
+    env
 }
 
 fn env_var_or_default(
@@ -624,36 +642,162 @@ fn default_object_store_url(slug: &str) -> String {
     )
 }
 
-fn read_compose_services(root: &Path) -> Vec<String> {
+fn fallback_dev_env_value(name: &str, slug: &str) -> String {
+    match name {
+        "DATABASE_URL" => format!("postgres://coil:coil@127.0.0.1:15432/{slug}"),
+        "REDIS_URL" => "redis://127.0.0.1:16379/0".to_string(),
+        "COIL_COOKIE_SECRET" => "local-development-cookie-secret".to_string(),
+        "COIL_CSRF_SECRET" => "local-development-csrf-secret".to_string(),
+        "OBJECT_STORE_URL" => default_object_store_url(slug),
+        "STRIPE_PUBLISHABLE_KEY" => "pk_test_replace_me".to_string(),
+        "STRIPE_SECRET_KEY" => "sk_test_replace_me".to_string(),
+        "STRIPE_WEBHOOK_SECRET" => "whsec_replace_me".to_string(),
+        _ => format!(
+            "local-development-{}",
+            name.to_ascii_lowercase().replace('_', "-")
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ComposeFile {
+    #[serde(default)]
+    services: BTreeMap<String, ComposeService>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ComposeService {
+    #[serde(default)]
+    environment: Option<serde_yaml::Value>,
+    #[serde(default)]
+    ports: Vec<String>,
+}
+
+fn read_compose(root: &Path) -> Option<ComposeFile> {
     let compose_path = root.join("docker-compose.yml");
-    let Ok(contents) = fs::read_to_string(compose_path) else {
-        return Vec::new();
+    let contents = fs::read_to_string(compose_path).ok()?;
+    serde_yaml::from_str(&contents).ok()
+}
+
+fn read_compose_services(root: &Path) -> Vec<String> {
+    read_compose(root)
+        .map(|file| file.services.into_keys().collect())
+        .unwrap_or_default()
+}
+
+fn compose_app_environment(compose: &ComposeFile) -> Option<BTreeMap<String, String>> {
+    let service = compose.services.get("app")?;
+    let serde_yaml::Value::Mapping(mapping) = service.environment.as_ref()? else {
+        return None;
     };
 
-    let mut services = Vec::new();
-    let mut in_services = false;
-    for line in contents.lines() {
-        let trimmed_end = line.trim_end();
-        if trimmed_end == "services:" {
-            in_services = true;
+    let mut env = BTreeMap::new();
+    for (key, value) in mapping {
+        let Some(key) = key.as_str() else {
             continue;
+        };
+        let value = match value {
+            serde_yaml::Value::String(value) => value.clone(),
+            other => serde_yaml::to_string(other).ok()?.trim().to_string(),
+        };
+        env.insert(key.to_string(), value);
+    }
+    Some(env)
+}
+
+fn compose_host_port(compose: &ComposeFile, service_name: &str, container_port: u16) -> Option<u16> {
+    let service = compose.services.get(service_name)?;
+    service
+        .ports
+        .iter()
+        .find_map(|entry| parse_host_port(entry, container_port))
+}
+
+fn parse_host_port(entry: &str, container_port: u16) -> Option<u16> {
+    let entry = entry.trim().trim_matches('"').trim_matches('\'');
+    let mut parts = entry.rsplitn(2, ':');
+    let container = parts.next()?.trim();
+    let host = parts.next()?.trim();
+    let container = container.parse::<u16>().ok()?;
+    if container != container_port {
+        return None;
+    }
+    resolve_compose_scalar(host)?.parse::<u16>().ok()
+}
+
+fn resolve_compose_scalar(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let trimmed = if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        &trimmed[1..trimmed.len().saturating_sub(1)]
+    } else {
+        trimmed
+    };
+    if let Some(inner) = trimmed
+        .strip_prefix("${")
+        .and_then(|rest| rest.strip_suffix('}'))
+    {
+        if let Some((_, default)) = inner.split_once(":-") {
+            return Some(default.to_string());
         }
-        if !in_services {
-            continue;
-        }
-        if trimmed_end.is_empty() {
-            continue;
-        }
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            break;
-        }
-        if let Some(name) = line.strip_prefix("  ").and_then(|rest| rest.strip_suffix(':')) {
-            if !name.contains(' ') {
-                services.push(name.to_string());
-            }
+        return std::env::var(inner).ok().filter(|value| !value.trim().is_empty());
+    }
+    Some(trimmed.to_string())
+}
+
+fn localize_compose_env_value(
+    name: &str,
+    value: &str,
+    slug: &str,
+    postgres_host_port: u16,
+    redis_host_port: u16,
+    minio_host_port: u16,
+) -> Option<String> {
+    match name {
+        "DATABASE_URL" => Some(localize_database_url(value, postgres_host_port)),
+        "REDIS_URL" => Some(localize_redis_url(value, redis_host_port)),
+        "OBJECT_STORE_URL" => Some(localize_object_store_url(value, minio_host_port)),
+        _ => resolve_compose_scalar(value).or_else(|| Some(fallback_dev_env_value(name, slug))),
+    }
+}
+
+fn localize_database_url(value: &str, host_port: u16) -> String {
+    localize_network_url(value, host_port)
+}
+
+fn localize_redis_url(value: &str, host_port: u16) -> String {
+    localize_network_url(value, host_port)
+}
+
+fn localize_network_url(value: &str, host_port: u16) -> String {
+    let resolved = resolve_compose_scalar(value).unwrap_or_else(|| value.to_string());
+    let Some((scheme, rest)) = resolved.split_once("://") else {
+        return resolved;
+    };
+    let (authority, suffix) = if let Some((authority, tail)) = rest.split_once('/') {
+        (authority, format!("/{tail}"))
+    } else {
+        (rest, String::new())
+    };
+    let prefix = authority
+        .split_once('@')
+        .map(|(credentials, _)| format!("{credentials}@"))
+        .unwrap_or_default();
+    format!("{scheme}://{prefix}127.0.0.1:{host_port}{suffix}")
+}
+
+fn localize_object_store_url(value: &str, host_port: u16) -> String {
+    let mut output = Vec::new();
+    for line in value.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("endpoint_url=") {
+            output.push(format!("endpoint_url=\"http://127.0.0.1:{host_port}\""));
+        } else {
+            output.push(resolve_compose_scalar(trimmed).unwrap_or_else(|| trimmed.to_string()));
         }
     }
-    services
+    output.join("\n")
 }
 
 fn run_process(
@@ -792,7 +936,26 @@ fn should_ignore_watch_path(relative: &Path) -> bool {
         return false;
     };
     let first = first.as_os_str();
-    first == ".git" || first == "target" || first == "node_modules" || first == ".coil"
+    if first == ".git"
+        || first == "target"
+        || first == "node_modules"
+        || first == ".coil"
+        || first == ".cargo"
+    {
+        return true;
+    }
+
+    if relative.starts_with(Path::new("theme/assets")) {
+        return true;
+    }
+
+    if relative.starts_with(Path::new("extensions"))
+        && relative.extension().is_some_and(|extension| extension == "wasm")
+    {
+        return true;
+    }
+
+    false
 }
 
 fn resolve_framework_version(requested: Option<String>) -> Result<String> {
@@ -913,19 +1076,33 @@ mod tests {
             ".coil/metadata/app.sqlite3"
         )));
         assert!(should_ignore_watch_path(Path::new("target/debug/app")));
+        assert!(should_ignore_watch_path(Path::new(
+            "theme/assets/site.js"
+        )));
+        assert!(should_ignore_watch_path(Path::new(
+            "extensions/example/example.wasm"
+        )));
+        assert!(should_ignore_watch_path(Path::new(".cargo/config.toml")));
         assert!(!should_ignore_watch_path(Path::new(
             "templates/pages/home.html"
+        )));
+        assert!(!should_ignore_watch_path(Path::new(
+            "theme/frontend/site.ts"
+        )));
+        assert!(!should_ignore_watch_path(Path::new(
+            "extensions/example/package.toml"
         )));
     }
 
     #[test]
     fn dev_environment_defaults_object_store_url() {
+        let dir = tempfile::tempdir().unwrap();
         let descriptor = ProjectDescriptor::new(
             "my-store".to_string(),
             "My Store".to_string(),
             "en-GB".to_string(),
         );
-        let env = dev_environment(&descriptor);
+        let env = dev_environment(dir.path(), &descriptor);
         let object_store = env
             .iter()
             .find(|(key, _)| key == "OBJECT_STORE_URL")
@@ -946,10 +1123,72 @@ mod tests {
         assert_eq!(
             read_compose_services(dir.path()),
             vec![
+                "minio".to_string(),
                 "postgres".to_string(),
                 "redis".to_string(),
-                "minio".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn dev_environment_uses_localized_compose_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("docker-compose.yml"),
+            r#"
+services:
+  app:
+    environment:
+      DATABASE_URL: postgres://coil:devpass@postgres:5432/coil_shoppr
+      REDIS_URL: redis://redis:6379
+      OBJECT_STORE_URL: |-
+        endpoint_url="http://minio:9000"
+        bucket="shoppr"
+        region="us-east-1"
+        access_key_id="minio"
+        secret_access_key="minio123"
+      STRIPE_PUBLISHABLE_KEY: "${STRIPE_PUBLISHABLE_KEY:-pk_test_replace_me}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_test_replace_me}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_replace_me}"
+  postgres:
+    ports:
+      - "15432:5432"
+  redis:
+    ports:
+      - "16379:6379"
+  minio:
+    ports:
+      - "9000:9000"
+"#,
+        )
+        .unwrap();
+        let descriptor = ProjectDescriptor::new(
+            "shoppr".to_string(),
+            "Shoppr".to_string(),
+            "en-GB".to_string(),
+        );
+        let env = dev_environment(dir.path(), &descriptor)
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            env.get("DATABASE_URL").map(String::as_str),
+            Some("postgres://coil:devpass@127.0.0.1:15432/coil_shoppr")
+        );
+        assert_eq!(
+            env.get("REDIS_URL").map(String::as_str),
+            Some("redis://127.0.0.1:16379")
+        );
+        assert_eq!(
+            env.get("STRIPE_SECRET_KEY").map(String::as_str),
+            Some("sk_test_replace_me")
+        );
+        assert!(
+            env.get("OBJECT_STORE_URL")
+                .is_some_and(|value| value.contains("endpoint_url=\"http://127.0.0.1:9000\""))
+        );
+        assert!(
+            env.get("OBJECT_STORE_URL")
+                .is_some_and(|value| value.contains("bucket=\"shoppr\""))
         );
     }
 }
